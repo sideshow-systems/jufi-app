@@ -1,0 +1,100 @@
+{
+	"name": "entwurf",
+	"$schema": "../../node_modules/nx/schemas/project-schema.json",
+	"projectType": "application",
+	"prefix": "jf",
+	"sourceRoot": "apps/entwurf/src",
+	"tags": [],
+	"targets": {
+		"konfig": {
+			"//": "Schreibt apps/entwurf/src/konfig.generated.ts. Haengt an build, serve, test und typecheck, weil die Datei nicht im Repo liegt (siehe .gitignore) und der Import sonst ins Leere zeigt. Nicht zwischengespeichert: die Nummer soll aus der aktuellen Umgebung kommen.",
+			"executor": "nx:run-commands",
+			"cache": false,
+			"options": {
+				"cwd": "{workspaceRoot}",
+				"commands": ["node tools/entwurf-konfig.mjs"]
+			}
+		},
+		"build": {
+			"//": "Nur Browser: kein SSR, kein Service Worker, kein Manifest (Spec TP1 8.2). baseHref /entwurf/, weil der Entwurf unter diesem Pfad ausgeliefert wird und die Routen dem echten URL-Schema folgen.",
+			"executor": "@angular/build:application",
+			"dependsOn": ["konfig"],
+			"outputs": ["{options.outputPath}"],
+			"defaultConfiguration": "production",
+			"options": {
+				"outputPath": "dist/apps/entwurf",
+				"browser": "apps/entwurf/src/main.ts",
+				"tsConfig": "apps/entwurf/tsconfig.app.json",
+				"baseHref": "/entwurf/",
+				"assets": [
+					{
+						"glob": "**/*",
+						"input": "apps/entwurf/public"
+					}
+				],
+				"styles": ["apps/entwurf/src/styles.css"]
+			},
+			"configurations": {
+				"production": {
+					"budgets": [
+						{
+							"type": "initial",
+							"maximumWarning": "500kb",
+							"maximumError": "1mb"
+						},
+						{
+							"type": "anyComponentStyle",
+							"maximumWarning": "6kb",
+							"maximumError": "8kb"
+						}
+					],
+					"outputHashing": "all"
+				},
+				"development": {
+					"optimization": false,
+					"extractLicenses": false,
+					"sourceMap": true
+				}
+			}
+		},
+		"serve": {
+			"continuous": true,
+			"dependsOn": ["konfig"],
+			"executor": "@angular/build:dev-server",
+			"defaultConfiguration": "development",
+			"options": {
+				"port": 4300,
+				"servePath": "/entwurf/"
+			},
+			"configurations": {
+				"production": {
+					"buildTarget": "entwurf:build:production"
+				},
+				"development": {
+					"buildTarget": "entwurf:build:development"
+				}
+			}
+		},
+		"typecheck": {
+			"executor": "nx:run-commands",
+			"cache": true,
+			"inputs": ["default", "^default"],
+			"options": {
+				"cwd": "apps/entwurf",
+				"commands": ["tsc -p tsconfig.app.json --noEmit", "tsc -p tsconfig.spec.json --noEmit"],
+				"parallel": false
+			},
+			"dependsOn": ["konfig"]
+		},
+		"test": {
+			"executor": "@angular/build:unit-test",
+			"dependsOn": ["konfig"],
+			"outputs": ["{workspaceRoot}/coverage/apps/entwurf"],
+			"options": {
+				"buildTarget": "entwurf:build:development",
+				"tsConfig": "apps/entwurf/tsconfig.spec.json",
+				"runner": "vitest"
+			}
+		}
+	}
+}

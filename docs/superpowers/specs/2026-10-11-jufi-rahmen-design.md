@@ -30,20 +30,20 @@ Die Plattform ist von Anfang an **mandantenfähig**: Sie startet mit der eigenen
 
 ## 2. Begriffe
 
-| Begriff | Bedeutung |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Plattform-Admin | Betreiber der Plattform. Steht außerhalb aller Vereine. |
-| Verein | Mandant. Hat genau eine Jugendgruppe; deren Einstellungen sind Einstellungen des Vereins. |
-| Slug | URL-Kennung eines Vereins, z. B. `glonntal` in `jufi-app.de/glonntal/`. |
-| Person | Mitglied eines Vereins: Jungfischer oder Erwachsener. |
-| Zugang | Anmeldedaten einer Person (E-Mail, Passkeys, Passwort, TOTP). Optional. |
-| Jugendleiter | Erwachsener mit mindestens einem Recht aus 4.2. |
-| Elternteil | Erwachsener, dem mindestens ein Jungfischer zugeordnet ist. |
-| Untergruppe | Frei benannte Teilmenge der Jungfischer, z. B. „Ältere", „Zeltlager-Teilnehmer". |
-| Thread | Ein Anlass oder Thema: Aushang aus Modulen plus Verlauf. |
-| Modul | Baustein im Aushang eines Threads (Umfrage, Termin, Helferliste …). |
-| Verlauf | Chronologischer Teil eines Threads: Nachrichten, Kommentare, Systemereignisse. |
-| Antwort-Einheit | Legt bei einem Antwort-Modul fest, für wen eine Antwort gilt (6.3). |
+| Begriff         | Bedeutung                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| Plattform-Admin | Betreiber der Plattform. Steht außerhalb aller Vereine.                                   |
+| Verein          | Mandant. Hat genau eine Jugendgruppe; deren Einstellungen sind Einstellungen des Vereins. |
+| Slug            | URL-Kennung eines Vereins, z. B. `glonntal` in `jufi-app.de/glonntal/`.                   |
+| Person          | Mitglied eines Vereins: Jungfischer oder Erwachsener.                                     |
+| Zugang          | Anmeldedaten einer Person (E-Mail, Passkeys, Passwort, TOTP). Optional.                   |
+| Jugendleiter    | Erwachsener mit mindestens einem Recht aus 4.2.                                           |
+| Elternteil      | Erwachsener, dem mindestens ein Jungfischer zugeordnet ist.                               |
+| Untergruppe     | Frei benannte Teilmenge der Jungfischer, z. B. „Ältere", „Zeltlager-Teilnehmer".          |
+| Thread          | Ein Anlass oder Thema: Aushang aus Modulen plus Verlauf.                                  |
+| Modul           | Baustein im Aushang eines Threads (Umfrage, Termin, Helferliste …).                       |
+| Verlauf         | Chronologischer Teil eines Threads: Nachrichten, Kommentare, Systemereignisse.            |
+| Antwort-Einheit | Legt bei einem Antwort-Modul fest, für wen eine Antwort gilt (6.3).                       |
 
 ---
 
@@ -96,23 +96,23 @@ Verworfen: Magic Links als einziger Weg (Kinder ohne E-Mail fallen heraus; der W
 
 Intern gibt es nur **Einzelrechte**. Rollen sind **Vorlagen**, die die Häkchen vorbelegen; danach ist jedes Recht pro Person änderbar. Neue Rechte lassen sich so ergänzen, ohne Rollen umzubauen.
 
-| Recht | Umfasst |
-| ------------------------------- | ------------------------------------------------------------------------------- |
-| Mitglieder verwalten | Personen anlegen, einladen, Eltern und Kinder verknüpfen, Untergruppen pflegen |
-| Threads erstellen | Threads anlegen, Module hinzufügen, eigene Threads bearbeiten |
-| Alle Threads bearbeiten | fremde Threads ändern, archivieren, Modus umstellen, Kommentare löschen |
-| Globale Dokumente verwalten | Dokumente hochladen, ersetzen, Kategorien pflegen |
-| Antworten im Detail sehen | sehen, wer was geantwortet hat; ohne dieses Recht nur Summen |
-| Jugendleiter & Rechte verwalten | weitere Jugendleiter anlegen und Rechte vergeben |
-| Vereinseinstellungen | Name, Logo, Farben, Kontaktdaten des Vereins |
+| Recht                           | Umfasst                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------ |
+| Mitglieder verwalten            | Personen anlegen, einladen, Eltern und Kinder verknüpfen, Untergruppen pflegen |
+| Threads erstellen               | Threads anlegen, Module hinzufügen, eigene Threads bearbeiten                  |
+| Alle Threads bearbeiten         | fremde Threads ändern, archivieren, Modus umstellen, Kommentare löschen        |
+| Globale Dokumente verwalten     | Dokumente hochladen, ersetzen, Kategorien pflegen                              |
+| Antworten im Detail sehen       | sehen, wer was geantwortet hat; ohne dieses Recht nur Summen                   |
+| Jugendleiter & Rechte verwalten | weitere Jugendleiter anlegen und Rechte vergeben                               |
+| Vereinseinstellungen            | Name, Logo, Farben, Kontaktdaten des Vereins                                   |
 
 Rollen-Vorlagen:
 
-| Vorlage | Vorbelegte Rechte |
-| ------------ | ------------------------------------------------------------------------- |
-| Leitung | alle |
+| Vorlage      | Vorbelegte Rechte                                                       |
+| ------------ | ----------------------------------------------------------------------- |
+| Leitung      | alle                                                                    |
 | Jugendleiter | alle außer „Jugendleiter & Rechte verwalten" und „Vereinseinstellungen" |
-| Betreuer | „Antworten im Detail sehen" |
+| Betreuer     | „Antworten im Detail sehen"                                             |
 
 Feste Regeln:
 
@@ -157,18 +157,18 @@ Die genaue Gestaltung wird im klickbaren Entwurf (Teilprojekt 1) ausgearbeitet.
 
 Jeder Bereich ist direkt verlinkbar, damit aus WhatsApp heraus gezielt hineingesprungen werden kann.
 
-| URL | Inhalt |
-| ------------------------------------------------------ | -------------------------------------------------------------- |
-| `/admin/…` | Plattform-Admin |
-| `/<slug>/` | Dashboard |
-| `/<slug>/threads` | Thread-Liste |
-| `/<slug>/t/<id>-<titel-slug>` | Thread; die ID ist maßgeblich, der Titelteil nur zur Lesbarkeit |
-| `/<slug>/t/<id>/m/<modulId>` | Sprung zu einem Modul im Thread |
-| `/<slug>/termine` · `/<slug>/medien` · `/<slug>/dokumente` | Kalender, Medienbereich, globale Dokumente |
-| `/<slug>/einladung/<token>` | Einladung annehmen |
-| `/<slug>/verwaltung/…` | Verwaltung |
-| `/<slug>/api/v1/…` | REST-API des Vereins |
-| `/<slug>/ws` | WebSocket des Vereins |
+| URL                                                        | Inhalt                                                          |
+| ---------------------------------------------------------- | --------------------------------------------------------------- |
+| `/admin/…`                                                 | Plattform-Admin                                                 |
+| `/<slug>/`                                                 | Dashboard                                                       |
+| `/<slug>/threads`                                          | Thread-Liste                                                    |
+| `/<slug>/t/<id>-<titel-slug>`                              | Thread; die ID ist maßgeblich, der Titelteil nur zur Lesbarkeit |
+| `/<slug>/t/<id>/m/<modulId>`                               | Sprung zu einem Modul im Thread                                 |
+| `/<slug>/termine` · `/<slug>/medien` · `/<slug>/dokumente` | Kalender, Medienbereich, globale Dokumente                      |
+| `/<slug>/einladung/<token>`                                | Einladung annehmen                                              |
+| `/<slug>/verwaltung/…`                                     | Verwaltung                                                      |
+| `/<slug>/api/v1/…`                                         | REST-API des Vereins                                            |
+| `/<slug>/ws`                                               | WebSocket des Vereins                                           |
 
 Ein umbenannter Thread bleibt unter seinem alten Link erreichbar, weil nur die ID zählt.
 
@@ -182,11 +182,11 @@ Ein umbenannter Thread bleibt unter seinem alten Link erreichbar, weil nur die I
 
 Jeder Thread hat denselben Aufbau mit zwei **Reitern**: **Übersicht** zeigt den **Aushang** aus Modulen in fester, vom Jugendleiter bestimmter Reihenfolge; **Verlauf** zeigt Nachrichten, Kommentare und Systemereignisse und trägt einen Zähler für Neues. Verworfen: eine durchgehende Seite mit Verlauf unter dem Aushang — bei vielen Modulen läge der Verlauf weit unten, und der Aushang soll als „aktueller Stand" ungestört bleiben. Der **Modus** legt fest, wer im Verlauf schreiben darf:
 
-| Modus | Verlauf |
-| -------------------- | ------------------------------------------------------------------ |
-| Nur Aushang | niemand schreibt; der Reiter „Verlauf" entfällt |
-| Aushang + Kommentare | alle Leser kommentieren |
-| Offener Chat | alle Leser schreiben frei |
+| Modus                | Verlauf                                         |
+| -------------------- | ----------------------------------------------- |
+| Nur Aushang          | niemand schreibt; der Reiter „Verlauf" entfällt |
+| Aushang + Kommentare | alle Leser kommentieren                         |
+| Offener Chat         | alle Leser schreiben frei                       |
 
 Der Modus ist jederzeit änderbar, etwa von „Offener Chat" auf „Nur Aushang" nach der Veranstaltung. Ein einheitlicher Aufbau statt dreier Seitentypen hält die Oberfläche für alle Modi gleich.
 
@@ -208,11 +208,11 @@ Feste Regeln: Eltern sehen alles, was ihre Kinder sehen. Jugendleiter sehen alle
 
 Jedes Modul, auf das man antwortet (Umfrage, Helferliste, Fahrgemeinschaft), hat eine Antwort-Einheit. Das Kosten-Modul gilt immer pro Jungfischer und hat einen eigenen Status-Ablauf (6.4.2).
 
-| Antwort-Einheit | Beispiel | Wer antwortet |
-| ---------------- | ---------------------------- | -------------------------------------------------------------------- |
-| Pro Jungfischer | „Kommst du zum Bowling?" | der Jungfischer selbst **oder** seine Eltern; eine Antwort pro Kind |
-| Pro Erwachsenem | „Wer bringt Kuchen?" | jeder Elternteil und Jugendleiter für sich |
-| Pro Person | „Welche Pizza wollt ihr?" | jeder mit Zugang, Kinder und Erwachsene |
+| Antwort-Einheit | Beispiel                  | Wer antwortet                                                       |
+| --------------- | ------------------------- | ------------------------------------------------------------------- |
+| Pro Jungfischer | „Kommst du zum Bowling?"  | der Jungfischer selbst **oder** seine Eltern; eine Antwort pro Kind |
+| Pro Erwachsenem | „Wer bringt Kuchen?"      | jeder Elternteil und Jugendleiter für sich                          |
+| Pro Person      | „Welche Pizza wollt ihr?" | jeder mit Zugang, Kinder und Erwachsene                             |
 
 Eine Antwort-Einheit „pro Familie" ist ausdrücklich nicht vorgesehen.
 
@@ -222,16 +222,16 @@ Bei „pro Jungfischer" speichert jede Antwort, **für wen** und **von wem** sie
 
 Alle acht gehören zu Version 1:
 
-| Modul | Zweck |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Info-Text | Formatierter Text |
-| Termin | Datum, Uhrzeit, Ende, Ort mit Karten-Link, Treffpunkt. Speist Kalender, Dashboard und Archiv-Regel. |
-| Umfrage | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter |
-| Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht. |
-| Fahrgemeinschaft | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1) |
-| Kosten | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2) |
-| Dateien | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter. |
-| Fotos | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen. |
+| Modul                   | Zweck                                                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Info-Text               | Formatierter Text                                                                                                                                       |
+| Termin                  | Datum, Uhrzeit, Ende, Ort mit Karten-Link, Treffpunkt. Speist Kalender, Dashboard und Archiv-Regel.                                                     |
+| Umfrage                 | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter |
+| Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht.                        |
+| Fahrgemeinschaft        | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1)                                   |
+| Kosten                  | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2)                                                                       |
+| Dateien                 | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter.                                                                                 |
+| Fotos                   | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen.                                                      |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Fangbuch/Ergebnisse, Wettbewerbe.
 
@@ -290,21 +290,21 @@ Verworfen: öffentliche Nur-Lese-Links (Namen von Kindern wären für jeden mit 
 
 Übernommen von HWYD (`../hwyd`, dort `SPEZIFIKATION.md` Abschnitt 5):
 
-| Baustein | Wahl |
-| ------------ | ------------------------------------------------------------------------------ |
-| Frontend | Angular 22, CSR, Signale, `OnPush`, Inline-Vorlagen, `@if`/`@for` |
-| Backend | Express-Server-Routen über `@angular/ssr` im **selben Deployable** |
-| Echtzeit | `ws` am selben HTTP-Server |
-| ORM / DB | Prisma 7 mit `@prisma/adapter-pg`, Postgres 17 |
-| Monorepo | Nx 23, pnpm |
-| Auth | `@node-rs/argon2`, `otplib`, `@simplewebauthn`, serverseitige Sessions in Postgres |
-| PWA | Angular `ngsw`, eigener Speicher in IndexedDB (`idb`) |
-| Push | `web-push` (VAPID) |
-| Mail | `nodemailer` über SMTP |
-| Bilder | `sharp` |
-| Zeitpläne | `node-cron` im selben Prozess |
-| Tests | Vitest |
-| Auslieferung | Docker-Image (arm64), lokal gebaut, Traefik mit Let's Encrypt |
+| Baustein     | Wahl                                                                               |
+| ------------ | ---------------------------------------------------------------------------------- |
+| Frontend     | Angular 22, CSR, Signale, `OnPush`, Inline-Vorlagen, `@if`/`@for`                  |
+| Backend      | Express-Server-Routen über `@angular/ssr` im **selben Deployable**                 |
+| Echtzeit     | `ws` am selben HTTP-Server                                                         |
+| ORM / DB     | Prisma 7 mit `@prisma/adapter-pg`, Postgres 17                                     |
+| Monorepo     | Nx 23, pnpm                                                                        |
+| Auth         | `@node-rs/argon2`, `otplib`, `@simplewebauthn`, serverseitige Sessions in Postgres |
+| PWA          | Angular `ngsw`, eigener Speicher in IndexedDB (`idb`)                              |
+| Push         | `web-push` (VAPID)                                                                 |
+| Mail         | `nodemailer` über SMTP                                                             |
+| Bilder       | `sharp`                                                                            |
+| Zeitpläne    | `node-cron` im selben Prozess                                                      |
+| Tests        | Vitest                                                                             |
+| Auslieferung | Docker-Image (arm64), lokal gebaut, Traefik mit Let's Encrypt                      |
 
 Verworfen: eine getrennte API (NestJS/Fastify) neben einem statischen Frontend (zwei Deployables, CORS, Abweichung vom bewährten HWYD-Betrieb) und eine Instanz pro Verein (jeder Verein bräuchte Container, Datenbank und Deploy).
 
@@ -448,13 +448,13 @@ Offline möglich: Antworten auf Umfragen, Eintragen in Helferlisten und Fahrgeme
 
 ### 9.4 Push
 
-| Anlass | Empfänger |
-| ------------------------------- | -------------------------------------------------------------------------------- |
-| Neuer Thread | Zielgruppe |
-| Wichtige Änderung | Zielgruppe, nur wenn der Jugendleiter beim Speichern „Mitglieder benachrichtigen" anhakt |
-| Frist läuft ab (2 Tage vorher) | wer noch nicht geantwortet hat; bei „pro Jungfischer" das Kind und seine Eltern |
-| Termin am nächsten Tag | Zielgruppe des Threads (Eingrenzung auf Zusagende: siehe 15) |
-| Kommentare und Chat | je nach Glocke des Threads |
+| Anlass                         | Empfänger                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------- |
+| Neuer Thread                   | Zielgruppe                                                                               |
+| Wichtige Änderung              | Zielgruppe, nur wenn der Jugendleiter beim Speichern „Mitglieder benachrichtigen" anhakt |
+| Frist läuft ab (2 Tage vorher) | wer noch nicht geantwortet hat; bei „pro Jungfischer" das Kind und seine Eltern          |
+| Termin am nächsten Tag         | Zielgruppe des Threads (Eingrenzung auf Zusagende: siehe 15)                             |
+| Kommentare und Chat            | je nach Glocke des Threads                                                               |
 
 - **Glocke pro Thread**: Alles / Nur Wichtiges (Vorgabe) / Stumm.
 - Push-Anmeldungen hängen am Zugang, also am Verein. Der Benachrichtigungstitel nennt den Verein; ein Tipp öffnet den Deep Link.
@@ -477,10 +477,10 @@ Offline möglich: Antworten auf Umfragen, Eintragen in Helferlisten und Fahrgeme
 
 ### 10.1 Umgebungen
 
-| Umgebung | Ort | Zweck |
-| -------- | ------------------------------------------------------------------------------- | ----------------------------- |
-| Test | `https://jufi-app.sideshow-systems.de`, bestehende Hetzner-VM (neben paperless, HWYD) | Entwurf, Entwicklung, Pilot |
-| Live | `https://www.jufi-app.de`, **eigene Hetzner-VM** | Betrieb für alle Vereine |
+| Umgebung | Ort                                                                                   | Zweck                       |
+| -------- | ------------------------------------------------------------------------------------- | --------------------------- |
+| Test     | `https://jufi-app.sideshow-systems.de`, bestehende Hetzner-VM (neben paperless, HWYD) | Entwurf, Entwicklung, Pilot |
+| Live     | `https://www.jufi-app.de`, **eigene Hetzner-VM**                                      | Betrieb für alle Vereine    |
 
 - Domain, Basis-URL, `WEBAUTHN_RP_ID` und `WEBAUTHN_ORIGIN` kommen aus Umgebungsvariablen. Der Umzug ist damit reine Konfiguration.
 - Passkeys aus der Testumgebung werden beim Umzug ungültig, weil sie an die Domain gebunden sind. Passwort-Zugänge bleiben.
@@ -500,15 +500,15 @@ Täglich Datenbank-Dump **und** Upload-Volume per restic in ein zweites Hetzner-
 
 Jedes Teilprojekt bekommt eine eigene Spezifikation, einen eigenen Plan und eine eigene Umsetzung, in dieser Reihenfolge:
 
-| # | Teilprojekt | Inhalt | Ergebnis |
-| - | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 1 | Klickbarer Entwurf | Nx-Grundgerüst; `apps/entwurf` mit Beispieldaten im Speicher, ohne Backend (12) | Durchklickbarer Entwurf auf der Testdomain |
-| 2 | Fundament | Server, Datenbank, Mandanten, Plattform-Admin, Personen, Elternschaft, Untergruppen, Einladung und Anmeldung, Rechte, beide Hüllen, Docker, Deploy, Sicherung | Einladen, anmelden, Mitglieder pflegen |
-| 3 | Thread-Kern | Threads, Zielgruppen, Modi, Verlauf; Module Info-Text, Termin, Umfrage; Dashboard, Thread-Liste, Kalender; Änderungszähler und WebSocket; Teilen und Link-Vorschau | Bowling-Szenario ohne Fahrgemeinschaft durchspielbar |
-| 4 | Weitere Module und Medien | Helferliste, Fahrgemeinschaft, Kosten, Dateien, Fotos mit Upload-Verarbeitung; Medienbereich; globale Dokumente | Alle acht Kernmodule |
-| 5 | Offline und Benachrichtigungen | Lokaler Speicher, Outbox, Dokumente offline; Push, E-Mail-Ersatz, Erinnerungen, Archivierung | Bereit für den Pilotbetrieb |
-| 6 | Live-Gang | Eigene VM, `jufi-app.de`, Rechtstexte, AV-Vertrag, Umzug | Offen für weitere Vereine |
-| 7 | Abrechnung | Tarife, Testzeitraum, Rechnungen, Sperre bei Nichtzahlung (16) | Vereine zahlen für die Nutzung |
+| #   | Teilprojekt                    | Inhalt                                                                                                                                                             | Ergebnis                                             |
+| --- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| 1   | Klickbarer Entwurf             | Nx-Grundgerüst; `apps/entwurf` mit Beispieldaten im Speicher, ohne Backend (12)                                                                                    | Durchklickbarer Entwurf auf der Testdomain           |
+| 2   | Fundament                      | Server, Datenbank, Mandanten, Plattform-Admin, Personen, Elternschaft, Untergruppen, Einladung und Anmeldung, Rechte, beide Hüllen, Docker, Deploy, Sicherung      | Einladen, anmelden, Mitglieder pflegen               |
+| 3   | Thread-Kern                    | Threads, Zielgruppen, Modi, Verlauf; Module Info-Text, Termin, Umfrage; Dashboard, Thread-Liste, Kalender; Änderungszähler und WebSocket; Teilen und Link-Vorschau | Bowling-Szenario ohne Fahrgemeinschaft durchspielbar |
+| 4   | Weitere Module und Medien      | Helferliste, Fahrgemeinschaft, Kosten, Dateien, Fotos mit Upload-Verarbeitung; Medienbereich; globale Dokumente                                                    | Alle acht Kernmodule                                 |
+| 5   | Offline und Benachrichtigungen | Lokaler Speicher, Outbox, Dokumente offline; Push, E-Mail-Ersatz, Erinnerungen, Archivierung                                                                       | Bereit für den Pilotbetrieb                          |
+| 6   | Live-Gang                      | Eigene VM, `jufi-app.de`, Rechtstexte, AV-Vertrag, Umzug                                                                                                           | Offen für weitere Vereine                            |
+| 7   | Abrechnung                     | Tarife, Testzeitraum, Rechnungen, Sperre bei Nichtzahlung (16)                                                                                                     | Vereine zahlen für die Nutzung                       |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Capacitor-Apps.
 
@@ -553,12 +553,12 @@ Wie HWYD (`../hwyd/CLAUDE.md`):
 
 Diese Punkte sind bewusst nicht hier entschieden, sondern gehören in die genannte Spezifikation:
 
-| Punkt | Teilprojekt |
-| ---------------------------------------------------------------------------- | ----------- |
-| Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen | 2 |
-| Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar | 4 |
-| Länge des offline gehaltenen Verlaufs pro Thread | 5 |
-| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5 |
+| Punkt                                                                          | Teilprojekt |
+| ------------------------------------------------------------------------------ | ----------- |
+| Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen       | 2           |
+| Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar    | 4           |
+| Länge des offline gehaltenen Verlaufs pro Thread                               | 5           |
+| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5           |
 
 Die Gestaltung von Dashboard und Kalender, der Ablauf der Fahrgemeinschaft und das Kosten-Modul sind inzwischen entschieden (5.1.1, 6.4.1, 6.4.2); Feinheiten zeigen sich im Entwurf.
 

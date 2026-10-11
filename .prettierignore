@@ -1,0 +1,20 @@
+# Prettier liest zusaetzlich .gitignore. Hier steht nur, was getrackt ist und
+# trotzdem nicht formatiert werden darf.
+
+# --- Baustaende und Zwischenspeicher -------------------------------------------
+/dist
+/coverage
+/.nx/cache
+/.nx/workspace-data
+.nx/self-healing
+.angular
+
+# --- Maschinengeschrieben ------------------------------------------------------
+# Die Sperrdatei schreibt pnpm. Sie zu formatieren erzeugt einen riesigen Diff,
+# den der naechste `pnpm install` wieder umwirft.
+pnpm-lock.yaml
+
+# --- Fremde Werkzeugdateien ----------------------------------------------------
+# Von Claude Code und VS Code selbst geschrieben.
+/.claude/
+/.vscode/

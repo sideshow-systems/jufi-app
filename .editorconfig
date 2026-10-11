@@ -1,0 +1,39 @@
+# JuFi — Einrückung mit Tabs, überall wo es technisch möglich ist.
+# Siehe Rahmen-Spezifikation, Abschnitt 14.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = tab
+indent_size = 2
+
+# --- Dokumentierte Ausnahmen ---------------------------------------------------
+# Diese Stellen koennen keine Tabs verwenden. Das ist kein Konfigurationsfehler.
+
+# 1. YAML verbietet Tabs zur Einrueckung laut Spezifikation. Eine YAML-Datei mit
+#    Tabs ist ein Parser-Fehler, nicht ein Stilverstoss: der Compose-Stack
+#    wuerde nicht starten.
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# 2. `prisma format` schreibt feste zwei Spaces und ist nicht konfigurierbar
+#    (ab Teilprojekt 2).
+[*.prisma]
+indent_style = space
+indent_size = 2
+
+# 3. pnpm normalisiert package.json beim Schreiben auf Spaces.
+[package.json]
+indent_style = space
+indent_size = 2
+
+# Markdown: Tabs in Listen brechen die Einrueckungssemantik mancher Renderer.
+[*.md]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false

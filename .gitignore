@@ -1,1 +1,38 @@
+# Begleitdateien des Brainstormings und Arbeitsbereich der Planausfuehrung
 .superpowers/
+
+# Baustaende und Abhaengigkeiten
+dist
+tmp
+out-tsc
+node_modules
+/coverage
+.angular
+.nx/cache
+.nx/workspace-data
+.nx/self-healing
+.nx/polygraph
+.nx/migrate-runs
+vitest.config.*.timestamp*
+__screenshots__/
+
+# Editoren und System
+/.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+.claude/worktrees
+.claude/settings.local.json
+
+# Secrets: niemals ins Repo. Vorlagen tragen die Endung .example.
+.env
+.env.*
+!.env.example
+!.env.*.example
+env.deploy
+.env.deploy
+
+# Von tools/entwurf-konfig.mjs bei jedem Bau geschrieben. Enthaelt die
+# WhatsApp-Nummer fuer Rueckmeldungen, die nicht ins Repo gehoert (Spec TP1 5.5).
+apps/entwurf/src/konfig.generated.ts

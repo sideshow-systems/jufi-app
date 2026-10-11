@@ -40,29 +40,29 @@ Alle Termine und Fristen sind **relativ zum Tag des ersten Öffnens** angelegt (
 
 ### 3.3 Personen
 
-| Person | Rolle | Besonderheit |
-| ------- | --------------------------------- | -------------------------------------------------------- |
-| Sandra | Elternteil | Mutter von Lena und Max |
-| Lena | Jungfischerin, 13, mit Zugang | Untergruppe „Zeltlager-Teilnehmer" |
-| Max | Jungfischer, 10, **ohne Zugang** | Foto-Einwilligung: nein |
-| Thomas | Jugendleiter, Vorlage „Leitung" | Vater von Jonas (12) |
-| Katrin | Jugendleiterin, Vorlage „Jugendleiter" | — |
-| Michael | Betreuer | — |
+| Person  | Rolle                                  | Besonderheit                       |
+| ------- | -------------------------------------- | ---------------------------------- |
+| Sandra  | Elternteil                             | Mutter von Lena und Max            |
+| Lena    | Jungfischerin, 13, mit Zugang          | Untergruppe „Zeltlager-Teilnehmer" |
+| Max     | Jungfischer, 10, **ohne Zugang**       | Foto-Einwilligung: nein            |
+| Thomas  | Jugendleiter, Vorlage „Leitung"        | Vater von Jonas (12)               |
+| Katrin  | Jugendleiterin, Vorlage „Jugendleiter" | —                                  |
+| Michael | Betreuer                               | —                                  |
 
 Dazu kommen rund 12 weitere Jungfischer mit Eltern, damit Listen und Summen realistisch aussehen. Untergruppen: „Ältere" (ab 14, ohne Lena, Max, Jonas) und „Zeltlager-Teilnehmer".
 
 ### 3.4 Threads
 
-| Thread | Zielgruppe | Modus | Module | Zweck im Test |
-| ----------------------------- | ------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| 📌 Wichtige Infos (angepinnt) | Alle · Jungfischer + Eltern | Nur Aushang | Info-Text, Termin „Nächste Gruppenstunde" (in 2 Tagen, Vereinsheim) | „Wann ist das nächste Treffen?" |
-| 🎳 Bowling | Alle · Jungfischer + Eltern | Aushang + Kommentare | Termin (kommender Samstag), Umfrage „Kommst du mit?" pro Jungfischer (Frist in 3 Tagen), Fahrgemeinschaft, Kosten 12 €, Datei | Kern-Szenario |
-| 🍂 Herbstfest – Helfer | Alle · Nur Eltern | Aushang + Kommentare | Info-Text, Helferliste (Kuchen 3/5, Salat 1/4, Aufbau Sa 2/4, Abbau 0/4), Termin (in 3 Wochen) | Pro Erwachsenem, Eltern-Thread |
-| ⛺ Zeltlager 2027 | Zeltlager-Teilnehmer · JF + Eltern | Offener Chat | Info-Text, Termin Vortreffen (in 2 Wochen), Umfrage „Welche Pizza beim Vortreffen?" pro Person | Chat-Modus, Antwort pro Person |
-| 🎣 Hegefischen | Alle · Jungfischer + Eltern | Aushang + Kommentare | Info-Text mit Ergebnissen, Fotos (Platzhalter), Termin (vor 5 Tagen) | Medien, bald im Archiv |
-| 📝 Fischerprüfung 2027 | Ältere · Jungfischer + Eltern | Aushang + Kommentare | Info-Text, Datei | Sichtbarkeit: Sandra und Lena sehen ihn nicht |
-| 🔧 Orga Jugendleiter | Nur Jugendleiter | Offener Chat | Info-Text | Nur Thomas sieht ihn |
-| 🏆 Königsfischen 2026 (Archiv) | Alle · Jungfischer + Eltern | Nur Aushang | Termin (vor 6 Wochen), Fotos | Archiv |
+| Thread                         | Zielgruppe                         | Modus                | Module                                                                                                                        | Zweck im Test                                 |
+| ------------------------------ | ---------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| 📌 Wichtige Infos (angepinnt)  | Alle · Jungfischer + Eltern        | Nur Aushang          | Info-Text, Termin „Nächste Gruppenstunde" (in 2 Tagen, Vereinsheim)                                                           | „Wann ist das nächste Treffen?"               |
+| 🎳 Bowling                     | Alle · Jungfischer + Eltern        | Aushang + Kommentare | Termin (kommender Samstag), Umfrage „Kommst du mit?" pro Jungfischer (Frist in 3 Tagen), Fahrgemeinschaft, Kosten 12 €, Datei | Kern-Szenario                                 |
+| 🍂 Herbstfest – Helfer         | Alle · Nur Eltern                  | Aushang + Kommentare | Info-Text, Helferliste (Kuchen 3/5, Salat 1/4, Aufbau Sa 2/4, Abbau 0/4), Termin (in 3 Wochen)                                | Pro Erwachsenem, Eltern-Thread                |
+| ⛺ Zeltlager 2027              | Zeltlager-Teilnehmer · JF + Eltern | Offener Chat         | Info-Text, Termin Vortreffen (in 2 Wochen), Umfrage „Welche Pizza beim Vortreffen?" pro Person                                | Chat-Modus, Antwort pro Person                |
+| 🎣 Hegefischen                 | Alle · Jungfischer + Eltern        | Aushang + Kommentare | Info-Text mit Ergebnissen, Fotos (Platzhalter), Termin (vor 5 Tagen)                                                          | Medien, bald im Archiv                        |
+| 📝 Fischerprüfung 2027         | Ältere · Jungfischer + Eltern      | Aushang + Kommentare | Info-Text, Datei                                                                                                              | Sichtbarkeit: Sandra und Lena sehen ihn nicht |
+| 🔧 Orga Jugendleiter           | Nur Jugendleiter                   | Offener Chat         | Info-Text                                                                                                                     | Nur Thomas sieht ihn                          |
+| 🏆 Königsfischen 2026 (Archiv) | Alle · Jungfischer + Eltern        | Nur Aushang          | Termin (vor 6 Wochen), Fotos                                                                                                  | Archiv                                        |
 
 Ausgangszustand im Bowling-Thread: Lena hat **selbst** zugesagt, Max und Jonas sind offen. Fahrgemeinschaft: Familie Maier (Hinfahrt, 3 Plätze, davon 2 belegt), Familie Huber (Hin- und Rückfahrt, 2 Plätze). Kosten: alle offen.
 
@@ -78,29 +78,29 @@ Kategorien „Ordnungen" (Jugendfischereiordnung), „Merkblätter" (Mindestmaß
 
 Untere Leiste: Start · Threads · Termine · Medien · Mehr. Am Desktop erscheint die Hülle als mittige Spalte in Handybreite.
 
-| Bildschirm | Inhalt |
-| ---------- | ------ |
-| Start | Begrüßung; „Braucht deine Antwort" (pro Kind bzw. „Du"); „Als Nächstes" (nächste Termine); „Neu seit deinem letzten Besuch" |
-| Threads | Angepinnt; Aktiv nach letzter Aktivität; Archiv als eigener Abschnitt |
-| Thread | Kopf mit Titel, Zielgruppe und Teilen-Knopf; Reiter **Übersicht** (Module) und **Verlauf** (mit Zähler; entfällt im Modus „Nur Aushang") |
-| Termine | Monatskalender mit Markierungen, darunter die Liste der Termine des Monats; Tippen führt zum Thread |
-| Medien | Fotos und Dateien gruppiert nach Thread |
-| Dokumente | Globale Dokumente nach Kategorie, mit Schalter „Offline verfügbar" (nur angedeutet) |
-| Mehr | Profil; meine Kinder (Foto-Einwilligung, „Zugang für Kind erzeugen"); Benachrichtigungen (Glocke pro Thread); Darstellung Hell/Dunkel/System; offline gespeicherte Dokumente; Installationshinweis |
+| Bildschirm | Inhalt                                                                                                                                                                                             |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start      | Begrüßung; „Braucht deine Antwort" (pro Kind bzw. „Du"); „Als Nächstes" (nächste Termine); „Neu seit deinem letzten Besuch"                                                                        |
+| Threads    | Angepinnt; Aktiv nach letzter Aktivität; Archiv als eigener Abschnitt                                                                                                                              |
+| Thread     | Kopf mit Titel, Zielgruppe und Teilen-Knopf; Reiter **Übersicht** (Module) und **Verlauf** (mit Zähler; entfällt im Modus „Nur Aushang")                                                           |
+| Termine    | Monatskalender mit Markierungen, darunter die Liste der Termine des Monats; Tippen führt zum Thread                                                                                                |
+| Medien     | Fotos und Dateien gruppiert nach Thread                                                                                                                                                            |
+| Dokumente  | Globale Dokumente nach Kategorie, mit Schalter „Offline verfügbar" (nur angedeutet)                                                                                                                |
+| Mehr       | Profil; meine Kinder (Foto-Einwilligung, „Zugang für Kind erzeugen"); Benachrichtigungen (Glocke pro Thread); Darstellung Hell/Dunkel/System; offline gespeicherte Dokumente; Installationshinweis |
 
 ### 4.2 Module im Entwurf
 
-| Modul | Im Entwurf |
-| ---------------- | ---------- |
-| Info-Text | Anzeige |
-| Termin | Anzeige mit Karten-Link (öffnet echte Kartensuche) |
-| Umfrage | **Bedienbar**: Antwort pro Kind / pro Person; „eingetragen von"; Ergebnisanzeige je nach Einstellung |
-| Helferliste | **Bedienbar**: eintragen, austragen; volle Plätze gesperrt |
+| Modul            | Im Entwurf                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------- |
+| Info-Text        | Anzeige                                                                                               |
+| Termin           | Anzeige mit Karten-Link (öffnet echte Kartensuche)                                                    |
+| Umfrage          | **Bedienbar**: Antwort pro Kind / pro Person; „eingetragen von"; Ergebnisanzeige je nach Einstellung  |
+| Helferliste      | **Bedienbar**: eintragen, austragen; volle Plätze gesperrt                                            |
 | Fahrgemeinschaft | **Bedienbar**: Auto anbieten, Kind eintragen, „Braucht noch Mitfahrt"; Jugendleiter verschiebt Kinder |
-| Kosten | **Bedienbar**: „Habe bezahlt" (Eltern), bestätigen (Jugendleiter), Kopier-Knopf für Verwendungszweck |
-| Dateien | Angedeutet: Tippen zeigt „Im Entwurf nicht herunterladbar" |
-| Fotos | Galerie mit Platzhalterbildern, Großansicht; Hochladen angedeutet |
-| Verlauf | **Bedienbar**: Kommentare bzw. Chatnachrichten schreiben |
+| Kosten           | **Bedienbar**: „Habe bezahlt" (Eltern), bestätigen (Jugendleiter), Kopier-Knopf für Verwendungszweck  |
+| Dateien          | Angedeutet: Tippen zeigt „Im Entwurf nicht herunterladbar"                                            |
+| Fotos            | Galerie mit Platzhalterbildern, Großansicht; Hochladen angedeutet                                     |
+| Verlauf          | **Bedienbar**: Kommentare bzw. Chatnachrichten schreiben                                              |
 
 **Teilen-Knopf**: erzeugt den WhatsApp-Text nach Rahmen-Spec 6.7, mit Deep Link in den Entwurf, und öffnet das Teilen-Menü bzw. kopiert.
 
@@ -108,14 +108,14 @@ Untere Leiste: Start · Threads · Termine · Medien · Mehr. Am Desktop erschei
 
 Nur für Thomas. Seitenleiste: Übersicht · Threads · Termine · Personen · Untergruppen · Jugendleiter & Rechte · Globale Dokumente · Einstellungen. Am Handy benutzbar, mit Hinweis „Am Desktop bequemer".
 
-| Bildschirm | Umfang |
-| --------------------- | ------ |
-| Threads | Liste mit Filter (aktiv, Archiv); **Thread-Editor**: links Formular (Titel, Zielgruppe, Modus, „Mitglieder benachrichtigen", sortierbare Module, Modul hinzufügen), rechts Live-Vorschau am Handy mit Markierung des bearbeiteten Moduls. Voll bedienbar für Info-Text, Termin und Umfrage; die übrigen Module lassen sich hinzufügen, aber nur mit Grundeinstellungen. |
-| Antworten | Pro Thread: wer hat was geantwortet, wer fehlt noch; Teilen des Stands |
-| Personen | Liste, Detail, Eltern-Kind-Zuordnung, **Einladungslink erzeugen** mit WhatsApp-Text und Vorschau „So sieht die Einladung aus" (Willkommen → Passkey einrichten, simuliert → Einwilligung für Kinder → fertig) |
-| Jugendleiter & Rechte | Rollen-Vorlage wählen, Häkchen anpassen; Schutz des letzten Rechte-Verwalters |
-| Untergruppen, Termine, Globale Dokumente | Ansicht mit Beispieldaten, eingeschränkt bedienbar |
-| Einstellungen | Vereinsname, Logo (Platzhalter), **Vereinsfarbe**: Änderung wirkt sofort in der ganzen App |
+| Bildschirm                               | Umfang                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Threads                                  | Liste mit Filter (aktiv, Archiv); **Thread-Editor**: links Formular (Titel, Zielgruppe, Modus, „Mitglieder benachrichtigen", sortierbare Module, Modul hinzufügen), rechts Live-Vorschau am Handy mit Markierung des bearbeiteten Moduls. Voll bedienbar für Info-Text, Termin und Umfrage; die übrigen Module lassen sich hinzufügen, aber nur mit Grundeinstellungen. |
+| Antworten                                | Pro Thread: wer hat was geantwortet, wer fehlt noch; Teilen des Stands                                                                                                                                                                                                                                                                                                  |
+| Personen                                 | Liste, Detail, Eltern-Kind-Zuordnung, **Einladungslink erzeugen** mit WhatsApp-Text und Vorschau „So sieht die Einladung aus" (Willkommen → Passkey einrichten, simuliert → Einwilligung für Kinder → fertig)                                                                                                                                                           |
+| Jugendleiter & Rechte                    | Rollen-Vorlage wählen, Häkchen anpassen; Schutz des letzten Rechte-Verwalters                                                                                                                                                                                                                                                                                           |
+| Untergruppen, Termine, Globale Dokumente | Ansicht mit Beispieldaten, eingeschränkt bedienbar                                                                                                                                                                                                                                                                                                                      |
+| Einstellungen                            | Vereinsname, Logo (Platzhalter), **Vereinsfarbe**: Änderung wirkt sofort in der ganzen App                                                                                                                                                                                                                                                                              |
 
 ### 4.4 Nicht im Entwurf
 
@@ -146,35 +146,35 @@ Es gibt zwei Arten von Aufgaben:
 
 **Sandra**
 
-| # | Aufgabe | Prüfregel |
-| - | ------------------------------------------------------------ | ------------------------------------------------------------------- |
-| 1 | Melde Max fürs Bowling an. | Umfrage Bowling: Max = Ja |
-| 2 | Trag dich fürs Herbstfest für einen Kuchen ein. | Helferliste Herbstfest, Platz „Kuchen": Sandra eingetragen |
-| 3 | Such Max einen Platz für die Hinfahrt zum Bowling. | Fahrgemeinschaft Bowling, Hinfahrt: Max sitzt in einem Auto |
-| 4 | Melde, dass du die 12 € für Lena überwiesen hast. | Kosten Bowling: Lena = gemeldet oder bezahlt |
-| 5 | Finde heraus, wann und wo das nächste Treffen ist. | Suchaufgabe: Wochentag, Uhrzeit und Ort der nächsten Gruppenstunde |
-| 6 | Finde die Jugendfischereiordnung. | Dokument „Jugendfischereiordnung" wurde geöffnet |
+| #   | Aufgabe                                            | Prüfregel                                                          |
+| --- | -------------------------------------------------- | ------------------------------------------------------------------ |
+| 1   | Melde Max fürs Bowling an.                         | Umfrage Bowling: Max = Ja                                          |
+| 2   | Trag dich fürs Herbstfest für einen Kuchen ein.    | Helferliste Herbstfest, Platz „Kuchen": Sandra eingetragen         |
+| 3   | Such Max einen Platz für die Hinfahrt zum Bowling. | Fahrgemeinschaft Bowling, Hinfahrt: Max sitzt in einem Auto        |
+| 4   | Melde, dass du die 12 € für Lena überwiesen hast.  | Kosten Bowling: Lena = gemeldet oder bezahlt                       |
+| 5   | Finde heraus, wann und wo das nächste Treffen ist. | Suchaufgabe: Wochentag, Uhrzeit und Ort der nächsten Gruppenstunde |
+| 6   | Finde die Jugendfischereiordnung.                  | Dokument „Jugendfischereiordnung" wurde geöffnet                   |
 
 **Lena**
 
-| # | Aufgabe | Prüfregel |
-| - | ------------------------------------------------------------ | ------------------------------------------------------------------- |
-| 1 | Wähl deine Pizza fürs Zeltlager-Vortreffen. | Umfrage Pizza: Lena hat geantwortet |
-| 2 | Finde heraus, mit wem du zum Bowling fährst. | Suchaufgabe: Familie des Fahrers |
-| 3 | Schau dir die Fotos vom Hegefischen an. | Ein Foto aus „Hegefischen" wurde groß geöffnet |
-| 4 | Stell eine Frage im Thread „Zeltlager 2027". | Neue Nachricht von Lena im Verlauf „Zeltlager 2027" |
+| #   | Aufgabe                                      | Prüfregel                                           |
+| --- | -------------------------------------------- | --------------------------------------------------- |
+| 1   | Wähl deine Pizza fürs Zeltlager-Vortreffen.  | Umfrage Pizza: Lena hat geantwortet                 |
+| 2   | Finde heraus, mit wem du zum Bowling fährst. | Suchaufgabe: Familie des Fahrers                    |
+| 3   | Schau dir die Fotos vom Hegefischen an.      | Ein Foto aus „Hegefischen" wurde groß geöffnet      |
+| 4   | Stell eine Frage im Thread „Zeltlager 2027". | Neue Nachricht von Lena im Verlauf „Zeltlager 2027" |
 
 Für Aufgabe 2 sitzt Lena im Ausgangszustand bereits im Auto der Familie Maier.
 
 **Thomas**
 
-| # | Aufgabe | Prüfregel |
-| - | ------------------------------------------------------------ | ------------------------------------------------------------------- |
-| 1 | Leg den Thread „Weihnachtsfeier" mit Termin und Teilnahme-Umfrage an. | Veröffentlichter Thread, Titel enthält „Weihnachtsfeier", mit Termin- und Umfrage-Modul |
-| 2 | Finde heraus, wer beim Bowling noch nicht geantwortet hat, und teile den Stand per WhatsApp. | Teilen des Bowling-Stands wurde ausgelöst (aus dem Thread oder aus der Antwort-Übersicht der Verwaltung) |
-| 3 | Bestätige die Zahlung für Lena. | Kosten Bowling: Lena = bezahlt |
-| 4 | Lade einen neuen Elternteil ein. | Neue erwachsene Person angelegt und Einladungslink erzeugt |
-| 5 | Setz Max in ein anderes Auto, weil Familie Maier ausfällt. | Max sitzt in einem Auto, das nicht Familie Maier gehört |
+| #   | Aufgabe                                                                                      | Prüfregel                                                                                                |
+| --- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 1   | Leg den Thread „Weihnachtsfeier" mit Termin und Teilnahme-Umfrage an.                        | Veröffentlichter Thread, Titel enthält „Weihnachtsfeier", mit Termin- und Umfrage-Modul                  |
+| 2   | Finde heraus, wer beim Bowling noch nicht geantwortet hat, und teile den Stand per WhatsApp. | Teilen des Bowling-Stands wurde ausgelöst (aus dem Thread oder aus der Antwort-Übersicht der Verwaltung) |
+| 3   | Bestätige die Zahlung für Lena.                                                              | Kosten Bowling: Lena = bezahlt                                                                           |
+| 4   | Lade einen neuen Elternteil ein.                                                             | Neue erwachsene Person angelegt und Einladungslink erzeugt                                               |
+| 5   | Setz Max in ein anderes Auto, weil Familie Maier ausfällt.                                   | Max sitzt in einem Auto, das nicht Familie Maier gehört                                                  |
 
 Die Reihenfolge innerhalb einer Person ist fest. Aufgaben, deren Voraussetzung fehlt (z. B. Thomas 3, bevor Sandra „gemeldet" hat), funktionieren trotzdem: Thomas kann direkt auf „bezahlt" setzen.
 
@@ -217,18 +217,18 @@ Gerät: iPhone · Safari · dunkel
 
 Die fachlichen Regeln sind reine Funktionen in `apps/entwurf/src/app/regeln/`, ohne Angular-Abhängigkeit. Sie sind so geschrieben, dass sie in den Teilprojekten 2 und 3 als Ausgangspunkt für `libs/domain` dienen können; eine Verbindung zu `libs/domain` besteht im Entwurf nicht.
 
-| Regel | Aufgabe |
-| -------------------------- | ------- |
-| `siehtThread` | Sichtbarkeit nach Rahmen-Spec 6.2 |
-| `antwortZeilen` | Welche Zeilen eine Person bei einem Antwort-Modul sieht (pro Kind, „Du", pro Person) |
-| `brauchtAntwort` | Inhalt von „Braucht deine Antwort" |
-| `naechsteTermine` | „Als Nächstes" und Kalender |
-| `istArchiviert` | Archiv-Regel (eine Woche nach dem letzten Termin oder manuell) |
-| `mitfahrtOffen` | „Braucht noch Mitfahrt" |
-| `kostenStatus`, `zahlungspflichtig` | Kosten nach Rahmen-Spec 6.4.2 |
-| `darf` | Einzelrechte nach Rahmen-Spec 4.2 |
-| `teilenText` | WhatsApp-Text des Thread-Stands |
-| `vereinsfarben` | Ableitung der Akzentfarben aus der Vereinsfarbe, Kontrastprüfung |
+| Regel                               | Aufgabe                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------------ |
+| `siehtThread`                       | Sichtbarkeit nach Rahmen-Spec 6.2                                                    |
+| `antwortZeilen`                     | Welche Zeilen eine Person bei einem Antwort-Modul sieht (pro Kind, „Du", pro Person) |
+| `brauchtAntwort`                    | Inhalt von „Braucht deine Antwort"                                                   |
+| `naechsteTermine`                   | „Als Nächstes" und Kalender                                                          |
+| `istArchiviert`                     | Archiv-Regel (eine Woche nach dem letzten Termin oder manuell)                       |
+| `mitfahrtOffen`                     | „Braucht noch Mitfahrt"                                                              |
+| `kostenStatus`, `zahlungspflichtig` | Kosten nach Rahmen-Spec 6.4.2                                                        |
+| `darf`                              | Einzelrechte nach Rahmen-Spec 4.2                                                    |
+| `teilenText`                        | WhatsApp-Text des Thread-Stands                                                      |
+| `vereinsfarben`                     | Ableitung der Akzentfarben aus der Vereinsfarbe, Kontrastprüfung                     |
 
 ---
 

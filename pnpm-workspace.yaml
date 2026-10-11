@@ -1,0 +1,25 @@
+# ACHTUNG: YAML verbietet Tabs zur Einrueckung. Diese Datei nutzt bewusst
+# Spaces — siehe .editorconfig.
+
+packages:
+  - 'apps/*'
+  - 'libs/*'
+
+# Build-Skripte von Abhaengigkeiten laufen bewusst nicht. Alle Pakete hier
+# beziehen ihre nativen Anteile ueber vorgebaute Plattformpakete
+# (@esbuild/darwin-arm64, @nx/nx-darwin-arm64 und so weiter), ihre
+# Install-Skripte pruefen die nur nach. Ohne diese Liste bricht `pnpm install`
+# in einem frischen Baum — etwa im Docker-Build — mit ERR_PNPM_IGNORED_BUILDS ab
+# (Erfahrung aus HWYD). @prisma/engines und prisma stehen schon fuer
+# Teilprojekt 2 hier.
+ignoredBuiltDependencies:
+  - '@parcel/watcher'
+  - '@prisma/engines'
+  - '@swc/core'
+  - esbuild
+  - less
+  - lmdb
+  - msgpackr-extract
+  - nx
+  - prisma
+  - unrs-resolver

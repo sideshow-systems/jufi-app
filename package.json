@@ -1,0 +1,51 @@
+{
+  "name": "@jufi/source",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "//packageManager": "Gepinnt, damit corepack im Docker-Build dieselbe pnpm-Version nimmt wie lokal (Erfahrung aus HWYD: ohne das Feld zieht corepack die neueste).",
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "dev:entwurf": "nx serve entwurf",
+    "build:entwurf": "nx build entwurf",
+    "test": "nx run-many -t test",
+    "typecheck": "nx run-many -t typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "image:entwurf": "docker build -f Dockerfile.entwurf -t jufi-entwurf:local .",
+    "deploy:entwurf": "bash tools/deploy-entwurf.sh"
+  },
+  "nx": {
+    "//": "Leere Liste: die Skripte hier sind Abkuerzungen fuer den Menschen. Ohne das wuerde Nx sie als Targets eines Root-Projekts erkennen, und `pnpm test` (nx run-many -t test) wuerde sich selbst aufrufen.",
+    "includedScripts": []
+  },
+  "devDependencies": {
+    "@angular-devkit/core": "~22.0.4",
+    "@angular-devkit/schematics": "~22.0.4",
+    "@angular/build": "~22.0.4",
+    "@angular/cli": "~22.0.4",
+    "@angular/compiler-cli": "~22.0.4",
+    "@nx/angular": "23.1.0",
+    "@nx/js": "23.1.0",
+    "@nx/vitest": "23.1.0",
+    "@nx/web": "23.1.0",
+    "@schematics/angular": "~22.0.4",
+    "@types/node": "^24.0.0",
+    "jsdom": "^27.1.0",
+    "nx": "23.1.0",
+    "prettier": "^3.8.1",
+    "tslib": "^2.3.0",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@angular/common": "~22.0.4",
+    "@angular/compiler": "~22.0.4",
+    "@angular/core": "~22.0.4",
+    "@angular/forms": "~22.0.4",
+    "@angular/platform-browser": "~22.0.4",
+    "@angular/router": "~22.0.4",
+    "lucide": "^1.31.0",
+    "rxjs": "~7.8.0"
+  }
+}

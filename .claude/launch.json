@@ -1,0 +1,12 @@
+{
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "entwurf",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": ["run", "dev:entwurf"],
+			"port": 4300,
+			"url": "http://localhost:4300"
+		}
+	]
+}
