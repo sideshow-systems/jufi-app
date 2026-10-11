@@ -12,6 +12,7 @@ import { Router } from '@angular/router';
 import { EntwurfStore } from '../daten/store';
 import { MeldungService } from '../gestaltung/meldung';
 import { aktuellerPfad } from './ort';
+import { RueckmeldungDialog } from './rueckmeldung';
 import { TM_STIL } from './stil';
 import { TestmodusService } from './testmodus';
 import type { Ergebnis } from './typen';
@@ -25,11 +26,11 @@ const SMILEYS: { wert: NonNullable<Ergebnis['smiley']>; zeichen: string; text: s
 /**
  * Die Dialoge des Testmodus (Spec TP1 5.4): Bewertung nach jeder Aufgabe,
  * "Wo haengst du?", Aufgabenliste, Notiz zur Seite und die Rueckfrage vor dem
- * Zuruecksetzen. Die Rueckmeldung selbst folgt in rueckmeldung.ts.
+ * Zuruecksetzen. Die Rueckmeldung selbst steht in rueckmeldung.ts.
  */
 @Component({
 	selector: 'jf-testmodus-dialoge',
-	imports: [FormsModule],
+	imports: [FormsModule, RueckmeldungDialog],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	host: { '(document:keydown.escape)': 'abbrechen()' },
 	template: `
@@ -112,9 +113,7 @@ const SMILEYS: { wert: NonNullable<Ergebnis['smiley']>; zeichen: string; text: s
 							<button type="button" class="tm-knopf leise" (click)="abbrechen()">Abbrechen</button>
 						}
 						@case ('rueckmeldung') {
-							<h2 id="tm-titel">Danke fürs Ausprobieren!</h2>
-							<p>Die Rückmeldung kannst du gleich über den Testmodus-Knopf senden.</p>
-							<button type="button" class="tm-knopf" (click)="abbrechen()">Schließen</button>
+							<jf-rueckmeldung (schliessen)="abbrechen()" />
 						}
 					}
 				</div>
@@ -221,10 +220,11 @@ export class TestmodusDialoge {
 
 	constructor() {
 		const host = inject(ElementRef<HTMLElement>).nativeElement as HTMLElement;
-		// Neuer Dialog: Eingaben leeren und den Fokus hineinsetzen (Tastatur, Vorleser).
+		// Neuer Dialog: Fokus auf den ersten Knopf (Tastatur, Vorleser). Nicht ins Textfeld,
+		// sonst schiebt am Handy sofort die Tastatur den Dialog zu.
 		afterRenderEffect(() => {
 			if (!this.testmodus.dialog()) return;
-			host.querySelector<HTMLElement>('.karte button, .karte textarea')?.focus();
+			host.querySelector<HTMLElement>('.karte button')?.focus();
 		});
 	}
 
