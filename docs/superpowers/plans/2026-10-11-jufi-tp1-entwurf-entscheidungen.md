@@ -1,0 +1,79 @@
+# TP1 Entwurf – Entscheidungen bei der Umsetzung
+
+Alle Abwägungen, die bei der Umsetzung des Plans [2026-10-11-jufi-tp1-entwurf.md](2026-10-11-jufi-tp1-entwurf.md) ohne Rückfrage getroffen wurden, in der Reihenfolge ihres Entstehens, jeweils mit dem, was sie kosten, falls sie falsch sind. Dazu die Befunde des abschließenden Reviews, die bewusst zurückgestellt wurden.
+
+## Entscheidungen
+
+- Setup: Ruling: Branch feat/tp1-entwurf von spec/rahmen statt Worktree — Repo hat ausser Specs noch keinen Code, ein Branch reicht zur Isolation — Kosten falls falsch: keine, Branch laesst sich umhaengen
+- T5→T7..T13 data-theme: Plan nutzt 'hell'/'dunkel', Spec 7 nennt [data-theme="dark"]. Ruling: Attributwerte 'light'/'dark' (Spec bindend), Signalwerte im ThemaService bleiben deutsch — Kosten falls falsch: Umbenennung eines Attributs.
+- T2→T4 Helferliste Herbstfest hat in T2 keine Frist, T4 erwartet sie in brauchtAntwort. Ruling: brauchtAntwort nimmt Helferlisten mit offener oder ohne Frist; Herbstfest bekommt Frist in 14 Tagen — Kosten: Herbstfest erscheint bei allen Eltern, gewollt.
+- T2→T13 Lena-Suchaufgabe braucht zwei falsche Familiennamen, Beispieldaten haben nur Maier/Huber als Fahrer. Ruling: falsch = andere Fahrerfamilien, aufgefuellt mit Nachnamen anderer Erwachsener — Kosten: keine.
+- Task 2: Ruling: Bowling-Ausgangszustand enthaelt neben Lena auch Paul Maier (Ja, sitzt im Maier-Auto) sowie Mia/Hannah (Nein) — Spec 3.4 verlangt 2 belegte Plaetze im Maier-Auto und realistische Summen; die Plan-Erwartungen in Task 4 'Dabei (1): Lena' und 'zusagen=[lena]' werden zu 'Dabei (2): Lena, Paul' bzw. '[lena, k-paul]' — Kosten falls falsch: Testerwartungen anpassen
+- Task 4: Ruling: Teilen-Text nennt Hinfahrt als "🚗 Fahrer: …" (wie Rahmen 6.7) und Rueckfahrt in eigener Zeile "↩️ Rückfahrt: …"; nicht-Teilnahme-Umfragen als "📊 Frage" plus "• Option (n): Namen"; Namenslisten ab 11 Eintraegen mit "…" gekuerzt (Rahmen-Beispiel kuerzt ebenfalls) — Kosten falls falsch: Textformat anpassen
+- Task 4: Ruling: brauchtAntwort nimmt Helferlisten mit offener oder ohne Frist (siehe Pre-flight) — Kosten: keine
+- Task 5: Ruling: Akzentflaeche zaehlt bei der Kontrastpruefung mit (Test ergaenzt, RED->GREEN), Flaeche hell L96/dunkel L16 — Spec 7 nennt nur Text auf Akzent und Akzent auf Flaeche, leise Knoepfe tragen aber Akzent-Schrift auf Akzentflaeche — Kosten falls falsch: etwas dunklere Akzente
+- Task 6: Ruling: ich und testmodusDaten sind lesbare Signale mit Settern setzeIch/setzeTestmodus statt WritableSignal; ich wird mitgespeichert (Gespeichert.ich) — so legt jede Aenderung synchron ab und die Person ueberlebt ein Neuladen — Kosten falls falsch: keine, Aufrufer nutzen die Setter
+- Task 7: Ruling: Vereinsfarbe wird schon hier in App per effect gesetzt (Plan: Task 12) — sonst zeigt jede Seite bis Task 12 nur die CSS-Vorgabe — Kosten: keine. Hilfen format.ts (getestet) und mitglieder/pfade.ts ergaenzt. Browser: 375x812 hell+dunkel, scrollWidth 375, Leiste 56px
+- Task 8: Ruling: Absender im Verlauf mit "(Elternteil von X)" statt "(Mama/Papa von X)" — der Entwurf kennt kein Geschlecht und soll keines raten — Kosten falls falsch: ein Textwechsel in gestaltung/texte.ts
+- Task 8: Ruling: Bei Modus "aushang" erscheint gar keine Reiterleiste (auch kein einzelner Reiter "Übersicht"); eigener Test um "Übersicht" erwartet nun dessen Fehlen — ein Reiter allein waere ein Bedienelement ohne Wahl — Kosten: eine Zeile Vorlage
+- Task 8: Ruling: Hilfen ausserhalb der Dateiliste angelegt: gestaltung/meldung.ts (MeldungService + <jf-meldung> in App), gestaltung/texte.ts (zielgruppeText, nameMitRolle), gestaltung/teilen-aktion.ts (teileText/kopiere); Icon "uhr" ergaenzt; .knopf.nur-icon.primaer behaelt die Akzentflaeche; Enter im Verlauf sendet per keydown.enter (implizites Absenden griff im Browsertest nicht). Browser: 375x812 hell+dunkel, Deep Link ?reiter=verlauf, Escape schliesst Foto, letzte Nachricht 44px ueber Eingabe, Teilen-Fallback "Text kopiert"
+- Task 9: Ruling: Umfrage-Antwort als Pille "✓ Dabei"/"✗ Abgesagt" bei Teilnahme, sonst "✓ <Optionen>"; Mehrfachwahl ueber Auswahl plus Knopf "Antworten"; Helferliste zeigt Namen je Platz und bei mehreren Zeilen "Eintragen · <Vorname>"; voller Platz → Meldung "Leider schon voll" — Plan laesst Darstellung offen — Kosten: Vorlagen-Text. Test erweitert um Frist, Ergebnisse, Helfer 4/5 und "voll". Browser: Max zugesagt → Start verliert Max-Bowling (Kosten fuer Max erscheint, da jetzt zahlungspflichtig); Kuchen 4/5
+- Task 10: Ruling: Verwendungszweck als reine Regel verwendungszweck(t, kind) in regeln/fahrt-kosten.ts; Datum = erster Termin des Threads, ohne Termin entfaellt es — Plan nennt TT.MM. ohne Quelle — Kosten: eine Zeile. Eltern koennen eigene Kinder aus einem Auto austragen, Jungfischer "Ich steige aus"; Kasse-Liste als <details> "Alle Zahlungen · n/m bezahlt"; ModulWeiche ohne @default (alle 8 Typen haben Bauteile). Nebenbei Tippflaechen auf 44px: Reiter (Task 8), "ändern" (Task 9), Karten-Link (Task 8). Browser: Umschalter 44px, Kopieren legt "Bowling 17.10. – Lena Wagner" ab, keine Tippflaeche <44px
+- Task 11: Ruling: Offline-Auswahl als In-Memory-Dienst daten/offline.ts (OfflineAuswahl) statt reinem Bauteil-Zustand — "Mehr" muss dieselbe Liste zeigen — Kosten: keine, nichts wird gespeichert. Medien zeigt Fotos im Vorschau-Modus (ohne "Foto hinzufügen") plus Link "Zum Thread"; Einladung als Beispiel-Link ?einladung=<vorname>-beispiel mit Teilen-Knopf; rolleText in gestaltung/texte.ts; Termine-Startmonat aus store.jetzt() (Datumstext waere UTC). Tests um Seiten-Rauchtests erweitert. Browser: Dunkel wirkt sofort und uebersteht Neuladen, Kalender 343px bei 375px, keine Tippflaeche <44px
+- Task 12: Ruling: Zugang zur Verwaltung per canMatch auf glonntal/verwaltung (vor glonntal); Nicht-Jugendleiter fallen auf NichtGefunden der Mitglieder-Huelle — Spec verlangt "nicht gefunden oder keine Berechtigung" statt Umleitung — kostet bei Irrtum eine Guard-Umstellung.
+- Task 12: Ruling: gemeinsames VERWALTUNG_STIL fuer Tabellen/Karten statt Stil je Bauteil — DRY — kostet nichts.
+- Task 12: Ruling: ThreadTeilen-Service aus ThreadSeite (Task 8) herausgezogen, weil Antworten-Ansicht "Stand teilen" denselben Ablauf braucht — Refactor ohne Verhaltensaenderung, Thread-Tests gruen.
+- Task 12: Ruling: Uebersicht lebt in ansichten.ts zusammen mit Untergruppen/Termine/Dokumente — kleine Ansichten gebuendelt — kostet nichts.
+- Task 12: Ruling: Speichern eines bereits veroeffentlichten Threads haelt ihn veroeffentlicht (Knopf heisst dann "Speichern") — sonst verschwaende ein laufender Thread beim Korrigieren — kostet bei Irrtum einen Knopftext.
+- Task 12: Ruling: neue Umfrage startet als Teilnahme-Umfrage "Kommst du mit?" (Ja/Nein, Jungfischer) — haeufigster Fall laut Spec-Beispielen — kostet nur Vorgabewerte.
+- Task 12: Ruling: "Weitere Person zum Jugendleiter machen" wendet Vorlage Betreuer an (geringste Rechte) — Prinzip minimaler Rechte — kostet bei Irrtum einen Vorlagen-Namen.
+- Task 12: Ruling: Link "Verwaltung" in Mehr fuer Jugendleiter ergaenzt — sonst ist die Verwaltung nur ueber URL erreichbar — kostet nichts.
+- Task 13: Ruling: Thomas 5 war ohne Vorarbeit von Sandra nicht loesbar (Max sitzt in keinem Auto, ohne Zusage nicht in "Braucht noch Mitfahrt") — FahrtBauteil bekommt fuer alleThreads-Inhaber je Auto mit freien Plaetzen die Auswahl "Kind einsetzen" (alle Kinder des Threads ohne Platz in dieser Richtung); Spec 5.3 "Aufgaben, deren Voraussetzung fehlt, funktionieren trotzdem" — kostet bei Irrtum eine Auswahl, die Jugendleiter real ohnehin brauchen.
+- Task 13: Ruling: Pruefregeln greifen auch, wenn sie beim Anzeigen schon erfuellt sind (z. B. Sandra setzte Max zu Huber → Thomas 5 sofort geschafft) — Spec "nach jeder Aenderung ausgewertet"; die Alternative (nur Wechsel von falsch zu wahr) liesse Testpersonen haengen — kostet eine irritierende Sofort-Bewertung in Randfaellen.
+- Task 13: Ruling: Info-Text "Gruppenstunde jeden Dienstag" nennt jetzt den Wochentag des Termins (in 2 Tagen) — sonst widerspraeche er Suchaufgabe Sandra 5 an jedem Bezugstag ausser Sonntag — kostet nichts.
+- Task 13: Ruling: TestmodusStand um aufgabeSeit (Echtzeit ms) und fehlversuche ergaenzt — Dauer und Fehlversuche ueberleben ein Neuladen — kostet zwei optionale Felder.
+- Task 13: Ruling: Einstieg nur ueber den verteilten Link /entwurf/ (Wurzel-Redirect bei person === null); tiefe Links (geteilte Threads) fuehren direkt zum Inhalt, Knopf bleibt sichtbar — Spec 2 verteilt /entwurf/; ein Guard auf jede Seite haette geteilte Links verbogen — kostet: wer per Thread-Link einsteigt, sieht die Begruessung erst ueber "Person wechseln".
+- Task 13: Ruling: "Ich komme nicht weiter" und Ueberspringen fuehren zur naechsten Aufgabe; Escape/Klick daneben im Geschafft-Dialog = Weiter ohne Smiley — Format 5.5 zeigt "nicht weiter" gefolgt von der naechsten Aufgabe — kostet nichts.
+- Task 13: Ruling: Dialog "rueckmeldung" zeigt bis Task 14 einen Dank-Platzhalter; Signalfarbe in testmodus/stil.ts mit eigener heller/dunkler Flaeche; Knopf rueckt per --eingabe-hoehe ueber das feste Verlauf-Eingabefeld — sonst verdeckte er dessen linken Teil.
+- Task 14: Ruling: versenden liefert zusaetzlich 'abgebrochen' und 'fehler' (Typ Versandweg) und nutzt teileText aus Task 8 — sonst muesste ein geschlossenes Teilen-Menue oder eine gesperrte Zwischenablage als Erfolg gemeldet werden — kostet einen breiteren Rueckgabetyp.
+- Task 14: Ruling: Rueckmeldezeile nennt bei Suchaufgaben "(n Fehlversuche)" — Spec 5.3 zaehlt sie, 5.5 zeigte sie nicht; ohne Ausgabe waere die Zaehlung wertlos — kostet eine Zusatzangabe im Format.
+- Task 14: Ruling: ohne Ergebnisse steht "Noch keine Aufgaben gespielt." im Text; Anfuehrungszeichen wie in Spec 5.5 („…") — kostet nichts.
+- Task 14: Ruling: Fokus in Testmodus-Dialogen auf den ersten Knopf statt ins Textfeld — am Handy schoebe sonst die Tastatur den Dialog zu — kostet einen Tab mehr bis ins Feld.
+- Task 15: Ruling: "Titel unveraendert im Text" geprueft als Titelzeile mit fettem Teil hinter dem Emoji ("🎳 _Bowling & Pizza #1 „Spezial"_") — so verlangt es titelzeile aus Task 4 fuer WhatsApp-Fettdruck; threadPfad brauchte keine Korrektur (Tests sofort gruen, Brief erlaubt PASS) — kostet nichts.
+- Task 16: Ruling: Commit vor dem Probelauf statt danach — Tor 1 verlangt einen sauberen Baum, das Image-Label soll den echten Commit nennen — kostet bei Fehler: ein Fixup-Commit (so geschehen: b0de735 nginx-Regex).
+- Task 16: Ruling: .dockerignore ergaenzt (nur dist/apps/entwurf/browser und die nginx-Konfig im Kontext) — ohne sie schickt docker build node_modules mit — kostet bei Fehler: nichts, nur Bauzeit.
+- Task 16: Ruling: absolute_redirect off in nginx — hinter Traefik waere die Weiterleitung sonst auf http://...:80 absolut — kostet bei Fehler: eine Konfigzeile.
+- Task 16: Ruling: --skip-nx-cache fuer Test, Typen und Build im Skript — die WhatsApp-Nummer steckt in einer ignorierten erzeugten Datei ausserhalb des Nx-Hashes — kostet bei Fehler: ein paar Sekunden Bauzeit.
+- Task 16: Ruling: echter Lauf bricht ohne WhatsApp-Nummer ab, Probelauf warnt nur — ohne Nummer kommt keine Rueckmeldung an (Spec 1.2) — kostet bei Fehler: Eigentuemer muss die Nummer eintragen.
+- Task 16: Ruling: HEALTHCHECK im Image ergaenzt — Docker/Traefik sehen einen haengenden nginx — kostet bei Fehler: nichts.
+- Task 16: Ruling: Traefik-Regel nur Host(jufi-app.sideshow-systems.de) statt PathPrefix(/entwurf) — / soll auf /entwurf/ umleiten, das braucht den ganzen Host; bis TP2 gehoert die Domain dem Entwurf — kostet bei Fehler: Regel in TP2 anpassen.
+- Task 16: Ruling: Regex-Location in Anfuehrungszeichen und case-sensitiv (~ statt ~*) — {8} ungequotet bricht nginx; Angular-Hashes sind Grossbuchstaben — kostet bei Fehler: ein klein geschriebener Hash wuerde nur nicht ewig gecacht.
+- Task 17: Ruling: Befund Select-Anzeige (Editor-Modus, Rechte-Vorlage) per [selected] an der Option behoben — [value] am select greift vor dem @for-Rendern; Tests RED->GREEN — kostet bei Fehler: nichts, Werte waren vorher falsch angezeigt.
+- Task 17: Ruling: Testmodus-Knopf setzt --knopf-platz, Mitglieder-main rechnet ihn in den unteren Abstand — sonst blieb die letzte Karte auf Start unter dem Knopf; Test knopf.spec RED->GREEN — kostet bei Fehler: 56 px mehr Leerraum unten im Testmodus.
+- Task 17: Ruling: .knopf.klein global von 36 auf 44 px (var(--tippflaeche)) und ul.liste a in der Verwaltung mit 44 px — Spec verlangt 44 px Tippflaechen; reines CSS, Nachweis per Browser-Messung statt Unit-Test (jsdom misst keine Layouts) — kostet bei Fehler: etwas hoehere kleine Knoepfe.
+- Task 17: Ruling: echter Versand an die echte Nummer bleibt offen bis zum Deploy durch den Eigentuemer (Brief Step 4) — kostet bei Fehler: nichts.
+- Final: Ruling: T13 "Pruefregel greift auch, wenn beim Anzeigen schon erfuellt" bleibt — Reviewer schlaegt eigenes Ergebnis "schon erledigt" vor; Testpersonen spielen meist eine Person pro Durchgang, und 0:00-Dauer macht den Fall im Text erkennbar — kostet bei Fehler: einzelne irrefuehrende Haken in Rueckmeldungen.
+
+## Final Review
+
+- Final review: opus-Reviewer, Urteil "With fixes"; 0 Critical, 2 Important, 13 Minor. Brute-force Vereinsfarben 5832 Farben: 0 AA-Verstoesse.
+- Final: fixed Wunschfeld frisst Leerzeichen beim Tippen (trim im Store bei [value]-Binding) — testmodus.spec "speichert den Wunsch so, wie er getippt wird" + rueckmeldung.spec "kuerzt den Wunsch erst im Text" RED->GREEN, suite 179/179
+- Final: fixed Deep-Link-Besucher ohne Personenwahl sahen echt wirkende Zahlungsaufforderung ohne Entwurfshinweis; PayPal-Kennung wirkte echt — band.spec (2 Tests) + Beispieldaten-Test RED->GREEN, suite 179/179
+
+## Zurückgestellte Kleinigkeiten
+
+- "Mehr" bietet "Zugang fuer Lena erzeugen" an, obwohl daneben "Hat eigenen Zugang" steht — besser "Neuen Zugang erzeugen".
+- Geschafft-Dialog fuer "Fotos Hegefischen" erscheint ueber der offenen Foto-Grossansicht; nach "Weiter" muss man die Grossansicht noch selbst schliessen.
+- Verlauf sortiert nach eingefrorenem Datum + echter Uhrzeit; Nachrichten an spaeteren Tagen koennen ueber aelteren eigenen landen.
+- Schon erfuellte Aufgaben als eigenes Ergebnis "schon erledigt" statt Geschafft-Dialog mit Smiley.
+- Editor: eigene Umfrage-Optionen werden nach Position neu nummeriert (vorhandene Antworten wandern); Wechsel auf "eigene" setzt teilnahme still auf false.
+- Editor: letzte Untergruppe abwaehlen macht den Thread fuer alle sichtbar statt Speichern zu sperren.
+- Einladungslink der Verwaltung zeigt auf https://jufi-app.de/...; Kind-Einladung in mehr.ts kodiert den Vornamen nicht.
+- Thomas kann sich selbst alle Rechte entziehen und kommt dann nur per "Entwurf zuruecksetzen" zurueck.
+- Voller localStorage beim Start liest gespeicherten Stand gar nicht erst.
+- HEALTHCHECK ohne --start-period/--start-interval: nach jedem Deploy ca. 30 s 404 hinter Traefik.
+- Deploy-Tor 6 prueft nur HTTP 200, nicht den ausgelieferten main-<hash>.js.
+- Hell/Dunkel-Wahl fehlt in den Verwaltungs-Einstellungen; Thema liegt unter eigenem Schluessel jufi-entwurf:thema.
+- "Neu seit deinem letzten Besuch" zaehlt eigene Aktionen mit.
+- WhatsApp-Formatzeichen (* _ ~) in Titeln/Notizen werden als Formatierung dargestellt; iPadOS meldet sich als "Mac"; Aufgabendauer ist Wanduhrzeit (ueber Nacht offen -> riesige Werte).
+- nginx ohne CSP und frame-ancestors/X-Frame-Options.
