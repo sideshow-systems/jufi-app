@@ -37,3 +37,16 @@ export function nameMitRolle(stand: Datenstand, id: Id): string {
 export function vorname(stand: Datenstand, id: Id): string {
 	return person(stand, id)?.vorname ?? '?';
 }
+
+/** Rolle in Worten fuers Profil: "Jugendleiter · Elternteil von Jonas", "Jungfischer". */
+export function rolleText(stand: Datenstand, id: Id): string {
+	const p = person(stand, id);
+	if (!p) return '';
+	if (p.art === 'jungfischer') return 'Jungfischer';
+	const kinder = kinderVon(stand, id).map((k) => k.vorname);
+	const teile = [
+		istJugendleiter(p) ? 'Jugendleiter' : '',
+		kinder.length ? `Elternteil von ${kinder.join(' und ')}` : '',
+	];
+	return teile.filter(Boolean).join(' · ') || 'Erwachsener';
+}
