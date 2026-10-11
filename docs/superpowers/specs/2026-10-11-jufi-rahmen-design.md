@@ -1,6 +1,6 @@
 # JuFi App — Rahmen-Spezifikation
 
-Stand: 11.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: zur Prüfung
+Stand: 11.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: freigegeben, ergänzt um die Entscheidungen aus dem Brainstorming zu Teilprojekt 1
 
 Diese Spezifikation legt den **Rahmen** fest: Zweck, Rollen, Domänenmodell, Architektur, Querschnittsthemen und die Aufteilung in Teilprojekte. Jedes Teilprojekt bekommt eine eigene, detaillierte Spezifikation, die auf dieser aufbaut und ihr nicht widerspricht. Wo eine Teilprojekt-Spezifikation etwas ändern muss, wird diese Datei mitgeändert.
 
@@ -128,7 +128,14 @@ Feste Regeln:
 - **Mitglieder-Hülle**, optimiert fürs Handy, mit unterer Leiste: **Start · Threads · Termine · Medien · Mehr**. Unter „Mehr" liegen globale Dokumente, Profil, die eigenen Kinder, offline gespeicherte Dokumente und Benachrichtigungseinstellungen.
 - **Verwaltungs-Hülle** unter `/<slug>/verwaltung`, optimiert für den Desktop, mit Seitenleiste: Mitglieder, Untergruppen, Jugendleiter und Rechte, Threads, globale Dokumente, Vereinseinstellungen.
 
-Module im Thread anlegen und bearbeiten geht auch am Handy, ist aber auf den Desktop ausgelegt.
+Module im Thread anlegen und bearbeiten geht auch am Handy, ist aber auf den Desktop ausgelegt. Der **Thread-Editor** zeigt links das Formular (Titel, Zielgruppe, Modus, „Mitglieder benachrichtigen", sortierbare Modulliste) und rechts eine **Live-Vorschau am Handy**, in der das gerade bearbeitete Modul markiert ist. Verworfen: Bearbeiten in einer breiten Thread-Ansicht mit Seitenleiste — Jugendleiter arbeiten am Desktop, gelesen wird am Handy, und die Vorschau zeigt sofort, ob ein Modul dort verständlich ist.
+
+### 5.1.1 Gestaltung
+
+- Grundcharakter **„Am Wasser"**: helle, ruhige Flächen, weiße Karten mit weichen Ecken, Knöpfe direkt an jeder Aufgabe. Verworfen: eine neutrale Listenoptik (zu nüchtern für Jungfischer) und eine kräftige, jugendliche Optik mit dunklem Kopf (für Eltern zu laut).
+- **Die Vereinsfarbe ist ein einziger Eingabewert.** Akzent, helle Akzentfläche und die Variante für den dunklen Modus werden daraus abgeleitet; der Kontrast wird auf WCAG AA geprüft und notfalls angepasst.
+- **Dunkler Modus ist Pflicht** in beiden Hüllen. Er folgt `prefers-color-scheme` und ist unter „Mehr" bzw. in der Verwaltung umschaltbar (Hell / Dunkel / System).
+- Gestaltungs-Tokens als CSS-Variablen; die Grundlage entsteht im klickbaren Entwurf (Teilprojekt 1) und wird übernommen.
 
 ### 5.2 Start (Dashboard)
 
@@ -165,17 +172,19 @@ Jeder Bereich ist direkt verlinkbar, damit aus WhatsApp heraus gezielt hineinges
 
 Ein umbenannter Thread bleibt unter seinem alten Link erreichbar, weil nur die ID zählt.
 
+**Reservierte Slugs**: `admin`, `api`, `entwurf`, `assets` sowie alle Namen, die die Plattform künftig selbst auf oberster Ebene braucht. Kein Verein darf so heißen; die Prüfung liegt in `libs/domain`.
+
 ---
 
 ## 6. Threads und Module
 
 ### 6.1 Aufbau eines Threads
 
-Jeder Thread hat denselben Aufbau: oben der **Aushang** aus Modulen in fester, vom Jugendleiter bestimmter Reihenfolge, darunter der **Verlauf**. Der **Modus** legt fest, wer im Verlauf schreiben darf:
+Jeder Thread hat denselben Aufbau mit zwei **Reitern**: **Übersicht** zeigt den **Aushang** aus Modulen in fester, vom Jugendleiter bestimmter Reihenfolge; **Verlauf** zeigt Nachrichten, Kommentare und Systemereignisse und trägt einen Zähler für Neues. Verworfen: eine durchgehende Seite mit Verlauf unter dem Aushang — bei vielen Modulen läge der Verlauf weit unten, und der Aushang soll als „aktueller Stand" ungestört bleiben. Der **Modus** legt fest, wer im Verlauf schreiben darf:
 
 | Modus | Verlauf |
 | -------------------- | ------------------------------------------------------------------ |
-| Nur Aushang | niemand schreibt; nur Systemereignisse („Umfrage hinzugefügt") |
+| Nur Aushang | niemand schreibt; der Reiter „Verlauf" entfällt |
 | Aushang + Kommentare | alle Leser kommentieren |
 | Offener Chat | alle Leser schreiben frei |
 
@@ -197,7 +206,7 @@ Feste Regeln: Eltern sehen alles, was ihre Kinder sehen. Jugendleiter sehen alle
 
 ### 6.3 Antwort-Einheiten
 
-Jedes Modul, auf das man antwortet (Umfrage, Helferliste, Fahrgemeinschaft), hat eine Antwort-Einheit. Das Kosten-Modul gilt immer pro Jungfischer; dort antwortet niemand, der Jugendleiter hakt ab.
+Jedes Modul, auf das man antwortet (Umfrage, Helferliste, Fahrgemeinschaft), hat eine Antwort-Einheit. Das Kosten-Modul gilt immer pro Jungfischer und hat einen eigenen Status-Ablauf (6.4.2).
 
 | Antwort-Einheit | Beispiel | Wer antwortet |
 | ---------------- | ---------------------------- | -------------------------------------------------------------------- |
@@ -219,12 +228,29 @@ Alle acht gehören zu Version 1:
 | Termin | Datum, Uhrzeit, Ende, Ort mit Karten-Link, Treffpunkt. Speist Kalender, Dashboard und Archiv-Regel. |
 | Umfrage | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter |
 | Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht. |
-| Fahrgemeinschaft | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Jungfischer werden zugeordnet oder tragen sich ein; Übersicht „Wer fährt mit wem" |
-| Kosten | Betrag pro Kind, Hinweis zur Bezahlung, Abhaken „bezahlt" durch Jugendleiter |
+| Fahrgemeinschaft | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1) |
+| Kosten | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2) |
 | Dateien | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter. |
 | Fotos | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen. |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Fangbuch/Ergebnisse, Wettbewerbe.
+
+#### 6.4.1 Fahrgemeinschaft
+
+- **Selbstbedienung, Jugendleiter können umsetzen.** Erwachsene bieten ein Auto an (Plätze, Abfahrtszeit, Abfahrtsort). Eltern setzen ihre Kinder in ein Auto, Jungfischer mit Zugang sich selbst. Jugendleiter verschieben Kinder zwischen Autos und ändern Plätze, etwa wenn ein Auto ausfällt. Verworfen: reine Zuteilung durch den Jugendleiter (Arbeit für ihn, Wartezeit für alle).
+- **Hin- und Rückfahrt sind getrennt**; ein Fahrer kann für beide anbieten.
+- Die Liste **„Braucht noch Mitfahrt"** zeigt Kinder ohne Platz — bei einem Thread mit Teilnahme-Umfrage nur die mit Zusage.
+- Wer ein Kind in ein Auto setzt, sieht nur Vornamen; Telefonnummern werden nicht gezeigt. Abstimmung läuft über den Verlauf.
+
+#### 6.4.2 Kosten
+
+- Betrag pro Kind, freier Hinweis zur Bezahlung, optional Bankverbindung oder PayPal-Link. Ein Kopier-Knopf liefert den Verwendungszweck („Bowling 10.10. – Lena Huber").
+- Status pro Kind: **offen → gemeldet → bezahlt**. Eltern tippen „Habe bezahlt" (gemeldet), ein Jugendleiter bestätigt (bezahlt). Jugendleiter können auch direkt auf „bezahlt" setzen, etwa bei Barzahlung.
+- **Zahlungspflichtig** sind bei einem Thread mit Teilnahme-Umfrage die Kinder mit Zusage, sonst die ganze Zielgruppe.
+- Eltern sehen nur ihre eigenen Kinder; die Liste aller Kinder sieht nur, wer „Antworten im Detail sehen" hat.
+- Nicht vorgesehen: Anzahlungen, Teilbeträge, Erstattungen, Kassen-Export.
+
+Die Kosten zählen in „Braucht deine Antwort" (5.2), solange ein Kind auf „offen" steht.
 
 ### 6.5 Medienbereich und globale Dokumente
 
@@ -482,6 +508,7 @@ Jedes Teilprojekt bekommt eine eigene Spezifikation, einen eigenen Plan und eine
 | 4 | Weitere Module und Medien | Helferliste, Fahrgemeinschaft, Kosten, Dateien, Fotos mit Upload-Verarbeitung; Medienbereich; globale Dokumente | Alle acht Kernmodule |
 | 5 | Offline und Benachrichtigungen | Lokaler Speicher, Outbox, Dokumente offline; Push, E-Mail-Ersatz, Erinnerungen, Archivierung | Bereit für den Pilotbetrieb |
 | 6 | Live-Gang | Eigene VM, `jufi-app.de`, Rechtstexte, AV-Vertrag, Umzug | Offen für weitere Vereine |
+| 7 | Abrechnung | Tarife, Testzeitraum, Rechnungen, Sperre bei Nichtzahlung (16) | Vereine zahlen für die Nutzung |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Capacitor-Apps.
 
@@ -489,13 +516,12 @@ Später: Packliste/Checkliste, digitale Einverständniserklärung, Capacitor-App
 
 ## 12. Teilprojekt 1 im Überblick: Klickbarer Entwurf
 
-Ziel ist, vor dem ersten Datenmodell zu prüfen, ob das Konzept für Eltern, Jungfischer und Jugendleiter trägt. Die eigene Spezifikation dieses Teilprojekts legt Bildschirme, Beispieldaten und Gestaltung fest. Hier gilt der Rahmen:
+Ziel ist, vor dem ersten Datenmodell zu prüfen, ob das Konzept für Eltern, Jungfischer und Jugendleiter trägt. Die Einzelheiten stehen in `2026-10-11-jufi-tp1-entwurf-design.md`. Kurz:
 
-- Angular-App `apps/entwurf` im Nx-Workspace, statisch gebaut, ohne Backend; Beispieldaten im Speicher.
-- Umschalter **„Ansicht als"**: Jugendleiter · Elternteil mit zwei Kindern · Jungfischer · Elternteil eines Kindes ohne Zugang.
-- Mitglieder-Hülle am Handy (Dashboard, Thread-Liste, Thread mit allen acht Modulen, Kalender, Medien, Dokumente, Mehr) **und** Verwaltung am Desktop.
-- Antworten und Einträge bleiben im Browser gespeichert, damit sich das Durchklicken echt anfühlt.
-- Der Code ist Wegwerfcode. Übernommen werden Gestaltung (Farben, Typografie, Aufbau der Hüllen) und die Erkenntnisse aus dem Durchklicken; sie fließen in die Spezifikationen der Teilprojekte 2 bis 4 ein.
+- Angular-App `apps/entwurf` im Nx-Workspace, statisch gebaut, ohne Backend; Beispieldaten im Browser.
+- Drei Personen (Elternteil mit einem Kind mit und einem ohne Zugang, Jungfischerin, Jugendleiter mit eigenem Kind) mit **geführten Aufgaben**; Rückmeldung der Testpersonen als WhatsApp-Text.
+- Mitglieder-Hülle am Handy **und** Verwaltung am Desktop.
+- Der Code ist Wegwerfcode. Übernommen werden Gestaltung und die Erkenntnisse aus dem Durchklicken; sie fließen in die Spezifikationen der Teilprojekte 2 bis 4 ein.
 
 ---
 
@@ -529,10 +555,23 @@ Diese Punkte sind bewusst nicht hier entschieden, sondern gehören in die genann
 
 | Punkt | Teilprojekt |
 | ---------------------------------------------------------------------------- | ----------- |
-| Gestaltung von Dashboard und Kalender, Farbwelt, Typografie | 1 |
-| Ablauf der Fahrgemeinschaft im Detail (wer ordnet zu, Rückfahrt getrennt) | 1, dann 4 |
-| Kosten: Bezahlwege, Teilbeträge, Erstattung | 1, dann 4 |
 | Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen | 2 |
 | Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar | 4 |
 | Länge des offline gehaltenen Verlaufs pro Thread | 5 |
 | Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5 |
+
+Die Gestaltung von Dashboard und Kalender, der Ablauf der Fahrgemeinschaft und das Kosten-Modul sind inzwischen entschieden (5.1.1, 6.4.1, 6.4.2); Feinheiten zeigen sich im Entwurf.
+
+---
+
+## 16. Geschäftsmodell (später)
+
+Ziel: Sobald andere Vereine die App nutzen, zahlt jeder Verein für die Nutzung. Das wird **nicht vor dem Live-Gang** gebaut. Das passende Preismodell (pauschal, nach Mitgliederzahl, nach Speicher) lässt sich erst nach dem Pilotbetrieb sinnvoll festlegen.
+
+Was schon jetzt dafür angelegt ist und nicht verbaut werden darf:
+
+- Der Verein ist ein eigener Mandant mit Status (aktiv, gesperrt), den der Plattform-Admin setzt (3.1).
+- Der Plattform-Admin sieht Kennzahlen pro Verein — Mitgliederzahl, Speicherverbrauch (8.3). Das sind die naheliegenden Größen für eine Preisstaffel.
+- Vereine werden ausschließlich vom Plattform-Admin angelegt; eine Selbstregistrierung gibt es nicht.
+
+Teilprojekt 7 „Abrechnung" ergänzt Tarif, Testzeitraum, Rechnungsstellung und eine Sperre bei Nichtzahlung. AGB, Rechnungsstellung, Umsatzsteuer und Gewerbe sind vorher organisatorisch und fachkundig zu klären.
