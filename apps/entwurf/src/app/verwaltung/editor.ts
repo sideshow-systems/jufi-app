@@ -157,7 +157,7 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 							Modus
 							<select [value]="t.modus" (change)="setze({ modus: $any(wert($event)) })">
 								@for (m of modi; track m.wert) {
-									<option [value]="m.wert">{{ m.text }}</option>
+									<option [value]="m.wert" [selected]="m.wert === t.modus">{{ m.text }}</option>
 								}
 							</select>
 						</label>

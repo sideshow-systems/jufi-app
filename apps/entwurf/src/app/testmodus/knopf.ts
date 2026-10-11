@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+	ChangeDetectionStrategy,
+	Component,
+	computed,
+	DestroyRef,
+	DOCUMENT,
+	effect,
+	inject,
+	signal,
+} from '@angular/core';
 import { Router } from '@angular/router';
 import { EntwurfStore } from '../daten/store';
 import { aktuellerPfad } from './ort';
@@ -8,6 +17,8 @@ import { type Dialog, TestmodusService } from './testmodus';
 /**
  * Schwebender Testmodus-Knopf (Spec TP1 5.2), unten links ueber der Leiste.
  * Ueber dem Eingabefeld des Verlaufs rueckt er per --eingabe-hoehe hoch.
+ * Solange er zu sehen ist, haelt --knopf-platz unten Platz frei, damit sich
+ * das letzte Element einer Seite unter ihm hervorscrollen laesst.
  */
 @Component({
 	selector: 'jf-testmodus-knopf',
@@ -106,6 +117,15 @@ export class TestmodusKnopf {
 	protected readonly sichtbar = computed(() => !this.pfad().includes('/willkommen'));
 	protected readonly inVerwaltung = computed(() => this.pfad().includes('/verwaltung'));
 	protected readonly name = computed(() => (this.testmodus.zustand().person ? this.store.person().vorname : ''));
+
+	constructor() {
+		const wurzel = inject(DOCUMENT).documentElement;
+		effect(() => {
+			if (this.sichtbar()) wurzel.style.setProperty('--knopf-platz', 'calc(var(--tippflaeche) + var(--a3))');
+			else wurzel.style.removeProperty('--knopf-platz');
+		});
+		inject(DestroyRef).onDestroy(() => wurzel.style.removeProperty('--knopf-platz'));
+	}
 
 	protected oeffne(d: Dialog): void {
 		this.offen.set(false);

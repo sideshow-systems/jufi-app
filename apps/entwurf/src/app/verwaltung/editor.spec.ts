@@ -59,6 +59,20 @@ describe('Verwaltung', () => {
 		expect(siehtThread(store.stand(), P.sandra, t)).toBe(true);
 	});
 
+	it('zeigt im Modus-Feld den Modus, der gespeichert wird', async () => {
+		const { el } = await oeffne('/glonntal/verwaltung/threads/neu', P.thomas);
+		const modus = [...el.querySelectorAll('label.feld')].find((l) => l.textContent?.includes('Modus'))!;
+		expect(modus.querySelector('select')!.value).toBe(leererThread(P.thomas).modus);
+	});
+
+	it('zeigt in der Rechte-Vorlage die Vorlage der Person', async () => {
+		const { el } = await oeffne('/glonntal/verwaltung/rechte', P.thomas);
+		const karte = [...el.querySelectorAll('jf-karte')].find((k) =>
+			k.querySelector('h2')?.textContent?.includes('Katrin'),
+		)!;
+		expect(karte.querySelector('select')!.value).toBe('jugendleiter');
+	});
+
 	it('bleibt Sandra verborgen', async () => {
 		const { el } = await oeffne('/glonntal/verwaltung', P.sandra);
 		expect(el.textContent).toContain('Nicht gefunden oder keine Berechtigung');

@@ -49,9 +49,9 @@ const VORLAGEN: { wert: Vorlage; text: string }[] = [
 						Vorlage
 						<select [value]="vorlage(p)" (change)="vorlageSetzen(p, $event)">
 							@for (v of vorlagen; track v.wert) {
-								<option [value]="v.wert">{{ v.text }}</option>
+								<option [value]="v.wert" [selected]="v.wert === vorlage(p)">{{ v.text }}</option>
 							}
-							<option value="eigene" disabled>Angepasst</option>
+							<option value="eigene" disabled [selected]="vorlage(p) === 'eigene'">Angepasst</option>
 						</select>
 					</label>
 				</div>

@@ -194,7 +194,8 @@ button {
 }
 
 .knopf.klein {
-	min-height: 36px;
+	/* Kleiner in Schrift und Polster, nicht in der Tippflaeche (Spec TP1: mindestens 44 px). */
+	min-height: var(--tippflaeche);
 	font-size: var(--schrift-klein);
 	padding: 0 var(--a3);
 }

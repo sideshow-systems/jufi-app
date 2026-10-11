@@ -67,6 +67,11 @@ export const VERWALTUNG_STIL = `
 		padding: 0;
 		list-style: none;
 	}
+	ul.liste a {
+		display: inline-flex;
+		align-items: center;
+		min-height: var(--tippflaeche);
+	}
 `;
 
 /** Startseite der Verwaltung: Kennzahlen und naechste Termine. */

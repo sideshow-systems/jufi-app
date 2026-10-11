@@ -73,7 +73,7 @@ interface Eintrag {
 		main {
 			max-width: 480px;
 			margin: 0 auto;
-			padding: var(--a2) var(--a4) calc(88px + var(--sicher-unten));
+			padding: var(--a2) var(--a4) calc(88px + var(--knopf-platz, 0px) + var(--sicher-unten));
 		}
 		.leiste {
 			position: fixed;
