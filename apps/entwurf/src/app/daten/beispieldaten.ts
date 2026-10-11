@@ -1,4 +1,5 @@
 import type { Datenstand, Dokument, Elternschaft, Person, Recht, Thread, Untergruppe, VerlaufEintrag } from './typen';
+import { wochentag } from '../gestaltung/format';
 import { naechsterWochentag, relativ } from './zeit';
 
 /**
@@ -154,7 +155,9 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 				{
 					id: 'm-infos-text',
 					typ: 'info',
-					text: 'Hier findet ihr alles, was dauerhaft gilt.\n\nDie Gruppenstunde ist jeden Dienstag im Vereinsheim. Bitte wetterfeste Kleidung mitbringen.',
+					// Der Wochentag folgt dem Termin, sonst widerspraeche der Text der
+					// Suchaufgabe "naechstes Treffen" an jedem Bezugstag ausser Sonntag.
+					text: `Hier findet ihr alles, was dauerhaft gilt.\n\nDie Gruppenstunde ist jeden ${wochentag(r(2, '18:00'))} im Vereinsheim. Bitte wetterfeste Kleidung mitbringen.`,
 				},
 				{
 					id: M.gruppenstunde,

@@ -29,6 +29,14 @@ describe('Mitglieder-Ansicht', () => {
 		expect(text).not.toContain('Orga Jugendleiter');
 	});
 
+	it('fuehrt ohne gewaehlte Person vom verteilten Link in den Einstieg', async () => {
+		const text = await oeffne('/');
+		expect(text).toContain('Wer bist du heute?');
+		expect(text).toContain('Sandra');
+		expect(text).toContain('Thomas');
+		expect(text).toContain('Mit Aufgaben');
+	});
+
 	it('meldet unbekannte Adressen als nicht gefunden', async () => {
 		expect(await oeffne('/irgendwas')).toContain('Nicht gefunden');
 	});

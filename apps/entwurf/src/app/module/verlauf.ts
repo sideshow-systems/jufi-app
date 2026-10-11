@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { EntwurfStore } from '../daten/store';
 import type { Thread } from '../daten/typen';
@@ -141,6 +142,13 @@ export class VerlaufBauteil {
 	private readonly store = inject(EntwurfStore);
 	protected readonly ich = this.store.ich;
 	protected readonly text = signal('');
+
+	constructor() {
+		// Das feste Eingabefeld meldet seine Hoehe, damit der Testmodus-Knopf darueber rueckt.
+		const wurzel = inject(DOCUMENT).documentElement;
+		effect(() => wurzel.style.setProperty('--eingabe-hoehe', this.schreibbar() ? '72px' : '0px'));
+		inject(DestroyRef).onDestroy(() => wurzel.style.removeProperty('--eingabe-hoehe'));
+	}
 
 	protected readonly eintraege = computed(() =>
 		[...this.thread().verlauf].sort((a, b) => a.zeit.localeCompare(b.zeit)),

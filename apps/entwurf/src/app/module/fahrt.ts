@@ -5,6 +5,7 @@ import type { Auto, FahrModul, Id, Thread } from '../daten/typen';
 import { MeldungService } from '../gestaltung/meldung';
 import { freiePlaetze, mitfahrtOffen } from '../regeln/fahrt-kosten';
 import { darf, kinderVon, person } from '../regeln/personen';
+import { kinderImThread } from '../regeln/sichtbarkeit';
 
 type Richtung = 'hin' | 'rueck';
 
@@ -83,6 +84,17 @@ type Richtung = 'hin' | 'rueck';
 							</li>
 						}
 					</ul>
+				}
+				@if (bedienbar() && verwaltet() && frei(a) > 0 && einsetzbar().length) {
+					<label class="feld">
+						Kind einsetzen
+						<select data-einsetzen (change)="einsetzen($event, a.id)">
+							<option value="">Kind auswählen …</option>
+							@for (k of einsetzbar(); track k.id) {
+								<option [value]="k.id">{{ k.vorname }}</option>
+							}
+						</select>
+					</label>
 				}
 				@if (bedienbar() && frei(a) > 0) {
 					<div class="knoepfe">
@@ -268,6 +280,14 @@ export class FahrtBauteil {
 		mitfahrtOffen(this.store.stand(), this.thread(), this.modul(), this.richtung()),
 	);
 	protected readonly offen = computed(() => this.offenePersonen().map((p) => p.vorname));
+	/**
+	 * Jugendleiter setzen jedes Kind des Threads ein, auch ohne Zusage: sie
+	 * planen oft, bevor alle geantwortet haben (Spec TP1 5.3, Thomas 5).
+	 */
+	protected readonly einsetzbar = computed(() => {
+		const sitzen = new Set(this.autos().flatMap((a) => a.mitfahrer));
+		return kinderImThread(this.store.stand(), this.thread()).filter((k) => !sitzen.has(k.id));
+	});
 	protected readonly ohnePlatz = computed(() => this.offenePersonen().filter((p) => this.eigene().includes(p.id)));
 
 	protected frei(a: Auto): number {
@@ -291,6 +311,12 @@ export class FahrtBauteil {
 		if (!this.store.mitfahrerSetzen(this.thread().id, this.modul().id, kind, autoId, this.richtung())) {
 			this.meldung.zeige('Das Auto ist schon voll');
 		}
+	}
+
+	protected einsetzen(e: Event, autoId: Id): void {
+		const auswahl = e.target as HTMLSelectElement;
+		if (auswahl.value) this.setzen(auswahl.value, autoId);
+		auswahl.value = '';
 	}
 
 	protected formularOeffnen(): void {

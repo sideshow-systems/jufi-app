@@ -3,12 +3,15 @@ import { RouterOutlet } from '@angular/router';
 import { EntwurfStore } from './daten/store';
 import { MeldungComponent } from './gestaltung/meldung';
 import { ThemaService } from './gestaltung/thema';
+import { Band } from './testmodus/band';
+import { TestmodusDialoge } from './testmodus/bewertung';
+import { TestmodusKnopf } from './testmodus/knopf';
 
 @Component({
 	selector: 'jf-root',
-	imports: [RouterOutlet, MeldungComponent],
+	imports: [RouterOutlet, MeldungComponent, Band, TestmodusKnopf, TestmodusDialoge],
 	changeDetection: ChangeDetectionStrategy.OnPush,
-	template: `<router-outlet /><jf-meldung />`,
+	template: `<jf-band /><router-outlet /><jf-testmodus-knopf /><jf-testmodus-dialoge /><jf-meldung />`,
 })
 export class App {
 	constructor() {

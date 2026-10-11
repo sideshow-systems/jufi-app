@@ -11,6 +11,8 @@ import { Termine } from './mitglieder/termine';
 import { ThreadSeite } from './mitglieder/thread';
 import { Threads } from './mitglieder/threads';
 import { istJugendleiter } from './regeln/personen';
+import { Einstieg } from './testmodus/einstieg';
+import { TestmodusService } from './testmodus/testmodus';
 import { VerwaltungAntworten } from './verwaltung/antworten';
 import {
 	VerwaltungDokumente,
@@ -33,7 +35,14 @@ const titel = (t: string) => `${t} · Verwaltung · JuFi Entwurf`;
  * Platzhalter-Route wuerde jeden Tippfehler als Verein durchwinken.
  */
 export const routes: Routes = [
-	{ path: '', pathMatch: 'full', redirectTo: 'glonntal' },
+	{
+		// Der verteilte Link zeigt auf /entwurf/: wer noch keine Person gewaehlt
+		// hat, landet im Einstieg. Tiefe Links (geteilte Threads) fuehren direkt hin.
+		path: '',
+		pathMatch: 'full',
+		redirectTo: () => (inject(TestmodusService).zustand().person === null ? 'glonntal/willkommen' : 'glonntal'),
+	},
+	{ path: 'glonntal/willkommen', component: Einstieg, title: 'Willkommen · JuFi Entwurf' },
 	{
 		// Nur fuer Jugendleiter; alle anderen fallen durch auf "Nicht gefunden"
 		// der Mitglieder-Huelle — wie bei unsichtbaren Threads (Rahmen 8).

@@ -47,6 +47,23 @@ describe('FahrtBauteil', () => {
 		expect(auto(el, 'a-maier').textContent).not.toContain('Max');
 	});
 
+	it('laesst Thomas Max einsetzen, auch ohne Zusage und ohne bisheriges Auto', () => {
+		const { el, neu } = aufbauen(FahrtBauteil, P.thomas, T.bowling, M.bowlingFahrt);
+		const auswahl = auto(el, 'a-huber-hin').querySelector<HTMLSelectElement>('select[data-einsetzen]')!;
+		expect([...auswahl.options].map((o) => o.textContent?.trim())).toContain('Max');
+
+		auswahl.value = P.max;
+		auswahl.dispatchEvent(new Event('change'));
+		neu();
+
+		expect(auto(el, 'a-huber-hin').textContent).toContain('Max');
+	});
+
+	it('zeigt Sandra keine Auswahl zum Einsetzen fremder Kinder', () => {
+		const { el } = aufbauen(FahrtBauteil, P.sandra, T.bowling, M.bowlingFahrt);
+		expect(el.querySelector('select[data-einsetzen]')).toBeNull();
+	});
+
 	it('zeigt Fahrer als Familie mit Abfahrt und freien Plaetzen', () => {
 		const { el } = aufbauen(FahrtBauteil, P.sandra, T.bowling, M.bowlingFahrt);
 		expect(auto(el, 'a-maier').textContent).toContain('Fam. Maier');
