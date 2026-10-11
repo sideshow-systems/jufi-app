@@ -26,3 +26,15 @@ export function zahlungspflichtig(stand: Datenstand, t: Thread): Id[] {
 export function kostenStatus(m: KostenModul, kindId: Id): KostenStatus {
 	return m.status[kindId] ?? 'offen';
 }
+
+/**
+ * Verwendungszweck fuer die Ueberweisung: "Bowling 17.10. – Lena Wagner".
+ * Das Emoji faellt weg, weil Banking-Apps es oft nicht annehmen; das Datum
+ * des ersten Termins unterscheidet wiederkehrende Ausfluege.
+ */
+export function verwendungszweck(t: Thread, kind: Person): string {
+	const titel = t.titel.replace(/^\p{Extended_Pictographic}\S*\s*/u, '').trim();
+	const termin = t.module.find((m) => m.typ === 'termin');
+	const datum = termin ? ` ${termin.beginn.slice(8, 10)}.${termin.beginn.slice(5, 7)}.` : '';
+	return `${titel}${datum} – ${kind.vorname} ${kind.nachname}`;
+}

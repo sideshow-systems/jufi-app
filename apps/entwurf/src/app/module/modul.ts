@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import type { Modul, Thread } from '../daten/typen';
 import { DateienBauteil } from './dateien';
+import { FahrtBauteil } from './fahrt';
 import { FotosBauteil } from './fotos';
 import { HelferBauteil } from './helfer';
 import { InfoBauteil } from './info';
+import { KostenBauteil } from './kosten';
 import { TerminBauteil } from './termin';
 import { UmfrageBauteil } from './umfrage';
 
@@ -13,7 +15,16 @@ import { UmfrageBauteil } from './umfrage';
  */
 @Component({
 	selector: 'jf-modul',
-	imports: [InfoBauteil, TerminBauteil, DateienBauteil, FotosBauteil, UmfrageBauteil, HelferBauteil],
+	imports: [
+		InfoBauteil,
+		TerminBauteil,
+		DateienBauteil,
+		FotosBauteil,
+		UmfrageBauteil,
+		HelferBauteil,
+		FahrtBauteil,
+		KostenBauteil,
+	],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@let m = modul();
@@ -33,11 +44,14 @@ import { UmfrageBauteil } from './umfrage';
 			@case ('helfer') {
 				<jf-helfer [thread]="thread()" [modul]="m" [vorschau]="vorschau()" />
 			}
+			@case ('fahrt') {
+				<jf-fahrt [thread]="thread()" [modul]="m" [vorschau]="vorschau()" />
+			}
+			@case ('kosten') {
+				<jf-kosten [thread]="thread()" [modul]="m" [vorschau]="vorschau()" />
+			}
 			@case ('fotos') {
 				<jf-fotos [modul]="m" [threadId]="thread().id" [vorschau]="vorschau()" />
-			}
-			@default {
-				<p class="gedaempft">{{ m.typ }}</p>
 			}
 		}
 	`,

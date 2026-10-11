@@ -130,7 +130,8 @@ interface Ergebnis {
 			align-items: center;
 			gap: var(--a2);
 		}
-		.optionen .knopf {
+		.optionen .knopf,
+		.antwort .knopf {
 			min-height: var(--tippflaeche);
 		}
 		.von {

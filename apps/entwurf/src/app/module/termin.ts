@@ -38,6 +38,9 @@ import { IconComponent } from '../gestaltung/icon';
 			flex: none;
 		}
 		a {
+			display: inline-flex;
+			align-items: center;
+			min-height: var(--tippflaeche);
 			color: var(--akzent);
 			font-weight: 600;
 		}

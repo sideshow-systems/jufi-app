@@ -114,7 +114,7 @@ export function nrAusSegment(seg: string): number | null {
 			align-items: center;
 			justify-content: center;
 			gap: var(--a2);
-			min-height: 40px;
+			min-height: var(--tippflaeche);
 			border-radius: var(--radius-pille);
 			color: var(--text-gedaempft);
 			font-weight: 600;
