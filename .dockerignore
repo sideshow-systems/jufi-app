@@ -1,0 +1,7 @@
+# Alles ausschliessen, dann gezielt hereinlassen: das Image braucht nur das
+# fertige Buendel und die nginx-Konfiguration. Sonst schickt jeder Bau
+# node_modules an Docker, und eine .env koennte im Image landen.
+*
+
+!dist/apps/entwurf/browser/
+!deploy/nginx-entwurf.conf

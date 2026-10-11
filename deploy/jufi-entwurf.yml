@@ -1,0 +1,36 @@
+# Dienst des klickbaren Entwurfs fuer die gemeinsame Compose-Datei auf dem Server.
+#
+# ACHTUNG: YAML verbietet Tabs zur Einrueckung. Diese Datei nutzt bewusst Spaces.
+#
+# **Das ist kein eigenstaendiger Stack.** Dieser Block gehoert in
+# `/home/paperless/paperless-ngx/docker-compose.yml`, wo auch paperless, traefik
+# und HWYD wohnen — ein Docker-Netz, ein Traefik. Die Datei hier ist die
+# versionierte Fassung davon.
+#
+# Anwenden (immer nur diesen Dienst nennen, nie ein blankes `up -d`, sonst fasst
+# Compose die anderen Apps an):
+#   docker compose up -d jufi-entwurf
+#
+# Abweichung von Spec TP1 8.3: die Regel ist nur `Host(...)`, ohne
+# `PathPrefix(/entwurf)`. Bis Teilprojekt 2 gibt es unter dieser Domain nichts
+# anderes, und die Umleitung von `/` auf `/entwurf/` (ebenfalls Spec 8.3) braucht
+# den Wurzelpfad — mit PathPrefix kaeme `/` gar nicht erst bei nginx an.
+
+services:
+  jufi-entwurf:
+    image: sideshowsystems/jufi-entwurf:${JUFI_ENTWURF_TAG:-latest}
+    restart: unless-stopped
+    # nginx mit statischen Dateien braucht wenige MB; die Grenze schuetzt die
+    # anderen Apps auf dem Server (3,7 GB, kein Swap).
+    mem_limit: 32m
+    # Kein `ports:`. Erreichbar nur ueber Traefik.
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.jufi-entwurf.rule=Host(`jufi-app.sideshow-systems.de`)'
+      # Traefik terminiert TLS selbst per Let's Encrypt, wie bei HWYD.
+      - 'traefik.http.routers.jufi-entwurf.entrypoints=websecure'
+      - 'traefik.http.routers.jufi-entwurf.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.jufi-entwurf.loadbalancer.server.port=80'
+      # nginx im Image komprimiert nicht; Traefik macht es fuer alle Dienste gleich.
+      - 'traefik.http.middlewares.jufi-entwurf-compress.compress=true'
+      - 'traefik.http.routers.jufi-entwurf.middlewares=jufi-entwurf-compress'
