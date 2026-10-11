@@ -246,7 +246,8 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 					betragCent: 1200,
 					hinweis: 'Zwei Spiele, Schuhe und ein Getränk. Bitte bis Freitag überweisen.',
 					iban: 'DE00 1234 5678 9000 0000 00',
-					paypal: 'jufi-glonntal',
+					// Erkennbar erfunden: ein echt wirkender Name koennte einem Fremden gehoeren.
+					paypal: 'beispiel@example.org',
 					status: {},
 				},
 				{

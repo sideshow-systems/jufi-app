@@ -67,6 +67,15 @@ describe('rueckmeldungText', () => {
 		expect(text.at(-1)).toBe('💬 Sonst noch: „Dunkler Modus top!"');
 	});
 
+	it('kuerzt den Wunsch erst im Text und laesst einen leeren weg', () => {
+		expect(
+			rueckmeldungText(stand({ wunsch: '  Mehr Fotos \n' }), 'x')
+				.split('\n')
+				.at(-1),
+		).toBe('💬 Sonst noch: „Mehr Fotos"');
+		expect(rueckmeldungText(stand({ wunsch: ' \n ' }), 'x')).not.toContain('Sonst noch');
+	});
+
 	it('nennt Fehlversuche bei Suchaufgaben', () => {
 		const text = rueckmeldungText(
 			stand({

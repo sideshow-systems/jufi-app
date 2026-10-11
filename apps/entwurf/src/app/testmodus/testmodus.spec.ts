@@ -118,6 +118,12 @@ describe('TestmodusService', () => {
 		expect(tm.aktuelleAufgabe()?.id).toBe('sandra-2');
 	});
 
+	it('speichert den Wunsch so, wie er getippt wird', () => {
+		const { tm } = aufbauen();
+		tm.wunschSetzen('Hallo ');
+		expect(tm.zustand().wunsch).toBe('Hallo ');
+	});
+
 	it('legt den Fortschritt im Store ab', () => {
 		const { tm, store } = aufbauen();
 		tm.waehlePerson('lena', true);

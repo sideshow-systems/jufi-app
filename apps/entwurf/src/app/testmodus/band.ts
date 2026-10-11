@@ -9,6 +9,7 @@ import {
 	inject,
 	linkedSignal,
 } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { EntwurfStore } from '../daten/store';
 import { MeldungService } from '../gestaltung/meldung';
 import { aktuellerPfad } from './ort';
@@ -28,9 +29,15 @@ function gemischt<T>(liste: T[]): T[] {
  * Aufgabenband (Spec TP1 5.2): oben fixiert, die Huellen ruecken per
  * --band-hoehe darunter, damit es nichts verdeckt. Die Hoehe misst ein
  * ResizeObserver, weil lange Aufgaben am Handy zweizeilig umbrechen.
+ *
+ * Ohne gewaehlte Person traegt das Band stattdessen den Entwurfshinweis: wer
+ * einen geteilten Thread-Link oeffnet, ueberspringt den Einstieg (gewollt,
+ * der Link soll direkt zum Thread fuehren) und saehe sonst echt wirkende
+ * Termine und Zahlungsaufforderungen ohne jede Erklaerung.
  */
 @Component({
 	selector: 'jf-band',
+	imports: [RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@if (sichtbar()) {
@@ -57,6 +64,11 @@ function gemischt<T>(liste: T[]): T[] {
 					<button type="button" class="tm-knopf rand" (click)="testmodus.ueberspringen()">Überspringen</button>
 				</div>
 			</section>
+		} @else if (hinweis()) {
+			<section class="band hinweis" aria-label="Hinweis">
+				<p><strong>Das ist ein Entwurf</strong> – nichts hier ist echt, alle Namen und Beträge sind erfunden.</p>
+				<a class="tm-knopf hell" [routerLink]="['/', slug(), 'willkommen']">Mitspielen</a>
+			</section>
 		}
 	`,
 	styles: [
@@ -82,6 +94,17 @@ function gemischt<T>(liste: T[]): T[] {
 			p {
 				margin: 0;
 				max-width: 720px;
+			}
+			.hinweis {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: center;
+				justify-content: space-between;
+			}
+			a.tm-knopf {
+				display: inline-flex;
+				align-items: center;
+				text-decoration: none;
 			}
 			.knoepfe,
 			.antworten {
@@ -116,6 +139,10 @@ export class Band {
 
 	protected readonly aufgabe = this.testmodus.aktuelleAufgabe;
 	protected readonly sichtbar = computed(() => !!this.aufgabe() && !this.pfad().includes('/willkommen'));
+	protected readonly hinweis = computed(
+		() => this.testmodus.zustand().person === null && !this.pfad().includes('/willkommen'),
+	);
+	protected readonly slug = computed(() => this.store.stand().verein.slug);
 	protected readonly nummer = computed(() => this.testmodus.index() + 1);
 	protected readonly anzahl = computed(() => this.testmodus.aufgaben().length);
 	/** Die drei Antworten einer Suchaufgabe, einmal gemischt beim Oeffnen; neue Aufgabe schliesst sie. */
@@ -139,6 +166,7 @@ export class Band {
 		// Ohne ResizeObserver (und vor dessen erstem Aufruf) nach jedem Zeichnen messen.
 		afterRenderEffect(() => {
 			this.sichtbar();
+			this.hinweis();
 			this.antworten();
 			setzen();
 		});

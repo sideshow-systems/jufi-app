@@ -124,8 +124,9 @@ export class TestmodusService {
 		if (t) this.aendern((z) => ({ ...z, seitenNotizen: [...z.seitenNotizen, { pfad, text: t }] }));
 	}
 
+	/** Ungekuerzt: das Feld haengt per [value] am Zustand, ein trim() hier fraesse beim Tippen die Leerzeichen. */
 	wunschSetzen(text: string): void {
-		this.aendern((z) => ({ ...z, wunsch: text.trim() || undefined }));
+		this.aendern((z) => ({ ...z, wunsch: text || undefined }));
 	}
 
 	/** Beispieldaten, Bezugstag und Testmodus neu; danach beginnt der Einstieg. */

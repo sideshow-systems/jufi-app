@@ -74,7 +74,8 @@ export function rueckmeldungText(z: TestmodusStand, geraet: string): string {
 	}
 	if (!personen.length) zeilen.push('Noch keine Aufgaben gespielt.');
 	zeilen.push(...z.seitenNotizen.map((n) => `📍 ${n.pfad}: ${zitat(n.text)}`));
-	if (z.wunsch) zeilen.push(`💬 Sonst noch: ${zitat(z.wunsch)}`);
+	const wunsch = z.wunsch?.trim();
+	if (wunsch) zeilen.push(`💬 Sonst noch: ${zitat(wunsch)}`);
 	return zeilen.join('\n');
 }
 
