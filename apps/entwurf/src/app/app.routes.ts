@@ -1,15 +1,24 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { Routes } from '@angular/router';
+import { MitgliederHuelle } from './mitglieder/huelle';
+import { NichtGefunden } from './mitglieder/nicht-gefunden';
+import { Start } from './mitglieder/start';
+import { Threads } from './mitglieder/threads';
 
-/** Vorlaeufiger Platzhalter, bis die Mitglieder-Huelle steht (Task 7). */
-@Component({
-	selector: 'jf-platzhalter',
-	changeDetection: ChangeDetectionStrategy.OnPush,
-	template: `<p>JuFi Entwurf</p>`,
-})
-class Platzhalter {}
-
+/**
+ * Routen nach dem echten URL-Schema (Rahmen 5.4) unter base href /entwurf/.
+ * Der Slug steht fest im Pfad: der Entwurf kennt nur einen Verein, und eine
+ * Platzhalter-Route wuerde jeden Tippfehler als Verein durchwinken.
+ */
 export const routes: Routes = [
 	{ path: '', pathMatch: 'full', redirectTo: 'glonntal' },
-	{ path: 'glonntal', component: Platzhalter },
+	{
+		path: 'glonntal',
+		component: MitgliederHuelle,
+		children: [
+			{ path: '', component: Start, title: 'Start · JuFi Entwurf' },
+			{ path: 'threads', component: Threads, title: 'Threads · JuFi Entwurf' },
+			{ path: '**', component: NichtGefunden },
+		],
+	},
+	{ path: '**', component: NichtGefunden },
 ];
