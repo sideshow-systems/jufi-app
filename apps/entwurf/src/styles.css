@@ -1,10 +1,234 @@
-/* Globale Stile des Entwurfs. Die Tokens kommen in Task 5 dazu. */
+/*
+ * Globale Tokens und Grundstile, Stil "Am Wasser" (Rahmen 5.1.1, Spec TP1 7).
+ * Bauteile nutzen nur diese Variablen; feste Farben stehen allein hier.
+ * Die Akzentfarben setzt ThemaService aus der Vereinsfarbe (--akzent-hell,
+ * --akzent-dunkel …); die Vorgaben hier gelten bis dahin.
+ */
+:root {
+	color-scheme: light;
+	--seite: #eef5f4;
+	--karte: #ffffff;
+	--text: #12312e;
+	--text-gedaempft: #566d6a;
+	--linie: #d3e2e0;
+	--akzent: var(--akzent-hell, #0f766e);
+	--akzent-flaeche: var(--akzent-flaeche-hell, #f0faf9);
+	--auf-akzent: var(--auf-akzent-hell, #ffffff);
+	--erfolg: #15803d;
+	--erfolg-flaeche: #dcfce7;
+	--warnung: #a24a07;
+	--warnung-flaeche: #fef3c7;
+	--fehler: #b91c1c;
+	--fehler-flaeche: #fee2e2;
+	--schatten: 0 1px 2px rgb(15 50 45 / 0.06), 0 4px 16px rgb(15 50 45 / 0.06);
+
+	--a1: 4px;
+	--a2: 8px;
+	--a3: 12px;
+	--a4: 16px;
+	--a5: 24px;
+	--a6: 32px;
+	--radius: 14px;
+	--radius-klein: 10px;
+	--radius-pille: 999px;
+	--schrift-klein: 0.8125rem;
+	--schrift: 1rem;
+	--schrift-gross: 1.25rem;
+	--schrift-titel: 1.5rem;
+	--tippflaeche: 44px;
+
+	--sicher-oben: env(safe-area-inset-top, 0px);
+	--sicher-unten: env(safe-area-inset-bottom, 0px);
+	--sicher-links: env(safe-area-inset-left, 0px);
+	--sicher-rechts: env(safe-area-inset-right, 0px);
+	/* Hoehe des Aufgabenbands des Testmodus; die Huellen ruecken darunter. */
+	--band-hoehe: 0px;
+}
+
+/*
+ * Dunkel zweimal: einmal fuer "System" (Medienabfrage, solange keine feste
+ * Wahl gesetzt ist), einmal fuer die feste Wahl. CSS kann einen Block nicht
+ * unter zwei Bedingungen teilen; die Werte muessen gleich bleiben.
+ */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		color-scheme: dark;
+		--seite: #0e1716;
+		--karte: #172423;
+		--text: #e2eeec;
+		--text-gedaempft: #9db3af;
+		--linie: #2b3f3d;
+		--akzent: var(--akzent-dunkel, #2fb3a3);
+		--akzent-flaeche: var(--akzent-flaeche-dunkel, #183331);
+		--auf-akzent: var(--auf-akzent-dunkel, #0b1f1d);
+		--erfolg: #4ade80;
+		--erfolg-flaeche: #14361f;
+		--warnung: #fbbf24;
+		--warnung-flaeche: #3a2a08;
+		--fehler: #f87171;
+		--fehler-flaeche: #3f1212;
+		--schatten: 0 1px 2px rgb(0 0 0 / 0.3);
+	}
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--seite: #0e1716;
+	--karte: #172423;
+	--text: #e2eeec;
+	--text-gedaempft: #9db3af;
+	--linie: #2b3f3d;
+	--akzent: var(--akzent-dunkel, #2fb3a3);
+	--akzent-flaeche: var(--akzent-flaeche-dunkel, #183331);
+	--auf-akzent: var(--auf-akzent-dunkel, #0b1f1d);
+	--erfolg: #4ade80;
+	--erfolg-flaeche: #14361f;
+	--warnung: #fbbf24;
+	--warnung-flaeche: #3a2a08;
+	--fehler: #f87171;
+	--fehler-flaeche: #3f1212;
+	--schatten: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%;
+}
+
 body {
 	margin: 0;
+	background: var(--seite);
+	color: var(--text);
 	font-family:
 		system-ui,
 		-apple-system,
 		'Segoe UI',
 		Roboto,
+		'Helvetica Neue',
 		sans-serif;
+	font-size: var(--schrift);
+	line-height: 1.45;
+	/* Nimmt den Doppeltipp-Zoom, laesst Aufziehen zu (Erfahrung aus HWYD). */
+	touch-action: manipulation;
+	overflow-x: hidden;
+}
+
+h1,
+h2,
+h3 {
+	line-height: 1.2;
+}
+
+a {
+	color: var(--akzent);
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+
+button {
+	cursor: pointer;
+}
+
+:focus-visible {
+	outline: 2px solid var(--akzent);
+	outline-offset: 2px;
+}
+
+/* --- Knoepfe als Pillen -------------------------------------------------- */
+.knopf {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--a2);
+	min-height: var(--tippflaeche);
+	min-width: var(--tippflaeche);
+	padding: 0 var(--a4);
+	border-radius: var(--radius-pille);
+	border: 1px solid var(--linie);
+	background: var(--karte);
+	color: var(--text);
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+.knopf.primaer {
+	background: var(--akzent);
+	border-color: var(--akzent);
+	color: var(--auf-akzent);
+}
+
+.knopf.leise {
+	background: var(--akzent-flaeche);
+	border-color: transparent;
+	color: var(--akzent);
+}
+
+.knopf.nur-icon {
+	padding: 0;
+	border-color: transparent;
+	background: transparent;
+	font-size: 1.25rem;
+}
+
+.knopf:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.knopf.klein {
+	min-height: 36px;
+	font-size: var(--schrift-klein);
+	padding: 0 var(--a3);
+}
+
+/* --- Formularfelder ------------------------------------------------------ */
+.feld {
+	display: grid;
+	gap: var(--a1);
+	font-size: var(--schrift-klein);
+	font-weight: 600;
+	color: var(--text-gedaempft);
+}
+
+.feld input,
+.feld select,
+.feld textarea {
+	min-height: var(--tippflaeche);
+	padding: var(--a2) var(--a3);
+	border: 1px solid var(--linie);
+	border-radius: var(--radius-klein);
+	background: var(--karte);
+	color: var(--text);
+	font-weight: 400;
+	font-size: var(--schrift);
+}
+
+.gedaempft {
+	color: var(--text-gedaempft);
+}
+
+.klein {
+	font-size: var(--schrift-klein);
+}
+
+.unsichtbar {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
 }
