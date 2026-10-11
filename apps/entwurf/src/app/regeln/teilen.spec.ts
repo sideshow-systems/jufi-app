@@ -43,3 +43,31 @@ describe('teilenText', () => {
 		expect(zelt).toContain('• Salami (1): Jonas');
 	});
 });
+
+describe('Sonderzeichen', () => {
+	const titel = '🎳 Bowling & Pizza #1 „Spezial"';
+	const sonder = {
+		...stand,
+		personen: stand.personen.map((p) => (p.id === 'p-lena' ? { ...p, vorname: 'Zoë' } : p)),
+		threads: stand.threads.map((t) => (t.id === T.bowling ? { ...t, titel } : t)),
+	};
+	const bowling = threadVon(sonder, T.bowling);
+
+	it('bildet aus Satzzeichen, Emoji und Anfuehrungen einen sauberen Pfad', () => {
+		expect(threadPfad(bowling, 'glonntal')).toBe('/glonntal/t/2-bowling-pizza-1-spezial');
+	});
+
+	it('loest Umlaute, Eszett und Akzente auf', () => {
+		expect(threadPfad({ ...bowling, titel: 'Größe Übung im Café Noël' }, 'glonntal')).toBe(
+			'/glonntal/t/2-groesse-uebung-im-cafe-noel',
+		);
+	});
+
+	it('uebernimmt Titel und Namen unveraendert in den Text', () => {
+		const text = teilenText(sonder, bowling, 'https://x/entwurf', jetzt);
+		expect(text.split('\n')[0]).toBe('🎳 *Bowling & Pizza #1 „Spezial"* – Stand So 10:05');
+		expect(text).toContain('✅ Dabei (2): Zoë, Paul');
+		expect(text.split('\n').at(-1)).toBe('👉 Antworten: https://x/entwurf/glonntal/t/2-bowling-pizza-1-spezial');
+		expect(decodeURIComponent(encodeURIComponent(text))).toBe(text);
+	});
+});
