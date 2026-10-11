@@ -183,6 +183,11 @@ button {
 	font-size: 1.25rem;
 }
 
+.knopf.nur-icon.primaer {
+	background: var(--akzent);
+	border-color: var(--akzent);
+}
+
 .knopf:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;

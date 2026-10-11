@@ -1,13 +1,14 @@
 import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { EntwurfStore } from './daten/store';
+import { MeldungComponent } from './gestaltung/meldung';
 import { ThemaService } from './gestaltung/thema';
 
 @Component({
 	selector: 'jf-root',
-	imports: [RouterOutlet],
+	imports: [RouterOutlet, MeldungComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
-	template: `<router-outlet />`,
+	template: `<router-outlet /><jf-meldung />`,
 })
 export class App {
 	constructor() {

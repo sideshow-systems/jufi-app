@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { MitgliederHuelle } from './mitglieder/huelle';
 import { NichtGefunden } from './mitglieder/nicht-gefunden';
 import { Start } from './mitglieder/start';
+import { ThreadSeite } from './mitglieder/thread';
 import { Threads } from './mitglieder/threads';
 
 /**
@@ -17,6 +18,8 @@ export const routes: Routes = [
 		children: [
 			{ path: '', component: Start, title: 'Start · JuFi Entwurf' },
 			{ path: 'threads', component: Threads, title: 'Threads · JuFi Entwurf' },
+			{ path: 't/:nrSlug', component: ThreadSeite },
+			{ path: 't/:nrSlug/m/:modulId', component: ThreadSeite },
 			{ path: '**', component: NichtGefunden },
 		],
 	},

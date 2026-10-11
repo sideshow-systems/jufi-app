@@ -12,6 +12,7 @@ import chevronDownIcon from 'lucide/dist/esm/icons/chevron-down.mjs';
 import chevronLeftIcon from 'lucide/dist/esm/icons/chevron-left.mjs';
 import chevronRightIcon from 'lucide/dist/esm/icons/chevron-right.mjs';
 import circleQuestionMarkIcon from 'lucide/dist/esm/icons/circle-question-mark.mjs';
+import clockIcon from 'lucide/dist/esm/icons/clock.mjs';
 import copyIcon from 'lucide/dist/esm/icons/copy.mjs';
 import downloadIcon from 'lucide/dist/esm/icons/download.mjs';
 import ellipsisIcon from 'lucide/dist/esm/icons/ellipsis.mjs';
@@ -68,6 +69,7 @@ const ICONS = {
 	schliessen: xIcon,
 	haken: checkIcon,
 	kalender: calendarIcon,
+	uhr: clockIcon,
 	ort: mapPinIcon,
 	auto: carIcon,
 	euro: euroIcon,
