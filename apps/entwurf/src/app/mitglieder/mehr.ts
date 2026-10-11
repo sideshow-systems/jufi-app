@@ -11,7 +11,7 @@ import { teileText } from '../gestaltung/teilen-aktion';
 import { rolleText } from '../gestaltung/texte';
 import { type ThemaWahl, ThemaService } from '../gestaltung/thema';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
-import { kinderVon } from '../regeln/personen';
+import { istJugendleiter, kinderVon } from '../regeln/personen';
 import { siehtThread } from '../regeln/sichtbarkeit';
 import { istArchiviert } from '../regeln/termine';
 
@@ -38,6 +38,11 @@ interface Einladung {
 
 		<nav class="links">
 			<a [routerLink]="'/' + slug() + '/dokumente'"><jf-icon name="ordner" /> Dokumente <jf-icon name="vor" /></a>
+			@if (jugendleiter()) {
+				<a [routerLink]="'/' + slug() + '/verwaltung'"
+					><jf-icon name="einstellungen" /> Verwaltung <jf-icon name="vor"
+				/></a>
+			}
 		</nav>
 
 		@if (kinder().length) {
@@ -143,6 +148,10 @@ interface Einladung {
 			color: var(--akzent);
 			font-weight: 700;
 			flex: none;
+		}
+		.links {
+			display: grid;
+			gap: var(--a2);
 		}
 		.links a {
 			display: flex;
@@ -261,6 +270,7 @@ export class Mehr {
 
 	protected readonly ich = this.store.person;
 	protected readonly slug = computed(() => this.store.stand().verein.slug);
+	protected readonly jugendleiter = computed(() => istJugendleiter(this.store.person()));
 	protected readonly rolle = computed(() => rolleText(this.store.stand(), this.store.ich()));
 	protected readonly kinder = computed(() => kinderVon(this.store.stand(), this.store.ich()));
 	protected readonly threads = computed(() => {

@@ -2,17 +2,14 @@ import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
-import { TESTEREIGNISSE } from '../daten/ereignisse';
 import { EntwurfStore } from '../daten/store';
 import { IconComponent } from '../gestaltung/icon';
-import { MeldungService } from '../gestaltung/meldung';
-import { teileText } from '../gestaltung/teilen-aktion';
+import { ThreadTeilen } from '../gestaltung/teilen-aktion';
 import { zielgruppeText } from '../gestaltung/texte';
 import { KarteComponent } from '../gestaltung/ui';
 import { ModulWeiche } from '../module/modul';
 import { VerlaufBauteil } from '../module/verlauf';
 import { threadZuNr } from '../regeln/sichtbarkeit';
-import { teilenText } from '../regeln/teilen';
 import { NichtGefunden } from './nicht-gefunden';
 
 /**
@@ -155,8 +152,7 @@ export class ThreadSeite {
 	readonly reiter = input<string | undefined>(undefined);
 
 	private readonly store = inject(EntwurfStore);
-	private readonly meldung = inject(MeldungService);
-	private readonly ereignisse = inject(TESTEREIGNISSE);
+	private readonly teiler = inject(ThreadTeilen);
 	private readonly dokument = inject(DOCUMENT);
 
 	protected readonly thread = computed(() => {
@@ -197,16 +193,8 @@ export class ThreadSeite {
 		});
 	}
 
-	protected async teilen(): Promise<void> {
+	protected teilen(): void {
 		const t = this.thread();
-		if (!t) return;
-		const text = teilenText(this.store.stand(), t, `${this.dokument.location.origin}/entwurf`, this.store.jetzt());
-		const ergebnis = await teileText(text);
-		if (ergebnis === 'fehler') {
-			this.meldung.zeige('Teilen nicht möglich');
-			return;
-		}
-		if (ergebnis === 'kopiert') this.meldung.zeige('Text kopiert');
-		this.ereignisse.next({ art: 'geteilt', threadId: t.id });
+		if (t) void this.teiler.teilen(t);
 	}
 }
