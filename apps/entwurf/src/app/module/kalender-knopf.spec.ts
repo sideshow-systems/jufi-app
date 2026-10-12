@@ -69,13 +69,17 @@ describe('Kalender-Knopf', () => {
 		expect(g.target).toBe('_blank');
 		expect(g.rel).toContain('noopener');
 		expect(g.href).toContain('calendar.google.com');
+		expect(new URL(g.href).searchParams.get('text')).toMatch(/^\[Entwurf\] /);
 	});
 
 	it('laedt eine ics-Datei mit Thread-Titel und App-Link und meldet das Testereignis', async () => {
 		const { el, gemeldet } = await aufgeklappt();
 		knopf(el, 'Kalender des Telefons').click();
 		const text = await blobLesen(blob!);
-		expect(text).toContain('SUMMARY:🎳 Bowling');
+		expect(text).toContain('SUMMARY:[Entwurf] 🎳 Bowling');
+		expect(text.replace(/\r\n /g, '')).toContain(
+			'DESCRIPTION:Testeintrag aus dem JuFi-Entwurf – kann gelöscht werden.\\n',
+		);
 		expect(text.replace(/\r\n /g, '')).toContain(
 			`${location.origin}/entwurf/glonntal/t/2-bowling/m/${M.bowlingTermin}`,
 		);

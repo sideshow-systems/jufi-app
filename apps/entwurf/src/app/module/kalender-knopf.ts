@@ -71,9 +71,20 @@ export class KalenderKnopf {
 	private readonly ereignisse = inject(TESTEREIGNISSE);
 	protected readonly offen = signal(false);
 
+	/**
+	 * Die Testpersonen tragen erfundene Termine in ihre echten, oft mit der
+	 * Familie geteilten Kalender ein. Ohne Kennzeichnung saehe "Zeltlager 2027"
+	 * Monate spaeter wie ein echter Termin der Jugendgruppe aus. Nur im Entwurf;
+	 * die Regel kalenderEintrag bleibt dafuer frei.
+	 */
 	private readonly eintrag = computed(() => {
 		const pfad = pfadZuThread(this.store.stand(), this.thread().id, this.modul().id);
-		return kalenderEintrag(this.modul(), this.thread().titel, `${this.dokument.location.origin}/entwurf${pfad}`);
+		const e = kalenderEintrag(this.modul(), this.thread().titel, `${this.dokument.location.origin}/entwurf${pfad}`);
+		return {
+			...e,
+			titel: `[Entwurf] ${e.titel}`,
+			beschreibung: `Testeintrag aus dem JuFi-Entwurf – kann gelöscht werden.\n${e.beschreibung}`,
+		};
 	});
 	protected readonly google = computed(() => googleLink(this.eintrag()));
 
