@@ -1,5 +1,5 @@
 import type { TerminModul } from '../daten/typen';
-import { beginnIso, endeIso, istMehrtaegig, tagPlus, terminZeit } from './terminzeit';
+import { beginnIso, endeIso, istMehrtaegig, tagPlus, terminFehler, terminZeit } from './terminzeit';
 
 const t = (x: Partial<TerminModul>): TerminModul => ({ id: 'm', typ: 'termin', von: '2026-10-17', ort: 'X', ...x });
 
@@ -32,5 +32,23 @@ describe('Beginn und Ende', () => {
 		expect(endeIso(t({ bis: '2026-10-31', endeZeit: '12:00' }))).toBe('2026-10-31T12:00');
 		expect(tagPlus('2026-12-31', 1)).toBe('2027-01-01');
 		expect(istMehrtaegig(t({ bis: '2026-10-18' }))).toBe(true);
+	});
+});
+
+describe('terminFehler', () => {
+	it('meldet ein Enddatum vor dem Startdatum', () => {
+		expect(terminFehler(t({ von: '2026-10-25', bis: '2026-10-23' }))).toBe('Das Enddatum liegt vor dem Startdatum.');
+	});
+
+	it('meldet an einem Tag ein Ende vor dem Beginn', () => {
+		expect(terminFehler(t({ beginnZeit: '17:00', endeZeit: '12:00' }))).toBe('Das Ende liegt vor dem Beginn.');
+	});
+
+	it('laesst gueltige Formen durch', () => {
+		expect(terminFehler(t({ bis: '2026-10-17', beginnZeit: '14:00', endeZeit: '17:00' }))).toBeNull();
+		expect(terminFehler(t({ endeZeit: '12:00' }))).toBeNull();
+		expect(
+			terminFehler(t({ von: '2026-10-23', bis: '2026-10-25', beginnZeit: '17:00', endeZeit: '12:00' })),
+		).toBeNull();
 	});
 });

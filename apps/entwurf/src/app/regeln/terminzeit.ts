@@ -62,3 +62,16 @@ export function terminZeit(m: TerminModul): string {
 			: 'ganztägig';
 	return `${tagKurz(m.von)} · ${zeit}`;
 }
+
+/**
+ * Pruefung im Editor (Spec 2026-10-12, 3.1). Ende vor Beginn ist nur an einem
+ * Tag ein Fehler: mehrtaegig ist "Fr 17:00 bis So 12:00" der Normalfall.
+ * Ein Ende ohne Beginn ist erlaubt ("bis 12:00"), es gibt nichts zu vergleichen.
+ */
+export function terminFehler(m: TerminModul): string | null {
+	if (m.bis && m.bis < m.von) return 'Das Enddatum liegt vor dem Startdatum.';
+	if (!istMehrtaegig(m) && m.beginnZeit && m.endeZeit && m.endeZeit < m.beginnZeit) {
+		return 'Das Ende liegt vor dem Beginn.';
+	}
+	return null;
+}

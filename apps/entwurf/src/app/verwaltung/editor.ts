@@ -10,7 +10,7 @@ import { zielgruppeText } from '../gestaltung/texte';
 import { KarteComponent } from '../gestaltung/ui';
 import { NichtGefunden } from '../mitglieder/nicht-gefunden';
 import { ModulWeiche } from '../module/modul';
-import { terminZeit } from '../regeln/terminzeit';
+import { terminFehler, terminZeit } from '../regeln/terminzeit';
 import { VERWALTUNG_STIL } from './ansichten';
 import { MODUS_TEXT } from './threads';
 
@@ -237,11 +237,21 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 									</label>
 									<div class="reihe">
 										<label class="feld">
-											Datum
+											Startdatum
 											<input type="date" [value]="m.von" (change)="datumSetzen(wert($event))" />
 										</label>
 										<label class="feld">
-											Beginn
+											Enddatum (optional)
+											<input
+												type="date"
+												[value]="m.bis ?? ''"
+												(change)="modulSetzen({ bis: wert($event) || undefined })"
+											/>
+										</label>
+									</div>
+									<div class="reihe">
+										<label class="feld">
+											Beginn (optional)
 											<input
 												type="time"
 												[value]="m.beginnZeit ?? ''"
@@ -249,7 +259,7 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 											/>
 										</label>
 										<label class="feld">
-											Ende
+											Ende (optional)
 											<input
 												type="time"
 												[value]="m.endeZeit ?? ''"
@@ -257,6 +267,9 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 											/>
 										</label>
 									</div>
+									@if (terminFehler(m); as fehler) {
+										<p class="hinweis klein">{{ fehler }}</p>
+									}
 									<label class="feld">
 										Ort
 										<input [value]="m.ort" (input)="modulSetzen({ ort: wert($event) })" />
@@ -602,6 +615,7 @@ export class ThreadEditor {
 	}
 
 	protected readonly ohneZielgruppe = ohneZielgruppe;
+	protected readonly terminFehler = terminFehler;
 
 	protected setze(teil: Partial<Thread>): void {
 		this.entwurf.update((t) => (t ? { ...t, ...teil } : t));
@@ -705,6 +719,12 @@ export class ThreadEditor {
 		}
 		if (ohneZielgruppe(t)) {
 			this.meldung.zeige('Bitte „Alle" oder eine Untergruppe wählen');
+			return;
+		}
+		// Ein falscher Termin landete sonst so in Kalendern und "Als Naechstes".
+		const fehler = t.module.map((m) => (m.typ === 'termin' ? terminFehler(m) : null)).find(Boolean);
+		if (fehler) {
+			this.meldung.zeige(fehler);
 			return;
 		}
 		this.store.threadSpeichern({ ...t, titel: t.titel.trim(), veroeffentlicht: veroeffentlichen || t.veroeffentlicht });

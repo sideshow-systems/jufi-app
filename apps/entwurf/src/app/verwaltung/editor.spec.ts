@@ -199,3 +199,49 @@ describe('Thread-Editor', () => {
 		expect(el.textContent).toContain('Wer soll den Thread sehen');
 	});
 });
+
+describe('Termin im Editor', () => {
+	async function mitTermin() {
+		const o = await oeffne('/glonntal/verwaltung/threads/neu', P.thomas);
+		const titel = o.el.querySelector<HTMLInputElement>('input[name="titel"]')!;
+		titel.value = 'Lager';
+		titel.dispatchEvent(new Event('input'));
+		knopf(o.el.querySelector('.hinzufuegen')!, 'Termin').click();
+		o.harness.detectChanges();
+		return o;
+	}
+	function setze(el: HTMLElement, text: string, wert: string) {
+		const i = [...el.querySelectorAll('label')]
+			.find((l) => l.textContent?.trim().startsWith(text))!
+			.querySelector('input')!;
+		i.value = wert;
+		i.dispatchEvent(new Event('change'));
+	}
+
+	it('legt ein mehrtaegiges Zeltlager ohne Uhrzeiten an', async () => {
+		const { store, harness, el } = await mitTermin();
+		setze(el, 'Startdatum', '2026-10-23');
+		setze(el, 'Enddatum (optional)', '2026-10-25');
+		setze(el, 'Beginn (optional)', '');
+		setze(el, 'Ende (optional)', '');
+		harness.detectChanges();
+		knopf(el, 'Entwurf speichern').click();
+		await harness.fixture.whenStable();
+		const m = store.stand().threads.find((t) => t.titel === 'Lager')!.module[0];
+		expect(m).toMatchObject({ von: '2026-10-23', bis: '2026-10-25' });
+		expect(m.typ === 'termin' && m.beginnZeit).toBeUndefined();
+		expect(m.typ === 'termin' && m.endeZeit).toBeUndefined();
+	});
+
+	it('speichert nicht, wenn das Enddatum vor dem Startdatum liegt', async () => {
+		const { store, harness, el } = await mitTermin();
+		setze(el, 'Startdatum', '2026-10-25');
+		setze(el, 'Enddatum (optional)', '2026-10-23');
+		harness.detectChanges();
+		expect(el.textContent).toContain('Das Enddatum liegt vor dem Startdatum.');
+		const vorher = store.stand().threads.length;
+		knopf(el, 'Entwurf speichern').click();
+		await harness.fixture.whenStable();
+		expect(store.stand().threads).toHaveLength(vorher);
+	});
+});
