@@ -1,7 +1,7 @@
 import type { Datenstand, Id, TerminModul, Thread } from '../daten/typen';
 import { zeitpunkt } from '../daten/zeit';
 import { siehtThread } from './sichtbarkeit';
-import { beginnIso, endeIso } from './terminzeit';
+import { beginnIso, endeIso, letzterTag } from './terminzeit';
 
 export interface TerminEintrag {
 	threadId: Id;
@@ -38,16 +38,24 @@ export function termineVon(stand: Datenstand, personId: Id): TerminEintrag[] {
 		.sort((a, b) => beginnIso(a.modul).localeCompare(beginnIso(b.modul)));
 }
 
+/**
+ * Ein Termin bleibt unter "Als Naechstes", bis sein Ende vorbei ist (Spec
+ * 2026-10-12, 3.2): das laufende Zeltlager am Samstag gehoert noch dazu.
+ * Verworfen: ab Beginn ausblenden — dann verschwaende ein Termin, waehrend
+ * er laeuft, und mit ihm Ort und Treffpunkt.
+ */
 export function naechsteTermine(stand: Datenstand, personId: Id, jetzt: Date, anzahl: number): TerminEintrag[] {
 	return termineVon(stand, personId)
-		.filter((e) => zeitpunkt(beginnIso(e.modul)) >= jetzt)
+		.filter((e) => zeitpunkt(endeIso(e.modul)) >= jetzt)
 		.slice(0, anzahl);
 }
 
-/** Termine eines Monats; monat zaehlt wie bei Date von 0 bis 11. */
+/** Termine, die einen Monat beruehren, auch ueber die Monatsgrenze; monat zaehlt wie bei Date von 0 bis 11. */
 export function termineImMonat(stand: Datenstand, personId: Id, jahr: number, monat: number): TerminEintrag[] {
 	const praefix = `${jahr}-${String(monat + 1).padStart(2, '0')}`;
-	return termineVon(stand, personId).filter((e) => e.modul.von.startsWith(praefix));
+	const erster = `${praefix}-01`;
+	const letzter = `${praefix}-31`;
+	return termineVon(stand, personId).filter((e) => e.modul.von <= letzter && letzterTag(e.modul) >= erster);
 }
 
 const fremdSeit = (t: Thread, personId: Id, seit: string) =>

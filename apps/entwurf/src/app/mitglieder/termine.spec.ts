@@ -3,7 +3,7 @@ import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { routes } from '../app.routes';
 import { type Testereignis, TESTEREIGNISSE } from '../daten/ereignisse';
-import { P } from '../daten/beispieldaten';
+import { P, T } from '../daten/beispieldaten';
 import { EntwurfStore } from '../daten/store';
 import { testProvider } from '../testhilfe';
 import { monatsRaster } from './termine';
@@ -40,6 +40,28 @@ describe('Seiten', () => {
 		const { el } = await oeffne('/glonntal/termine');
 		expect(el.textContent).toContain('Oktober 2026');
 		expect(el.textContent).toContain('🎳 Bowling');
+	});
+
+	it('Termine markiert jeden Tag eines Termins ueber die Monatsgrenze', async () => {
+		TestBed.resetTestingModule();
+		TestBed.configureTestingModule({
+			providers: [provideRouter(routes, withComponentInputBinding()), ...testProvider()],
+		});
+		const store = TestBed.inject(EntwurfStore);
+		const t = store.stand().threads.find((x) => x.id === T.orga)!;
+		store.setzeIch(P.thomas);
+		store.threadSpeichern({
+			...t,
+			module: [{ id: 'm-grenze', typ: 'termin', von: '2026-10-30', bis: '2026-11-01', ort: 'Vereinsheim' }],
+		});
+		const harness = await RouterTestingHarness.create('/glonntal/termine');
+		harness.detectChanges();
+		const el = harness.routeNativeElement as HTMLElement;
+		const markiert = () => [...el.querySelectorAll('.tag.mit')].map((x) => x.textContent?.trim());
+		expect(markiert()).toEqual(expect.arrayContaining(['30', '31']));
+		(el.querySelector('[aria-label="Nächster Monat"]') as HTMLButtonElement).click();
+		harness.detectChanges();
+		expect(markiert()).toContain('1');
 	});
 
 	it('Dokumente meldet das Oeffnen an den Testmodus', async () => {

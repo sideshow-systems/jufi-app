@@ -63,6 +63,21 @@ describe('erzeugeBeispieldaten', () => {
 		for (const t of stand.threads) expect(t.veroeffentlicht).toBe(true);
 	});
 
+	it('hat ein mehrtaegiges Zeltlager und einen ganztaegigen Aufbau', () => {
+		const zelt = termine(T.zeltlager).find((m) => m.id === M.zeltlagerTermin)!;
+		expect(zelt).toMatchObject({
+			titel: 'Zeltlager',
+			von: '2027-06-18',
+			bis: '2027-06-20',
+			beginnZeit: '17:00',
+			endeZeit: '12:00',
+		});
+		const aufbau = termine(T.herbstfest).find((m) => m.id === M.herbstAufbau)!;
+		expect(aufbau).toMatchObject({ titel: 'Aufbau', von: '2026-10-31' });
+		expect(aufbau.beginnZeit).toBeUndefined();
+		expect(aufbau.bis).toBeUndefined();
+	});
+
 	it('setzt Termine und Fristen relativ zum Bezugstag', () => {
 		expect(modul<TerminModul>(T.infos, M.gruppenstunde)).toMatchObject({
 			von: '2026-10-13',
@@ -73,7 +88,7 @@ describe('erzeugeBeispieldaten', () => {
 		expect(modul<UmfrageModul>(T.bowling, M.bowlingUmfrage).frist?.slice(0, 10)).toBe('2026-10-14');
 		expect(termine(T.hegefischen)[0].von).toBe('2026-10-06');
 		expect(termine(T.koenigsfischen)[0].von).toBe('2026-08-30');
-		expect(termine(T.herbstfest)[0].von).toBe('2026-11-01');
+		expect(termine(T.herbstfest).map((m) => m.von)).toEqual(['2026-10-31', '2026-11-01']);
 		expect(termine(T.zeltlager)[0].von).toBe('2026-10-25');
 	});
 

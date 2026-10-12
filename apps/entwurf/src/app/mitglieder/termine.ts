@@ -4,7 +4,7 @@ import { EntwurfStore } from '../daten/store';
 import { monatName, wochentagKurz } from '../gestaltung/format';
 import { IconComponent } from '../gestaltung/icon';
 import { termineImMonat, type TerminEintrag } from '../regeln/termine';
-import { beginnIso, terminZeit } from '../regeln/terminzeit';
+import { beginnIso, letzterTag, tagPlus, terminZeit } from '../regeln/terminzeit';
 import { pfadZuThread } from './pfade';
 
 /** Tage eines Monats als 6×7-Raster ab Montag; leere Felder sind null. monat: 0 = Januar. */
@@ -179,9 +179,18 @@ export class Termine {
 			beginnIso(a.modul).localeCompare(beginnIso(b.modul)),
 		);
 	});
-	protected readonly tageMitTermin = computed(
-		() => new Set(this.termine().map((e) => Number(e.modul.von.slice(8, 10)))),
-	);
+	/** Jeder Tag eines mehrtaegigen Termins bekommt seinen Punkt, aber nur die Tage im gezeigten Monat. */
+	protected readonly tageMitTermin = computed(() => {
+		const { jahr, monat } = this.monat();
+		const praefix = `${jahr}-${String(monat + 1).padStart(2, '0')}-`;
+		const tage = new Set<number>();
+		for (const e of this.termine()) {
+			for (let tag = e.modul.von; tag <= letzterTag(e.modul); tag = tagPlus(tag, 1)) {
+				if (tag.startsWith(praefix)) tage.add(Number(tag.slice(8, 10)));
+			}
+		}
+		return tage;
+	});
 	protected readonly heute = computed(() => {
 		const j = this.store.jetzt();
 		const { jahr, monat } = this.monat();

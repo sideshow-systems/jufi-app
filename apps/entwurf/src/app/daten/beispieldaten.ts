@@ -39,6 +39,8 @@ export const M = {
 	herbstHelfer: 'm-herbst-helfer',
 	pizzaUmfrage: 'm-pizza-umfrage',
 	hegeFotos: 'm-hege-fotos',
+	zeltlagerTermin: 'm-zelt-lager',
+	herbstAufbau: 'm-herbst-aufbau',
 } as const;
 
 export const UG = { aeltere: 'u-aeltere', zeltlager: 'u-zeltlager' } as const;
@@ -100,6 +102,8 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 		endeZeit,
 	});
 	const samstag = naechsterWochentag(bezugstag, 6);
+	// Zeltlager Freitag bis Sonntag, gut acht Monate voraus wie ein echtes Pfingst- oder Sommerlager.
+	const zeltFreitag = naechsterWochentag(bezugstag, 5) + 7 * 35;
 
 	const personen: Person[] = [
 		erwachsen(P.sandra, 'Sandra', 'Wagner'),
@@ -301,6 +305,8 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 						{ id: 'h-abbau', text: 'Abbau', anzahl: 4, eintraege: [] },
 					],
 				},
+				// Ganztaegig ohne Uhrzeit (Spec 2026-10-12, 4.1): zeigt die kuerzeste Terminform.
+				{ id: M.herbstAufbau, typ: 'termin', titel: 'Aufbau', von: r(20, '00:00').slice(0, 10), ort: 'Vereinsgelände' },
 				{ id: 'm-herbst-termin', typ: 'termin', ...zeiten(21, '11:00', '17:00'), ort: 'Vereinsgelände' },
 			],
 		},
@@ -325,6 +331,14 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 					titel: 'Vortreffen',
 					...zeiten(14, '17:00', '19:00'),
 					ort: 'Vereinsheim',
+				},
+				{
+					id: M.zeltlagerTermin,
+					typ: 'termin',
+					titel: 'Zeltlager',
+					...zeiten(zeltFreitag, '17:00', '12:00'),
+					bis: r(zeltFreitag + 2, '00:00').slice(0, 10),
+					ort: 'Chiemsee',
 				},
 				{
 					id: M.pizzaUmfrage,
