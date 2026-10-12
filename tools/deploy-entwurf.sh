@@ -114,8 +114,11 @@ for _ in $(seq 1 20); do
 done
 [[ "$OK" -eq 1 ]] || { docker logs "$SMOKE" 2>&1 | tail -20; fail "Das Image antwortet nicht auf $BASIS/entwurf/."; }
 
-curl -fsS "$BASIS/entwurf/" | grep -qF '<base href="/entwurf/">' || fail '/entwurf/ liefert keine index.html mit base href.'
-curl -fsS "$BASIS/entwurf/glonntal/t/2-bowling" | grep -qF '<base href="/entwurf/">' \
+# Mit oder ohne Schraegstrich: ohne kritisches CSS (inlineCritical: false)
+# schreibt der Bau das HTML nicht mehr um und laesst <base href="…"/> stehen.
+BASE_HREF='<base href="/entwurf/" ?/?>'
+curl -fsS "$BASIS/entwurf/" | grep -qE "$BASE_HREF" || fail '/entwurf/ liefert keine index.html mit base href.'
+curl -fsS "$BASIS/entwurf/glonntal/t/2-bowling" | grep -qE "$BASE_HREF" \
 	|| fail 'Tiefer Link liefert nicht die index.html.'
 KOPF="$(curl -sS -o /dev/null -D - "$BASIS/")"
 grep -qi '^location: /entwurf/' <<<"$KOPF" || fail "/ leitet nicht relativ auf /entwurf/ um: $KOPF"
