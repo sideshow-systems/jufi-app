@@ -517,10 +517,10 @@ Offline möglich: Antworten auf Umfragen, Eintragen in Helferlisten und Fahrgeme
 
 ### 10.1 Umgebungen
 
-| Umgebung | Ort                                                                                   | Zweck                       |
-| -------- | ------------------------------------------------------------------------------------- | --------------------------- |
-| Test     | `https://jufi-app.sideshow-systems.de`, bestehende Hetzner-VM (neben paperless, HWYD) | Entwurf, Entwicklung, Pilot |
-| Live     | `https://www.jufi-app.de`, **eigene Hetzner-VM**                                      | Betrieb für alle Vereine    |
+| Umgebung | Ort                                                                       | Zweck                       |
+| -------- | ------------------------------------------------------------------------- | --------------------------- |
+| Test     | `https://test.jufi-app.de`, bestehende Hetzner-VM (neben paperless, HWYD) | Entwurf, Entwicklung, Pilot |
+| Live     | `https://www.jufi-app.de`, **eigene Hetzner-VM**                          | Betrieb für alle Vereine    |
 
 - Domain, Basis-URL, `WEBAUTHN_RP_ID` und `WEBAUTHN_ORIGIN` kommen aus Umgebungsvariablen. Der Umzug ist damit reine Konfiguration.
 - Passkeys aus der Testumgebung werden beim Umzug ungültig, weil sie an die Domain gebunden sind. Passwort-Zugänge bleiben.

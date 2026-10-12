@@ -50,7 +50,7 @@ export JUFI_ENTWURF_WHATSAPP
 
 IMAGE=sideshowsystems/jufi-entwurf
 SERVICE=jufi-entwurf
-APP_URL=https://jufi-app.sideshow-systems.de
+APP_URL=https://test.jufi-app.de
 SMOKE_PORT="${SMOKE_PORT:-8089}"
 
 SSH_OPTS=(-o BatchMode=yes)

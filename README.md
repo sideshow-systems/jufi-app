@@ -40,7 +40,7 @@ wohnt der Dienst `jufi-entwurf` in der gemeinsamen Compose-Datei hinter Traefik.
 
 Vor dem ersten Deploy:
 
-1. DNS-Eintrag `jufi-app.sideshow-systems.de` auf den Server.
+1. DNS-Eintrag `test.jufi-app.de` auf den Server.
 2. Den Block aus [`deploy/jufi-entwurf.yml`](deploy/jufi-entwurf.yml) in
    `/home/paperless/paperless-ngx/docker-compose.yml` übernehmen.
 3. `cp deploy/env.deploy.example .env.deploy` und Serverzugang sowie `JUFI_ENTWURF_WHATSAPP` (Nummer für

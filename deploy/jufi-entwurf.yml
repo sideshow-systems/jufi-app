@@ -15,6 +15,11 @@
 # `PathPrefix(/entwurf)`. Bis Teilprojekt 2 gibt es unter dieser Domain nichts
 # anderes, und die Umleitung von `/` auf `/entwurf/` (ebenfalls Spec 8.3) braucht
 # den Wurzelpfad — mit PathPrefix kaeme `/` gar nicht erst bei nginx an.
+#
+# Testdomain ist test.jufi-app.de. Die erste Domain jufi-app.sideshow-systems.de
+# leitet dauerhaft dorthin um, damit verschickte Testlinks weiter funktionieren.
+# Verworfen: beide Domains parallel bedienen — der Testmodus speichert im
+# localStorage, der je Domain getrennt ist; Testpersonen haetten zwei Staende.
 
 services:
   jufi-entwurf:
@@ -26,7 +31,7 @@ services:
     # Kein `ports:`. Erreichbar nur ueber Traefik.
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.jufi-entwurf.rule=Host(`jufi-app.sideshow-systems.de`)'
+      - 'traefik.http.routers.jufi-entwurf.rule=Host(`test.jufi-app.de`)'
       # Traefik terminiert TLS selbst per Let's Encrypt, wie bei HWYD.
       - 'traefik.http.routers.jufi-entwurf.entrypoints=websecure'
       - 'traefik.http.routers.jufi-entwurf.tls.certresolver=letsencrypt'
@@ -34,3 +39,12 @@ services:
       # nginx im Image komprimiert nicht; Traefik macht es fuer alle Dienste gleich.
       - 'traefik.http.middlewares.jufi-entwurf-compress.compress=true'
       - 'traefik.http.routers.jufi-entwurf.middlewares=jufi-entwurf-compress'
+      # Alte Domain: nur noch Umleitung, Pfad und Abfrage bleiben erhalten.
+      - 'traefik.http.routers.jufi-entwurf-alt.rule=Host(`jufi-app.sideshow-systems.de`)'
+      - 'traefik.http.routers.jufi-entwurf-alt.entrypoints=websecure'
+      - 'traefik.http.routers.jufi-entwurf-alt.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.jufi-entwurf-alt.service=jufi-entwurf'
+      - 'traefik.http.middlewares.jufi-entwurf-umzug.redirectregex.regex=^https://jufi-app\.sideshow-systems\.de/(.*)'
+      - 'traefik.http.middlewares.jufi-entwurf-umzug.redirectregex.replacement=https://test.jufi-app.de/$${1}'
+      - 'traefik.http.middlewares.jufi-entwurf-umzug.redirectregex.permanent=true'
+      - 'traefik.http.routers.jufi-entwurf-alt.middlewares=jufi-entwurf-umzug'
