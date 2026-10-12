@@ -33,7 +33,7 @@ import { UmfrageBauteil } from './umfrage';
 				<jf-info [modul]="m" />
 			}
 			@case ('termin') {
-				<jf-termin [modul]="m" />
+				<jf-termin [thread]="thread()" [modul]="m" [vorschau]="vorschau()" />
 			}
 			@case ('dateien') {
 				<jf-dateien [modul]="m" />

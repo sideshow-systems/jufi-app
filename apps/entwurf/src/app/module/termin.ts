@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import type { TerminModul } from '../daten/typen';
+import type { TerminModul, Thread } from '../daten/typen';
 import { IconComponent } from '../gestaltung/icon';
 import { terminZeit } from '../regeln/terminzeit';
+import { KalenderKnopf } from './kalender-knopf';
 
-/** Datum und Uhrzeit in einer Zeile (auch mehrtaegig), Ort als Karten-Link, Treffpunkt. */
+/** Datum und Uhrzeit in einer Zeile (auch mehrtaegig), Ort als Karten-Link, Treffpunkt, Kalender-Knopf. */
 @Component({
 	selector: 'jf-termin',
-	imports: [IconComponent],
+	imports: [IconComponent, KalenderKnopf],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@if (modul().titel) {
@@ -20,6 +21,7 @@ import { terminZeit } from '../regeln/terminzeit';
 		@if (modul().treffpunkt) {
 			<p class="gedaempft">Treffpunkt: {{ modul().treffpunkt }}</p>
 		}
+		<jf-kalender-knopf [thread]="thread()" [modul]="modul()" [vorschau]="vorschau()" />
 	`,
 	styles: `
 		h3 {
@@ -46,7 +48,9 @@ import { terminZeit } from '../regeln/terminzeit';
 	`,
 })
 export class TerminBauteil {
+	readonly thread = input.required<Thread>();
 	readonly modul = input.required<TerminModul>();
+	readonly vorschau = input(false);
 	protected readonly zeit = computed(() => terminZeit(this.modul()));
 	protected readonly karte = computed(
 		() => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(this.modul().ort)}`,
