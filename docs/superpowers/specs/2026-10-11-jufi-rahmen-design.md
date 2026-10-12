@@ -1,6 +1,6 @@
 # JuFi App — Rahmen-Spezifikation
 
-Stand: 11.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: freigegeben, ergänzt um die Entscheidungen aus dem Brainstorming zu Teilprojekt 1
+Stand: 11.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: freigegeben, ergänzt um die Entscheidungen aus dem Brainstorming zu Teilprojekt 1 und um Familie, Jugendsprecher und Kalender (12.10.2026, `2026-10-12-jufi-familie-jugendsprecher-kalender-design.md`)
 
 Diese Spezifikation legt den **Rahmen** fest: Zweck, Rollen, Domänenmodell, Architektur, Querschnittsthemen und die Aufteilung in Teilprojekte. Jedes Teilprojekt bekommt eine eigene, detaillierte Spezifikation, die auf dieser aufbaut und ihr nicht widerspricht. Wo eine Teilprojekt-Spezifikation etwas ändern muss, wird diese Datei mitgeändert.
 
@@ -17,7 +17,7 @@ Die Plattform ist von Anfang an **mandantenfähig**: Sie startet mit der eigenen
 ### 1.1 Erfolgskriterien
 
 - Die eigene Jugendgruppe nutzt im Pilotbetrieb die App statt der WhatsApp-Gruppe für Termine, Abstimmungen, Helferplanung, Fahrgemeinschaften und Dokumente.
-- Eltern und Jungfischer finden am Handy innerhalb weniger Sekunden: was sie beantworten müssen, was als Nächstes ansteht, was neu ist.
+- Familien und Jungfischer finden am Handy innerhalb weniger Sekunden: was sie beantworten müssen, was als Nächstes ansteht, was neu ist.
 - Jugendleiter erledigen die Verwaltung am Desktop ohne Umwege.
 - Ein zweiter Verein lässt sich vom Plattform-Admin anlegen, ohne Code, Deploy oder Datenbankeingriff.
 
@@ -38,7 +38,9 @@ Die Plattform ist von Anfang an **mandantenfähig**: Sie startet mit der eigenen
 | Person          | Mitglied eines Vereins: Jungfischer oder Erwachsener.                                     |
 | Zugang          | Anmeldedaten einer Person (E-Mail, Passkeys, Passwort, TOTP). Optional.                   |
 | Jugendleiter    | Erwachsener mit mindestens einem Recht aus 4.2.                                           |
-| Elternteil      | Erwachsener, dem mindestens ein Jungfischer zugeordnet ist.                               |
+| Bezugsperson    | Erwachsener, dem mindestens ein Jungfischer zugeordnet ist (3.3).                         |
+| Familie         | Alle Bezugspersonen eines Jungfischers. Das Wort der Oberfläche für Bezugspersonen.       |
+| Jugendsprecher  | Von der Gruppe gewählter Jungfischer, Bindeglied zu den Jugendleitern (3.5).              |
 | Untergruppe     | Frei benannte Teilmenge der Jungfischer, z. B. „Ältere", „Zeltlager-Teilnehmer".          |
 | Thread          | Ein Anlass oder Thema: Aushang aus Modulen plus Verlauf.                                  |
 | Modul           | Baustein im Aushang eines Threads (Umfrage, Termin, Helferliste …).                       |
@@ -67,14 +69,43 @@ Folgen:
 
 ### 3.3 Personen
 
-- **Jungfischer**: Kind oder Jugendlicher. Hat standardmäßig einen eigenen Zugang. Wünschen die Eltern das nicht, bleibt der Jungfischer eine Person ohne Zugang; die Eltern erledigen dann alles in seinem Namen.
-- **Erwachsener**: Rollen sind kombinierbar. Elternteil, wenn ihm Jungfischer zugeordnet sind; Jugendleiter, wenn er Rechte hat. Ein Jugendleiter mit eigenem Kind in der Gruppe ist beides.
-- **Elternschaft**: n:m zwischen Erwachsenen und Jungfischern (beide Elternteile, Geschwister).
-- Eltern handeln immer auch im Namen ihrer Kinder, unabhängig davon, ob das Kind einen eigenen Zugang hat.
+- **Jungfischer**: Kind oder Jugendlicher. Hat standardmäßig einen eigenen Zugang. Wünschen die Erziehungsberechtigten das nicht, bleibt der Jungfischer eine Person ohne Zugang; die Familie erledigt dann alles in seinem Namen.
+- **Erwachsener**: Rollen sind kombinierbar. Bezugsperson, wenn ihm Jungfischer zugeordnet sind; Jugendleiter, wenn er Rechte hat. Ein Jugendleiter mit eigenem Kind in der Gruppe ist beides.
+- **Bezugsperson**: n:m zwischen Erwachsenen und Jungfischern (beide Elternteile, Großeltern, Geschwister). Jede Zuordnung trägt:
+  - die **Beziehung** aus einer festen Liste: Mutter, Vater, Großmutter, Großvater, Tante, Onkel, Geschwister, Pflegeperson, Andere (mit Freitext);
+  - **erziehungsberechtigt** (ja/nein): bei Mutter, Vater und Pflegeperson vorbelegt, sonst nicht; immer änderbar, weil nicht jeder Vater sorgeberechtigt ist.
+- In der Oberfläche heißen alle Bezugspersonen eines Kindes **Familie** („Jungfischer + Familie", „Lenas Familie"). Verworfen: „Eltern" als Sammelbegriff (zu eng: auch nur ein Erziehungsberechtigter oder der Opa kommen vor) und „Angehörige" (klingt nach Behördenbrief).
+- Bezugspersonen handeln immer auch im Namen ihrer Kinder, unabhängig davon, ob das Kind einen eigenen Zugang hat. Rechtliches bleibt den Erziehungsberechtigten vorbehalten:
+
+|                                                            | Erziehungsberechtigte | Weitere Bezugspersonen |
+| ---------------------------------------------------------- | --------------------- | ---------------------- |
+| Sehen, was das Kind sieht (Ausnahme: 6.2)                  | ✓                     | ✓                      |
+| Für das Kind antworten, Fahrten eintragen, Kosten melden   | ✓                     | ✓                      |
+| Einwilligung nach Art. 8 DSGVO beim Annehmen der Einladung | ✓                     | –                      |
+| Foto-Einwilligung pflegen (6.6)                            | ✓                     | –                      |
+| Zugang des Kindes erlauben, entziehen, neuen Link erzeugen | ✓                     | –                      |
+
+Einwilligungen darf nur geben, wer sorgeberechtigt ist. Verworfen: alle Bezugspersonen gleichgestellt (Einwilligungen von Nicht-Sorgeberechtigten wären rechtlich wackelig) und weitere Verwandte nur als Helfer ohne Kindbezug (sie könnten nicht für das Kind antworten).
+
+Feste Regeln:
+
+- Bezugspersonen legt nur an, wer „Mitglieder verwalten" hat. Verworfen: Erziehungsberechtigte laden selbst ein, auch mit Freigabe durch einen Jugendleiter; die Pflege der Mitglieder bleibt beim Verein.
+- Ein Jungfischer ohne erziehungsberechtigte Bezugsperson erscheint in der Verwaltung mit Warnhinweis.
+- Eine Einladung für einen Jungfischer lässt sich erst erzeugen, wenn eine erziehungsberechtigte Bezugsperson ihre Einwilligung bestätigt hat. Sonst entstünde ein Kinderkonto ohne Einwilligung.
 
 ### 3.4 Untergruppen
 
-Untergruppen enthalten Jungfischer. Eltern gehören keiner Untergruppe an; sie sehen, was ihre Kinder sehen (6.2). Untergruppen pflegt, wer das Recht „Mitglieder verwalten" hat.
+Untergruppen enthalten Jungfischer. Bezugspersonen gehören keiner Untergruppe an; sie sehen, was ihre Kinder sehen (6.2). Untergruppen pflegt, wer das Recht „Mitglieder verwalten" hat.
+
+### 3.5 Jugendsprecher
+
+Jugendsprecher sind Jungfischer, die von den übrigen Jungfischern gewählt werden. Sie sind Bindeglied zwischen Jugendleitern und Jungfischern.
+
+- `jugendsprecher` ist ein Merkmal am Jungfischer. Setzen und entfernen darf, wer „Mitglieder verwalten" hat. Die Wahl findet außerhalb der App statt; eine Amtszeit wird nicht gespeichert.
+- Für den Austausch gibt es den Rollenfilter **„Jugendleiter + Jugendsprecher"** (6.2). **Die Familie sieht diese Threads nicht**: Jugendliche sollen dort offen für die Gruppe sprechen können. Verworfen: die Familie liest mit (Jugendsprecher reden dann vorsichtiger) oder sieht alles wie sonst (dann ist es kein Austausch nur zwischen den beiden Gruppen).
+- **Schutzregeln** nach dem Vorbild von Kinderschutzkonzepten: nur Gruppen-Threads, nie ein Zweiergespräch zwischen einem Erwachsenen und einem Kind; alle Jugendleiter lesen mit; unter „Meine Jungfischer" steht für die Familie „Lena ist Jugendsprecherin und nimmt am Austausch mit den Jugendleitern teil."
+- Jeder Verein hat einen angepinnten Thread **„Jugendsprecher-Austausch"** im Modus „Offener Chat" mit diesem Filter. Er entsteht beim Anlegen des Vereins, wird nie automatisch archiviert und lässt sich nicht löschen. Weitere Themen-Threads legen Jugendleiter über den normalen Editor an. Jugendsprecher bekommen keine Rechte zum Anlegen. Verworfen: ein eingeschränktes Recht „Threads erstellen" für Jugendsprecher (erstes Recht für Jungfischer, Sonderfall in Rechtemodell und Editor).
+- Wer kein Jugendsprecher mehr ist, für den sind diese Threads samt Verlauf „nicht gefunden" (404).
 
 ---
 
@@ -85,10 +116,10 @@ Untergruppen enthalten Jungfischer. Eltern gehören keiner Untergruppe an; sie s
 - Ein Jugendleiter legt eine Person an und erzeugt einen **persönlichen, einmaligen Einladungslink** (14 Tage gültig, jederzeit neu erzeugbar). Die App liefert dazu einen fertigen WhatsApp-Text zum Kopieren oder Teilen; optional geht der Link zusätzlich per E-Mail raus.
 - Beim Öffnen richtet die Person ihren Zugang ein: bevorzugt ein **Passkey**, sonst ein **Passwort**.
 - E-Mail ist für Erwachsene Pflicht, für Jungfischer freiwillig.
-- Eltern bestätigen beim Annehmen der Einladung die Einwilligung für ihre Kinder (8.4).
-- **TOTP** ist optional für Jugendleiter und den Plattform-Admin. Für den Plattform-Admin wird es dringend empfohlen. Eltern und Jungfischer bekommen kein TOTP angeboten.
-- **Zugang verloren**: Erwachsene bekommen einen Reset-Link per E-Mail. Für Jungfischer erzeugt ein Jugendleiter **oder ein Elternteil** einen neuen Einladungslink.
-- Eltern entscheiden, ob ihr Kind überhaupt einen Zugang bekommt, und können ihn wieder entziehen.
+- Erziehungsberechtigte bestätigen beim Annehmen der Einladung die Einwilligung für ihre Kinder (8.4).
+- **TOTP** ist optional für Jugendleiter und den Plattform-Admin. Für den Plattform-Admin wird es dringend empfohlen. Bezugspersonen und Jungfischer bekommen kein TOTP angeboten.
+- **Zugang verloren**: Erwachsene bekommen einen Reset-Link per E-Mail. Für Jungfischer erzeugt ein Jugendleiter **oder ein Erziehungsberechtigter** einen neuen Einladungslink.
+- Erziehungsberechtigte entscheiden, ob ihr Kind überhaupt einen Zugang bekommt, und können ihn wieder entziehen.
 
 Verworfen: Magic Links als einziger Weg (Kinder ohne E-Mail fallen heraus; der Wechsel Mail-App → installierte PWA ist auf iOS holprig) und vom Jugendleiter vergebene Passwörter (Pflegeaufwand, Passwörter wären bekannt).
 
@@ -96,15 +127,15 @@ Verworfen: Magic Links als einziger Weg (Kinder ohne E-Mail fallen heraus; der W
 
 Intern gibt es nur **Einzelrechte**. Rollen sind **Vorlagen**, die die Häkchen vorbelegen; danach ist jedes Recht pro Person änderbar. Neue Rechte lassen sich so ergänzen, ohne Rollen umzubauen.
 
-| Recht                           | Umfasst                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------ |
-| Mitglieder verwalten            | Personen anlegen, einladen, Eltern und Kinder verknüpfen, Untergruppen pflegen |
-| Threads erstellen               | Threads anlegen, Module hinzufügen, eigene Threads bearbeiten                  |
-| Alle Threads bearbeiten         | fremde Threads ändern, archivieren, Modus umstellen, Kommentare löschen        |
-| Globale Dokumente verwalten     | Dokumente hochladen, ersetzen, Kategorien pflegen                              |
-| Antworten im Detail sehen       | sehen, wer was geantwortet hat; ohne dieses Recht nur Summen                   |
-| Jugendleiter & Rechte verwalten | weitere Jugendleiter anlegen und Rechte vergeben                               |
-| Vereinseinstellungen            | Name, Logo, Farben, Kontaktdaten des Vereins                                   |
+| Recht                           | Umfasst                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Mitglieder verwalten            | Personen anlegen, einladen, Familien verknüpfen, Jugendsprecher festlegen, Untergruppen pflegen |
+| Threads erstellen               | Threads anlegen, Module hinzufügen, eigene Threads bearbeiten                                   |
+| Alle Threads bearbeiten         | fremde Threads ändern, archivieren, Modus umstellen, Kommentare löschen                         |
+| Globale Dokumente verwalten     | Dokumente hochladen, ersetzen, Kategorien pflegen                                               |
+| Antworten im Detail sehen       | sehen, wer was geantwortet hat; ohne dieses Recht nur Summen                                    |
+| Jugendleiter & Rechte verwalten | weitere Jugendleiter anlegen und Rechte vergeben                                                |
+| Vereinseinstellungen            | Name, Logo, Farben, Kontaktdaten des Vereins                                                    |
 
 Rollen-Vorlagen:
 
@@ -125,7 +156,7 @@ Feste Regeln:
 
 ### 5.1 Zwei Oberflächen
 
-- **Mitglieder-Hülle**, optimiert fürs Handy, mit unterer Leiste: **Start · Threads · Termine · Medien · Mehr**. Unter „Mehr" liegen globale Dokumente, Profil, die eigenen Kinder, offline gespeicherte Dokumente und Benachrichtigungseinstellungen.
+- **Mitglieder-Hülle**, optimiert fürs Handy, mit unterer Leiste: **Start · Threads · Termine · Medien · Mehr**. Unter „Mehr" liegen globale Dokumente, Profil, **„Meine Jungfischer"** (die zugeordneten Kinder; nicht „Meine Kinder", weil auch Großeltern Bezugspersonen sind), offline gespeicherte Dokumente und Benachrichtigungseinstellungen.
 - **Verwaltungs-Hülle** unter `/<slug>/verwaltung`, optimiert für den Desktop, mit Seitenleiste: Mitglieder, Untergruppen, Jugendleiter und Rechte, Threads, globale Dokumente, Vereinseinstellungen.
 
 Module im Thread anlegen und bearbeiten geht auch am Handy, ist aber auf den Desktop ausgelegt. Der **Thread-Editor** zeigt links das Formular (Titel, Zielgruppe, Modus, „Mitglieder benachrichtigen", sortierbare Modulliste) und rechts eine **Live-Vorschau am Handy**, in der das gerade bearbeitete Modul markiert ist. Verworfen: Bearbeiten in einer breiten Thread-Ansicht mit Seitenleiste — Jugendleiter arbeiten am Desktop, gelesen wird am Handy, und die Vorschau zeigt sofort, ob ein Modul dort verständlich ist.
@@ -141,7 +172,7 @@ Module im Thread anlegen und bearbeiten geht auch am Handy, ist aber auf den Des
 
 Von oben nach unten:
 
-1. **Braucht deine Antwort**: offene Umfragen, Helferlisten und Kosten mit Frist. Bei Eltern pro Kind („Lena: Bowling noch offen").
+1. **Braucht deine Antwort**: offene Umfragen, Helferlisten und Kosten mit Frist. Bei Bezugspersonen pro Kind („Lena: Bowling noch offen"), ohne Rollenwort.
 2. **Als Nächstes**: die nächsten Termine mit Ort und Uhrzeit.
 3. **Neu seit deinem letzten Besuch**: neue Threads, Änderungen, Kommentare, kurz zusammengefasst.
 
@@ -151,7 +182,7 @@ Die genaue Gestaltung wird im klickbaren Entwurf (Teilprojekt 1) ausgearbeitet.
 
 - Thread-Liste: angepinnte Threads oben, dann aktive nach letzter Aktivität.
 - **Termine** zeigt alle Termine aus Termin-Modulen als **Kalenderansicht**.
-- Ein Thread mit Termin wird **eine Woche nach seinem letzten Termin** automatisch archiviert. Jugendleiter können manuell archivieren und wiederherstellen. Archivierte Threads bleiben les- und durchsuchbar.
+- Ein Thread mit Termin wird **eine Woche nach dem letzten Tag seines letzten Termins** automatisch archiviert. Jugendleiter können manuell archivieren und wiederherstellen. Archivierte Threads bleiben les- und durchsuchbar.
 
 ### 5.4 URL-Schema
 
@@ -192,52 +223,53 @@ Der Modus ist jederzeit änderbar, etwa von „Offener Chat" auf „Nur Aushang"
 
 ### 6.2 Sichtbarkeit (Zielgruppe)
 
-Die Zielgruppe gilt für den **ganzen Thread**; Module haben keine eigene Sichtbarkeit. Wer eine Eltern-Helferliste zu einem Kinder-Thread braucht, legt einen zweiten Thread an.
+Die Zielgruppe gilt für den **ganzen Thread**; Module haben keine eigene Sichtbarkeit. Wer eine Helferliste für die Familien zu einem Kinder-Thread braucht, legt einen zweiten Thread an.
 
 Die Zielgruppe besteht aus zwei Teilen:
 
 1. **Untergruppen**: „Alle" oder eine Auswahl.
 2. **Rollenfilter**:
-   - **Jungfischer + Eltern** (Vorgabe): die Jungfischer der gewählten Untergruppen und deren Eltern.
-   - **Nur Eltern**: die Eltern der Jungfischer der gewählten Untergruppen.
+   - **Jungfischer + Familie** (Vorgabe): die Jungfischer der gewählten Untergruppen und deren Bezugspersonen.
+   - **Nur Familie**: die Bezugspersonen der Jungfischer der gewählten Untergruppen.
    - **Nur Jugendleiter**: interne Orga.
+   - **Jugendleiter + Jugendsprecher**: alle Jugendleiter und die Jungfischer, die gerade Jugendsprecher sind (3.5). Die Untergruppen werden hier ignoriert, weil Jugendsprecher für die ganze Gruppe sprechen.
 
-Feste Regeln: Eltern sehen alles, was ihre Kinder sehen. Jugendleiter sehen alle Threads.
+Feste Regeln: Bezugspersonen sehen alles, was ihre Kinder sehen, **außer Threads mit dem Rollenfilter „Jugendleiter + Jugendsprecher"**. Jugendleiter sehen alle Threads.
 
 ### 6.3 Antwort-Einheiten
 
 Jedes Modul, auf das man antwortet (Umfrage, Helferliste, Fahrgemeinschaft), hat eine Antwort-Einheit. Das Kosten-Modul gilt immer pro Jungfischer und hat einen eigenen Status-Ablauf (6.4.2).
 
-| Antwort-Einheit | Beispiel                  | Wer antwortet                                                       |
-| --------------- | ------------------------- | ------------------------------------------------------------------- |
-| Pro Jungfischer | „Kommst du zum Bowling?"  | der Jungfischer selbst **oder** seine Eltern; eine Antwort pro Kind |
-| Pro Erwachsenem | „Wer bringt Kuchen?"      | jeder Elternteil und Jugendleiter für sich                          |
-| Pro Person      | „Welche Pizza wollt ihr?" | jeder mit Zugang, Kinder und Erwachsene                             |
+| Antwort-Einheit | Beispiel                  | Wer antwortet                                                        |
+| --------------- | ------------------------- | -------------------------------------------------------------------- |
+| Pro Jungfischer | „Kommst du zum Bowling?"  | der Jungfischer selbst **oder** seine Familie; eine Antwort pro Kind |
+| Pro Erwachsenem | „Wer bringt Kuchen?"      | jede Bezugsperson und jeder Jugendleiter für sich                    |
+| Pro Person      | „Welche Pizza wollt ihr?" | jeder mit Zugang, Kinder und Erwachsene                              |
 
 Eine Antwort-Einheit „pro Familie" ist ausdrücklich nicht vorgesehen.
 
-Bei „pro Jungfischer" speichert jede Antwort, **für wen** und **von wem** sie abgegeben wurde. Es gilt die zuletzt abgegebene Antwort; angezeigt wird, wer sie eingetragen hat („eingetragen von Mama"). Ein Elternteil mit zwei Kindern sieht eine Zeile pro Kind.
+Bei „pro Jungfischer" speichert jede Antwort, **für wen** und **von wem** sie abgegeben wurde. Es gilt die zuletzt abgegebene Antwort; angezeigt wird, wer sie eingetragen hat, als Beziehung und Vorname („eingetragen von Opa Hans"). Eine Bezugsperson mit zwei Kindern sieht eine Zeile pro Kind. In Threads mit „Jugendleiter + Jugendsprecher" antworten Jugendsprecher selbst, weil ihre Familie den Thread nicht sieht.
 
 ### 6.4 Kernmodule
 
 Alle acht gehören zu Version 1:
 
-| Modul                   | Zweck                                                                                                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Info-Text               | Formatierter Text                                                                                                                                       |
-| Termin                  | Datum, Uhrzeit, Ende, Ort mit Karten-Link, Treffpunkt. Speist Kalender, Dashboard und Archiv-Regel.                                                     |
-| Umfrage                 | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter |
-| Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht.                        |
-| Fahrgemeinschaft        | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1)                                   |
-| Kosten                  | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2)                                                                       |
-| Dateien                 | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter.                                                                                 |
-| Fotos                   | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen.                                                      |
+| Modul                   | Zweck                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Info-Text               | Formatierter Text                                                                                                                                                   |
+| Termin                  | Startdatum, optional Enddatum, Beginn- und Endezeit (6.4.3); Ort mit Karten-Link, Treffpunkt; „In Kalender eintragen". Speist Kalender, Dashboard und Archiv-Regel. |
+| Umfrage                 | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter             |
+| Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht.                                    |
+| Fahrgemeinschaft        | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1)                                               |
+| Kosten                  | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2)                                                                                   |
+| Dateien                 | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter.                                                                                             |
+| Fotos                   | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen.                                                                  |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Fangbuch/Ergebnisse, Wettbewerbe.
 
 #### 6.4.1 Fahrgemeinschaft
 
-- **Selbstbedienung, Jugendleiter können umsetzen.** Erwachsene bieten ein Auto an (Plätze, Abfahrtszeit, Abfahrtsort). Eltern setzen ihre Kinder in ein Auto, Jungfischer mit Zugang sich selbst. Jugendleiter verschieben Kinder zwischen Autos und ändern Plätze, etwa wenn ein Auto ausfällt. Verworfen: reine Zuteilung durch den Jugendleiter (Arbeit für ihn, Wartezeit für alle).
+- **Selbstbedienung, Jugendleiter können umsetzen.** Erwachsene bieten ein Auto an (Plätze, Abfahrtszeit, Abfahrtsort). Bezugspersonen setzen ihre Kinder in ein Auto, Jungfischer mit Zugang sich selbst. Jugendleiter verschieben Kinder zwischen Autos und ändern Plätze, etwa wenn ein Auto ausfällt. Verworfen: reine Zuteilung durch den Jugendleiter (Arbeit für ihn, Wartezeit für alle).
 - **Hin- und Rückfahrt sind getrennt**; ein Fahrer kann für beide anbieten.
 - Die Liste **„Braucht noch Mitfahrt"** zeigt Kinder ohne Platz — bei einem Thread mit Teilnahme-Umfrage nur die mit Zusage.
 - Wer ein Kind in ein Auto setzt, sieht nur Vornamen; Telefonnummern werden nicht gezeigt. Abstimmung läuft über den Verlauf.
@@ -245,12 +277,20 @@ Später: Packliste/Checkliste, digitale Einverständniserklärung, Fangbuch/Erge
 #### 6.4.2 Kosten
 
 - Betrag pro Kind, freier Hinweis zur Bezahlung, optional Bankverbindung oder PayPal-Link. Ein Kopier-Knopf liefert den Verwendungszweck („Bowling 10.10. – Lena Huber").
-- Status pro Kind: **offen → gemeldet → bezahlt**. Eltern tippen „Habe bezahlt" (gemeldet), ein Jugendleiter bestätigt (bezahlt). Jugendleiter können auch direkt auf „bezahlt" setzen, etwa bei Barzahlung.
+- Status pro Kind: **offen → gemeldet → bezahlt**. Bezugspersonen tippen „Habe bezahlt" (gemeldet), ein Jugendleiter bestätigt (bezahlt). Jugendleiter können auch direkt auf „bezahlt" setzen, etwa bei Barzahlung.
 - **Zahlungspflichtig** sind bei einem Thread mit Teilnahme-Umfrage die Kinder mit Zusage, sonst die ganze Zielgruppe.
-- Eltern sehen nur ihre eigenen Kinder; die Liste aller Kinder sieht nur, wer „Antworten im Detail sehen" hat.
+- Bezugspersonen sehen nur ihre eigenen Kinder; die Liste aller Kinder sieht nur, wer „Antworten im Detail sehen" hat.
 - Nicht vorgesehen: Anzahlungen, Teilbeträge, Erstattungen, Kassen-Export.
 
 Die Kosten zählen in „Braucht deine Antwort" (5.2), solange ein Kind auf „offen" steht.
+
+#### 6.4.3 Termine und Kalender
+
+- **Form**: Pflicht ist das Startdatum; optional sind Enddatum (mehrtägig), Beginnzeit und Endezeit. Alle Zeiten gelten in der Zeitzone des Vereins (Europe/Berlin). Anzeige: „Sa 17.10. · ganztägig", „Sa 17.10. · 14:00–17:00", „Fr 23.10. – So 25.10.", „Fr 23.10. 17:00 – So 25.10. 12:00". Ungültig: Enddatum vor Startdatum; am selben Tag Endezeit vor Beginnzeit. Verworfen: Uhrzeit als Pflicht (keine ganztägigen Termine) und Mehrtägiges als mehrere Termin-Module (kein zusammenhängender Kalendereintrag).
+- **Regeln**: Archivierung ab dem letzten Tag (5.3); „Als Nächstes" zeigt einen laufenden mehrtägigen Termin bis zu seinem Ende; sortiert wird nach Startdatum, dann Beginnzeit, ganztägige zuerst; die Termin-Erinnerung kommt am Vortag des Startdatums.
+- **Kalendereintrag**: ohne Beginnzeit ganztägig über alle Tage (eine Endezeit steht in der Beschreibung); mit Beginn, ohne Ende eintägig eine Stunde lang mit „Ende offen", mehrtägig bis zum Ende des letzten Tages. Titel ist der Thread-Titel plus Modultitel, Ort der Ort, die Beschreibung enthält Treffpunkt und Link zum Termin in der App. **Keine Personennamen.**
+- **„In Kalender eintragen"** am Termin-Modul klappt zwei Wege auf: **„Kalender des Telefons"** lädt eine im Browser erzeugte .ics-Datei (feste UID pro Termin-Modul), **„Google Kalender"** öffnet die Template-URL von Google Kalender, auf Android meist direkt in der Kalender-App, die dort keine .ics-Dateien importiert. Verworfen: nur .ics (Sackgasse auf Android mit Google-Kalender) und Geräteerkennung (falsch bei Android mit Samsung-Kalender oder iPhone mit Google-Kalender). Beim Google-Weg gehen Titel, Zeit, Ort und Beschreibung an Google, nur durch eigenes Antippen und in den eigenen Kalender.
+- **Kalender-Abo** (Teilprojekt 5): persönliche webcal-Adresse, freiwillig und abschaltbar, neu erzeugbar (die alte wird ungültig), nur mit Terminen aus sichtbaren Threads und ohne Personennamen.
 
 ### 6.5 Medienbereich und globale Dokumente
 
@@ -259,7 +299,7 @@ Die Kosten zählen in „Braucht deine Antwort" (5.2), solange ein Kind auf „o
 
 ### 6.6 Foto-Einwilligung
 
-Jeder Jungfischer hat im Profil eine Foto-Einwilligung, die die Eltern pflegen und die mit Zeitpunkt gespeichert wird. Jugendleiter sehen sie als Warnhinweis. Die App erkennt keine Gesichter; die Einwilligung ist eine sichtbare Erinnerung, kein Filter.
+Jeder Jungfischer hat im Profil eine Foto-Einwilligung, die die Erziehungsberechtigten pflegen und die mit Zeitpunkt gespeichert wird. Jugendleiter sehen sie als Warnhinweis. Die App erkennt keine Gesichter; die Einwilligung ist eine sichtbare Erinnerung, kein Filter.
 
 ### 6.7 Teilen nach WhatsApp
 
@@ -332,9 +372,9 @@ libs/
 Die genauen Felder legt Teilprojekt 2 fest. Konzeptuell:
 
 - `Verein` (Slug, Name, Logo, Farben, Kontakt, Status, Gruppenname)
-- `Person` (Verein, Art Jungfischer/Erwachsener, Name, Foto-Einwilligung, Rechte)
+- `Person` (Verein, Art Jungfischer/Erwachsener, Name, Foto-Einwilligung, Jugendsprecher, Rechte)
 - `Zugang` (Person, E-Mail, Passwort-Hash, TOTP, Passkeys) — optional pro Person
-- `Elternschaft` (Erwachsener ↔ Jungfischer)
+- `Bezugsperson` (Erwachsener ↔ Jungfischer, Beziehung, erziehungsberechtigt)
 - `Untergruppe`, `UntergruppeMitglied`
 - `Einladung` (Person, Token-Hash, Ablauf, eingelöst)
 - `Thread` (Verein, Titel, Zielgruppe, Modus, angepinnt, archiviert)
@@ -402,7 +442,7 @@ Jede Anfrage an `/<slug>/api/v1/…`:
 
 ### 8.4 DSGVO
 
-- **Einwilligungen** werden mit Zeitpunkt gespeichert: die Einwilligung der Eltern für ihr Kind (Art. 8 DSGVO) beim Annehmen der Einladung, die Foto-Einwilligung im Profil des Kindes.
+- **Einwilligungen** werden mit Zeitpunkt gespeichert: die Einwilligung eines Erziehungsberechtigten für sein Kind (Art. 8 DSGVO) beim Annehmen der Einladung, die Foto-Einwilligung im Profil des Kindes.
 - **Person entfernen**: Antworten und Kommentare bleiben erhalten, damit Listen und Verläufe stimmen, und erscheinen als „ehemaliges Mitglied". Zugang, Profil, Push-Anmeldungen und Sessions werden gelöscht.
 - **Auskunft**: Export „Meine Daten" als JSON pro Person.
 - **Logs** enthalten keine Inhalte, nur technische Daten.
@@ -452,7 +492,7 @@ Offline möglich: Antworten auf Umfragen, Eintragen in Helferlisten und Fahrgeme
 | ------------------------------ | ---------------------------------------------------------------------------------------- |
 | Neuer Thread                   | Zielgruppe                                                                               |
 | Wichtige Änderung              | Zielgruppe, nur wenn der Jugendleiter beim Speichern „Mitglieder benachrichtigen" anhakt |
-| Frist läuft ab (2 Tage vorher) | wer noch nicht geantwortet hat; bei „pro Jungfischer" das Kind und seine Eltern          |
+| Frist läuft ab (2 Tage vorher) | wer noch nicht geantwortet hat; bei „pro Jungfischer" das Kind und seine Familie         |
 | Termin am nächsten Tag         | Zielgruppe des Threads (Eingrenzung auf Zusagende: siehe 15)                             |
 | Kommentare und Chat            | je nach Glocke des Threads                                                               |
 
@@ -465,7 +505,7 @@ Offline möglich: Antworten auf Umfragen, Eintragen in Helferlisten und Fahrgeme
 
 - Hat ein Zugang kein funktionierendes Push, landen seine Benachrichtigungen in der `MailWarteschlange`. Sie wird **höchstens stündlich** als eine Sammelmail mit Links in die Threads verschickt.
 - Fällt SMTP aus, bleibt die Warteschlange stehen und wird später abgearbeitet. Die Verwaltung zeigt einen Hinweis.
-- Jungfischer ohne E-Mail und ohne Push erhalten direkt nichts. Was ihre Teilnahme betrifft, geht ohnehin an die Eltern.
+- Jungfischer ohne E-Mail und ohne Push erhalten direkt nichts. Was ihre Teilnahme betrifft, geht ohnehin an die Familie.
 
 ### 9.6 Zeitgesteuerte Aufgaben
 
@@ -500,15 +540,15 @@ Täglich Datenbank-Dump **und** Upload-Volume per restic in ein zweites Hetzner-
 
 Jedes Teilprojekt bekommt eine eigene Spezifikation, einen eigenen Plan und eine eigene Umsetzung, in dieser Reihenfolge:
 
-| #   | Teilprojekt                    | Inhalt                                                                                                                                                             | Ergebnis                                             |
-| --- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| 1   | Klickbarer Entwurf             | Nx-Grundgerüst; `apps/entwurf` mit Beispieldaten im Speicher, ohne Backend (12)                                                                                    | Durchklickbarer Entwurf auf der Testdomain           |
-| 2   | Fundament                      | Server, Datenbank, Mandanten, Plattform-Admin, Personen, Elternschaft, Untergruppen, Einladung und Anmeldung, Rechte, beide Hüllen, Docker, Deploy, Sicherung      | Einladen, anmelden, Mitglieder pflegen               |
-| 3   | Thread-Kern                    | Threads, Zielgruppen, Modi, Verlauf; Module Info-Text, Termin, Umfrage; Dashboard, Thread-Liste, Kalender; Änderungszähler und WebSocket; Teilen und Link-Vorschau | Bowling-Szenario ohne Fahrgemeinschaft durchspielbar |
-| 4   | Weitere Module und Medien      | Helferliste, Fahrgemeinschaft, Kosten, Dateien, Fotos mit Upload-Verarbeitung; Medienbereich; globale Dokumente                                                    | Alle acht Kernmodule                                 |
-| 5   | Offline und Benachrichtigungen | Lokaler Speicher, Outbox, Dokumente offline; Push, E-Mail-Ersatz, Erinnerungen, Archivierung                                                                       | Bereit für den Pilotbetrieb                          |
-| 6   | Live-Gang                      | Eigene VM, `jufi-app.de`, Rechtstexte, AV-Vertrag, Umzug                                                                                                           | Offen für weitere Vereine                            |
-| 7   | Abrechnung                     | Tarife, Testzeitraum, Rechnungen, Sperre bei Nichtzahlung (16)                                                                                                     | Vereine zahlen für die Nutzung                       |
+| #   | Teilprojekt                    | Inhalt                                                                                                                                                                                                                | Ergebnis                                             |
+| --- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 1   | Klickbarer Entwurf             | Nx-Grundgerüst; `apps/entwurf` mit Beispieldaten im Speicher, ohne Backend (12)                                                                                                                                       | Durchklickbarer Entwurf auf der Testdomain           |
+| 2   | Fundament                      | Server, Datenbank, Mandanten, Plattform-Admin, Personen, Bezugspersonen, Jugendsprecher, Untergruppen, Einladung und Anmeldung, Rechte, beide Hüllen, Docker, Deploy, Sicherung                                       | Einladen, anmelden, Mitglieder pflegen               |
+| 3   | Thread-Kern                    | Threads, Zielgruppen, Modi, Verlauf; Module Info-Text, Termin, Umfrage; Dashboard, Thread-Liste, Kalender, „In Kalender eintragen", Jugendsprecher-Austausch; Änderungszähler und WebSocket; Teilen und Link-Vorschau | Bowling-Szenario ohne Fahrgemeinschaft durchspielbar |
+| 4   | Weitere Module und Medien      | Helferliste, Fahrgemeinschaft, Kosten, Dateien, Fotos mit Upload-Verarbeitung; Medienbereich; globale Dokumente                                                                                                       | Alle acht Kernmodule                                 |
+| 5   | Offline und Benachrichtigungen | Lokaler Speicher, Outbox, Dokumente offline; Push, E-Mail-Ersatz, Erinnerungen, Archivierung, Kalender-Abo                                                                                                            | Bereit für den Pilotbetrieb                          |
+| 6   | Live-Gang                      | Eigene VM, `jufi-app.de`, Rechtstexte, AV-Vertrag, Umzug                                                                                                                                                              | Offen für weitere Vereine                            |
+| 7   | Abrechnung                     | Tarife, Testzeitraum, Rechnungen, Sperre bei Nichtzahlung (16)                                                                                                                                                        | Vereine zahlen für die Nutzung                       |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Capacitor-Apps.
 
@@ -530,7 +570,7 @@ Ziel ist, vor dem ersten Datenmodell zu prüfen, ob das Konzept für Eltern, Jun
 - **`libs/domain` testgetrieben mit Vitest**: Rechte, Sichtbarkeit, Antwort-Einheiten, Fristen, Archiv-Regel. Das sind reine Funktionen und die häufigste Fehlerquelle.
 - **API-Tests gegen eine Wegwerf-Postgres** (eigener Container, Port 5433).
 - **Systematischer Mandanten-Test**: Für jede Route wird mit IDs aus einem fremden Verein und mit unsichtbaren Threads zugegriffen. Erwartet wird immer 404.
-- **Wenige Ende-zu-Ende-Abläufe im Browser**: Einladung annehmen; Elternteil beantwortet eine Umfrage für zwei Kinder; offline antworten und später senden.
+- **Wenige Ende-zu-Ende-Abläufe im Browser**: Einladung annehmen; Bezugsperson beantwortet eine Umfrage für zwei Kinder; offline antworten und später senden.
 - Geprüft wird ausschließlich mit erfundenen Daten.
 
 ---
