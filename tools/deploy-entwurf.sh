@@ -122,11 +122,13 @@ grep -qi '^location: /entwurf/' <<<"$KOPF" || fail "/ leitet nicht relativ auf /
 KOPF="$(curl -fsS -o /dev/null -D - "$BASIS/entwurf/")"
 grep -qi '^cache-control: no-cache' <<<"$KOPF" || fail 'index.html ohne Cache-Control: no-cache.'
 grep -qi '^x-content-type-options: nosniff' <<<"$KOPF" || fail 'Header X-Content-Type-Options fehlt.'
+grep -qi "^content-security-policy: .*frame-ancestors 'none'" <<<"$KOPF" || fail 'Content-Security-Policy fehlt.'
+grep -qi '^x-frame-options: deny' <<<"$KOPF" || fail 'Header X-Frame-Options fehlt.'
 MAIN="$(curl -fsS "$BASIS/entwurf/" | grep -oE 'main-[A-Z0-9]{8}\.js' | head -1)"
 [[ -n "$MAIN" ]] || fail 'Kein main-<hash>.js in der index.html gefunden.'
 curl -fsS -o /dev/null -D - "$BASIS/entwurf/$MAIN" | grep -qi '^cache-control: .*immutable' \
 	|| fail "$MAIN wird nicht dauerhaft gecacht."
-note "/ → /entwurf/, tiefe Links → index.html, Cache-Header und nosniff stimmen"
+note "/ → /entwurf/, tiefe Links → index.html, Cache- und Sicherheits-Header stimmen"
 docker rm -f "$SMOKE" >/dev/null
 trap - EXIT INT TERM
 
@@ -148,13 +150,22 @@ remote "cd $REMOTE_DIR && JUFI_ENTWURF_TAG=$SHA docker compose -f $REMOTE_COMPOS
 
 # --- Tor 6: Nachpruefen ------------------------------------------------------
 step 'Tor 6: Nachpruefen'
+# Ein 200 allein beweist nichts: bis Traefik den neuen Container aufnimmt,
+# antwortet noch der alte. Erst wenn die index.html das eben gebaute
+# main-<hash>.js nennt, laeuft der neue Stand.
 OK=0
+LIVE=''
 for _ in $(seq 1 20); do
-	curl -fsS -o /dev/null "$APP_URL/entwurf/" 2>/dev/null && { OK=1; break; }
+	LIVE="$(curl -fsS "$APP_URL/entwurf/" 2>/dev/null | grep -oE 'main-[A-Z0-9]{8}\.js' | head -1 || true)"
+	[[ "$LIVE" == "$MAIN" ]] && { OK=1; break; }
 	sleep 3
 done
 if [[ "$OK" -eq 1 ]]; then
-	note "$APP_URL/entwurf/: 200"
+	note "$APP_URL/entwurf/ liefert $MAIN"
+elif [[ -n "$LIVE" ]]; then
+	warn "$APP_URL/entwurf/ liefert noch $LIVE statt $MAIN."
+	note "  ssh: cd $REMOTE_DIR && docker compose -f $REMOTE_COMPOSE ps $SERVICE"
+	exit 1
 else
 	warn "$APP_URL/entwurf/ ist von aussen nicht erreichbar."
 	note 'Fehlt der DNS-Eintrag, der Block in der Compose-Datei oder das Zertifikat?'

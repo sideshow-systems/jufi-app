@@ -9,6 +9,7 @@ import type { Id } from './typen';
  */
 export type Testereignis =
 	| { art: 'dokumentGeoeffnet'; id: Id }
+	/** Erst beim Schliessen der Grossansicht gemeldet (siehe FotosBauteil). */
 	| { art: 'fotoGeoeffnet'; threadId: Id; fotoId: Id }
 	| { art: 'geteilt'; threadId: Id }
 	| { art: 'einladungErzeugt'; personId: Id };

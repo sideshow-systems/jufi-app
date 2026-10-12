@@ -52,7 +52,7 @@ Alle Abwägungen, die bei der Umsetzung des Plans [2026-10-11-jufi-tp1-entwurf.m
 - Task 17: Ruling: Testmodus-Knopf setzt --knopf-platz, Mitglieder-main rechnet ihn in den unteren Abstand — sonst blieb die letzte Karte auf Start unter dem Knopf; Test knopf.spec RED->GREEN — kostet bei Fehler: 56 px mehr Leerraum unten im Testmodus.
 - Task 17: Ruling: .knopf.klein global von 36 auf 44 px (var(--tippflaeche)) und ul.liste a in der Verwaltung mit 44 px — Spec verlangt 44 px Tippflaechen; reines CSS, Nachweis per Browser-Messung statt Unit-Test (jsdom misst keine Layouts) — kostet bei Fehler: etwas hoehere kleine Knoepfe.
 - Task 17: Ruling: echter Versand an die echte Nummer bleibt offen bis zum Deploy durch den Eigentuemer (Brief Step 4) — kostet bei Fehler: nichts.
-- Final: Ruling: T13 "Pruefregel greift auch, wenn beim Anzeigen schon erfuellt" bleibt — Reviewer schlaegt eigenes Ergebnis "schon erledigt" vor; Testpersonen spielen meist eine Person pro Durchgang, und 0:00-Dauer macht den Fall im Text erkennbar — kostet bei Fehler: einzelne irrefuehrende Haken in Rueckmeldungen.
+- Final: Ruling: T13 "Pruefregel greift auch, wenn beim Anzeigen schon erfuellt" bleibt — Reviewer schlaegt eigenes Ergebnis "schon erledigt" vor; Testpersonen spielen meist eine Person pro Durchgang, und 0:00-Dauer macht den Fall im Text erkennbar — kostet bei Fehler: einzelne irrefuehrende Haken in Rueckmeldungen. _Am 2026-10-12 aufgehoben, siehe unten._
 
 ## Final Review
 
@@ -60,20 +60,22 @@ Alle Abwägungen, die bei der Umsetzung des Plans [2026-10-11-jufi-tp1-entwurf.m
 - Final: fixed Wunschfeld frisst Leerzeichen beim Tippen (trim im Store bei [value]-Binding) — testmodus.spec "speichert den Wunsch so, wie er getippt wird" + rueckmeldung.spec "kuerzt den Wunsch erst im Text" RED->GREEN, suite 179/179
 - Final: fixed Deep-Link-Besucher ohne Personenwahl sahen echt wirkende Zahlungsaufforderung ohne Entwurfshinweis; PayPal-Kennung wirkte echt — band.spec (2 Tests) + Beispieldaten-Test RED->GREEN, suite 179/179
 
-## Zurückgestellte Kleinigkeiten
+## Zurückgestellte Kleinigkeiten (erledigt am 2026-10-12)
 
-- "Mehr" bietet "Zugang fuer Lena erzeugen" an, obwohl daneben "Hat eigenen Zugang" steht — besser "Neuen Zugang erzeugen".
-- Geschafft-Dialog fuer "Fotos Hegefischen" erscheint ueber der offenen Foto-Grossansicht; nach "Weiter" muss man die Grossansicht noch selbst schliessen.
-- Verlauf sortiert nach eingefrorenem Datum + echter Uhrzeit; Nachrichten an spaeteren Tagen koennen ueber aelteren eigenen landen.
-- Schon erfuellte Aufgaben als eigenes Ergebnis "schon erledigt" statt Geschafft-Dialog mit Smiley.
-- Editor: eigene Umfrage-Optionen werden nach Position neu nummeriert (vorhandene Antworten wandern); Wechsel auf "eigene" setzt teilnahme still auf false.
-- Editor: letzte Untergruppe abwaehlen macht den Thread fuer alle sichtbar statt Speichern zu sperren.
-- Einladungslink der Verwaltung zeigt auf https://jufi-app.de/...; Kind-Einladung in mehr.ts kodiert den Vornamen nicht.
-- Thomas kann sich selbst alle Rechte entziehen und kommt dann nur per "Entwurf zuruecksetzen" zurueck.
-- Voller localStorage beim Start liest gespeicherten Stand gar nicht erst.
-- HEALTHCHECK ohne --start-period/--start-interval: nach jedem Deploy ca. 30 s 404 hinter Traefik.
-- Deploy-Tor 6 prueft nur HTTP 200, nicht den ausgelieferten main-<hash>.js.
-- Hell/Dunkel-Wahl fehlt in den Verwaltungs-Einstellungen; Thema liegt unter eigenem Schluessel jufi-entwurf:thema.
-- "Neu seit deinem letzten Besuch" zaehlt eigene Aktionen mit.
-- WhatsApp-Formatzeichen (* _ ~) in Titeln/Notizen werden als Formatierung dargestellt; iPadOS meldet sich als "Mac"; Aufgabendauer ist Wanduhrzeit (ueber Nacht offen -> riesige Werte).
-- nginx ohne CSP und frame-ancestors/X-Frame-Options.
+Alle 15 Punkte behoben, je mit Test, der vorher rot war (Ausnahmen: reine Auslieferung, siehe dort). Suite danach 204/204.
+
+- "Mehr": Kind mit Zugang bekommt "Neuen Zugang erzeugen" — mehr.spec.
+- Foto-Grossansicht: `fotoGeoeffnet` wird erst beim Schliessen (oder Verlassen der Seite) gemeldet; der Geschafft-Dialog erscheint danach. Ruling: Meldung verschoben statt Grossansicht beim Testmodus-Dialog zu schliessen — haelt das Modul frei vom Testmodus und nimmt der Testperson das Foto nicht mitten im Ansehen weg — kostet bei Fehler: Lena 3 gilt erst nach dem Schliessen als geschafft. fotos.spec.
+- Verlauf in Ablagefolge statt nach Zeit; ein Test sichert, dass die Beispieldaten zeitlich geordnet abgelegt sind — thread.spec, beispieldaten.spec.
+- Neues Ergebnis `schonErledigt` (☑️ schon erledigt, ohne Smiley und Dauer): beim Anzeigen schon erfuellte Aufgaben werden beim Personenwechsel, Aufgabenstart und Weitergehen abgehakt. Ruling: hebt T13 auf — der Geschafft-Dialog fragte nach einer Leistung, die die Testperson nicht erbracht hat. Die Rueckmeldung oeffnet sich dabei nur, wenn das Abhaken die letzte Aufgabe erledigt — kostet bei Fehler: nichts. testmodus.spec, rueckmeldung.spec.
+- Editor: eigene Antworten behalten ihre Kennung bei unveraendertem Text (neue bekommen die naechste freie); bei eigenen Antworten ist "Ist Teilnahme-Umfrage" gesperrt, mit Begruendung darunter. Ruling: sperren statt Rueckfrage — Fahrgemeinschaft und Kosten erkennen Teilnahme an der Option "ja", eigene Antworten koennen sie nie tragen — kostet bei Fehler: nichts. editor.spec.
+- Editor: leere Zielgruppe bleibt leer, Hinweis im Feld, Speichern verweigert mit Meldung. Ruling: gilt auch fuer "Alle" abwaehlen, das schon vorher [] setzte und damit einen fuer niemanden sichtbaren Thread speicherte. editor.spec.
+- Einladungslinks: `einladungsLink(basisUrl, slug, kennung)` in regeln/teilen.ts, Verwaltung und "Mehr" zeigen auf `<origin>/entwurf/<slug>?einladung=…`, Kennung kodiert — teilen.spec, editor.spec, mehr.spec.
+- Rechte: die eigenen Rechte aendert nur eine andere Person (Haekchen und Vorlage gesperrt, Hinweis; der Store verweigert es ebenfalls). Ruling: Sperre statt Rueckfrage — Thomas braucht "Alle Threads" und "Antworten im Detail" fuer seine Aufgaben, und eine Rueckfrage haelt nicht auf, wer nicht weiss, wofuer ein Recht gebraucht wird — kostet bei Fehler: Thomas kann an sich selbst nichts ausprobieren. Der Test "schuetzt das letzte Recht" laeuft jetzt als Katrin. editor.spec.
+- Speicher: `browserAblage` prueft nur lesend; Schreibfehler faengt `speichern` ab — speicher.spec.
+- HEALTHCHECK mit `--start-period=10s --start-interval=1s` (Server: Docker 28, kann das).
+- Deploy-Tor 6 wartet, bis die ausgelieferte index.html das eben gebaute `main-<hash>.js` nennt.
+- Hell/Dunkel/System als Bauteil `jf-thema-wahl`, unter "Mehr" und in den Verwaltungs-Einstellungen — editor.spec. Ruling: das Thema bleibt unter eigenem Schluessel `jufi-entwurf:thema` (Abweichung von Spec 5.6) — die Darstellung ist eine Vorliebe des Geraets; "Entwurf zuruecksetzen" und eine neue Entwurfsversion sollen niemanden ins grelle Hell zurueckwerfen — kostet bei Fehler: ein zweiter Schluessel im localStorage.
+- "Neu seit deinem letzten Besuch" und die Neu-Markierung der Threadliste zaehlen nur fremde Aktivitaet (`istNeu`, Thread merkt sich `letzteAktivitaetVon`). Ruling: hat die Person zuletzt selbst gehandelt, zaehlt nur noch fremder Verlauf; fremde Antworten davor gehen unter — sie war in dem Moment im Thread — kostet bei Fehler: selten eine verpasste Neu-Markierung. termine.spec, store.spec.
+- WhatsApp-Formatzeichen werden in geteilten Titeln, Umfrage- und Fahrzeilen und in zitierten Notizen durch gleich aussehende Zeichen ersetzt (`ohneFormat`); iPad wird ueber `navigator.maxTouchPoints` erkannt; Dauer auf 30 Minuten gedeckelt, im Text "über 30 Min". Ruling: Deckel statt nur sichtbare Zeit zu zaehlen — wer laenger als 30 Minuten braucht, kam ohnehin nicht weiter — kostet bei Fehler: keine genaue Dauer jenseits 30 Minuten. teilen.spec, rueckmeldung.spec, testmodus.spec.
+- nginx: CSP (`script-src 'self'`, `style-src 'self' 'unsafe-inline'`, `frame-ancestors 'none'` …) und X-Frame-Options DENY in deploy/nginx-sicherheit.conf, per include in jedem Block; Rauchtest (Tor 4) prueft beide. Ruling: kritisches CSS im Bau abgeschaltet (`inlineCritical: false`) — es laedt das Stylesheet per onload-Attribut, das die CSP sperrt; ein Hash mit 'unsafe-hashes' liesse die Seite bei falschem Hash ungestylt — kostet bei Fehler: ein render-blockierendes Stylesheet (klein). Im Browser mit denselben Headern geprueft (lokaler Server statt nginx, da Docker lokal nicht lief): Einstieg, Thread mit Fotos, Verwaltung, Mehr ohne CSP-Verstoss.

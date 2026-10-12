@@ -9,7 +9,7 @@ import { IconComponent, type IconName } from '../gestaltung/icon';
 import { MeldungService } from '../gestaltung/meldung';
 import { teileText } from '../gestaltung/teilen-aktion';
 import { rolleText } from '../gestaltung/texte';
-import { type ThemaWahl, ThemaService } from '../gestaltung/thema';
+import { ThemaWahlComponent } from '../gestaltung/thema-wahl';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
 import { istJugendleiter, kinderVon } from '../regeln/personen';
 import { siehtThread } from '../regeln/sichtbarkeit';
@@ -26,7 +26,7 @@ interface Einladung {
 /** Profil, Kinder, Benachrichtigungen, Darstellung und Hinweise (Spec TP1 4.5). */
 @Component({
 	selector: 'jf-mehr',
-	imports: [RouterLink, IconComponent, AbschnittComponent, KarteComponent],
+	imports: [RouterLink, IconComponent, AbschnittComponent, KarteComponent, ThemaWahlComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<jf-karte class="profil">
@@ -97,19 +97,7 @@ interface Einladung {
 		</jf-abschnitt>
 
 		<jf-abschnitt titel="Darstellung">
-			<div class="thema" role="group" aria-label="Darstellung">
-				@for (w of themen; track w.wert) {
-					<button
-						type="button"
-						class="knopf"
-						[class.primaer]="thema.wahl() === w.wert"
-						[attr.aria-pressed]="thema.wahl() === w.wert"
-						(click)="thema.setzeWahl(w.wert)"
-					>
-						<jf-icon [name]="w.icon" /> {{ w.text }}
-					</button>
-				}
-			</div>
+			<jf-thema-wahl />
 		</jf-abschnitt>
 
 		<jf-abschnitt titel="Offline gespeichert">
@@ -234,14 +222,6 @@ interface Einladung {
 			color: var(--text);
 			font: inherit;
 		}
-		.thema {
-			display: grid;
-			grid-template-columns: repeat(3, 1fr);
-			gap: var(--a2);
-		}
-		.thema .knopf {
-			padding: 0 var(--a2);
-		}
 		.offline {
 			display: flex;
 			align-items: center;
@@ -262,13 +242,6 @@ export class Mehr {
 	private readonly ereignisse = inject(TESTEREIGNISSE);
 	private readonly dokument = inject(DOCUMENT);
 	private readonly offline = inject(OfflineAuswahl);
-	protected readonly thema = inject(ThemaService);
-
-	protected readonly themen: { wert: ThemaWahl; text: string; icon: IconName }[] = [
-		{ wert: 'hell', text: 'Hell', icon: 'hell' },
-		{ wert: 'dunkel', text: 'Dunkel', icon: 'dunkel' },
-		{ wert: 'system', text: 'System', icon: 'system' },
-	];
 
 	protected readonly ich = this.store.person;
 	protected readonly slug = computed(() => this.store.stand().verein.slug);

@@ -3,13 +3,14 @@ import { EntwurfStore } from '../daten/store';
 import { vereinsfarben } from '../gestaltung/farben';
 import { MeldungService } from '../gestaltung/meldung';
 import { ThemaService } from '../gestaltung/thema';
+import { ThemaWahlComponent } from '../gestaltung/thema-wahl';
 import { KarteComponent } from '../gestaltung/ui';
 import { VERWALTUNG_STIL } from './ansichten';
 
 /** Vereinseinstellungen; die Farbe wirkt sofort in der ganzen App (Spec TP1 4.3). */
 @Component({
 	selector: 'jf-verwaltung-einstellungen',
-	imports: [KarteComponent],
+	imports: [KarteComponent, ThemaWahlComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<div class="titelzeile"><h1>Einstellungen</h1></div>
@@ -39,6 +40,11 @@ import { VERWALTUNG_STIL } from './ansichten';
 				Die App passt den Ton bei Bedarf etwas an, damit Text auf der Farbe und die Farbe auf weißem bzw. dunklem Grund
 				gut lesbar bleibt.
 			</p>
+		</jf-karte>
+		<jf-karte class="block">
+			<h2>Darstellung</h2>
+			<jf-thema-wahl />
+			<p class="gedaempft klein">Gilt nur auf diesem Gerät.</p>
 		</jf-karte>
 	`,
 	styles: [

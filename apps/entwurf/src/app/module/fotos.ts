@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, input, signal } from '@angular/core';
 import { TESTEREIGNISSE } from '../daten/ereignisse';
 import type { FotosModul, Id } from '../daten/typen';
 import { IconComponent } from '../gestaltung/icon';
@@ -97,13 +97,26 @@ export class FotosBauteil {
 	private readonly offen = signal<Id | null>(null);
 	protected readonly gross = computed(() => this.modul().fotos.find((f) => f.id === this.offen()));
 
-	protected oeffnen(id: Id): void {
-		this.offen.set(id);
-		this.ereignisse.next({ art: 'fotoGeoeffnet', threadId: this.threadId(), fotoId: id });
+	constructor() {
+		inject(DestroyRef).onDestroy(() => this.schliessen());
 	}
 
+	protected oeffnen(id: Id): void {
+		this.offen.set(id);
+	}
+
+	/**
+	 * Gemeldet wird beim Schliessen, nicht beim Oeffnen: sonst erschiene die
+	 * Testmodus-Bewertung ueber der Grossansicht, und nach "Weiter" stuende das
+	 * Foto noch offen da. Verworfen: die Grossansicht schliessen, sobald der
+	 * Testmodus einen Dialog oeffnet — das koppelte das Modul an den Testmodus
+	 * und naehme der Testperson das Foto mitten im Ansehen weg.
+	 */
 	protected schliessen(): void {
+		const id = this.offen();
+		if (id === null) return;
 		this.offen.set(null);
+		this.ereignisse.next({ art: 'fotoGeoeffnet', threadId: this.threadId(), fotoId: id });
 	}
 
 	protected hinzufuegen(): void {

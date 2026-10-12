@@ -4,6 +4,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { routes } from '../app.routes';
 import { P } from '../daten/beispieldaten';
 import { EntwurfStore } from '../daten/store';
+import { ThemaService } from '../gestaltung/thema';
 import { siehtThread } from '../regeln/sichtbarkeit';
 import { testProvider } from '../testhilfe';
 import { leererThread } from './editor';
@@ -117,6 +118,16 @@ describe('Verwaltung', () => {
 		const link = el.querySelector('.einladung .link')!.textContent!;
 		expect(link.startsWith(`${location.origin}/entwurf/glonntal?einladung=`)).toBe(true);
 		expect(el.querySelector('.einladung .text')!.textContent).toContain(link);
+	});
+
+	it('bietet in den Einstellungen Hell, Dunkel und System an', async () => {
+		const { harness, el } = await oeffne('/glonntal/verwaltung/einstellungen', P.thomas);
+		knopf(el.querySelector('[aria-label="Darstellung"]')!, 'Dunkel').click();
+		harness.detectChanges();
+		expect(TestBed.inject(ThemaService).wahl()).toBe('dunkel');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+		TestBed.inject(ThemaService).setzeWahl('system');
+		localStorage.removeItem('jufi-entwurf:thema');
 	});
 });
 
