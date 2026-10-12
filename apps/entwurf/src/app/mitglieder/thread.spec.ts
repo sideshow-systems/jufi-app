@@ -2,6 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { routes } from '../app.routes';
+import { T } from '../daten/beispieldaten';
+import { EntwurfStore, UHR } from '../daten/store';
 import { testProvider } from '../testhilfe';
 import { nrAusSegment } from './thread';
 
@@ -52,5 +54,24 @@ describe('Thread-Seite', () => {
 
 	it('findet den Thread auch mit veraltetem Titel in der Adresse', async () => {
 		expect(await oeffne('/glonntal/t/2-alter-titel')).toContain('Bowlingcenter Dachau');
+	});
+});
+
+describe('Verlauf', () => {
+	it('zeigt eine neue Nachricht unten, auch wenn die Uhr frueher steht als die letzte', async () => {
+		// Der Bezugstag ist eingefroren, die Uhrzeit laeuft mit: um 7 Uhr liegt
+		// Petras Frage von 8:30 "spaeter" als die neue Nachricht.
+		TestBed.configureTestingModule({
+			providers: [
+				provideRouter(routes, withComponentInputBinding()),
+				...testProvider(),
+				{ provide: UHR, useValue: () => new Date(2026, 9, 11, 7, 0) },
+			],
+		});
+		const harness = await RouterTestingHarness.create('/glonntal/t/4-zeltlager-2027?reiter=verlauf');
+		TestBed.inject(EntwurfStore).nachrichtSchreiben(T.zeltlager, 'Ganz neu');
+		harness.detectChanges();
+		const eintraege = harness.routeNativeElement!.querySelectorAll('jf-verlauf li');
+		expect(eintraege[eintraege.length - 1].textContent).toContain('Ganz neu');
 	});
 });

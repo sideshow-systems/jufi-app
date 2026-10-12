@@ -6,7 +6,7 @@ import { relativeZeit } from '../gestaltung/format';
 import { IconComponent } from '../gestaltung/icon';
 import { AbschnittComponent } from '../gestaltung/ui';
 import { siehtThread } from '../regeln/sichtbarkeit';
-import { istArchiviert } from '../regeln/termine';
+import { istArchiviert, istNeu } from '../regeln/termine';
 import { pfadZuThread } from './pfade';
 
 /** Thread-Liste (Spec TP1 4.1): Angepinnt, Aktiv nach letzter Aktivitaet, Archiv eingeklappt. */
@@ -135,6 +135,6 @@ export class Threads {
 	}
 
 	protected istNeu(t: Thread): boolean {
-		return t.letzteAktivitaet > (this.store.stand().letzterBesuch[this.store.ich()] ?? '');
+		return istNeu(t, this.store.ich(), this.store.stand().letzterBesuch[this.store.ich()] ?? '');
 	}
 }

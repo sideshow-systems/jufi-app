@@ -47,7 +47,7 @@ const VORLAGEN: { wert: Vorlage; text: string }[] = [
 					<h2>{{ p.vorname }} {{ p.nachname }}</h2>
 					<label class="feld">
 						Vorlage
-						<select [value]="vorlage(p)" (change)="vorlageSetzen(p, $event)">
+						<select [value]="vorlage(p)" [disabled]="eigen(p)" (change)="vorlageSetzen(p, $event)">
 							@for (v of vorlagen; track v.wert) {
 								<option [value]="v.wert" [selected]="v.wert === vorlage(p)">{{ v.text }}</option>
 							}
@@ -70,7 +70,9 @@ const VORLAGEN: { wert: Vorlage; text: string }[] = [
 						</label>
 					}
 				</div>
-				@if (gesperrt(p, 'rechteVerwalten')) {
+				@if (eigen(p)) {
+					<p class="gedaempft klein">Deine eigenen Rechte ändert eine andere Person mit „Rechte verwalten".</p>
+				} @else if (gesperrt(p, 'rechteVerwalten')) {
 					<p class="gedaempft klein">Mindestens eine Person muss Rechte verwalten können.</p>
 				}
 			</jf-karte>
@@ -131,8 +133,12 @@ export class VerwaltungRechte {
 		return darf(p, r);
 	}
 
+	protected eigen(p: Person): boolean {
+		return p.id === this.store.ich();
+	}
+
 	protected gesperrt(p: Person, r: Recht): boolean {
-		return darf(p, r) && !kannRechtEntziehen(this.store.stand(), p.id, r);
+		return this.eigen(p) || (darf(p, r) && !kannRechtEntziehen(this.store.stand(), p.id, r));
 	}
 
 	protected vorlage(p: Person): Vorlage | 'eigene' {

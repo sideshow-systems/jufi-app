@@ -49,17 +49,30 @@ export function termineImMonat(stand: Datenstand, personId: Id, jahr: number, mo
 	return termineVon(stand, personId).filter((e) => e.modul.beginn.startsWith(praefix));
 }
 
-/** Fuer "Neu seit deinem letzten Besuch": sichtbare Threads mit Aktivitaet nach seit. */
+const fremdSeit = (t: Thread, personId: Id, seit: string) =>
+	t.verlauf.filter((v) => v.zeit > seit && v.von !== personId);
+
+/**
+ * Neu fuer eine Person ist, was andere nach seit getan haben. Hat sie selbst
+ * zuletzt gehandelt, zaehlt nur noch fremder Verlauf: fremde Antworten davor
+ * gehen dann unter — verschmerzbar, denn sie war in dem Moment im Thread.
+ */
+export function istNeu(t: Thread, personId: Id, seit: string): boolean {
+	if (t.letzteAktivitaet <= seit) return false;
+	return t.letzteAktivitaetVon !== personId || fremdSeit(t, personId, seit).length > 0;
+}
+
+/** Fuer "Neu seit deinem letzten Besuch": sichtbare Threads mit fremder Aktivitaet nach seit. */
 export function neuigkeiten(
 	stand: Datenstand,
 	personId: Id,
 	seit: string,
 ): { threadId: Id; titel: string; text: string }[] {
 	return stand.threads
-		.filter((t) => siehtThread(stand, personId, t) && t.letzteAktivitaet > seit)
+		.filter((t) => siehtThread(stand, personId, t) && istNeu(t, personId, seit))
 		.sort((a, b) => b.letzteAktivitaet.localeCompare(a.letzteAktivitaet))
 		.map((t) => {
-			const n = t.verlauf.filter((v) => v.zeit > seit).length;
+			const n = fremdSeit(t, personId, seit).length;
 			const wort =
 				t.modus === 'chat'
 					? n === 1

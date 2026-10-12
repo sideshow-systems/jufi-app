@@ -149,12 +149,13 @@ export class EntwurfStore {
 		const stand = this._stand();
 		const vorhanden = stand.threads.some((x) => x.id === t.id && t.id !== '');
 		const gespeichert: Thread = vorhanden
-			? { ...t, letzteAktivitaet: this.zeit() }
+			? { ...t, letzteAktivitaet: this.zeit(), letzteAktivitaetVon: this._ich() }
 			: {
 					...t,
 					id: neueId('t'),
 					nr: Math.max(0, ...stand.threads.map((x) => x.nr)) + 1,
 					letzteAktivitaet: this.zeit(),
+					letzteAktivitaetVon: this._ich(),
 				};
 		this.setze({
 			...stand,
@@ -181,8 +182,15 @@ export class EntwurfStore {
 		return id;
 	}
 
-	/** Das Recht "Rechte verwalten" bleibt beim letzten Inhaber (Rahmen 4.2). */
+	/**
+	 * Das Recht "Rechte verwalten" bleibt beim letzten Inhaber (Rahmen 4.2).
+	 * Die eigenen Rechte aendert nur eine andere Person: sonst nimmt sich
+	 * Thomas versehentlich "Alle Threads" und kommt an seine Aufgaben nicht mehr.
+	 * Verworfen: eine Rueckfrage beim Entziehen — sie haelt nicht auf, wer
+	 * nicht weiss, wofuer das Recht gebraucht wird.
+	 */
 	rechteSetzen(personId: Id, rechte: Recht[]): void {
+		if (personId === this._ich()) return;
 		const stand = this._stand();
 		const behalten =
 			!rechte.includes('rechteVerwalten') &&
@@ -232,7 +240,9 @@ export class EntwurfStore {
 		const zeit = this.zeit();
 		this.setze({
 			...stand,
-			threads: stand.threads.map((t) => (t.id === threadId ? { ...fn(t), letzteAktivitaet: zeit } : t)),
+			threads: stand.threads.map((t) =>
+				t.id === threadId ? { ...fn(t), letzteAktivitaet: zeit, letzteAktivitaetVon: this._ich() } : t,
+			),
 		});
 	}
 

@@ -41,9 +41,10 @@ export function speicherAblage(start: Record<string, string> = {}): Ablage {
 export function browserAblage(): Ablage {
 	try {
 		const ls = globalThis.localStorage;
-		const probe = `${SCHLUESSEL}:probe`;
-		ls.setItem(probe, '1');
-		ls.removeItem(probe);
+		// Nur lesend pruefen: ein Schreibversuch scheitert auch an vollem Speicher,
+		// und dann bliebe ein gespeicherter Stand ungelesen. Fehlschlaege beim
+		// Schreiben faengt speichern() ab.
+		ls.getItem(SCHLUESSEL);
 		return {
 			lesen: (k) => {
 				try {

@@ -4,7 +4,8 @@ import { ThemaService } from '../gestaltung/thema';
 import { AUFGABEN } from './aufgaben';
 import { TM_STIL } from './stil';
 import { TestmodusService } from './testmodus';
-import type { Ergebnis, PersonKey, TestmodusStand } from './typen';
+import { ohneFormat } from '../regeln/teilen';
+import { MAX_DAUER_SEK, type Ergebnis, type PersonKey, type TestmodusStand } from './typen';
 import { versenden, type Versandweg } from './versand';
 
 const NAMEN: Record<PersonKey, string> = { sandra: 'Sandra', lena: 'Lena', thomas: 'Thomas' };
@@ -13,20 +14,25 @@ const AUSGANG: Record<Ergebnis['ausgang'], string> = {
 	geschafft: '✅',
 	nichtWeiter: '❌ nicht weiter',
 	uebersprungen: '⏭ übersprungen',
+	schonErledigt: '☑️ schon erledigt',
 };
 
-const dauer = (sek: number) => `${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')}`;
-const zitat = (t: string) => `„${t}"`;
+const dauer = (sek: number) =>
+	sek >= MAX_DAUER_SEK
+		? `über ${MAX_DAUER_SEK / 60} Min`
+		: `${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')}`;
+const zitat = (t: string) => `„${ohneFormat(t)}"`;
 
 /**
  * Geraetezeile aus dem User-Agent, grob (Spec TP1 5.5): Geraetetyp, Browser,
  * Hell/Dunkel. Mehr nicht — keine Versionen, keine Kennungen.
  */
-export function geraeteZeile(userAgent: string, dunkel: boolean): string {
+export function geraeteZeile(userAgent: string, dunkel: boolean, beruehrungspunkte = 0): string {
 	const ua = userAgent;
+	// iPadOS gibt sich seit Version 13 als Mac aus; nur die Beruehrungspunkte verraten es.
 	const geraet = /iPhone/.test(ua)
 		? 'iPhone'
-		: /iPad/.test(ua)
+		: /iPad/.test(ua) || (/Macintosh/.test(ua) && beruehrungspunkte > 1)
 			? 'iPad'
 			: /Android/.test(ua)
 				? 'Android'
@@ -58,7 +64,9 @@ function ergebnisZeile(k: PersonKey, e: Ergebnis): string {
 	const kurz = AUFGABEN[k][i]?.kurz ?? e.aufgabeId;
 	const teile = [String(i + 1), AUSGANG[e.ausgang]];
 	if (e.smiley) teile.push(SMILEY[e.smiley]);
-	teile.push(dauer(e.dauerSek), kurz);
+	// Schon Erledigtes hat weder Smiley noch gemessene Dauer.
+	if (e.ausgang !== 'schonErledigt') teile.push(dauer(e.dauerSek));
+	teile.push(kurz);
 	let zeile = teile.join(' ');
 	if (e.fehlversuche > 0) zeile += ` (${e.fehlversuche} ${e.fehlversuche === 1 ? 'Fehlversuch' : 'Fehlversuche'})`;
 	if (e.notiz) zeile += ` – ${zitat(e.notiz)}`;
@@ -160,7 +168,10 @@ export class RueckmeldungDialog {
 		() => this.testmodus.aufgaben().length > 0 && this.testmodus.index() >= this.testmodus.aufgaben().length,
 	);
 	protected readonly text = computed(() =>
-		rueckmeldungText(this.testmodus.zustand(), geraeteZeile(navigator.userAgent, this.thema.aktiv() === 'dunkel')),
+		rueckmeldungText(
+			this.testmodus.zustand(),
+			geraeteZeile(navigator.userAgent, this.thema.aktiv() === 'dunkel', navigator.maxTouchPoints),
+		),
 	);
 
 	protected wunschAendern(e: Event): void {

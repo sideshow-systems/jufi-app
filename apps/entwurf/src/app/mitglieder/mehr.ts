@@ -13,6 +13,7 @@ import { type ThemaWahl, ThemaService } from '../gestaltung/thema';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
 import { istJugendleiter, kinderVon } from '../regeln/personen';
 import { siehtThread } from '../regeln/sichtbarkeit';
+import { einladungsLink } from '../regeln/teilen';
 import { istArchiviert } from '../regeln/termine';
 
 type Glocke = 'alles' | 'wichtig' | 'stumm';
@@ -61,7 +62,8 @@ interface Einladung {
 							Fotos von {{ k.vorname }} dürfen gezeigt werden
 						</label>
 						<button type="button" class="knopf leise klein" (click)="einladen(k)">
-							<jf-icon name="einladen" /> Zugang für {{ k.vorname }} erzeugen
+							<jf-icon name="einladen" />
+							{{ k.hatZugang ? 'Neuen Zugang erzeugen' : 'Zugang für ' + k.vorname + ' erzeugen' }}
 						</button>
 						@if (einladung()?.kindId === k.id) {
 							<div class="einladung">
@@ -306,7 +308,11 @@ export class Mehr {
 	/** Beispiel-Link: der Entwurf kennt keine echten Zugaenge, zeigt aber den Weg dorthin. */
 	protected einladen(k: Person): void {
 		const verein = this.store.stand().verein;
-		const link = `${this.dokument.location.origin}/entwurf/${verein.slug}?einladung=${k.vorname.toLowerCase()}-beispiel`;
+		const link = einladungsLink(
+			`${this.dokument.location.origin}/entwurf`,
+			verein.slug,
+			`${k.vorname.toLowerCase()}-beispiel`,
+		);
 		this.einladung.set({
 			kindId: k.id,
 			text: `Hallo ${k.vorname}! Hier ist dein eigener Zugang zur JuFi App der ${verein.name}:\n${link}`,

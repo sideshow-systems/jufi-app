@@ -23,9 +23,18 @@ export interface Suche {
 
 export type Aufgabe = (Handlung | Suche) & { id: string; kurz: string };
 
+/**
+ * Obergrenze der gemessenen Dauer. Gemessen wird Wanduhrzeit: ein ueber Nacht
+ * offener Tab ergaebe sonst Stunden. Verworfen: nur sichtbare Zeit zaehlen —
+ * braucht Sichtbarkeits-Ereignisse im Dienst und bringt fuer die Auswertung
+ * nichts, denn wer laenger als eine halbe Stunde braucht, kam ohnehin nicht weiter.
+ */
+export const MAX_DAUER_SEK = 30 * 60;
+
 export interface Ergebnis {
 	aufgabeId: string;
-	ausgang: 'geschafft' | 'nichtWeiter' | 'uebersprungen';
+	/** schonErledigt: beim Anzeigen schon erfuellt, ohne Bewertung (Testperson hat es vorher nebenbei getan). */
+	ausgang: 'geschafft' | 'nichtWeiter' | 'uebersprungen' | 'schonErledigt';
 	dauerSek: number;
 	smiley?: 'gut' | 'mittel' | 'schlecht';
 	notiz?: string;

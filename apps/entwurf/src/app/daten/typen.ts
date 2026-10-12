@@ -167,6 +167,8 @@ export interface Thread {
 	module: Modul[];
 	verlauf: VerlaufEintrag[];
 	letzteAktivitaet: string;
+	/** Wer zuletzt etwas getan hat; fehlt bei den Beispieldaten (dort war es immer jemand anderes). */
+	letzteAktivitaetVon?: Id;
 }
 
 export interface Dokument {
