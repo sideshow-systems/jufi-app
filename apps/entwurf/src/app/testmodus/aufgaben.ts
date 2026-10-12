@@ -1,4 +1,5 @@
 import { M, P, T } from '../daten/beispieldaten';
+import type { Testereignis } from '../daten/ereignisse';
 import type { Datenstand } from '../daten/typen';
 import { alsIso, zeitpunkt } from '../daten/zeit';
 import { uhrzeit, wochentag } from '../gestaltung/format';
@@ -51,8 +52,17 @@ const umfrageJa = (s: Datenstand, kind: string) =>
 const kosten = (s: Datenstand, kind: string) => modul(s, T.bowling, M.bowlingKosten, 'kosten')?.status[kind];
 
 /**
- * Die 15 Aufgaben der Spec TP1 5.3, Texte woertlich. "kurz" ist der Titel in
- * der Rueckmeldung. Die Reihenfolge je Person ist fest.
+ * Ob der Eintrag im Telefon ankam, kann der Browser nicht wissen; erfuellt
+ * heisst nur, dass ein Weg gewaehlt wurde. Ob es geklappt hat, sagt die
+ * Bewertung der Testperson.
+ */
+const kalenderEingetragen = (_: Datenstand, e: Testereignis[]) =>
+	e.some((x) => x.art === 'kalenderEingetragen' && x.modulId === M.zeltlagerTermin);
+
+/**
+ * Die 17 Aufgaben: 15 aus Spec TP1 5.3, dazu je eine fuer Sandra und Lena aus
+ * Spec 2026-10-12 4.4 (Zeltlager in den Kalender). Texte woertlich. "kurz" ist
+ * der Titel in der Rueckmeldung. Die Reihenfolge je Person ist fest.
  */
 export const AUFGABEN: Record<PersonKey, Aufgabe[]> = {
 	sandra: [
@@ -104,6 +114,13 @@ export const AUFGABEN: Record<PersonKey, Aufgabe[]> = {
 			text: 'Finde die Jugendfischereiordnung.',
 			erfuellt: (_, e) => e.some((x) => x.art === 'dokumentGeoeffnet' && x.id === 'g-jfo'),
 		},
+		{
+			id: 'sandra-7',
+			kurz: 'Zeltlager in Kalender',
+			art: 'handlung',
+			text: 'Trag das Zeltlager in deinen Kalender ein.',
+			erfuellt: kalenderEingetragen,
+		},
 	],
 	lena: [
 		{
@@ -141,6 +158,13 @@ export const AUFGABEN: Record<PersonKey, Aufgabe[]> = {
 						?.verlauf.some((v) => v.art === 'nachricht' && v.von === P.lena && !alt.has(v.id)) ?? false
 				);
 			},
+		},
+		{
+			id: 'lena-5',
+			kurz: 'Zeltlager in Kalender',
+			art: 'handlung',
+			text: 'Trag das Zeltlager in deinen Kalender ein.',
+			erfuellt: kalenderEingetragen,
 		},
 	],
 	thomas: [

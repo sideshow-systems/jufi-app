@@ -1,4 +1,5 @@
 import { geraeteZeile, rueckmeldungText } from './rueckmeldung';
+import type { Testereignis } from '../daten/ereignisse';
 import { MAX_DAUER_SEK, type TestmodusStand } from './typen';
 import { versenden, whatsappUrl } from './versand';
 
@@ -173,5 +174,32 @@ describe('versenden', () => {
 		expect(await versenden('Text', null)).toBe('kopiert');
 		expect(offen).not.toHaveBeenCalled();
 		vi.unstubAllGlobals();
+	});
+});
+
+describe('Kalender in der Rueckmeldung', () => {
+	const leer = stand({});
+	const kal = (weg: 'ics' | 'google'): Testereignis => ({
+		art: 'kalenderEingetragen',
+		threadId: 't',
+		modulId: 'm',
+		weg,
+	});
+
+	it('nennt die gewaehlten Kalender-Wege einmal in Reihenfolge', () => {
+		const z = { ...leer, ereignisse: [kal('google'), kal('ics'), kal('google')] };
+		expect(rueckmeldungText(z, 'iPhone')).toContain('📅 Kalender: Google Kalender, Kalender des Telefons');
+	});
+
+	it('setzt die Kalender-Zeile hinter die Personen und vor die Seiten-Notizen', () => {
+		const z = { ...leer, ereignisse: [kal('ics')], seitenNotizen: [{ pfad: '/x', text: 'Notiz' }] };
+		const zeilen = rueckmeldungText(z, 'iPhone').split('\n');
+		const kalender = zeilen.indexOf('📅 Kalender: Kalender des Telefons');
+		expect(kalender).toBeGreaterThan(zeilen.indexOf('Noch keine Aufgaben gespielt.'));
+		expect(kalender).toBeLessThan(zeilen.findIndex((x) => x.startsWith('📍')));
+	});
+
+	it('laesst die Kalender-Zeile ohne Ereignis weg', () => {
+		expect(rueckmeldungText(leer, 'iPhone')).not.toContain('📅');
 	});
 });

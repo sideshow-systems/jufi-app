@@ -25,15 +25,36 @@ function vorherNachher(s: EntwurfStore, k: PersonKey, nr: number, aktion: () => 
 }
 
 describe('AUFGABEN', () => {
-	it('hat 6 Aufgaben fuer Sandra, 4 fuer Lena und 5 fuer Thomas mit den Texten der Spec', () => {
-		expect(AUFGABEN.sandra).toHaveLength(6);
-		expect(AUFGABEN.lena).toHaveLength(4);
+	it('hat 7 Aufgaben fuer Sandra, 5 fuer Lena und 5 fuer Thomas mit den Texten der Spec', () => {
+		expect(AUFGABEN.sandra).toHaveLength(7);
+		expect(AUFGABEN.lena).toHaveLength(5);
 		expect(AUFGABEN.thomas).toHaveLength(5);
 		expect(aufgabe('sandra', 1).text).toBe('Melde Max fürs Bowling an.');
 		expect(aufgabe('lena', 2).text).toBe('Finde heraus, mit wem du zum Bowling fährst.');
 		expect(aufgabe('thomas', 5).text).toBe('Setz Max in ein anderes Auto, weil Familie Maier ausfällt.');
 		const ids = Object.values(AUFGABEN).flatMap((l) => l.map((a) => a.id));
-		expect(new Set(ids).size).toBe(15);
+		expect(new Set(ids).size).toBe(17);
+	});
+});
+
+describe('Kalender-Aufgaben', () => {
+	const zelt: Testereignis = {
+		art: 'kalenderEingetragen',
+		threadId: T.zeltlager,
+		modulId: M.zeltlagerTermin,
+		weg: 'google',
+	};
+	const vortreffen: Testereignis = { ...zelt, modulId: 'm-zelt-termin' };
+
+	it.each([
+		['sandra', 7],
+		['lena', 5],
+	] as const)('%s %i ist erst mit dem Zeltlager im Kalender erfuellt', (k, nr) => {
+		const s = store();
+		expect(aufgabe(k, nr).id).toBe(`${k}-${nr}`);
+		expect(aufgabe(k, nr).text).toBe('Trag das Zeltlager in deinen Kalender ein.');
+		expect(istErfuellt(aufgabe(k, nr), s.stand(), [vortreffen])).toBe(false);
+		expect(istErfuellt(aufgabe(k, nr), s.stand(), [zelt])).toBe(true);
 	});
 });
 

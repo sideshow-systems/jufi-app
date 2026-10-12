@@ -21,6 +21,7 @@ const dauer = (sek: number) =>
 	sek >= MAX_DAUER_SEK
 		? `über ${MAX_DAUER_SEK / 60} Min`
 		: `${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')}`;
+const KALENDER_WEG = { ics: 'Kalender des Telefons', google: 'Google Kalender' } as const;
 const zitat = (t: string) => `„${ohneFormat(t)}"`;
 
 /**
@@ -81,6 +82,9 @@ export function rueckmeldungText(z: TestmodusStand, geraet: string): string {
 		zeilen.push(`*${NAMEN[k]}*`, ...z.ergebnisse[k].map((e) => ergebnisZeile(k, e)));
 	}
 	if (!personen.length) zeilen.push('Noch keine Aufgaben gespielt.');
+	// Spec 2026-10-12, 4.4: der gewaehlte Weg, je Weg einmal — mehrfaches Tippen sagt nichts Neues.
+	const wege = new Set(z.ereignisse.flatMap((e) => (e.art === 'kalenderEingetragen' ? [KALENDER_WEG[e.weg]] : [])));
+	if (wege.size) zeilen.push(`📅 Kalender: ${[...wege].join(', ')}`);
 	zeilen.push(...z.seitenNotizen.map((n) => `📍 ${n.pfad}: ${zitat(n.text)}`));
 	const wunsch = z.wunsch?.trim();
 	if (wunsch) zeilen.push(`💬 Sonst noch: ${zitat(wunsch)}`);
