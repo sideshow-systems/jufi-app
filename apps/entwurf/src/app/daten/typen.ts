@@ -66,8 +66,13 @@ export interface TerminModul {
 	id: Id;
 	typ: 'termin';
 	titel?: string;
-	beginn: string;
-	ende?: string;
+	/** Startdatum JJJJ-MM-TT. Zeiten sind optional (Spec 2026-10-12, 3.1): ganztaegig und mehrtaegig. */
+	von: string;
+	/** Letzter Tag, nur bei mehrtaegigen Terminen; gleich von zaehlt als eintaegig. */
+	bis?: string;
+	/** HH:MM, Berliner Wandzeit. */
+	beginnZeit?: string;
+	endeZeit?: string;
 	ort: string;
 	treffpunkt?: string;
 }
@@ -186,7 +191,7 @@ export interface Verein {
 }
 
 export interface Datenstand {
-	version: 1;
+	version: 2;
 	bezugstag: string;
 	verein: Verein;
 	personen: Person[];

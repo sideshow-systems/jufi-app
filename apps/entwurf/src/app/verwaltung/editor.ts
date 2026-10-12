@@ -10,6 +10,7 @@ import { zielgruppeText } from '../gestaltung/texte';
 import { KarteComponent } from '../gestaltung/ui';
 import { NichtGefunden } from '../mitglieder/nicht-gefunden';
 import { ModulWeiche } from '../module/modul';
+import { terminZeit } from '../regeln/terminzeit';
 import { VERWALTUNG_STIL } from './ansichten';
 import { MODUS_TEXT } from './threads';
 
@@ -69,7 +70,7 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 		case 'info':
 			return { id: id('m'), typ, text: '' };
 		case 'termin':
-			return { id: id('m'), typ, beginn: `${tag}T18:00`, ende: `${tag}T20:00`, ort: 'Vereinsheim' };
+			return { id: id('m'), typ, von: tag, beginnZeit: '18:00', endeZeit: '20:00', ort: 'Vereinsheim' };
 		case 'umfrage':
 			return {
 				id: id('m'),
@@ -237,24 +238,22 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 									<div class="reihe">
 										<label class="feld">
 											Datum
-											<input type="date" [value]="m.beginn.slice(0, 10)" (change)="datumSetzen(wert($event))" />
+											<input type="date" [value]="m.von" (change)="datumSetzen(wert($event))" />
 										</label>
 										<label class="feld">
 											Beginn
 											<input
 												type="time"
-												[value]="m.beginn.slice(11, 16)"
-												(change)="modulSetzen({ beginn: m.beginn.slice(0, 11) + wert($event) })"
+												[value]="m.beginnZeit ?? ''"
+												(change)="modulSetzen({ beginnZeit: wert($event) || undefined })"
 											/>
 										</label>
 										<label class="feld">
 											Ende
 											<input
 												type="time"
-												[value]="m.ende?.slice(11, 16) ?? ''"
-												(change)="
-													modulSetzen({ ende: wert($event) ? m.beginn.slice(0, 11) + wert($event) : undefined })
-												"
+												[value]="m.endeZeit ?? ''"
+												(change)="modulSetzen({ endeZeit: wert($event) || undefined })"
 											/>
 										</label>
 									</div>
@@ -591,7 +590,7 @@ export class ThreadEditor {
 			case 'info':
 				return m.titel ?? (m.text.slice(0, 40) || 'leer');
 			case 'termin':
-				return `${m.beginn.slice(8, 10)}.${m.beginn.slice(5, 7)}. ${m.beginn.slice(11, 16)} · ${m.ort}`;
+				return `${terminZeit(m)} · ${m.ort}`;
 			case 'umfrage':
 				return m.frage;
 			case 'helfer':
@@ -653,10 +652,7 @@ export class ThreadEditor {
 	protected datumSetzen(tag: string): void {
 		const m = this.aktuell();
 		if (m?.typ !== 'termin' || !tag) return;
-		this.modulSetzen({
-			beginn: `${tag}${m.beginn.slice(10)}`,
-			ende: m.ende ? `${tag}${m.ende.slice(10)}` : undefined,
-		});
+		this.modulSetzen({ von: tag });
 	}
 
 	protected vorlage(m: UmfrageModul): 'jn' | 'jnv' | 'eigene' {

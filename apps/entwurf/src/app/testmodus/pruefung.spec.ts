@@ -112,7 +112,7 @@ describe('Pruefregeln Lena', () => {
 });
 
 describe('Pruefregeln Thomas', () => {
-	const termin: Modul = { id: 'm-x1', typ: 'termin', beginn: '2026-12-18T18:00', ort: 'Vereinsheim' };
+	const termin: Modul = { id: 'm-x1', typ: 'termin', von: '2026-12-18', beginnZeit: '18:00', ort: 'Vereinsheim' };
 	const umfrage: Modul = {
 		id: 'm-x2',
 		typ: 'umfrage',

@@ -94,6 +94,11 @@ const FAMILIEN: [string, string, number, string, string, string][] = [
 
 export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 	const r = (tage: number, uhrzeit: string) => relativ(bezugstag, tage, uhrzeit);
+	const zeiten = (tage: number, beginnZeit: string, endeZeit: string) => ({
+		von: r(tage, beginnZeit).slice(0, 10),
+		beginnZeit,
+		endeZeit,
+	});
 	const samstag = naechsterWochentag(bezugstag, 6);
 
 	const personen: Person[] = [
@@ -163,8 +168,7 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 					id: M.gruppenstunde,
 					typ: 'termin',
 					titel: 'Nächste Gruppenstunde',
-					beginn: r(2, '18:00'),
-					ende: r(2, '19:30'),
+					...zeiten(2, '18:00', '19:30'),
 					ort: 'Vereinsheim',
 				},
 			],
@@ -181,8 +185,7 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 				{
 					id: M.bowlingTermin,
 					typ: 'termin',
-					beginn: r(samstag, '14:00'),
-					ende: r(samstag, '17:00'),
+					...zeiten(samstag, '14:00', '17:00'),
 					ort: 'Bowlingcenter Dachau',
 					treffpunkt: '13:30 am Vereinsheim',
 				},
@@ -298,7 +301,7 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 						{ id: 'h-abbau', text: 'Abbau', anzahl: 4, eintraege: [] },
 					],
 				},
-				{ id: 'm-herbst-termin', typ: 'termin', beginn: r(21, '11:00'), ende: r(21, '17:00'), ort: 'Vereinsgelände' },
+				{ id: 'm-herbst-termin', typ: 'termin', ...zeiten(21, '11:00', '17:00'), ort: 'Vereinsgelände' },
 			],
 		},
 		{
@@ -320,8 +323,7 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 					id: 'm-zelt-termin',
 					typ: 'termin',
 					titel: 'Vortreffen',
-					beginn: r(14, '17:00'),
-					ende: r(14, '19:00'),
+					...zeiten(14, '17:00', '19:00'),
 					ort: 'Vereinsheim',
 				},
 				{
@@ -375,8 +377,7 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 				{
 					id: 'm-hege-termin',
 					typ: 'termin',
-					beginn: r(-5, '07:00'),
-					ende: r(-5, '12:00'),
+					...zeiten(-5, '07:00', '12:00'),
 					ort: 'Glonn bei Petershausen',
 				},
 			],
@@ -427,7 +428,7 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 			archiviert: true,
 			letzteAktivitaet: r(-40, '18:00'),
 			module: [
-				{ id: 'm-koenig-termin', typ: 'termin', beginn: r(-42, '06:30'), ende: r(-42, '13:00'), ort: 'Vereinsweiher' },
+				{ id: 'm-koenig-termin', typ: 'termin', ...zeiten(-42, '06:30', '13:00'), ort: 'Vereinsweiher' },
 				{
 					id: 'm-koenig-fotos',
 					typ: 'fotos',
@@ -450,7 +451,7 @@ export function erzeugeBeispieldaten(bezugstag: string): Datenstand {
 	const letzterBesuch = Object.fromEntries(personen.map((p) => [p.id, vorZweiTagen]));
 
 	return {
-		version: 1,
+		version: 2,
 		bezugstag,
 		verein: { name: 'Jungfischer Glonntal', slug: 'glonntal', farbe: '#0f766e', logo: 'logo.svg' },
 		personen,

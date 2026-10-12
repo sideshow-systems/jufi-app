@@ -11,7 +11,7 @@ describe('erzeugeBeispieldaten', () => {
 	it('legt den Verein an', () => {
 		expect(stand.verein).toMatchObject({ name: 'Jungfischer Glonntal', slug: 'glonntal', farbe: '#0f766e' });
 		expect(stand.bezugstag).toBe('2026-10-11');
-		expect(stand.version).toBe(1);
+		expect(stand.version).toBe(2);
 	});
 
 	it('enthaelt die Personen aus Spec 3.3', () => {
@@ -65,15 +65,16 @@ describe('erzeugeBeispieldaten', () => {
 
 	it('setzt Termine und Fristen relativ zum Bezugstag', () => {
 		expect(modul<TerminModul>(T.infos, M.gruppenstunde)).toMatchObject({
-			beginn: '2026-10-13T18:00',
+			von: '2026-10-13',
+			beginnZeit: '18:00',
 			ort: 'Vereinsheim',
 		});
-		expect(termine(T.bowling)[0].beginn.slice(0, 10)).toBe('2026-10-17');
+		expect(termine(T.bowling)[0].von).toBe('2026-10-17');
 		expect(modul<UmfrageModul>(T.bowling, M.bowlingUmfrage).frist?.slice(0, 10)).toBe('2026-10-14');
-		expect(termine(T.hegefischen)[0].beginn.slice(0, 10)).toBe('2026-10-06');
-		expect(termine(T.koenigsfischen)[0].beginn.slice(0, 10)).toBe('2026-08-30');
-		expect(termine(T.herbstfest)[0].beginn.slice(0, 10)).toBe('2026-11-01');
-		expect(termine(T.zeltlager)[0].beginn.slice(0, 10)).toBe('2026-10-25');
+		expect(termine(T.hegefischen)[0].von).toBe('2026-10-06');
+		expect(termine(T.koenigsfischen)[0].von).toBe('2026-08-30');
+		expect(termine(T.herbstfest)[0].von).toBe('2026-11-01');
+		expect(termine(T.zeltlager)[0].von).toBe('2026-10-25');
 	});
 
 	it('bildet den Ausgangszustand im Bowling-Thread', () => {

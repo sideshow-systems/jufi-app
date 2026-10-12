@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { EntwurfStore } from '../daten/store';
-import { monatName, uhrzeit, wochentagKurz } from '../gestaltung/format';
+import { monatName, wochentagKurz } from '../gestaltung/format';
 import { IconComponent } from '../gestaltung/icon';
 import { termineImMonat, type TerminEintrag } from '../regeln/termine';
+import { beginnIso, terminZeit } from '../regeln/terminzeit';
 import { pfadZuThread } from './pfade';
 
 /** Tage eines Monats als 6×7-Raster ab Montag; leere Felder sind null. monat: 0 = Januar. */
@@ -50,13 +51,13 @@ export function monatsRaster(jahr: number, monat: number): (number | null)[] {
 		@for (e of termine(); track e.modul.id) {
 			<a class="eintrag" [routerLink]="link(e)">
 				<span class="datum">
-					<strong>{{ e.modul.beginn.slice(8, 10) }}</strong>
-					<span>{{ wtag(e.modul.beginn) }}</span>
+					<strong>{{ e.modul.von.slice(8, 10) }}</strong>
+					<span>{{ wtag(beginn(e.modul)) }}</span>
 				</span>
 				<span class="text">
 					<strong>{{ e.threadTitel }}</strong>
 					<span class="gedaempft klein">
-						{{ e.modul.titel ? e.modul.titel + ' · ' : '' }}{{ zeit(e.modul.beginn) }} · {{ e.modul.ort }}
+						{{ e.modul.titel ? e.modul.titel + ' · ' : '' }}{{ zeitText(e.modul) }} · {{ e.modul.ort }}
 					</span>
 				</span>
 				<jf-icon name="vor" />
@@ -175,11 +176,11 @@ export class Termine {
 	protected readonly termine = computed(() => {
 		const { jahr, monat } = this.monat();
 		return termineImMonat(this.store.stand(), this.store.ich(), jahr, monat).sort((a, b) =>
-			a.modul.beginn.localeCompare(b.modul.beginn),
+			beginnIso(a.modul).localeCompare(beginnIso(b.modul)),
 		);
 	});
 	protected readonly tageMitTermin = computed(
-		() => new Set(this.termine().map((e) => Number(e.modul.beginn.slice(8, 10)))),
+		() => new Set(this.termine().map((e) => Number(e.modul.von.slice(8, 10)))),
 	);
 	protected readonly heute = computed(() => {
 		const j = this.store.jetzt();
@@ -202,7 +203,6 @@ export class Termine {
 		return wochentagKurz(iso);
 	}
 
-	protected zeit(iso: string): string {
-		return uhrzeit(iso);
-	}
+	protected readonly beginn = beginnIso;
+	protected readonly zeitText = terminZeit;
 }

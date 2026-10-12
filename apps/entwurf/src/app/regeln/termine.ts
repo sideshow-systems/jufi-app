@@ -1,6 +1,7 @@
 import type { Datenstand, Id, TerminModul, Thread } from '../daten/typen';
 import { zeitpunkt } from '../daten/zeit';
 import { siehtThread } from './sichtbarkeit';
+import { beginnIso, endeIso } from './terminzeit';
 
 export interface TerminEintrag {
 	threadId: Id;
@@ -12,8 +13,8 @@ export interface TerminEintrag {
 const WOCHE_MS = 7 * 86_400_000;
 
 /**
- * Archiv-Regel (Rahmen 5.3): manuell archiviert, oder eine Woche nach Ende
- * (sonst Beginn) des letzten Termins. Threads ohne Termin bleiben aktiv, bis
+ * Archiv-Regel (Rahmen 5.3): manuell archiviert, oder eine Woche nach dem
+ * Ende des letzten Termins (ohne Endezeit: Ende seines letzten Tages). Threads ohne Termin bleiben aktiv, bis
  * jemand sie archiviert — sonst verschwaende "Wichtige Infos" ohne Datum nie
  * und ein Orga-Chat sofort.
  */
@@ -21,7 +22,7 @@ export function istArchiviert(t: Thread, jetzt: Date): boolean {
 	if (t.archiviert) return true;
 	const enden = t.module
 		.filter((m): m is TerminModul => m.typ === 'termin')
-		.map((m) => zeitpunkt(m.ende ?? m.beginn).getTime());
+		.map((m) => zeitpunkt(endeIso(m)).getTime());
 	if (enden.length === 0) return false;
 	return Math.max(...enden) + WOCHE_MS < jetzt.getTime();
 }
@@ -34,19 +35,19 @@ export function termineVon(stand: Datenstand, personId: Id): TerminEintrag[] {
 				.filter((m): m is TerminModul => m.typ === 'termin')
 				.map((modul) => ({ threadId: t.id, nr: t.nr, threadTitel: t.titel, modul })),
 		)
-		.sort((a, b) => a.modul.beginn.localeCompare(b.modul.beginn));
+		.sort((a, b) => beginnIso(a.modul).localeCompare(beginnIso(b.modul)));
 }
 
 export function naechsteTermine(stand: Datenstand, personId: Id, jetzt: Date, anzahl: number): TerminEintrag[] {
 	return termineVon(stand, personId)
-		.filter((e) => zeitpunkt(e.modul.beginn) >= jetzt)
+		.filter((e) => zeitpunkt(beginnIso(e.modul)) >= jetzt)
 		.slice(0, anzahl);
 }
 
 /** Termine eines Monats; monat zaehlt wie bei Date von 0 bis 11. */
 export function termineImMonat(stand: Datenstand, personId: Id, jahr: number, monat: number): TerminEintrag[] {
 	const praefix = `${jahr}-${String(monat + 1).padStart(2, '0')}`;
-	return termineVon(stand, personId).filter((e) => e.modul.beginn.startsWith(praefix));
+	return termineVon(stand, personId).filter((e) => e.modul.von.startsWith(praefix));
 }
 
 const fremdSeit = (t: Thread, personId: Id, seit: string) =>

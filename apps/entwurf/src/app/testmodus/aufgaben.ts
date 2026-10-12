@@ -3,6 +3,7 @@ import type { Datenstand } from '../daten/typen';
 import { alsIso, zeitpunkt } from '../daten/zeit';
 import { uhrzeit, wochentag } from '../gestaltung/format';
 import { naechsteTermine } from '../regeln/termine';
+import { beginnIso } from '../regeln/terminzeit';
 import { ausBeispieldaten, modul } from './pruefung';
 import type { Aufgabe, PersonKey } from './typen';
 
@@ -19,13 +20,14 @@ function treffen(s: Datenstand): { richtig: string; falsch: [string, string] } {
 	const g = gruppenstunde(s);
 	if (!g)
 		return { richtig: 'Kein Treffen geplant', falsch: ['Montag 17:00 · Vereinsheim', 'Freitag 18:00 · Kirchplatz'] };
-	const folgetag = zeitpunkt(g.beginn);
+	const beginn = beginnIso(g);
+	const folgetag = zeitpunkt(beginn);
 	folgetag.setDate(folgetag.getDate() + 1);
-	const zeit = uhrzeit(g.beginn);
+	const zeit = uhrzeit(beginn);
 	const andererOrt = g.ort === 'Vereinsweiher' ? 'Vereinsheim' : 'Vereinsweiher';
 	return {
-		richtig: `${wochentag(g.beginn)} ${zeit} · ${g.ort}`,
-		falsch: [`${wochentag(alsIso(folgetag))} ${zeit} · ${g.ort}`, `${wochentag(g.beginn)} ${zeit} · ${andererOrt}`],
+		richtig: `${wochentag(beginn)} ${zeit} · ${g.ort}`,
+		falsch: [`${wochentag(alsIso(folgetag))} ${zeit} · ${g.ort}`, `${wochentag(beginn)} ${zeit} · ${andererOrt}`],
 	};
 }
 

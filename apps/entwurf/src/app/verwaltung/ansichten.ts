@@ -2,13 +2,13 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterLink } from '@angular/router';
 import { EntwurfStore } from '../daten/store';
 import type { Dokument } from '../daten/typen';
-import { datumKurz, uhrzeit, wochentagKurz } from '../gestaltung/format';
 import { IconComponent } from '../gestaltung/icon';
 import { MeldungService } from '../gestaltung/meldung';
 import { KarteComponent } from '../gestaltung/ui';
 import { pfadZuThread } from '../mitglieder/pfade';
 import { brauchtAntwort } from '../regeln/antworten';
 import { istArchiviert, naechsteTermine, termineVon } from '../regeln/termine';
+import { beginnIso, terminZeit } from '../regeln/terminzeit';
 
 /** Gemeinsame Optik der Verwaltungsseiten: Titelzeile mit Aktion, Karten, Tabellen. */
 export const VERWALTUNG_STIL = `
@@ -104,7 +104,7 @@ export const VERWALTUNG_STIL = `
 				@for (e of termine(); track e.modul.id) {
 					<li>
 						<a [routerLink]="pfad(e.threadId)">{{ e.threadTitel }}</a>
-						<span class="gedaempft"> · {{ tag(e.modul.beginn) }} {{ zeit(e.modul.beginn) }} · {{ e.modul.ort }}</span>
+						<span class="gedaempft"> · {{ zeitText(e.modul) }} · {{ e.modul.ort }}</span>
 					</li>
 				}
 			</ul>
@@ -164,12 +164,7 @@ export class VerwaltungUebersicht {
 	protected pfad(id: string): string {
 		return pfadZuThread(this.store.stand(), id);
 	}
-	protected tag(iso: string): string {
-		return `${wochentagKurz(iso)} ${datumKurz(iso)}`;
-	}
-	protected zeit(iso: string): string {
-		return uhrzeit(iso);
-	}
+	protected readonly zeitText = terminZeit;
 }
 
 /** Untergruppen als Ansicht; Anlegen gibt es erst in der echten App. */
@@ -234,8 +229,7 @@ export class VerwaltungUntergruppen {
 			<table>
 				<thead>
 					<tr>
-						<th>Datum</th>
-						<th>Zeit</th>
+						<th>Datum und Zeit</th>
 						<th>Thread</th>
 						<th>Ort</th>
 					</tr>
@@ -243,8 +237,7 @@ export class VerwaltungUntergruppen {
 				<tbody>
 					@for (e of termine(); track e.modul.id) {
 						<tr>
-							<td>{{ tag(e.modul.beginn) }}</td>
-							<td>{{ zeit(e.modul.beginn) }}{{ e.modul.ende ? ' – ' + zeit(e.modul.ende) : '' }}</td>
+							<td>{{ zeitText(e.modul) }}</td>
 							<td>{{ e.threadTitel }}{{ e.modul.titel ? ' · ' + e.modul.titel : '' }}</td>
 							<td>{{ e.modul.ort }}</td>
 						</tr>
@@ -265,14 +258,11 @@ export class VerwaltungUntergruppen {
 export class VerwaltungTermine {
 	private readonly store = inject(EntwurfStore);
 	protected readonly termine = computed(() =>
-		termineVon(this.store.stand(), this.store.ich()).sort((a, b) => a.modul.beginn.localeCompare(b.modul.beginn)),
+		termineVon(this.store.stand(), this.store.ich()).sort((a, b) =>
+			beginnIso(a.modul).localeCompare(beginnIso(b.modul)),
+		),
 	);
-	protected tag(iso: string): string {
-		return `${wochentagKurz(iso)} ${datumKurz(iso)}`;
-	}
-	protected zeit(iso: string): string {
-		return uhrzeit(iso);
-	}
+	protected readonly zeitText = terminZeit;
 }
 
 /** Globale Dokumente; Hochladen und Loeschen nur angedeutet. */

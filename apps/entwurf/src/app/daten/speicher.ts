@@ -10,7 +10,7 @@ import { bezugstagHeute } from './zeit';
  * den Aufgaben. Alles, was beim Lesen nicht passt, fuehrt zu frischen
  * Beispieldaten statt zu einer weissen Seite.
  */
-export const SCHLUESSEL = 'jufi-entwurf:v1';
+export const SCHLUESSEL = 'jufi-entwurf:v2';
 
 export interface Ablage {
 	lesen(schluessel: string): string | null;
@@ -64,7 +64,7 @@ function istStand(s: unknown): s is Datenstand {
 	if (!s || typeof s !== 'object') return false;
 	const d = s as Partial<Datenstand>;
 	return (
-		d.version === 1 &&
+		d.version === 2 &&
 		typeof d.bezugstag === 'string' &&
 		!!d.verein &&
 		Array.isArray(d.personen) &&

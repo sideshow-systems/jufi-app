@@ -17,13 +17,13 @@ describe('laden', () => {
 	});
 
 	it('verwirft eine alte Version', () => {
-		const g = laden(speicherAblage({ [SCHLUESSEL]: '{"stand":{"version":0}}' }), heute);
-		expect(g.stand.version).toBe(1);
+		const g = laden(speicherAblage({ [SCHLUESSEL]: '{"stand":{"version":1}}' }), heute);
+		expect(g.stand.version).toBe(2);
 		expect(g.stand.threads).toHaveLength(8);
 	});
 
 	it('verwirft einen unvollstaendigen Stand', () => {
-		const g = laden(speicherAblage({ [SCHLUESSEL]: '{"stand":{"version":1,"bezugstag":"2026-10-01"}}' }), heute);
+		const g = laden(speicherAblage({ [SCHLUESSEL]: '{"stand":{"version":2,"bezugstag":"2026-10-01"}}' }), heute);
 		expect(g.stand.bezugstag).toBe('2026-10-11');
 	});
 

@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import type { TerminModul } from '../daten/typen';
-import { datumLang, uhrzeit } from '../gestaltung/format';
 import { IconComponent } from '../gestaltung/icon';
+import { terminZeit } from '../regeln/terminzeit';
 
-/** Datum, Uhrzeit, Ort als Karten-Link, Treffpunkt. */
+/** Datum und Uhrzeit in einer Zeile (auch mehrtaegig), Ort als Karten-Link, Treffpunkt. */
 @Component({
 	selector: 'jf-termin',
 	imports: [IconComponent],
@@ -12,8 +12,7 @@ import { IconComponent } from '../gestaltung/icon';
 		@if (modul().titel) {
 			<h3>{{ modul().titel }}</h3>
 		}
-		<p><jf-icon name="kalender" /> {{ datum() }}</p>
-		<p><jf-icon name="uhr" /> {{ zeit() }}</p>
+		<p><jf-icon name="kalender" /> {{ zeit() }}</p>
 		<p>
 			<jf-icon name="ort" />
 			<a [href]="karte()" target="_blank" rel="noopener">{{ modul().ort }}</a>
@@ -48,11 +47,7 @@ import { IconComponent } from '../gestaltung/icon';
 })
 export class TerminBauteil {
 	readonly modul = input.required<TerminModul>();
-	protected readonly datum = computed(() => datumLang(this.modul().beginn));
-	protected readonly zeit = computed(() => {
-		const m = this.modul();
-		return m.ende ? `${uhrzeit(m.beginn)} – ${uhrzeit(m.ende)} Uhr` : `${uhrzeit(m.beginn)} Uhr`;
-	});
+	protected readonly zeit = computed(() => terminZeit(this.modul()));
 	protected readonly karte = computed(
 		() => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(this.modul().ort)}`,
 	);

@@ -7,6 +7,7 @@ import { IconComponent } from '../gestaltung/icon';
 import { AbschnittComponent } from '../gestaltung/ui';
 import { brauchtAntwort, type OffenerPunkt } from '../regeln/antworten';
 import { naechsteTermine, neuigkeiten } from '../regeln/termine';
+import { beginnIso, terminZeit } from '../regeln/terminzeit';
 import { pfadZuThread } from './pfade';
 
 /** Start als Dashboard (Rahmen 5.2): Braucht deine Antwort · Als Naechstes · Neu. */
@@ -38,12 +39,12 @@ import { pfadZuThread } from './pfade';
 			@for (e of termine(); track e.modul.id) {
 				<a class="termin" [routerLink]="pfad(e.threadId)">
 					<span class="datum">
-						<strong>{{ tag(e.modul.beginn) }}</strong>
-						<span>{{ monat(e.modul.beginn) }}</span>
+						<strong>{{ tag(beginn(e.modul)) }}</strong>
+						<span>{{ monat(beginn(e.modul)) }}</span>
 					</span>
 					<span class="text">
 						<strong>{{ e.modul.titel ?? e.threadTitel }}</strong>
-						<span>{{ wtag(e.modul.beginn) }} {{ zeit(e.modul.beginn) }} · {{ e.modul.ort }}</span>
+						<span>{{ zeitText(e.modul) }} · {{ e.modul.ort }}</span>
 					</span>
 					<jf-icon name="vor" />
 				</a>
@@ -145,6 +146,8 @@ export class Start implements OnDestroy {
 	protected readonly neu = computed(() => neuigkeiten(this.store.stand(), this.store.ich(), this.seit));
 
 	protected readonly tag = tagImMonat;
+	protected readonly beginn = beginnIso;
+	protected readonly zeitText = terminZeit;
 	protected readonly monat = monatKurz;
 	protected readonly wtag = wochentagKurz;
 	protected readonly zeit = uhrzeit;
