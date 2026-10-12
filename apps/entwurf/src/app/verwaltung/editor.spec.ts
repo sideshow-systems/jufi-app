@@ -4,6 +4,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { routes } from '../app.routes';
 import { P } from '../daten/beispieldaten';
 import { EntwurfStore } from '../daten/store';
+import { ThemaService } from '../gestaltung/thema';
 import { siehtThread } from '../regeln/sichtbarkeit';
 import { testProvider } from '../testhilfe';
 import { leererThread } from './editor';
@@ -85,11 +86,116 @@ describe('Verwaltung', () => {
 	});
 
 	it('schuetzt das letzte Recht "Rechte verwalten"', async () => {
-		const { el } = await oeffne('/glonntal/verwaltung/rechte', P.thomas);
+		// Als Katrin: die eigenen Rechte sind ohnehin gesperrt, der Schutz zeigt sich nur von aussen.
+		const { el } = await oeffne('/glonntal/verwaltung/rechte', P.katrin);
 		const geschuetzt = el.querySelector<HTMLInputElement>(
 			`input[data-person="${P.thomas}"][data-recht="rechteVerwalten"]`,
 		)!;
 		expect(geschuetzt.disabled).toBe(true);
 		expect(el.textContent).toContain('Mindestens eine Person muss Rechte verwalten können');
+	});
+
+	it('laesst Thomas die eigenen Rechte nicht aendern, die von Katrin schon', async () => {
+		const { el } = await oeffne('/glonntal/verwaltung/rechte', P.thomas);
+		const eigene = el.querySelectorAll<HTMLInputElement>(`input[data-person="${P.thomas}"]`);
+		expect([...eigene].every((i) => i.disabled)).toBe(true);
+		expect(
+			el.querySelector<HTMLInputElement>(`input[data-person="${P.katrin}"][data-recht="mitglieder"]`)!.disabled,
+		).toBe(false);
+		expect(el.textContent).toContain('Deine eigenen Rechte');
+	});
+
+	it('verweigert dem Store eine Aenderung der eigenen Rechte', async () => {
+		const { store } = await oeffne('/glonntal/verwaltung/rechte', P.thomas);
+		store.rechteSetzen(P.thomas, []);
+		expect(store.person().rechte).toHaveLength(7);
+	});
+
+	it('erzeugt Einladungen in diesen Entwurf statt auf jufi-app.de', async () => {
+		const { harness, el } = await oeffne(`/glonntal/verwaltung/personen/${P.max}`, P.thomas);
+		knopf(el, 'Einladungslink erzeugen').click();
+		harness.detectChanges();
+		const link = el.querySelector('.einladung .link')!.textContent!;
+		expect(link.startsWith(`${location.origin}/entwurf/glonntal?einladung=`)).toBe(true);
+		expect(el.querySelector('.einladung .text')!.textContent).toContain(link);
+	});
+
+	it('bietet in den Einstellungen Hell, Dunkel und System an', async () => {
+		const { harness, el } = await oeffne('/glonntal/verwaltung/einstellungen', P.thomas);
+		knopf(el.querySelector('[aria-label="Darstellung"]')!, 'Dunkel').click();
+		harness.detectChanges();
+		expect(TestBed.inject(ThemaService).wahl()).toBe('dunkel');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+		TestBed.inject(ThemaService).setzeWahl('system');
+		localStorage.removeItem('jufi-entwurf:thema');
+	});
+});
+
+describe('Thread-Editor', () => {
+	async function mitUmfrage() {
+		const o = await oeffne('/glonntal/verwaltung/threads/neu', P.thomas);
+		const titel = o.el.querySelector<HTMLInputElement>('input[name="titel"]')!;
+		titel.value = 'Test';
+		titel.dispatchEvent(new Event('input'));
+		knopf(o.el.querySelector('.hinzufuegen')!, 'Umfrage').click();
+		o.harness.detectChanges();
+		return o;
+	}
+	const feld = (el: HTMLElement, text: string) =>
+		[...el.querySelectorAll('label')].find((l) => l.textContent?.trim().startsWith(text))!;
+	function waehle(el: HTMLElement, text: string, wert: string) {
+		const s = feld(el, text).querySelector('select')!;
+		s.value = wert;
+		s.dispatchEvent(new Event('change'));
+	}
+	function eigene(el: HTMLElement, text: string) {
+		const t = feld(el, 'Eigene Antworten').querySelector('textarea')!;
+		t.value = text;
+		t.dispatchEvent(new Event('change'));
+	}
+
+	it('behaelt die Kennung unveraenderter eigener Antworten', async () => {
+		const { store, harness, el } = await mitUmfrage();
+		waehle(el, 'Antworten', 'eigene');
+		harness.detectChanges();
+		eigene(el, 'Pizza\nDöner');
+		harness.detectChanges();
+		eigene(el, 'Döner\nSalat\nPizza');
+		harness.detectChanges();
+		knopf(el, 'Entwurf speichern').click();
+		await harness.fixture.whenStable();
+		const m = store.stand().threads.find((t) => t.titel === 'Test')!.module[0];
+		// o1 und o2 sind die Platzhalter beim Umschalten; Pizza und Doener behalten o3 und o4.
+		expect(m.typ === 'umfrage' && m.optionen).toEqual([
+			{ id: 'o4', text: 'Döner' },
+			{ id: 'o5', text: 'Salat' },
+			{ id: 'o3', text: 'Pizza' },
+		]);
+	});
+
+	it('sagt, warum eigene Antworten keine Teilnahme-Umfrage sein koennen', async () => {
+		const { harness, el } = await mitUmfrage();
+		const teilnahme = () => feld(el, 'Ist Teilnahme-Umfrage').querySelector('input')!;
+		expect(teilnahme().checked).toBe(true);
+		waehle(el, 'Antworten', 'eigene');
+		harness.detectChanges();
+		expect(teilnahme().checked).toBe(false);
+		expect(teilnahme().disabled).toBe(true);
+		expect(feld(el, 'Ist Teilnahme-Umfrage').parentElement!.textContent).toContain('nur mit Ja / Nein');
+	});
+
+	it('speichert ohne gewaehlte Untergruppe nicht, statt an alle zu gehen', async () => {
+		const { store, harness, el } = await mitUmfrage();
+		const gruppe = el.querySelectorAll<HTMLInputElement>('fieldset input[type="checkbox"]')[1];
+		gruppe.click();
+		harness.detectChanges();
+		gruppe.click();
+		harness.detectChanges();
+		expect(el.querySelector<HTMLInputElement>('fieldset input[type="checkbox"]')!.checked).toBe(false);
+		const vorher = store.stand().threads.length;
+		knopf(el, 'Entwurf speichern').click();
+		await harness.fixture.whenStable();
+		expect(store.stand().threads).toHaveLength(vorher);
+		expect(el.textContent).toContain('Wer soll den Thread sehen');
 	});
 });

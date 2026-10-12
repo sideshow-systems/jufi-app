@@ -116,4 +116,11 @@ describe('erzeugeBeispieldaten', () => {
 		);
 		expect(stand.dokumente.find((d) => d.name === 'Jugendfischereiordnung')?.kategorie).toBe('Ordnungen');
 	});
+
+	it('legt jeden Verlauf in zeitlicher Folge an (der Verlauf zeigt die Ablagefolge)', () => {
+		for (const t of stand.threads) {
+			const zeiten = t.verlauf.map((v) => v.zeit);
+			expect(zeiten).toEqual([...zeiten].sort());
+		}
+	});
 });

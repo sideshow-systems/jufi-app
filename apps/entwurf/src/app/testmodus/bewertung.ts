@@ -17,6 +17,13 @@ import { TM_STIL } from './stil';
 import { TestmodusService } from './testmodus';
 import type { Ergebnis } from './typen';
 
+const STATUS: Record<Ergebnis['ausgang'], [string, string]> = {
+	geschafft: ['✅', 'geschafft'],
+	nichtWeiter: ['❌', 'nicht weiter'],
+	uebersprungen: ['⏭', 'übersprungen'],
+	schonErledigt: ['☑️', 'schon erledigt'],
+};
+
 const SMILEYS: { wert: NonNullable<Ergebnis['smiley']>; zeichen: string; text: string }[] = [
 	{ wert: 'gut', zeichen: '😀', text: 'Leicht' },
 	{ wert: 'mittel', zeichen: '😐', text: 'Es ging' },
@@ -230,14 +237,13 @@ export class TestmodusDialoge {
 
 	protected status(i: number): string {
 		const e = this.ergebnis(i);
-		if (e) return e.ausgang === 'geschafft' ? '✅' : e.ausgang === 'nichtWeiter' ? '❌' : '⏭';
+		if (e) return STATUS[e.ausgang][0];
 		return i === this.testmodus.index() && this.aufgabenAn() ? '▶' : '○';
 	}
 
 	protected statusText(i: number): string {
 		const e = this.ergebnis(i);
-		if (e)
-			return e.ausgang === 'geschafft' ? 'geschafft' : e.ausgang === 'nichtWeiter' ? 'nicht weiter' : 'übersprungen';
+		if (e) return STATUS[e.ausgang][1];
 		return i === this.testmodus.index() ? 'aktuell' : 'offen';
 	}
 

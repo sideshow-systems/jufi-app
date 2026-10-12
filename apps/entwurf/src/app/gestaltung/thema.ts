@@ -3,6 +3,12 @@ import { vereinsfarben } from './farben';
 
 export type ThemaWahl = 'hell' | 'dunkel' | 'system';
 
+/**
+ * Eigener Schluessel neben jufi-entwurf:v<n> (Abweichung von Spec TP1 5.6):
+ * die Darstellung ist eine Vorliebe des Geraets, kein Teil des Entwurfs.
+ * "Entwurf zuruecksetzen" und eine neue Entwurfsversion sollen niemanden
+ * zurueck ins grelle Hell werfen.
+ */
 const SCHLUESSEL = 'jufi-entwurf:thema';
 
 function gemerkteWahl(): ThemaWahl {

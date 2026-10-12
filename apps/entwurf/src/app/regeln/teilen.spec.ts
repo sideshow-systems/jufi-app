@@ -1,6 +1,6 @@
 import { erzeugeBeispieldaten, T } from '../daten/beispieldaten';
 import { jetzt as jetztVon } from '../daten/zeit';
-import { teilenText, threadPfad } from './teilen';
+import { einladungsLink, ohneFormat, teilenText, threadPfad } from './teilen';
 import { threadVon } from './testhilfe';
 
 const stand = erzeugeBeispieldaten('2026-10-11');
@@ -69,5 +69,28 @@ describe('Sonderzeichen', () => {
 		expect(text).toContain('✅ Dabei (2): Zoë, Paul');
 		expect(text.split('\n').at(-1)).toBe('👉 Antworten: https://x/entwurf/glonntal/t/2-bowling-pizza-1-spezial');
 		expect(decodeURIComponent(encodeURIComponent(text))).toBe(text);
+	});
+});
+
+describe('ohneFormat', () => {
+	it('ersetzt Sternchen, Unterstrich, Tilde und Backtick durch gleich aussehende Zeichen', () => {
+		expect(ohneFormat('2*3 _a_ ~b~ \u0060c\u0060')).toBe('2∗3 ˍaˍ ∼b∼ ˋcˋ');
+	});
+
+	it('haelt Titel und Optionen im geteilten Text frei von ungewollter Formatierung', () => {
+		const sonder = {
+			...stand,
+			threads: stand.threads.map((t) => (t.id === T.bowling ? { ...t, titel: 'Bowling *neu*' } : t)),
+		};
+		const text = teilenText(sonder, threadVon(sonder, T.bowling), 'https://x/entwurf', jetzt);
+		expect(text.split('\n')[0]).toBe('*Bowling ∗neu∗* – Stand So 10:05');
+	});
+});
+
+describe('einladungsLink', () => {
+	it('zeigt auf diesen Entwurf und kodiert die Kennung', () => {
+		expect(einladungsLink('https://x/entwurf', 'glonntal', 'zoë & co')).toBe(
+			'https://x/entwurf/glonntal?einladung=zo%C3%AB%20%26%20co',
+		);
 	});
 });

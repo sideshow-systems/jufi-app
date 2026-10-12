@@ -42,6 +42,8 @@ let zaehler = 0;
 const id = (p: string) => `${p}-neu-${Date.now().toString(36)}${(++zaehler).toString(36)}`;
 
 /** Ein neuer, noch nicht gespeicherter Thread; an alle Jungfischer und Eltern. */
+const ohneZielgruppe = (t: Thread) => t.zielgruppe.untergruppen !== 'alle' && !t.zielgruppe.untergruppen.length;
+
 export function leererThread(ich: Id): Thread {
 	return {
 		id: '',
@@ -142,6 +144,9 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 									/>
 									{{ u.name }}
 								</label>
+							}
+							@if (ohneZielgruppe(t)) {
+								<p class="hinweis klein">Wer soll den Thread sehen? Bitte „Alle" oder eine Untergruppe wählen.</p>
 							}
 							<label class="feld">
 								Wer
@@ -318,10 +323,16 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 										<input
 											type="checkbox"
 											[checked]="m.teilnahme"
+											[disabled]="vorlage(m) === 'eigene'"
 											(change)="modulSetzen({ teilnahme: haken($event) })"
 										/>
 										Ist Teilnahme-Umfrage (steuert Fahrgemeinschaft und Kosten)
 									</label>
+									@if (vorlage(m) === 'eigene') {
+										<p class="gedaempft klein">
+											Teilnahme geht nur mit Ja / Nein: daran erkennen Fahrgemeinschaft und Kosten, wer mitkommt.
+										</p>
+									}
 								}
 								@case ('helfer') {
 									<label class="feld">
@@ -406,6 +417,11 @@ function neuesModul(typ: Typ, ich: Id, jetzt: Date): Modul {
 			.feld select,
 			.feld textarea {
 				font-family: inherit;
+			}
+			.hinweis {
+				margin: 0;
+				color: var(--warnung);
+				font-weight: 600;
 			}
 			fieldset {
 				display: grid;
@@ -586,6 +602,8 @@ export class ThreadEditor {
 		}
 	}
 
+	protected readonly ohneZielgruppe = ohneZielgruppe;
+
 	protected setze(teil: Partial<Thread>): void {
 		this.entwurf.update((t) => (t ? { ...t, ...teil } : t));
 	}
@@ -598,8 +616,9 @@ export class ThreadEditor {
 	protected untergruppeSetzen(uid: Id, e: Event): void {
 		const z = this.entwurf()!.zielgruppe;
 		const bisher = z.untergruppen === 'alle' ? [] : z.untergruppen;
+		// Leer bleibt leer: der Thread ginge sonst still an alle. speichern() verlangt eine Wahl.
 		const neu = this.haken(e) ? [...bisher, uid] : bisher.filter((x) => x !== uid);
-		this.setze({ zielgruppe: { ...z, untergruppen: neu.length ? neu : 'alle' } });
+		this.setze({ zielgruppe: { ...z, untergruppen: neu } });
 	}
 
 	protected rollenSetzen(e: Event): void {
@@ -666,7 +685,15 @@ export class ThreadEditor {
 			.split('\n')
 			.map((x) => x.trim())
 			.filter(Boolean);
-		this.modulSetzen({ optionen: texte.map((text, i) => ({ id: `o${i + 1}`, text })) });
+		// Unveraenderte Texte behalten ihre Kennung, sonst wanderten abgegebene
+		// Antworten beim Umsortieren auf eine andere Option.
+		const bisher = [...(this.aktuell() as UmfrageModul).optionen];
+		let nr = Math.max(0, ...bisher.map((o) => Number(o.id.slice(1)) || 0));
+		const optionen = texte.map((text) => {
+			const i = bisher.findIndex((o) => o.text === text);
+			return i >= 0 ? bisher.splice(i, 1)[0] : { id: `o${++nr}`, text };
+		});
+		this.modulSetzen({ optionen });
 	}
 
 	protected betragSetzen(e: Event): void {
@@ -678,6 +705,10 @@ export class ThreadEditor {
 		const t = this.entwurf()!;
 		if (!t.titel.trim()) {
 			this.meldung.zeige('Bitte einen Titel eingeben');
+			return;
+		}
+		if (ohneZielgruppe(t)) {
+			this.meldung.zeige('Bitte „Alle" oder eine Untergruppe wählen');
 			return;
 		}
 		this.store.threadSpeichern({ ...t, titel: t.titel.trim(), veroeffentlicht: veroeffentlichen || t.veroeffentlicht });

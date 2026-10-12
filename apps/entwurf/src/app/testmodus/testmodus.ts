@@ -5,7 +5,7 @@ import { EntwurfStore, UHR } from '../daten/store';
 import { alsIso } from '../daten/zeit';
 import { AUFGABEN } from './aufgaben';
 import { istErfuellt, PERSON_ID } from './pruefung';
-import type { Aufgabe, Ergebnis, PersonKey, TestmodusStand } from './typen';
+import { MAX_DAUER_SEK, type Aufgabe, type Ergebnis, type PersonKey, type TestmodusStand } from './typen';
 
 export type Dialog =
 	| { art: 'geschafft'; dauerSek: number }
@@ -63,6 +63,7 @@ export class TestmodusService {
 
 		// Nach jeder Aenderung am Datenstand oder neuem Ereignis pruefen. Solange
 		// ein Dialog offen ist, wartet die Pruefung; sie laeuft beim Schliessen erneut.
+		// Was schon beim Anzeigen erfuellt war, hat schonErledigteUeberspringen vorher abgehakt.
 		effect(() => {
 			const a = this.aktuelleAufgabe();
 			if (!a || this.dialog() !== null) return;
@@ -82,11 +83,14 @@ export class TestmodusService {
 			aufgabeSeit: this.uhr().getTime(),
 			fehlversuche: 0,
 		}));
-		this.dialog.set(null);
+		// Die Rueckmeldung nur anbieten, wenn das Abhaken die letzte Aufgabe erledigt hat;
+		// wer fertig war und die Person erneut waehlt, will sich umsehen.
+		this.dialog.set(this.schonErledigteUeberspringen() && this.alleDurch() ? { art: 'rueckmeldung' } : null);
 	}
 
 	aufgabenStarten(): void {
 		this.aendern((z) => ({ ...z, mitAufgaben: true, aufgabeSeit: this.uhr().getTime(), fehlversuche: 0 }));
+		if (this.schonErledigteUeberspringen() && this.alleDurch()) this.dialog.set({ art: 'rueckmeldung' });
 	}
 
 	nichtWeiter(notiz?: string): void {
@@ -137,7 +141,35 @@ export class TestmodusService {
 
 	private dauer(): number {
 		const seit = this.zustand().aufgabeSeit ?? this.uhr().getTime();
-		return Math.max(0, Math.round((this.uhr().getTime() - seit) / 1000));
+		return Math.min(MAX_DAUER_SEK, Math.max(0, Math.round((this.uhr().getTime() - seit) / 1000)));
+	}
+
+	private alleDurch(): boolean {
+		const z = this.zustand();
+		return !!z.person && z.mitAufgaben && this.aktuelleAufgabe() === null;
+	}
+
+	/**
+	 * Hakt Aufgaben ab, die beim Anzeigen schon erfuellt sind — etwa wenn
+	 * Sandra Max schon angemeldet hat, bevor Thomas die Fahrt pruefen soll.
+	 * Verworfen: der Geschafft-Dialog mit Smiley (erste Fassung, T13) — er
+	 * fragte nach einer Leistung, die die Testperson gar nicht erbracht hat,
+	 * und in der Rueckmeldung stand ein irrefuehrender Haken.
+	 */
+	private schonErledigteUeberspringen(): boolean {
+		const k = this.zustand().person;
+		let abgehakt = false;
+		for (let a = this.aktuelleAufgabe(); a && k; a = this.aktuelleAufgabe()) {
+			if (!istErfuellt(a, this.store.stand(), this.zustand().ereignisse)) break;
+			abgehakt = true;
+			const ergebnis: Ergebnis = { aufgabeId: a.id, ausgang: 'schonErledigt', dauerSek: 0, fehlversuche: 0 };
+			this.aendern((z) => ({
+				...z,
+				index: { ...z.index, [k]: z.index[k] + 1 },
+				ergebnisse: { ...z.ergebnisse, [k]: [...z.ergebnisse[k], ergebnis] },
+			}));
+		}
+		return abgehakt;
 	}
 
 	private abschliessen(teil: Omit<Ergebnis, 'aufgabeId' | 'fehlversuche'>): void {
@@ -154,6 +186,7 @@ export class TestmodusService {
 			aufgabeSeit: this.uhr().getTime(),
 			fehlversuche: 0,
 		}));
+		this.schonErledigteUeberspringen();
 		this.dialog.set(this.aktuelleAufgabe() === null ? { art: 'rueckmeldung' } : null);
 	}
 

@@ -1,11 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { M, P, T } from '../daten/beispieldaten';
 import { TESTEREIGNISSE } from '../daten/ereignisse';
-import { EntwurfStore } from '../daten/store';
+import { EntwurfStore, UHR } from '../daten/store';
 import { testProvider } from '../testhilfe';
 import { AUFGABEN } from './aufgaben';
 import { TestmodusService } from './testmodus';
-import type { Suche } from './typen';
+import { MAX_DAUER_SEK, type Suche } from './typen';
 
 function aufbauen() {
 	TestBed.configureTestingModule({ providers: testProvider() });
@@ -80,6 +80,28 @@ describe('TestmodusService', () => {
 		TestBed.inject(TESTEREIGNISSE).next({ art: 'dokumentGeoeffnet', id: 'g-jfo' });
 		TestBed.tick();
 		expect(tm.dialog()?.art).toBe('geschafft');
+	});
+
+	it('vermerkt eine beim Anzeigen schon erfuellte Aufgabe als "schon erledigt", ohne Bewertung', () => {
+		const { tm, store } = aufbauen();
+		store.antworten(T.bowling, M.bowlingUmfrage, P.max, ['ja']);
+		tm.waehlePerson('sandra', true);
+		TestBed.tick();
+		expect(tm.zustand().ergebnisse.sandra).toEqual([
+			{ aufgabeId: 'sandra-1', ausgang: 'schonErledigt', dauerSek: 0, fehlversuche: 0 },
+		]);
+		expect(tm.aktuelleAufgabe()?.id).toBe('sandra-2');
+		expect(tm.dialog()).toBeNull();
+	});
+
+	it('deckelt die Dauer, wenn der Tab ueber Nacht offen blieb', () => {
+		let ms = new Date(2026, 9, 11, 10, 0).getTime();
+		TestBed.configureTestingModule({ providers: [...testProvider(), { provide: UHR, useValue: () => new Date(ms) }] });
+		const tm = TestBed.inject(TestmodusService);
+		tm.waehlePerson('thomas', true);
+		ms += 14 * 3600 * 1000;
+		tm.ueberspringen();
+		expect(tm.zustand().ergebnisse.thomas[0].dauerSek).toBe(MAX_DAUER_SEK);
 	});
 
 	it('vermerkt "nicht weiter" mit Notiz und geht weiter', () => {

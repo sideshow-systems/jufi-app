@@ -1,5 +1,5 @@
 import { erzeugeBeispieldaten, P } from './beispieldaten';
-import { type Ablage, laden, SCHLUESSEL, speicherAblage, speichern } from './speicher';
+import { type Ablage, browserAblage, laden, SCHLUESSEL, speicherAblage, speichern } from './speicher';
 
 const heute = new Date(2026, 9, 11, 9, 0);
 
@@ -48,5 +48,31 @@ describe('speichern', () => {
 		expect(() =>
 			speichern(voll, { stand: erzeugeBeispieldaten('2026-10-11'), testmodus: null, ich: P.sandra }),
 		).not.toThrow();
+	});
+});
+
+describe('browserAblage', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('liest den Stand auch, wenn localStorage voll ist', () => {
+		vi.stubGlobal('localStorage', {
+			getItem: (k: string) => (k === SCHLUESSEL ? 'gespeichert' : null),
+			setItem: () => {
+				throw new DOMException('voll', 'QuotaExceededError');
+			},
+			removeItem: () => undefined,
+		});
+		expect(browserAblage().lesen(SCHLUESSEL)).toBe('gespeichert');
+	});
+
+	it('faellt in den Speicher zurueck, wenn schon der Zugriff scheitert', () => {
+		vi.stubGlobal('localStorage', {
+			getItem: () => {
+				throw new DOMException('gesperrt', 'SecurityError');
+			},
+		});
+		const ablage = browserAblage();
+		ablage.schreiben('x', '1');
+		expect(ablage.lesen('x')).toBe('1');
 	});
 });

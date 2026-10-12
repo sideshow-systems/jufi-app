@@ -5,3 +5,4 @@
 
 !dist/apps/entwurf/browser/
 !deploy/nginx-entwurf.conf
+!deploy/nginx-sicherheit.conf

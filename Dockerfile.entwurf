@@ -13,7 +13,11 @@ LABEL org.opencontainers.image.title="jufi-entwurf" \
 	org.opencontainers.image.revision="${GIT_COMMIT}"
 
 COPY deploy/nginx-entwurf.conf /etc/nginx/conf.d/default.conf
+COPY deploy/nginx-sicherheit.conf /etc/nginx/sicherheit.conf
 COPY dist/apps/entwurf/browser /usr/share/nginx/html/entwurf
 
 # busybox-wget steckt in alpine; Traefik nimmt den Dienst erst bei "healthy" auf.
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD wget -q -O /dev/null http://127.0.0.1/entwurf/ || exit 1
+# In der Startphase jede Sekunde pruefen: sonst wartet Traefik nach jedem
+# Ausrollen bis zu 30 s auf die erste Pruefung, und die Seite fehlt so lange.
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 --start-period=10s --start-interval=1s \
+	CMD wget -q -O /dev/null http://127.0.0.1/entwurf/ || exit 1

@@ -52,4 +52,21 @@ describe('neuigkeiten', () => {
 		expect(neu[1].text).toBe('2 neue Kommentare');
 		expect(neuigkeiten(stand, P.thomas, stand.letzterBesuch[P.thomas]).map((n) => n.threadId)).toContain(T.orga);
 	});
+
+	it('zaehlt eigene Nachrichten und Antworten nicht als neu', () => {
+		const seit = stand.letzterBesuch[P.sandra];
+		const eigen = { id: 'v-eigen', art: 'nachricht' as const, von: P.sandra, text: 'Hallo', zeit: '2026-10-11T09:00' };
+		const mitEigenem = {
+			...stand,
+			threads: stand.threads.map((t) =>
+				t.id === T.infos || t.id === T.bowling
+					? { ...t, verlauf: [...t.verlauf, eigen], letzteAktivitaet: eigen.zeit, letzteAktivitaetVon: P.sandra }
+					: t,
+			),
+		};
+		const neu = neuigkeiten(mitEigenem, P.sandra, seit);
+		expect(neu.map((n) => n.threadId)).not.toContain(T.infos);
+		expect(neu.find((n) => n.threadId === T.bowling)?.text).toBe('2 neue Kommentare');
+		expect(neuigkeiten(mitEigenem, P.thomas, stand.letzterBesuch[P.thomas]).map((n) => n.threadId)).toContain(T.infos);
+	});
 });

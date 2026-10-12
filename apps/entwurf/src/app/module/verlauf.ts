@@ -150,9 +150,12 @@ export class VerlaufBauteil {
 		inject(DestroyRef).onDestroy(() => wurzel.style.removeProperty('--eingabe-hoehe'));
 	}
 
-	protected readonly eintraege = computed(() =>
-		[...this.thread().verlauf].sort((a, b) => a.zeit.localeCompare(b.zeit)),
-	);
+	/**
+	 * In Ablagefolge, nicht nach Zeit: der Bezugstag ist eingefroren, die
+	 * Uhrzeit laeuft mit — um 7 Uhr geschrieben laege sonst ueber Petras Frage
+	 * von 8:30. Die Beispieldaten sind zeitlich geordnet abgelegt (Test).
+	 */
+	protected readonly eintraege = computed(() => this.thread().verlauf);
 	protected readonly ersterNeuer = computed(() => {
 		const seit = this.seit();
 		return seit ? this.eintraege().find((e) => e.zeit > seit && e.von !== this.ich())?.id : undefined;

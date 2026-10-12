@@ -1,11 +1,13 @@
 import { geraeteZeile, rueckmeldungText } from './rueckmeldung';
-import type { TestmodusStand } from './typen';
+import { MAX_DAUER_SEK, type TestmodusStand } from './typen';
 import { versenden, whatsappUrl } from './versand';
 
 const IPHONE =
 	'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 const ANDROID =
 	'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
+const IPAD_SAFARI =
+	'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 const MAC_FIREFOX = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:131.0) Gecko/20100101 Firefox/131.0';
 
 function stand(teil: Partial<TestmodusStand>): TestmodusStand {
@@ -90,6 +92,29 @@ describe('rueckmeldungText', () => {
 		expect(text).toContain('5 ✅ 😐 1:05 Nächstes Treffen (2 Fehlversuche)');
 	});
 
+	it('nennt schon Erledigtes und gedeckelte Dauern eigens', () => {
+		const zeilen = rueckmeldungText(
+			stand({
+				ergebnisse: {
+					sandra: [
+						{ aufgabeId: 'sandra-1', ausgang: 'schonErledigt', dauerSek: 0, fehlversuche: 0 },
+						{ aufgabeId: 'sandra-2', ausgang: 'geschafft', dauerSek: MAX_DAUER_SEK, smiley: 'gut', fehlversuche: 0 },
+					],
+					lena: [],
+					thomas: [],
+				},
+			}),
+			'x',
+		).split('\n');
+		expect(zeilen).toContain('1 ☑️ schon erledigt Max fürs Bowling');
+		expect(zeilen).toContain('2 ✅ 😀 über 30 Min Kuchen eintragen');
+	});
+
+	it('entschaerft WhatsApp-Formatzeichen in Notizen', () => {
+		const text = rueckmeldungText(stand({ wunsch: '*fett* _schraeg_ ~weg~' }), 'x');
+		expect(text).toContain('💬 Sonst noch: „∗fett∗ ˍschraegˍ ∼weg∼"');
+	});
+
 	it('meldet ohne Ergebnisse, dass noch nichts gespielt wurde', () => {
 		expect(rueckmeldungText(stand({}), 'x')).toContain('Noch keine Aufgaben gespielt.');
 	});
@@ -103,6 +128,11 @@ describe('geraeteZeile', () => {
 	it('erkennt Android mit Chrome und Mac mit Firefox', () => {
 		expect(geraeteZeile(ANDROID, false)).toBe('Android · Chrome · hell');
 		expect(geraeteZeile(MAC_FIREFOX, false)).toBe('Mac · Firefox · hell');
+	});
+
+	it('erkennt das iPad, obwohl iPadOS sich als Mac ausgibt', () => {
+		expect(geraeteZeile(IPAD_SAFARI, false, 5)).toBe('iPad · Safari · hell');
+		expect(geraeteZeile(IPAD_SAFARI, false, 0)).toBe('Mac · Safari · hell');
 	});
 
 	it('nennt Unbekanntes "Geraet unbekannt"', () => {

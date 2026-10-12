@@ -37,11 +37,11 @@ const plaetze = (n: number) => (n === 1 ? '1 Platz' : `${n} Plätze`);
 /** WhatsApp-Text mit dem Stand eines Threads (Rahmen 6.7). */
 export function teilenText(stand: Datenstand, t: Thread, basisUrl: string, jetzt: Date): string {
 	const zeilen = [
-		`${titelzeile(t.titel)} – Stand ${WOCHENTAGE[jetzt.getDay()]} ${zwei(jetzt.getHours())}:${zwei(jetzt.getMinutes())}`,
+		`${titelzeile(ohneFormat(t.titel))} – Stand ${WOCHENTAGE[jetzt.getDay()]} ${zwei(jetzt.getHours())}:${zwei(jetzt.getMinutes())}`,
 	];
 	for (const m of t.module) {
-		if (m.typ === 'umfrage') zeilen.push(...umfrageZeilen(stand, t, m));
-		if (m.typ === 'fahrt') zeilen.push(...fahrtZeilen(stand, m));
+		if (m.typ === 'umfrage') zeilen.push(...umfrageZeilen(stand, t, m).map(ohneFormat));
+		if (m.typ === 'fahrt') zeilen.push(...fahrtZeilen(stand, m).map(ohneFormat));
 	}
 	zeilen.push(`👉 Antworten: ${basisUrl}${threadPfad(t, stand.verein.slug)}`);
 	return zeilen.join('\n');
@@ -80,4 +80,23 @@ function fahrtZeilen(stand: Datenstand, m: FahrModul): string[] {
 	if (liste('hin')) zeilen.push(`🚗 Fahrer: ${liste('hin')}`);
 	if (liste('rueck')) zeilen.push(`↩️ Rückfahrt: ${liste('rueck')}`);
 	return zeilen;
+}
+
+/**
+ * Ersetzt WhatsApps Formatzeichen in fremdem Text durch gleich aussehende
+ * Zeichen, damit "Bowling *neu*" nicht die Fettschrift des Titels zerreisst.
+ * Verworfen: ein unsichtbares Zeichen dazwischen — ob WhatsApp es als Grenze
+ * wertet, ist nirgends festgelegt; die Ersatzzeichen wirken sicher.
+ */
+export function ohneFormat(text: string): string {
+	return text.replace(/[*_~`]/g, (z) => ({ '*': '∗', _: 'ˍ', '~': '∼', '`': 'ˋ' })[z]!);
+}
+
+/**
+ * Beispiel-Einladung in diesen Entwurf. Verworfen: die spaetere Adresse
+ * jufi-app.de — die gehoert dem Entwurf nicht, und ein dorthin geschickter
+ * Link liefe ins Leere oder zu Fremden.
+ */
+export function einladungsLink(basisUrl: string, slug: string, kennung: string): string {
+	return `${basisUrl}/${slug}?einladung=${encodeURIComponent(kennung)}`;
 }

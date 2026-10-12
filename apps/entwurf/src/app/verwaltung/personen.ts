@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TESTEREIGNISSE } from '../daten/ereignisse';
@@ -10,6 +11,7 @@ import { rolleText } from '../gestaltung/texte';
 import { KarteComponent, PilleComponent } from '../gestaltung/ui';
 import { NichtGefunden } from '../mitglieder/nicht-gefunden';
 import { elternVon, istJugendleiter, kinderVon, person } from '../regeln/personen';
+import { einladungsLink } from '../regeln/teilen';
 import { VERWALTUNG_STIL } from './ansichten';
 import { EinladungVorschau } from './einladung';
 
@@ -22,13 +24,12 @@ interface Einladung {
 }
 
 /**
- * Einladungstext fuer WhatsApp. Der Link zeigt auf die spaetere Adresse
- * (Rahmen 7) und fuehrt im Entwurf nirgendwohin; "So sieht die Einladung aus"
- * zeigt stattdessen die Schritte.
+ * Einladungstext fuer WhatsApp. Der Link fuehrt in diesen Entwurf, nicht zu
+ * einem echten Zugang; "So sieht die Einladung aus" zeigt die Schritte.
  */
-function einladungFuer(p: Person, vereinsname: string, slug: string): Einladung {
+function einladungFuer(p: Person, vereinsname: string, basisUrl: string, slug: string): Einladung {
 	const zufall = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(36).padStart(2, '0')).join('');
-	const link = `https://jufi-app.de/${slug}/einladung/${zufall}`;
+	const link = einladungsLink(basisUrl, slug, zufall);
 	return {
 		personId: p.id,
 		link,
@@ -102,6 +103,7 @@ export class EinladungErzeugen {
 	private readonly store = inject(EntwurfStore);
 	private readonly meldung = inject(MeldungService);
 	private readonly ereignisse = inject(TESTEREIGNISSE);
+	private readonly dokument = inject(DOCUMENT);
 	protected readonly einladung = signal<Einladung | null>(null);
 	protected readonly vorschau = signal(false);
 
@@ -109,7 +111,9 @@ export class EinladungErzeugen {
 		const stand = this.store.stand();
 		const p = person(stand, this.personId());
 		if (!p) return;
-		this.einladung.set(einladungFuer(p, stand.verein.name, stand.verein.slug));
+		this.einladung.set(
+			einladungFuer(p, stand.verein.name, `${this.dokument.location.origin}/entwurf`, stand.verein.slug),
+		);
 		this.ereignisse.next({ art: 'einladungErzeugt', personId: p.id });
 	}
 

@@ -148,4 +148,11 @@ describe('EntwurfStore', () => {
 		expect(store.stand().verein.farbe).toBe('#0f766e');
 		expect(store.testmodusDaten()).toBeNull();
 	});
+
+	it('merkt sich, wer zuletzt im Thread etwas getan hat', () => {
+		const { store } = aufbau();
+		store.setzeIch(P.thomas);
+		store.nachrichtSchreiben(T.zeltlager, 'Hallo');
+		expect(store.stand().threads.find((t) => t.id === T.zeltlager)!.letzteAktivitaetVon).toBe(P.thomas);
+	});
 });
