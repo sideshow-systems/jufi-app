@@ -196,7 +196,7 @@ Jeder Bereich ist direkt verlinkbar, damit aus WhatsApp heraus gezielt hineinges
 | `/<slug>/t/<id>-<titel-slug>`                              | Thread; die ID ist maßgeblich, der Titelteil nur zur Lesbarkeit |
 | `/<slug>/t/<id>/m/<modulId>`                               | Sprung zu einem Modul im Thread                                 |
 | `/<slug>/termine` · `/<slug>/medien` · `/<slug>/dokumente` | Kalender, Medienbereich, globale Dokumente                      |
-| `/<slug>/einladung/<token>`                                | Einladung annehmen                                              |
+| `/<slug>/einladung#<token>`                                | Einladung annehmen                                              |
 | `/<slug>/verwaltung/…`                                     | Verwaltung                                                      |
 | `/<slug>/api/v1/…`                                         | REST-API des Vereins                                            |
 | `/<slug>/ws`                                               | WebSocket des Vereins                                           |
@@ -361,6 +361,7 @@ libs/
 	domain/    Regeln ohne Framework: Rechte, Sichtbarkeit, Antwort-Einheiten,
 	           Fristen, Archiv-Regel, Validierung
 	db/        Prisma-Client mit Treiber-Adapter
+	auth/      Passwörter, TOTP, Passkeys, Sitzungen, Tokens, Backoff (aus HWYD kopiert)
 ```
 
 `libs/domain` wird von App und CLI gebraucht und muss isoliert testbar sein.
@@ -369,9 +370,9 @@ libs/
 
 ### 7.3 Datenmodell (konzeptuell)
 
-Die genauen Felder legt Teilprojekt 2 fest. Konzeptuell:
+Die genauen Felder legt Teilprojekt 2 fest (`2026-10-12-jufi-tp2-fundament-design.md`, Abschnitt 3). Konzeptuell:
 
-- `Verein` (Slug, Name, Logo, Farben, Kontakt, Status, Gruppenname)
+- `Verein` (Slug, offizieller Name, Anzeigename, Logo, Farbe, Kontakt, Status)
 - `Person` (Verein, Art Jungfischer/Erwachsener, Name, Foto-Einwilligung, Jugendsprecher, Rechte)
 - `Zugang` (Person, E-Mail, Passwort-Hash, TOTP, Passkeys) — optional pro Person
 - `Bezugsperson` (Erwachsener ↔ Jungfischer, Beziehung, erziehungsberechtigt)
@@ -593,12 +594,12 @@ Wie HWYD (`../hwyd/CLAUDE.md`):
 
 Diese Punkte sind bewusst nicht hier entschieden, sondern gehören in die genannte Spezifikation:
 
-| Punkt                                                                          | Teilprojekt |
-| ------------------------------------------------------------------------------ | ----------- |
-| Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen       | 2           |
-| Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar    | 4           |
-| Länge des offline gehaltenen Verlaufs pro Thread                               | 5           |
-| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5           |
+| Punkt                                                                          | Teilprojekt                           |
+| ------------------------------------------------------------------------------ | ------------------------------------- |
+| Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen       | 2 (entschieden: TP2-Spec 5.6 und 5.8) |
+| Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar    | 4                                     |
+| Länge des offline gehaltenen Verlaufs pro Thread                               | 5                                     |
+| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5                                     |
 
 Die Gestaltung von Dashboard und Kalender, der Ablauf der Fahrgemeinschaft und das Kosten-Modul sind inzwischen entschieden (5.1.1, 6.4.1, 6.4.2); Feinheiten zeigen sich im Entwurf.
 
