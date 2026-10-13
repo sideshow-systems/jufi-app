@@ -69,4 +69,19 @@ export class ThemaService {
 			s.setProperty(`--auf-akzent-${modus}`, f[modus].aufAkzent);
 		}
 	}
+
+	/**
+	 * Nimmt die Vereinsfarbe zurueck auf die Vorgaben aus styles.css. Die Werte
+	 * stehen als Inline-Eigenschaften auf html und blieben sonst nach dem Verlassen
+	 * eines Vereins stehen: die Plattformseite und der naechste Verein erschienen
+	 * in der Farbe des vorigen.
+	 */
+	entferneVereinsfarbe(): void {
+		const s = document.documentElement.style;
+		for (const modus of ['hell', 'dunkel'] as const) {
+			s.removeProperty(`--akzent-${modus}`);
+			s.removeProperty(`--akzent-flaeche-${modus}`);
+			s.removeProperty(`--auf-akzent-${modus}`);
+		}
+	}
 }

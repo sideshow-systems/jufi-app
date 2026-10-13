@@ -5,6 +5,9 @@ import { ThemaService } from '../gestaltung/thema';
 import { KarteComponent } from '../gestaltung/ui';
 import { NichtGefundenComponent } from './nicht-gefunden';
 
+/** Gleich dem title in index.html; dorthin faellt der Titel zurueck, sobald kein Verein mehr gezeigt wird. */
+const STANDARDTITEL = 'JuFi App';
+
 /** Platzhalter der Vereinsseite: zeigt, dass Slug, API und Vereinsfarbe zusammenspielen. */
 @Component({
 	selector: 'jf-verein-start',
@@ -62,13 +65,20 @@ export class VereinStartComponent {
 	});
 
 	constructor() {
-		effect(() => {
+		effect((onCleanup) => {
 			// value() wirft im Fehlerzustand; hasValue() fragt gefahrlos.
 			if (!this.verein.hasValue()) return;
 			const v = this.verein.value();
 			if (v && v !== 'nicht-gefunden') {
 				this.thema.setzeVereinsfarbe(v.farbe);
 				document.title = v.anzeigename;
+				// Laeuft vor dem naechsten Durchlauf (neuer Slug, 404, Fehler) und beim
+				// Zerstoeren der Seite. Ohne das trueg die Plattformseite oder ein
+				// unbekannter Verein Titel und Farbe des vorigen Vereins.
+				onCleanup(() => {
+					this.thema.entferneVereinsfarbe();
+					document.title = STANDARDTITEL;
+				});
 			}
 		});
 	}
