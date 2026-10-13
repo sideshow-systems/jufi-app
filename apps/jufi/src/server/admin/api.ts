@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { mitStandardwerten, type AppDeps } from '../abhaengigkeiten.js';
 import { routenAus } from '../routen.js';
 import { anmeldeRouten } from './anmeldung.js';
+import { passkeyRouten } from './passkeys.js';
 import { adminKontext, brauchtAdmin, loescheAdminCookie } from './sitzung.js';
 
 /**
@@ -14,6 +15,8 @@ export const OEFFENTLICHE_ADMIN_ROUTEN: readonly string[] = [
 	'POST /einrichtung/abschliessen',
 	'POST /anmelden',
 	'POST /anmelden/totp',
+	'POST /anmelden/passkey/optionen',
+	'POST /anmelden/passkey',
 ];
 
 /**
@@ -33,6 +36,7 @@ export function adminApi(appDeps: AppDeps): Router {
 	const router = Router({ caseSensitive: true });
 
 	anmeldeRouten(router, deps);
+	passkeyRouten(router, deps);
 
 	router.get('/ich', brauchtAdmin, async (_req, res, next) => {
 		try {

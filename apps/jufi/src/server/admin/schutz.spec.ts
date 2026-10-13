@@ -9,7 +9,14 @@ import { adminApi, adminRouten, OEFFENTLICHE_ADMIN_ROUTEN } from './api.js';
  * der erste Test, bis sie hier oder in OEFFENTLICHE_ADMIN_ROUTEN steht -- eine
  * vergessene Pruefung faellt so beim Eintragen auf, nicht erst im Betrieb.
  */
-const GESCHUETZT = ['GET /ich', 'POST /abmelden', 'POST /konto/totp/start', 'POST /konto/totp/bestaetigen'];
+const GESCHUETZT = [
+	'GET /ich',
+	'POST /abmelden',
+	'POST /konto/totp/start',
+	'POST /konto/totp/bestaetigen',
+	'POST /konto/passkey/optionen',
+	'POST /konto/passkey',
+];
 
 describe('Schutz der Admin-Routen', () => {
 	const prisma = createPrismaClientFromEnv();
