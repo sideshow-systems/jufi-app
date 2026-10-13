@@ -3,6 +3,7 @@ import express from 'express';
 import { fehlerbehandlung } from './fehler.js';
 import { healthRouter } from './health.js';
 import { sicherheitsHeader } from './sicherheit.js';
+import { nichtGefunden, vereinAusSlug, vereinsApi } from './verein.js';
 
 export interface AppDeps {
 	prisma: PrismaClient;
@@ -28,6 +29,11 @@ export function createApp(deps: AppDeps): express.Express {
 	app.use(express.json({ limit: '100kb' }));
 
 	app.use('/healthz', healthRouter(deps));
+
+	// Spaeter kommt /admin vor diese Zeile; pruefeSlug('admin') ist ohnehin reserviert.
+	// nichtGefunden steht hier und nicht im Router, damit auch unbekannte Pfade
+	// JSON-404 liefern, bevor server.ts den Angular-Handler dahinter haengt.
+	app.use('/:slug/api/v1', vereinAusSlug(deps.prisma), vereinsApi, nichtGefunden);
 
 	// Hier schon, damit Tests die Fehlerantworten ohne server.ts sehen. server.ts
 	// registriert sie ein zweites Mal hinter dem Angular-Handler, weil Express

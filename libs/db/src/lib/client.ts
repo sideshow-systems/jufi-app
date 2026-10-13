@@ -10,6 +10,8 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/client.js';
 
 export type { PrismaClient } from '../generated/client.js';
+/** Die Modelltypen, die der Server in res.locals ablegt; sonst muesste er in den generierten Ordner greifen. */
+export type { Verein } from '../generated/client.js';
 /** Fuer getippte `where`-Klauseln (z.B. `Prisma.PersonWhereInput`) ausserhalb dieser Bibliothek. */
 export { Prisma } from '../generated/client.js';
 /** Die Enums des Schemas als Werte und Typen, damit niemand ausserhalb in den generierten Ordner greift. */
