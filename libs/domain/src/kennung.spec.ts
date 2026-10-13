@@ -1,4 +1,12 @@
-import { normalisiereBenutzername, normalisiereEmail, pruefeBenutzername, pruefeEmail } from './kennung.js';
+import {
+	anmeldenameVorschlag,
+	normalisiereBenutzername,
+	normalisiereEmail,
+	pruefeAnmeldename,
+	pruefeBenutzername,
+	pruefeEmail,
+	pruefeKennung,
+} from './kennung.js';
 
 describe('Benutzername', () => {
 	it('normalisiert zu getrimmt und klein', () => {
@@ -31,5 +39,45 @@ describe('E-Mail', () => {
 
 	it.each(['thomas', 'thomas@example', 'a b@example.org', '@example.org', ''])('lehnt %j ab', (s) => {
 		expect(pruefeEmail(s)).toBe(false);
+	});
+});
+
+describe('Anmeldename', () => {
+	it('Vorschlag nimmt den Vornamen', () => {
+		expect(anmeldenameVorschlag('Lena', new Set())).toBe('lena');
+	});
+
+	it('Vorschlag zaehlt hoch, wenn vergeben', () => {
+		expect(anmeldenameVorschlag('Lena', new Set(['lena']))).toBe('lena2');
+		expect(anmeldenameVorschlag('Lena', new Set(['lena', 'lena2']))).toBe('lena3');
+	});
+
+	it('Vorschlag schreibt Umlaute um', () => {
+		expect(anmeldenameVorschlag('Jörg', new Set())).toBe('joerg');
+		expect(anmeldenameVorschlag('Zoë', new Set())).toBe('zoe');
+		expect(anmeldenameVorschlag('Strauß', new Set())).toBe('strauss');
+	});
+
+	it('Vorschlag fuellt zu kurze Namen auf', () => {
+		expect(anmeldenameVorschlag('Jo', new Set())).toBe('jo1');
+	});
+
+	it('Anmeldename: Gross, Rand, @ und Kuerze', () => {
+		expect(pruefeAnmeldename('Lena')).toBe(false);
+		expect(pruefeAnmeldename('le')).toBe(false);
+		expect(pruefeAnmeldename('a@b.de')).toBe(false);
+		expect(pruefeAnmeldename('lena.k-2')).toBe(true);
+	});
+});
+
+describe('Kennung', () => {
+	it('Kennung Erwachsener ist die normalisierte E-Mail', () => {
+		expect(pruefeKennung('ERWACHSENER', '  Thomas@Example.ORG ')).toEqual({ ok: true, wert: 'thomas@example.org' });
+		expect(pruefeKennung('ERWACHSENER', 'thomas')).toEqual({ ok: false, grund: 'ungueltig' });
+	});
+
+	it('Kennung Jungfischer ist der normalisierte Anmeldename', () => {
+		expect(pruefeKennung('JUNGFISCHER', '  Lena ')).toEqual({ ok: true, wert: 'lena' });
+		expect(pruefeKennung('JUNGFISCHER', 'lena@x.de')).toEqual({ ok: false, grund: 'ungueltig' });
 	});
 });
