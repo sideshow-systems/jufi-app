@@ -475,5 +475,29 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 				notfallLinkText({ vorname: 'Thomas', anzeigename: 'Jungfischer Aktionen', link: notfall.einladung.link }),
 			);
 		});
+
+		it('Notfall-Link fuer eine Nicht-Ansprechpartnerin im gesperrten Verein bleibt 404', async () => {
+			const { id } = await legeAn('aktion-notfall-gesperrt-404');
+			const elternteil = await prisma.person.create({
+				data: {
+					vereinId: id,
+					art: 'ERWACHSENER',
+					vorname: 'Sandra',
+					nachname: 'Erfunden',
+					email: 'sandra@example.org',
+				},
+			});
+			expect((await post(`/vereine/${id}/sperren`)).status).toBe(200);
+
+			const r = await post(`/vereine/${id}/notfall-link`, { personId: elternteil.id });
+			expect(r.status).toBe(404);
+			expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		});
+
+		it('Notfall-Link fuer einen unbekannten Verein ist 404', async () => {
+			const r = await post('/vereine/gibt-es-nicht/notfall-link', { personId: 'egal' });
+			expect(r.status).toBe(404);
+			expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		});
 	});
 });
