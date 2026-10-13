@@ -1,6 +1,6 @@
 import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { pathToFileURL } from 'node:url';
-import { demoEinspielen } from './demo.js';
+import { DemoGeschuetztFehler, demoEinspielen } from './demo.js';
 
 export interface Abhaengigkeiten {
 	/** Als Funktion, damit Befehle ohne Datenbank (die Hilfe) keine Verbindung aufbauen. */
@@ -26,9 +26,17 @@ export async function fuehreAus(argv: string[], deps: Abhaengigkeiten): Promise<
 		return 0;
 	}
 	if (befehl === 'demo' && unterbefehl === 'einspielen') {
-		const { personen } = await demoEinspielen(deps.prisma(), deps.jetzt());
-		deps.ausgabe(`Demo-Verein angelegt: /demo/ (${personen} Personen)`);
-		return 0;
+		try {
+			const { personen } = await demoEinspielen(deps.prisma(), deps.jetzt());
+			deps.ausgabe(`Demo-Verein angelegt: /demo/ (${personen} Personen)`);
+			return 0;
+		} catch (fehler) {
+			// Nur die erwartete Verweigerung wird hier gemeldet; alles andere (Datenbank
+			// weg, Schema veraltet) faengt starte() ab, mit demselben Exit-Code 1.
+			if (!(fehler instanceof DemoGeschuetztFehler)) throw fehler;
+			deps.ausgabe(fehler.message);
+			return 1;
+		}
 	}
 
 	deps.ausgabe('Unbekannter Befehl. Hilfe: pnpm run cli hilfe');

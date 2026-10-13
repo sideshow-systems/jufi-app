@@ -43,6 +43,25 @@ describe('fuehreAus', () => {
 		expect(ausgabe).toEqual(['Unbekannter Befehl. Hilfe: pnpm run cli hilfe']);
 	});
 
+	it('demo einspielen liefert 1 und nennt den Grund, wenn der Verein demo ein echter ist', async () => {
+		const p = (prisma ??= createPrismaClientFromEnv());
+		await p.verein.deleteMany();
+		const verein = await p.verein.create({
+			data: { slug: 'demo', name: 'Echter Verein e.V.', anzeigename: 'Echter Verein', farbe: '#1d4ed8' },
+		});
+		const person = await p.person.create({
+			data: { vereinId: verein.id, art: 'ERWACHSENER', vorname: 'Erika', nachname: 'Echt' },
+		});
+		await p.zugang.create({ data: { vereinId: verein.id, personId: person.id, email: 'erika@example.org' } });
+
+		ausgabe.length = 0;
+		expect(await fuehreAus(['demo', 'einspielen'], deps)).toBe(1);
+		expect(ausgabe.join('\n')).toMatch(/Zugang/);
+		expect(await p.verein.count({ where: { id: verein.id } })).toBe(1);
+
+		await p.verein.deleteMany();
+	});
+
 	it('demo einspielen liefert 0 und meldet den Verein', async () => {
 		ausgabe.length = 0;
 		expect(await fuehreAus(['demo', 'einspielen'], deps)).toBe(0);

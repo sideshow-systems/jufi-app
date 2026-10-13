@@ -5,6 +5,20 @@ export const DEMO_SLUG = 'demo';
 const ALLE_RECHTE = Object.values(Recht);
 
 /**
+ * Eigene Klasse, damit fuehreAus die Verweigerung als erwartete Meldung mit Exit-Code 1
+ * ausgibt und sie nicht mit einem Datenbankfehler verwechselt.
+ */
+export class DemoGeschuetztFehler extends Error {
+	constructor(zugaenge: number, sitzungen: number) {
+		super(
+			`Der Verein mit dem Slug "${DEMO_SLUG}" hat ${zugaenge} Zugang/Zugaenge und ${sitzungen} Sitzung(en), ` +
+				'ist also kein Demo-Verein. Nichts wurde geloescht. Den Verein vorher umbenennen oder von Hand entfernen.',
+		);
+		this.name = 'DemoGeschuetztFehler';
+	}
+}
+
+/**
  * Geburtsdatum, an dem die Person bei `jetzt` genau `alter` Jahre und mindestens
  * fuenf Monate alt ist. Der Erste des Monats und der Abstand zum Geburtstag
  * halten das Alter eindeutig, auch bei Zeitzonen- und Schaltjahrfragen; ein
@@ -17,7 +31,8 @@ function geburtsdatumFuer(alter: number, jetzt: Date): Date {
 /**
  * Spielt den erfundenen Verein "Jungfischer Demo" ein (Spec 7.1). Ein vorhandener
  * Verein `demo` wird vorher samt allen Daten geloescht, andere Vereine bleiben
- * unberuehrt.
+ * unberuehrt. Hat der vorhandene Verein `demo` Zugaenge oder Sitzungen, ist er
+ * kein Demo-Verein: dann wirft die Funktion DemoGeschuetztFehler und loescht nichts.
  *
  * Mit dem schlichten PrismaClient statt vereinDb: Die Funktion legt einen Verein
  * an und ist damit eine Plattform-Operation. vereinDb gehoert zur Anfragebehandlung
@@ -31,6 +46,22 @@ export async function demoEinspielen(
 	jetzt: Date,
 ): Promise<{ vereinId: string; personen: number }> {
 	return prisma.$transaction(async (tx) => {
+		// Der Slug demo laesst sich nicht in pruefeSlug reservieren: der Demo-Verein
+		// selbst muss darunter erreichbar bleiben. Also kann ein echter Verein ihn
+		// einmal erhalten haben, und das Werkzeug darf ihn nie wegloeschen. Der
+		// Demo-Verein hat heute keine Zugaenge und Sitzungen, daran erkennt man
+		// den echten. Legt die Anmeldung (Etappe 3) im Demo-Verein welche an, muss dieses
+		// Kriterium neu gefasst werden, sonst verweigert das Werkzeug jedes Mal. Verworfen: ein Kennzeichen am
+		// Verein -- ein Schemafeld nur fuer dieses Entwicklungswerkzeug.
+		const vorhanden = await tx.verein.findUnique({ where: { slug: DEMO_SLUG }, select: { id: true } });
+		if (vorhanden) {
+			const [zugaenge, sitzungen] = await Promise.all([
+				tx.zugang.count({ where: { vereinId: vorhanden.id } }),
+				tx.session.count({ where: { vereinId: vorhanden.id } }),
+			]);
+			if (zugaenge > 0 || sitzungen > 0) throw new DemoGeschuetztFehler(zugaenge, sitzungen);
+		}
+
 		// Die Vereinsloeschung nimmt Personen, Familienzuordnungen und Untergruppen
 		// per Cascade mit.
 		await tx.verein.deleteMany({ where: { slug: DEMO_SLUG } });

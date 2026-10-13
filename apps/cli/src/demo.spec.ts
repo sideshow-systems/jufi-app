@@ -1,6 +1,6 @@
 import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { demoEinspielen } from './demo.js';
+import { DemoGeschuetztFehler, demoEinspielen } from './demo.js';
 
 const BEZUGSTAG = new Date('2026-10-12T12:00:00Z');
 
@@ -118,5 +118,50 @@ describe('demoEinspielen', () => {
 		const alter = Object.fromEntries(jungfischer.map((p) => [p.vorname, alterAn(p.geburtsdatum as Date, BEZUGSTAG)]));
 		expect(alter).toEqual({ Lena: 14, Max: 12, Jonas: 17 });
 		expect(jungfischer.filter((p) => p.jugendsprecher).map((p) => p.vorname)).toEqual(['Jonas']);
+	});
+
+	describe('Schutz eines echten Vereins mit dem Slug demo', () => {
+		/** Ein Verein mit Slug demo, der kein Demo-Verein ist: Person mit Zugang, optional mit Sitzung. */
+		async function echterVereinMitSlugDemo(mitSitzung: boolean) {
+			const verein = await prisma.verein.create({
+				data: { slug: 'demo', name: 'Echter Verein e.V.', anzeigename: 'Echter Verein', farbe: '#1d4ed8' },
+			});
+			const person = await prisma.person.create({
+				data: { vereinId: verein.id, art: 'ERWACHSENER', vorname: 'Erika', nachname: 'Echt' },
+			});
+			const zugang = await prisma.zugang.create({
+				data: { vereinId: verein.id, personId: person.id, email: 'erika@example.org' },
+			});
+			if (mitSitzung) {
+				await prisma.session.create({
+					data: {
+						vereinId: verein.id,
+						zugangId: zugang.id,
+						tokenHash: 'erfundener-hash',
+						ablauf: new Date('2027-01-01T00:00:00Z'),
+					},
+				});
+			}
+			return verein;
+		}
+
+		it('verweigert das Einspielen, wenn der Verein demo einen Zugang hat, und loescht nichts', async () => {
+			const verein = await echterVereinMitSlugDemo(false);
+
+			await expect(demoEinspielen(prisma, BEZUGSTAG)).rejects.toBeInstanceOf(DemoGeschuetztFehler);
+
+			expect(await prisma.verein.findUnique({ where: { id: verein.id } })).not.toBeNull();
+			expect(await prisma.person.count({ where: { vereinId: verein.id } })).toBe(1);
+			expect(await prisma.zugang.count({ where: { vereinId: verein.id } })).toBe(1);
+			expect(await prisma.verein.count()).toBe(1);
+		});
+
+		it('verweigert das Einspielen auch bei einer Sitzung', async () => {
+			const verein = await echterVereinMitSlugDemo(true);
+
+			await expect(demoEinspielen(prisma, BEZUGSTAG)).rejects.toThrow(/Zugang|Sitzung/);
+
+			expect(await prisma.session.count({ where: { vereinId: verein.id } })).toBe(1);
+		});
 	});
 });
