@@ -233,15 +233,18 @@ export function adminDaten(prisma: PrismaClient) {
 				}),
 			]);
 
-			const slugAenderbar = !angenommen;
 			let leitung: VereinDetails['ersteLeitung'] = null;
-			if (slugAenderbar) {
+			if (!angenommen) {
 				const einladung = await ersteLeitung(prisma, id);
 				if (einladung) {
 					const { person } = einladung;
 					leitung = { personId: person.id, vorname: person.vorname, nachname: person.nachname };
 				}
 			}
+			// Dieselbe Bedingung wie in korrigiereSlug: Ohne Admin-Einladung (Demo-Verein
+			// aus dem Seed) antwortet die Korrektur 404, also darf die Oberflaeche sie
+			// nicht anbieten.
+			const slugAenderbar = leitung !== null;
 
 			return {
 				id: verein.id,

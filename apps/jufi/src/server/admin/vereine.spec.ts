@@ -170,6 +170,18 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 			'Keine gültige E-Mail-Adresse',
 		],
 		['ohne Leitung', { leitung: 'Thomas' }, 'vorname', 'Bitte ausfüllen'],
+		[
+			'zu langer Vorname',
+			{ leitung: { vorname: 'T'.repeat(101), nachname: 'Beispiel', email: 'thomas@example.org' } },
+			'vorname',
+			'Höchstens 100 Zeichen',
+		],
+		[
+			'zu langer Nachname',
+			{ leitung: { vorname: 'Thomas', nachname: 'B'.repeat(101), email: 'thomas@example.org' } },
+			'nachname',
+			'Höchstens 100 Zeichen',
+		],
 	])('%s ist 400 mit passendem feld', async (_fall, aenderung, feld, fehler) => {
 		const r = await lege(neuerVerein('abgelehnt-test', aenderung));
 		expect(r.status).toBe(400);
@@ -257,6 +269,34 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 		});
 		const namen = vereine.map((v) => v.anzeigename);
 		expect(namen).toEqual([...namen].sort((a, b) => a.localeCompare(b, 'de')));
+	});
+
+	it('Vor- und Nachname mit genau 100 Zeichen werden angenommen', async () => {
+		const r = await lege(
+			neuerVerein('grenze-name-test', {
+				leitung: { vorname: 'T'.repeat(100), nachname: 'B'.repeat(100), email: 'thomas@example.org' },
+			}),
+		);
+		expect(r.status).toBe(201);
+	});
+
+	it('ein Verein ohne Admin-Einladung (Demo-artig) bietet keine Slug-Korrektur an', async () => {
+		// Wie der Demo-Verein aus dem Seed: Verein und Leitung ohne Einladung, ohne Zugang.
+		const verein = await legeVereinAn(prisma, { slug: 'ohne-einladung-test' });
+		await prisma.person.create({
+			data: {
+				vereinId: verein.id,
+				art: 'ERWACHSENER',
+				vorname: 'Petra',
+				nachname: 'Probe',
+				rechte: ['JUGENDLEITER_RECHTE'],
+			},
+		});
+
+		const details = (await (await hole(`/vereine/${verein.id}`)).json()) as Record<string, unknown>;
+		expect(details['ersteLeitung']).toBeNull();
+		// Die Korrektur antwortet hier 404; die Oberflaeche darf das Feld also nicht anbieten.
+		expect(details['slugAenderbar']).toBe(false);
 	});
 
 	it('Vereinsdetails nennen nur Ansprechpartner', async () => {

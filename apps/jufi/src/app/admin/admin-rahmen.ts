@@ -89,10 +89,15 @@ export class AdminRahmenComponent {
 		try {
 			await firstValueFrom(this.api.abmelden());
 		} catch (ursache) {
-			// Nicht zur Anmeldeseite weiterleiten: ohne Antwort ist die Sitzung womoeglich
-			// noch offen, und die Person hielte sich fuer abgemeldet.
-			this.fehler.set(`Abmelden fehlgeschlagen – ${fehlertext(alsAdminFehler(ursache))}`);
-			return;
+			const f = alsAdminFehler(ursache);
+			// 401 heisst eindeutig: keine Sitzung (nach 12 Stunden abgelaufen). Abgemeldet ist
+			// dann erreicht, die Person gehoert zur Anmeldung statt vor eine Fehlermeldung.
+			if (f.status !== 401) {
+				// Sonst nicht weiterleiten: ohne Antwort ist die Sitzung womoeglich noch offen,
+				// und die Person hielte sich fuer abgemeldet.
+				this.fehler.set(`Abmelden fehlgeschlagen – ${fehlertext(f)}`);
+				return;
+			}
 		} finally {
 			this.laeuft.set(false);
 		}

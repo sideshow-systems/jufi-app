@@ -10,6 +10,9 @@ import {
 	viewChild,
 } from '@angular/core';
 
+/** Je Dialog eigene ids fuer aria-labelledby und -describedby, falls je zwei zugleich im DOM stuenden. */
+let naechsteId = 0;
+
 /**
  * Rueckfrage vor einer Handlung, die der Verein oder die Mitglieder spueren.
  * Ein eigenes Bauteil statt window.confirm: Der Browserdialog laesst sich nicht
@@ -36,12 +39,14 @@ import {
 				class="dialog"
 				role="dialog"
 				aria-modal="true"
-				aria-describedby="bestaetigung-text"
+				[attr.aria-labelledby]="titelId"
+				[attr.aria-describedby]="textId"
 				tabindex="-1"
 				(click)="$event.stopPropagation()"
 				(keydown)="taste($event)"
 			>
-				<p id="bestaetigung-text">{{ text() }}</p>
+				<h2 [id]="titelId">{{ titel() }}</h2>
+				<p [id]="textId">{{ text() }}</p>
 				<div class="knoepfe">
 					<button type="button" class="knopf" (click)="abgebrochen.emit()">Abbrechen</button>
 					<button type="button" class="knopf primaer" (click)="bestaetigt.emit()">{{ bestaetigung() }}</button>
@@ -70,6 +75,10 @@ import {
 		.dialog:focus {
 			outline: none;
 		}
+		h2 {
+			margin: 0 0 var(--a2);
+			font-size: var(--schrift-gross);
+		}
 		p {
 			margin: 0 0 var(--a4);
 		}
@@ -81,11 +90,16 @@ import {
 	`,
 })
 export class BestaetigungComponent {
+	/** Der Name des Dialogs fuer Screenreader; sichtbar als Ueberschrift ueber der Frage. */
+	readonly titel = input('Bitte bestätigen');
 	readonly text = input.required<string>();
 	/** Beschriftung des Knopfes, der die Handlung ausloest (nicht "OK", sondern was geschieht). */
 	readonly bestaetigung = input('Bestätigen');
 	readonly bestaetigt = output<void>();
 	readonly abgebrochen = output<void>();
+
+	protected readonly titelId = `bestaetigung-titel-${naechsteId}`;
+	protected readonly textId = `bestaetigung-text-${naechsteId++}`;
 
 	private readonly dialog = viewChild.required<ElementRef<HTMLElement>>('dialog');
 

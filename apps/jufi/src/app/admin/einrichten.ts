@@ -75,8 +75,11 @@ type Schritt = 'laedt' | 'ungueltig' | 'netzfehler' | 'passwort' | 'totp' | 'pas
 						<p class="gedaempft">
 							Mit einer Authenticator-App schützt du das Konto auch dann, wenn jemand dein Passwort kennt.
 						</p>
-						<jf-totp-einrichtung (eingerichtet)="zumPasskey()" />
-						<button type="button" class="knopf" (click)="zumPasskey()">Überspringen</button>
+						<jf-totp-einrichtung #totp (eingerichtet)="zumPasskey()" />
+						<!-- Nach dem Bestaetigen weg: Ueberspringen fuehrte an den nur einmal sichtbaren Codes vorbei. -->
+						@if (!totp.bestaetigt()) {
+							<button type="button" class="knopf" (click)="zumPasskey()">Überspringen</button>
+						}
 					}
 					@case ('passkey') {
 						<h2>Passkey</h2>

@@ -162,8 +162,12 @@ export class AdminKontoComponent implements OnInit {
 		try {
 			await firstValueFrom(this.api.abmelden());
 		} catch (ursache) {
-			this.passkeyMeldung.set(`Abmelden fehlgeschlagen – ${fehlertext(alsAdminFehler(ursache))}`);
-			return;
+			const f = alsAdminFehler(ursache);
+			// 401: keine Sitzung mehr, also abgemeldet -- wie bei Erfolg zur Anmeldung.
+			if (f.status !== 401) {
+				this.passkeyMeldung.set(`Abmelden fehlgeschlagen – ${fehlertext(f)}`);
+				return;
+			}
 		} finally {
 			this.laeuft.set(false);
 		}

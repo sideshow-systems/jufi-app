@@ -26,48 +26,56 @@ import { wertVon } from './formular';
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@if (start(); as s) {
-			<div class="spalten">
-				<div class="qr">
-					<!--
+			@if (!bestaetigt()) {
+				<div class="spalten">
+					<div class="qr">
+						<!--
 						Ein canvas statt eines img mit Data-URL: die Sicherheitsregel des Servers
 						erlaubt Bilder nur von der eigenen Adresse, kein data:. Das canvas braucht
 						keine Bildquelle. Der weisse Grund bleibt auch im Dunkelmodus, sonst liest
 						keine App den Code.
 					-->
-					<canvas #qr width="200" height="200" aria-label="QR-Code für die Authenticator-App" role="img"></canvas>
-					@if (qrFehler()) {
-						<p class="klein gedaempft">Der QR-Code konnte nicht gezeichnet werden. Gib das Geheimnis von Hand ein.</p>
-					}
-				</div>
-				<div class="rest">
-					<p>Scanne den Code mit der Authenticator-App oder gib dort das Geheimnis ein:</p>
-					<code class="geheimnis">{{ geheimnisGruppiert() }}</code>
-					<form (submit)="bestaetigen($event)">
-						<label class="feld">
-							Code aus der Authenticator-App
-							<input
-								name="code"
-								inputmode="numeric"
-								autocomplete="one-time-code"
-								maxlength="7"
-								[value]="code()"
-								(input)="code.set(wert($event))"
-							/>
-						</label>
-						<button type="submit" class="knopf primaer" [disabled]="laeuft() || code().trim() === ''">
-							Bestätigen
-						</button>
-					</form>
-					@if (fehler(); as text) {
-						<p class="fehler" role="alert">{{ text }}</p>
-						@if (abgelaufen()) {
-							<button type="button" class="knopf leise" (click)="beginne()">Neu beginnen</button>
+						<canvas #qr width="200" height="200" aria-label="QR-Code für die Authenticator-App" role="img"></canvas>
+						@if (qrFehler()) {
+							<p class="klein gedaempft">Der QR-Code konnte nicht gezeichnet werden. Gib das Geheimnis von Hand ein.</p>
 						}
-					}
+					</div>
+					<div class="rest">
+						<p>Scanne den Code mit der Authenticator-App oder gib dort das Geheimnis ein:</p>
+						<code class="geheimnis">{{ geheimnisGruppiert() }}</code>
+						<form (submit)="bestaetigen($event)">
+							<label class="feld">
+								Code aus der Authenticator-App
+								<input
+									name="code"
+									inputmode="numeric"
+									autocomplete="one-time-code"
+									maxlength="7"
+									[value]="code()"
+									(input)="code.set(wert($event))"
+								/>
+							</label>
+							<button type="submit" class="knopf primaer" [disabled]="laeuft() || code().trim() === ''">
+								Bestätigen
+							</button>
+						</form>
+						@if (fehler(); as text) {
+							<p class="fehler" role="alert">{{ text }}</p>
+							@if (abgelaufen()) {
+								<button type="button" class="knopf leise" (click)="beginne()">Neu beginnen</button>
+							}
+						}
+					</div>
 				</div>
-			</div>
+			}
 			<section class="codes">
 				<h3>Wiederherstellungscodes</h3>
+				@if (bestaetigt()) {
+					<p class="nur-jetzt" role="status">
+						Nur jetzt sichtbar: Der zweite Faktor ist eingerichtet. Sichere die Codes, bevor du weitergehst – später
+						zeigt sie niemand mehr an.
+					</p>
+				}
 				<ul>
 					@for (c of s.wiederherstellungscodes; track c) {
 						<li>
@@ -81,6 +89,11 @@ import { wertVon } from './formular';
 				</button>
 				@if (kopiert() === 'fehler') {
 					<p class="klein fehler" role="alert">Kopieren nicht möglich – schreibe die Codes bitte ab.</p>
+				}
+				@if (bestaetigt()) {
+					<button type="button" class="knopf primaer" (click)="eingerichtet.emit()">
+						Ich habe die Codes gesichert – weiter
+					</button>
 				}
 			</section>
 		} @else if (fehler(); as text) {
@@ -148,14 +161,30 @@ import { wertVon } from './formular';
 		.fehler {
 			color: var(--fehler);
 		}
+		.nur-jetzt {
+			font-weight: 600;
+		}
 	`,
 })
 export class TotpEinrichtungComponent implements OnInit {
 	private readonly api = inject(AdminApi);
 	private readonly leinwand = viewChild<ElementRef<HTMLCanvasElement>>('qr');
 
-	/** Das Konto hat jetzt einen zweiten Faktor. */
+	/**
+	 * Die Person hat die Wiederherstellungscodes gesichert und will weiter. Nicht
+	 * schon beim Bestaetigen des Codes: Die Elternseite entfernt das Bauteil bei
+	 * diesem Ereignis, und die Codes liessen sich nie wieder anzeigen
+	 * (/konto/totp/start antwortet 409, sobald der Faktor aktiv ist).
+	 */
 	readonly eingerichtet = output<void>();
+
+	/**
+	 * Der Server hat den Code angenommen, der zweite Faktor ist aktiv. Oeffentlich,
+	 * damit die Elternseite ihren Ueberspringen-Knopf dann verbergen kann: Er fuehrte
+	 * an der Quittung der Codes vorbei.
+	 */
+	private readonly bestaetigtIntern = signal(false);
+	readonly bestaetigt = this.bestaetigtIntern.asReadonly();
 
 	protected readonly start = signal<TotpStart | null>(null);
 	protected readonly code = signal('');
@@ -202,7 +231,7 @@ export class TotpEinrichtungComponent implements OnInit {
 		this.fehler.set(null);
 		try {
 			await firstValueFrom(this.api.totpBestaetigen(s.zwischenmarke, this.code().trim()));
-			this.eingerichtet.emit();
+			this.bestaetigtIntern.set(true);
 		} catch (ursache) {
 			const f = alsAdminFehler(ursache);
 			this.fehler.set(fehlertext(f));

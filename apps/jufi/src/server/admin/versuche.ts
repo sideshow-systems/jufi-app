@@ -15,11 +15,12 @@ export function zuVieleVersuche(res: Response, ms: number): void {
  * gesperrt, liefert sie die Wartezeit und zaehlt nichts. Sonst zaehlt sie den
  * Versuch sofort als Fehlversuch; ein Erfolg setzt danach mit versuche.reset
  * zurueck. loestSperreAus merkt sich, ob genau dieser Versuch die Sperre
- * ausgeloest hat, damit scheitere ihm und nur ihm 429 antwortet.
+ * ausgeloest hat: Scheitert er, antwortet scheitere mit 429 statt 401, und nur
+ * er bekommt das; Versuche, die vorher reserviert wurden, bleiben bei 401.
  *
- * Muss vor dem ersten await der Route stehen: Node fuehrt diesen Teil einer
- * Anfrage am Stueck aus, gleichzeitige Anfragen sehen also schon die Zaehlung
- * der vorigen. Verworfen: erst nach der Pruefung zaehlen wie hwyd -- alle
+ * Muss vor dem ersten await der Route stehen, damit gleichzeitige Anfragen das
+ * Sperrfenster nicht umgehen: Node fuehrt diesen Teil einer Anfrage am Stueck
+ * aus, jede weitere Anfrage sieht also schon die Zaehlung der vorigen. Verworfen: erst nach der Pruefung zaehlen wie hwyd -- alle
  * gleichzeitigen Anfragen saehen dann dieselbe alte Zahl, und wer das Passwort
  * kennt, probierte je Sperrfenster beliebig viele TOTP-Codes parallel.
  * Verworfen auch: hoechstens eine laufende Anfrage je Schluessel -- ein

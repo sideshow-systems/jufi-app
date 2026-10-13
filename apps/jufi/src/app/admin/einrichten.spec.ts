@@ -167,6 +167,16 @@ describe('Admin-Einrichtung', () => {
 		anfrage.flush({ ok: true });
 		await stabil(harness);
 
+		// Erst die Quittung der Codes bringt weiter. Ueberspringen entfaellt jetzt:
+		// es fuehrte an den nur einmal sichtbaren Codes vorbei.
+		expect(seite.textContent).toContain('A-1');
+		expect(seite.textContent).toContain('Nur jetzt sichtbar');
+		expect(seite.textContent).not.toContain('Passkey hinzufügen');
+		expect(() => knopf(seite, 'Überspringen')).toThrow();
+
+		knopf(seite, 'Ich habe die Codes gesichert').click();
+		await stabil(harness);
+
 		expect(seite.textContent).toContain('Passkey hinzufügen');
 		expect(seite.textContent).not.toContain('Dringend empfohlen');
 	});

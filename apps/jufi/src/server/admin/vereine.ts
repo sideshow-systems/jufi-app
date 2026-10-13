@@ -21,6 +21,12 @@ const SLUG_VERGEBEN = { fehler: 'Dieser Slug ist vergeben', feld: 'slug' };
 const SLUG_FEST = { fehler: 'Der Slug ist fest, seit die erste Einladung angenommen wurde' };
 const SCHON_ANGENOMMEN = { fehler: 'Die erste Einladung ist schon angenommen' };
 const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
+/**
+ * Ohne Grenze liefe ein 90-kB-Name (nur express.json begrenzt auf 100 kB) in die
+ * Datenbank und in den Einladungstext. 100 reicht fuer jeden echten Namen.
+ */
+const MAX_PERSONENNAME = 100;
+const ZU_LANG_NAME = `Höchstens ${MAX_PERSONENNAME} Zeichen`;
 
 type Feld = 'name' | 'anzeigename' | 'slug' | 'farbe' | 'vorname' | 'nachname' | 'email';
 
@@ -62,7 +68,9 @@ function pruefeNeuenVerein(
 	if (!slug.ok) return { ok: false, feld: 'slug', fehler: SLUG_HINWEIS[slug.grund] };
 	if (!pruefeFarbe(eingabe.farbe)) return { ok: false, feld: 'farbe', fehler: 'Farbe als #rrggbb' };
 	if (!eingabe.leitung.vorname) return { ok: false, feld: 'vorname', fehler: BITTE_AUSFUELLEN };
+	if (eingabe.leitung.vorname.length > MAX_PERSONENNAME) return { ok: false, feld: 'vorname', fehler: ZU_LANG_NAME };
 	if (!eingabe.leitung.nachname) return { ok: false, feld: 'nachname', fehler: BITTE_AUSFUELLEN };
+	if (eingabe.leitung.nachname.length > MAX_PERSONENNAME) return { ok: false, feld: 'nachname', fehler: ZU_LANG_NAME };
 	if (!pruefeEmail(eingabe.leitung.email)) return { ok: false, feld: 'email', fehler: 'Keine gültige E-Mail-Adresse' };
 	return { ok: true, eingabe };
 }
