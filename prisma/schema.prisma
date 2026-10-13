@@ -1,0 +1,543 @@
+// JuFi App — Datenmodell. Siehe Spezifikation TP2 Fundament, Abschnitt 3.
+//
+// Mandantentrennung (Spec 3.1): Jede Vereinstabelle traegt vereinId, auch die
+// Verknuepfungstabellen. Verweise auf Personen und Zugaenge laufen ueber das Paar
+// (vereinId, id) als zusammengesetzten Fremdschluessel. So kann die Datenbank
+// selbst keine Familie, Untergruppe oder Sitzung ueber Vereinsgrenzen hinweg
+// verknuepfen. Verworfen: Schutz nur in der Datenschicht (vereinDb) — ein
+// einziger Fehler im Code waere dann ein Leck. Dass vereinId dabei in mehreren
+// Relationen eines Modells steckt, ist gewollt.
+//
+// CHECK-Constraints bildet Prisma nicht ab; sie stehen von Hand in der Migration
+// prisma/migrations/*_fundament/migration.sql.
+//
+// Hinweis: `prisma format` schreibt feste zwei Spaces und ist nicht
+// konfigurierbar — daher weicht diese Datei bewusst von der Tab-Regel ab.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../libs/db/src/generated"
+  moduleFormat = "esm"
+}
+
+// Prisma 7: `url` ist im Schema nicht mehr erlaubt. Die Verbindung fuer Migrate
+// steht in prisma.config.ts, der Client bekommt einen Driver Adapter.
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Enums --------------------------------------------------------------------
+
+enum VereinStatus {
+  AKTIV
+  /// Alle Seiten des Vereins "nicht gefunden"; Sitzungen bleiben bestehen und
+  /// wirken nach dem Entsperren wieder (Spec 7.3).
+  GESPERRT
+}
+
+enum PersonArt {
+  JUNGFISCHER
+  ERWACHSENER
+}
+
+/// Rechte nach Rahmen-Spec 4.2. Auch Rechte fuer Bereiche, die erst spaeter
+/// entstehen, lassen sich schon in TP2 vergeben.
+enum Recht {
+  MITGLIEDER
+  THREADS_ERSTELLEN
+  ALLE_THREADS
+  DOKUMENTE
+  ANTWORTEN_DETAIL
+  JUGENDLEITER_RECHTE
+  EINSTELLUNGEN
+}
+
+enum Beziehung {
+  MUTTER
+  VATER
+  GROSSMUTTER
+  GROSSVATER
+  TANTE
+  ONKEL
+  GESCHWISTER
+  PFLEGEPERSON
+  ANDERE
+}
+
+enum EinladungArt {
+  EINLADUNG
+  RESET
+}
+
+enum EinwilligungArt {
+  DSGVO_ART8
+}
+
+/// Was im AdminProtokoll steht (Spec 7.5). Loeschen eines Vereins fehlt bewusst:
+/// es geschieht nur ueber die Kommandozeile, nicht als angemeldeter Admin.
+enum AdminAktion {
+  VEREIN_ANGELEGT
+  GESPERRT
+  ENTSPERRT
+  SLUG_KORRIGIERT
+  NOTFALL_LINK
+  ERSTE_EINLADUNG_ERNEUERT
+}
+
+// --- Verein -------------------------------------------------------------------
+
+model Verein {
+  id          String       @id @default(cuid())
+  /// Kleinbuchstaben, Ziffern, Bindestriche, 3–30 Zeichen (CHECK verein_slug).
+  /// Reservierte Slugs prueft libs/domain; die Liste waechst mit den Routen und
+  /// gehoert deshalb nicht in einen CHECK.
+  slug        String       @unique
+  /// Offizieller Name, z.B. fuer Einwilligungstext, Kontakt, Fusszeile der Mails.
+  name        String
+  /// Hoechstens 24 Zeichen (CHECK verein_anzeigename): Kopfzeile, Passkey-Name,
+  /// Home-Bildschirm, Betreff der Mails.
+  anzeigename String
+  /// Vereinsfarbe als Hex-Wert; alles Weitere wird daraus abgeleitet.
+  farbe       String
+  /// Freitext. Optional, weil "Verein anlegen" (Spec 7.3) ihn nicht abfragt.
+  kontakt     String?
+  status      VereinStatus @default(AKTIV)
+  angelegtAm  DateTime     @default(now())
+
+  logo                  VereinLogo?
+  personen              Person[]
+  bezugspersonen        Bezugsperson[]
+  untergruppen          Untergruppe[]
+  untergruppeMitglieder UntergruppeMitglied[]
+  zugaenge              Zugang[]
+  passkeys              Passkey[]
+  recoveryCodes         RecoveryCode[]
+  sessions              Session[]
+  webauthnChallenges    WebauthnChallenge[]
+  einladungen           Einladung[]
+  einwilligungen        Einwilligung[]
+  mails                 MailWarteschlange[]
+}
+
+/// Eigene Tabelle, damit nicht jede Vereinsabfrage das Bild mitlaedt. Verworfen:
+/// Dateiablage im Volume — die entsteht erst in TP4, und so ist das Logo mit der
+/// Datenbank gesichert (Spec 3.2).
+model VereinLogo {
+  vereinId    String   @id
+  verein      Verein   @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  /// PNG oder JPEG, hoechstens 1 MB.
+  bild        Bytes
+  mimeType    String
+  icon192     Bytes
+  icon512     Bytes
+  geaendertAm DateTime @default(now()) @updatedAt
+}
+
+// --- Personen -----------------------------------------------------------------
+
+/// Jungfischer und Erwachsene in einer Tabelle. Welche Felder zur Art passen,
+/// prueft libs/domain; der CHECK person_art_felder sichert es zusaetzlich ab.
+///
+/// Entfernte Personen bleiben als Grabstein (Spec 5.8): Namen und Geburtsdatum
+/// geleert, Rechte geleert, entferntAm gesetzt. Spaetere Antworten verweisen
+/// weiter auf die Zeile.
+model Person {
+  id                    String    @id @default(cuid())
+  vereinId              String
+  verein                Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  art                   PersonArt
+  /// Leer bei Grabstein.
+  vorname               String
+  /// Leer bei Grabstein.
+  nachname              String
+  /// Nur Jungfischer, dort Pflicht ausser beim Grabstein.
+  geburtsdatum          DateTime? @db.Date
+  /// Nur Jungfischer (Rahmen-Spec 3.5).
+  jugendsprecher        Boolean   @default(false)
+  /// Nur bei Jungfischern bedeutsam; Erziehungsberechtigte entscheiden.
+  zugangErlaubt         Boolean   @default(true)
+  /// Nur Jungfischer: Verwaltung hat den Volljaehrigkeitshinweis mit "Belassen"
+  /// quittiert (Spec 5.6).
+  volljaehrigGeprueftAm DateTime?
+  /// Nur Erwachsene; leer = kein Jugendleiter.
+  rechte                Recht[]   @default([])
+  /// Gesetzt = Grabstein.
+  entferntAm            DateTime?
+  angelegtAm            DateTime  @default(now())
+
+  zugang                       Zugang?
+  alsErwachsener               Bezugsperson[]        @relation("BezugspersonErwachsener")
+  alsJungfischer               Bezugsperson[]        @relation("BezugspersonJungfischer")
+  untergruppen                 UntergruppeMitglied[]
+  einladungen                  Einladung[]           @relation("EinladungPerson")
+  erstellteEinladungen         Einladung[]           @relation("EinladungErstelltVon")
+  einwilligungenAlsJungfischer Einwilligung[]        @relation("EinwilligungJungfischer")
+  erteilteEinwilligungen       Einwilligung[]        @relation("EinwilligungErteiltVon")
+  webauthnChallenges           WebauthnChallenge[]
+
+  /// Ziel der zusammengesetzten Fremdschluessel (Spec 3.1).
+  @@unique([vereinId, id])
+  @@index([vereinId, art])
+}
+
+/// Familienzuordnung zwischen einem Erwachsenen und einem Jungfischer.
+model Bezugsperson {
+  id                   String    @id @default(cuid())
+  vereinId             String
+  verein               Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  erwachsenerId        String
+  erwachsener          Person    @relation("BezugspersonErwachsener", fields: [vereinId, erwachsenerId], references: [vereinId, id], onDelete: Cascade)
+  jungfischerId        String
+  jungfischer          Person    @relation("BezugspersonJungfischer", fields: [vereinId, jungfischerId], references: [vereinId, id], onDelete: Cascade)
+  beziehung            Beziehung
+  /// Nur bei ANDERE, dort Pflicht (CHECK bezugsperson_freitext).
+  beziehungFreitext    String?
+  /// Wirkt nur bis zur Volljaehrigkeit des Jungfischers (Spec 5.6); das prueft
+  /// libs/domain, die Spalte haelt nur die Angabe der Verwaltung.
+  erziehungsberechtigt Boolean
+  angelegtAm           DateTime  @default(now())
+
+  @@unique([erwachsenerId, jungfischerId])
+  @@index([vereinId, erwachsenerId])
+  @@index([vereinId, jungfischerId])
+}
+
+model Untergruppe {
+  id         String   @id @default(cuid())
+  vereinId   String
+  verein     Verein   @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  name       String
+  angelegtAm DateTime @default(now())
+
+  mitglieder UntergruppeMitglied[]
+
+  @@unique([vereinId, name])
+  @@unique([vereinId, id])
+}
+
+/// Nur Jungfischer. Das prueft libs/domain; ein Fremdschluessel kann die Art der
+/// Person nicht sehen.
+model UntergruppeMitglied {
+  vereinId      String
+  verein        Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  untergruppeId String
+  untergruppe   Untergruppe @relation(fields: [vereinId, untergruppeId], references: [vereinId, id], onDelete: Cascade)
+  personId      String
+  person        Person      @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+
+  @@id([untergruppeId, personId])
+  @@index([vereinId, personId])
+}
+
+// --- Zugang und Anmeldung -----------------------------------------------------
+
+/// 0..1 je Person. Entsteht erst beim Einloesen der Einladung, zusammen mit dem
+/// ersten Anmeldeweg — einen Zugang ohne Passkey und ohne Passwort gibt es nicht.
+model Zugang {
+  id            String    @id @default(cuid())
+  vereinId      String
+  verein        Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  personId      String    @unique
+  person        Person    @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+  /// Kleingeschrieben, eindeutig je Verein. Erwachsene: Pflicht und Kennung;
+  /// Jungfischer: freiwillig, nur fuer Benachrichtigungen ab TP5.
+  email         String?
+  /// Kleingeschrieben, eindeutig je Verein; nur Jungfischer und ihre Kennung.
+  anmeldename   String?
+  /// Argon2id.
+  passwortHash  String?
+  /// Verschluesselt mit TOTP_ENC_KEY; nur Erwachsene mit Rechten.
+  totpGeheimnis String?
+  totpAktivAm   DateTime?
+  angelegtAm    DateTime  @default(now())
+
+  passkeys      Passkey[]
+  recoveryCodes RecoveryCode[]
+  sessions      Session[]
+
+  /// Ziel der zusammengesetzten Fremdschluessel von Passkey, RecoveryCode, Session.
+  @@unique([vereinId, id])
+  /// Prisma verlangt fuer die 1:1-Relation einen Schluessel genau ueber deren
+  /// Felder; personId allein ist schon eindeutig.
+  @@unique([vereinId, personId])
+  /// Je Verein, nicht global: Wer in zwei Vereinen ist, hat in jedem einen eigenen
+  /// Zugang, gern mit derselben Adresse (Spec 4.2, Passkey-Name).
+  @@unique([vereinId, email])
+  @@unique([vereinId, anmeldename])
+}
+
+/// Ein Passkey (WebAuthn-Credential), Felder wie in hwyd. Gespeichert wird nur der
+/// oeffentliche Schluessel; ein Datenbank-Leck gibt niemandem eine Anmeldung.
+model Passkey {
+  id           String    @id @default(cuid())
+  vereinId     String
+  verein       Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  zugangId     String
+  zugang       Zugang    @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade)
+  /// Credential-ID des Authenticators, base64url. Global eindeutig: Bei der
+  /// Anmeldung ohne allowCredentials steht der Verein des Passkeys erst nach dem
+  /// Nachschlagen fest ("Dieser Passkey gehoert nicht zu diesem Verein", Spec 4.3).
+  credentialId String    @unique
+  /// Oeffentlicher Schluessel (COSE), base64url.
+  publicKey    String
+  /// Signaturzaehler. Apple-Passkeys melden immer 0, weil ein synchronisierter
+  /// Schluessel auf mehreren Geraeten liegt; 0 darf nie als Klon gelten.
+  counter      Int       @default(0)
+  /// z.B. ["internal", "hybrid"] — steuert, welche Wege der Browser anbietet.
+  transports   String[]
+  /// true bei synchronisierten Schluesseln, die den Verlust des Geraets ueberleben.
+  backedUp     Boolean   @default(false)
+  /// Name in den Einstellungen, aus dem User-Agent geraten ("iPhone", "Mac").
+  label        String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([vereinId, zugangId])
+}
+
+/// Zehn gehashte Einmalcodes, nur fuer Zugaenge mit TOTP.
+model RecoveryCode {
+  id          String    @id @default(cuid())
+  vereinId    String
+  verein      Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  zugangId    String
+  zugang      Zugang    @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade)
+  codeHash    String
+  verwendetAm DateTime?
+
+  /// Eindeutig je Zugang statt global wie in hwyd: Ein Code wird immer zu einem
+  /// bekannten Zugang geprueft, und ein globaler Schluessel wuerde Zeilen
+  /// verschiedener Vereine miteinander vergleichen.
+  @@unique([zugangId, codeHash])
+  @@index([vereinId, zugangId])
+}
+
+/// Einmal-Challenge einer WebAuthn-Zeremonie, wie in hwyd. Die Zeile wird beim
+/// Einloesen geloescht, eine abgefangene Antwort ist danach wertlos.
+///
+/// vereinId null gehoert dem Plattform-Admin. Verworfen: eine zweite Tabelle fuer
+/// Admin-Challenges — Challenges tragen keine Personendaten, eine Kopie braechte
+/// nichts.
+model WebauthnChallenge {
+  id        String          @id @default(cuid())
+  challenge String          @unique
+  vereinId  String?
+  verein    Verein?         @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  /// Fuer wen registriert wird (Einladung annehmen oder Passkey im Profil); bei
+  /// der Anmeldung null, weil wer sich anmeldet erst nach der Antwort des
+  /// Authenticators feststeht. Person statt Zugang, weil der Zugang beim
+  /// Annehmen der Einladung erst mit dem ersten Passkey entsteht (Spec 4.2).
+  personId  String?
+  person    Person?         @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+  /// Gegenstueck zu personId fuer Admin-Challenges. Eine Zeile mit adminId hat
+  /// nie eine vereinId, verbindet also keine Vereinsdaten mit dem Admin.
+  adminId   String?
+  admin     PlattformAdmin? @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  /// 'register' oder 'authenticate'. Verhindert, dass eine Challenge aus der
+  /// Einrichtung fuer eine Anmeldung eingetauscht wird.
+  purpose   String
+  expiresAt DateTime
+  createdAt DateTime        @default(now())
+
+  @@index([expiresAt])
+}
+
+/// Mitglieder-Sitzung: 90 Tage, verlaengert sich bei Nutzung (Spec 4.5). Nur der
+/// Hash des Tokens steht hier, nie das Token selbst.
+model Session {
+  id             String   @id @default(cuid())
+  vereinId       String
+  verein         Verein   @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  zugangId       String
+  zugang         Zugang   @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade)
+  tokenHash      String   @unique
+  ablauf         DateTime
+  zuletztGesehen DateTime @default(now())
+  userAgent      String?
+  angelegtAm     DateTime @default(now())
+
+  @@index([vereinId, zugangId])
+}
+
+/// Einladungs- und Reset-Link. Ein neuer Link macht den offenen alten derselben
+/// Art fuer dieselbe Person ungueltig (Spec 3.4); das erledigt der Server.
+model Einladung {
+  id                  String       @id @default(cuid())
+  vereinId            String
+  verein              Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  personId            String
+  person              Person       @relation("EinladungPerson", fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+  art                 EinladungArt
+  tokenHash           String       @unique
+  ablauf              DateTime
+  eingeloestAm        DateTime?
+  /// null heisst "vom Plattform-Admin"; Einzelheiten stehen im AdminProtokoll.
+  /// Verworfen: ein Verweis auf PlattformAdmin — dann waeren Vereinsdaten und
+  /// Admin-Tabellen verbunden (Spec 3.2).
+  ///
+  /// NoAction statt Cascade: Einladungen, die eine spaeter entfernte Person
+  /// erstellt hat, bleiben gueltig — entfernt wird ohnehin per Grabstein, nicht
+  /// hart (Spec 5.8). Das Loeschen eines Vereins nimmt sie ueber die eigene
+  /// Relation zum Verein mit (Begruendung bei Einwilligung).
+  erstelltVonPersonId String?
+  erstelltVon         Person?      @relation("EinladungErstelltVon", fields: [vereinId, erstelltVonPersonId], references: [vereinId, id], onDelete: NoAction)
+  angelegtAm          DateTime     @default(now())
+
+  @@index([vereinId, personId, art])
+  @@index([vereinId, erstelltVonPersonId])
+}
+
+/// Einwilligungen werden nie geloescht, nur widerrufen; so bleibt nachweisbar,
+/// wer wann eingewilligt hat. Beim Entfernen einer Person bleiben sie stehen.
+model Einwilligung {
+  id               String          @id @default(cuid())
+  vereinId         String
+  verein           Verein          @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  /// Beide Personen-Relationen ohne Kaskade: Das harte Loeschen einer Person mit
+  /// Einwilligung wird abgelehnt (Nachweis, Spec 3.4). Das Loeschen eines ganzen
+  /// Vereins geht trotzdem durch, weil Postgres die Pruefungen aus einer Kaskade
+  /// erst am Ende der Anweisung ausfuehrt — dann hat die Kaskade vom Verein die
+  /// Einwilligung schon entfernt (Test "Verein loeschen ...").
+  ///
+  /// NoAction statt Restrict: Ohne DEFERRABLE verhalten sich beide hier gleich
+  /// (mit Postgres 17 nachgeprueft, auch das Vereinsloeschen mit RESTRICT). Die
+  /// Befuerchtung, RESTRICT pruefe mitten in der Kaskade, traf nicht zu; NO ACTION
+  /// liesse sich aber spaeter aufschieben, RESTRICT nie.
+  jungfischerId    String
+  jungfischer      Person          @relation("EinwilligungJungfischer", fields: [vereinId, jungfischerId], references: [vereinId, id], onDelete: NoAction)
+  /// Person, die eingewilligt hat (erziehungsberechtigte Bezugsperson).
+  erteiltVon       String
+  erteiltVonPerson Person          @relation("EinwilligungErteiltVon", fields: [vereinId, erteiltVon], references: [vereinId, id], onDelete: NoAction)
+  art              EinwilligungArt
+  /// Fassung des Einwilligungstexts, der angezeigt wurde.
+  textVersion      String
+  erteiltAm        DateTime        @default(now())
+  widerrufenAm     DateTime?
+
+  @@index([vereinId, jungfischerId])
+  @@index([vereinId, erteiltVon])
+}
+
+/// Ausgehende Mails. Gehoert schon in TP2: Der Reset-Dialog muss sofort antworten
+/// koennen, ohne ueber die Antwortzeit zu verraten, ob es die Adresse gibt.
+model MailWarteschlange {
+  id               String    @id @default(cuid())
+  /// null bei Mails ohne Verein (z.B. an den Plattform-Admin).
+  vereinId         String?
+  verein           Verein?   @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  empfaenger       String
+  betreff          String
+  text             String
+  versuche         Int       @default(0)
+  naechsterVersuch DateTime  @default(now())
+  gesendetAm       DateTime?
+  fehler           String?
+  /// Wozu die Mail gehoert, z.B. "einladung:<id>" — fuer den Warnhinweis
+  /// "Einladungsmail nicht zustellbar" (Spec 5.3). Freitext statt Fremdschluessel,
+  /// weil spaetere Teilprojekte weitere Anlaesse bringen.
+  bezug            String?
+  angelegtAm       DateTime  @default(now())
+
+  @@index([gesendetAm, naechsterVersuch])
+  @@index([vereinId, bezug])
+}
+
+// --- Plattform-Admin ----------------------------------------------------------
+//
+// Eigene Tabellen ohne vereinId und ohne Verbindung zu den Personen (Spec 3.2).
+// Verworfen: der Admin als Zugang ohne Person — dann stuende er in denselben
+// Tabellen wie die Vereinsdaten, und die Trennung hinge wieder an Abfragen.
+
+model PlattformAdmin {
+  id            String    @id @default(cuid())
+  benutzername  String    @unique
+  /// Leer bis zur Einrichtung ueber den einmaligen Link aus der Kommandozeile.
+  passwortHash  String?
+  /// Verschluesselt mit TOTP_ENC_KEY.
+  totpGeheimnis String?
+  totpAktivAm   DateTime?
+  angelegtAm    DateTime  @default(now())
+
+  sessions           AdminSession[]
+  passkeys           AdminPasskey[]
+  recoveryCodes      AdminRecoveryCode[]
+  einrichtungen      AdminEinrichtung[]
+  protokoll          AdminProtokoll[]
+  webauthnChallenges WebauthnChallenge[]
+}
+
+/// 12 Stunden, ohne Verlaengerung (Spec 4.5).
+model AdminSession {
+  id         String         @id @default(cuid())
+  adminId    String
+  admin      PlattformAdmin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  tokenHash  String         @unique
+  ablauf     DateTime
+  userAgent  String?
+  angelegtAm DateTime       @default(now())
+
+  @@index([adminId])
+}
+
+/// Wie Passkey, aber nur fuer den Admin; ein Vereins-Passkey wird bei der
+/// Admin-Anmeldung nicht erkannt (Spec 7.2).
+model AdminPasskey {
+  id           String         @id @default(cuid())
+  adminId      String
+  admin        PlattformAdmin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  credentialId String         @unique
+  publicKey    String
+  counter      Int            @default(0)
+  transports   String[]
+  backedUp     Boolean        @default(false)
+  label        String
+  createdAt    DateTime       @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([adminId])
+}
+
+model AdminRecoveryCode {
+  id          String         @id @default(cuid())
+  adminId     String
+  admin       PlattformAdmin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  codeHash    String
+  verwendetAm DateTime?
+
+  @@unique([adminId, codeHash])
+}
+
+/// Einmaliger Einrichtungslink aus "admin anlegen" bzw. "admin zuruecksetzen",
+/// 1 Stunde gueltig (Spec 7.1).
+model AdminEinrichtung {
+  id           String         @id @default(cuid())
+  adminId      String
+  admin        PlattformAdmin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  tokenHash    String         @unique
+  ablauf       DateTime
+  eingeloestAm DateTime?
+  angelegtAm   DateTime       @default(now())
+
+  @@index([adminId])
+}
+
+/// Wer wann was an einem Verein getan hat (Spec 7.5): Als Auftragsverarbeiter muss
+/// die Plattform das belegen koennen.
+model AdminProtokoll {
+  id                 String         @id @default(cuid())
+  /// Restrict: Ein Admin mit Protokolleintraegen laesst sich nicht hart loeschen,
+  /// sonst verloere der Nachweis seinen Urheber.
+  adminId            String
+  admin              PlattformAdmin @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  zeitpunkt          DateTime       @default(now())
+  aktion             AdminAktion
+  /// Ohne Fremdschluessel: Das Protokoll ueberlebt das Loeschen eines Vereins.
+  /// Der Slug steht deshalb als Abschrift daneben.
+  vereinId           String
+  vereinSlug         String
+  /// z.B. Ziel eines Notfall-Links. Ebenfalls ohne Fremdschluessel — sonst waeren
+  /// Admin-Tabellen und Personen verbunden (Spec 3.2).
+  betroffenePersonId String?
+
+  @@index([vereinId, zeitpunkt])
+}
