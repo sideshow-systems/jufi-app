@@ -36,6 +36,8 @@ describe('Admin-Routen', () => {
 				.flush({ benutzername: 'flo', totpAktiv: false, passkeys: 0, wiederherstellungscodesUebrig: 0 }),
 		);
 		await navigation;
+		// Die Vereinsliste laedt ihre Daten.
+		await vi.waitFor(() => http.expectOne(`${API}/vereine`).flush({ vereine: [] }));
 
 		expect(TestBed.inject(Router).url).toBe('/admin/vereine');
 	});

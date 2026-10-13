@@ -17,9 +17,10 @@ export const ADMIN_ROUTES: Routes = [
 		canActivate: [adminAngemeldet],
 		children: [
 			{ path: '', pathMatch: 'full', redirectTo: 'vereine' },
-			{ path: 'vereine', loadComponent: () => import('./platzhalter').then((m) => m.AdminPlatzhalterComponent) },
-			{ path: 'vereine/neu', loadComponent: () => import('./platzhalter').then((m) => m.AdminPlatzhalterComponent) },
-			{ path: 'vereine/:id', loadComponent: () => import('./platzhalter').then((m) => m.AdminPlatzhalterComponent) },
+			{ path: 'vereine', loadComponent: () => import('./vereine').then((m) => m.AdminVereineComponent) },
+			// Vor ':id', sonst waere "neu" ein Verein.
+			{ path: 'vereine/neu', loadComponent: () => import('./verein-neu').then((m) => m.AdminVereinNeuComponent) },
+			{ path: 'vereine/:id', loadComponent: () => import('./verein-seite').then((m) => m.AdminVereinSeiteComponent) },
 			{ path: 'konto', loadComponent: () => import('./konto').then((m) => m.AdminKontoComponent) },
 		],
 	},

@@ -31,6 +31,64 @@ export interface TotpStart {
 	wiederherstellungscodes: string[];
 }
 
+/** Link und fertiger Text zum Kopieren, wie der Server sie nach jeder Einladung liefert. */
+export interface Einladung {
+	link: string;
+	text: string;
+}
+
+export type VereinStatus = 'AKTIV' | 'GESPERRT';
+
+export type AdminAktion =
+	'VEREIN_ANGELEGT' | 'GESPERRT' | 'ENTSPERRT' | 'SLUG_KORRIGIERT' | 'NOTFALL_LINK' | 'ERSTE_EINLADUNG_ERNEUERT';
+
+export interface Kennzahlen {
+	jungfischer: number;
+	erwachsene: number;
+	zugaenge: number;
+	offeneEinladungen: number;
+	/** JJJJ-MM-TT, nur das Datum. */
+	letzteAnmeldung: string | null;
+}
+
+export interface VereinZeile {
+	id: string;
+	slug: string;
+	anzeigename: string;
+	status: VereinStatus;
+	kennzahlen: Kennzahlen;
+}
+
+export interface Ansprechpartner {
+	personId: string;
+	vorname: string;
+	nachname: string;
+	email: string | null;
+}
+
+export interface VereinDetails {
+	id: string;
+	slug: string;
+	name: string;
+	anzeigename: string;
+	farbe: string;
+	status: VereinStatus;
+	angelegtAm: string;
+	kennzahlen: Kennzahlen;
+	ansprechpartner: Ansprechpartner[];
+	ersteLeitung: { personId: string; vorname: string; nachname: string } | null;
+	slugAenderbar: boolean;
+	protokoll: { zeitpunkt: string; aktion: AdminAktion; admin: string }[];
+}
+
+export interface NeuerVerein {
+	name: string;
+	anzeigename: string;
+	slug: string;
+	farbe: string;
+	leitung: { vorname: string; nachname: string; email: string };
+}
+
 const KEINE_VERBINDUNG = 'Keine Verbindung – nochmal versuchen';
 
 /**
@@ -140,5 +198,41 @@ export class AdminApi {
 
 	passkeyHinzufuegen(antwort: unknown): Observable<{ label: string }> {
 		return this.post('/konto/passkey', { antwort });
+	}
+
+	vereine(): Observable<{ vereine: VereinZeile[] }> {
+		return this.http
+			.get<{ vereine: VereinZeile[] }>('/admin/api/v1/vereine')
+			.pipe(catchError((e: unknown) => throwError(() => alsAdminFehler(e))));
+	}
+
+	legeVereinAn(verein: NeuerVerein): Observable<{ id: string; slug: string; einladung: Einladung }> {
+		return this.post('/vereine', verein);
+	}
+
+	verein(id: string): Observable<VereinDetails> {
+		return this.http
+			.get<VereinDetails>(`/admin/api/v1/vereine/${encodeURIComponent(id)}`)
+			.pipe(catchError((e: unknown) => throwError(() => alsAdminFehler(e))));
+	}
+
+	sperren(id: string): Observable<{ status: VereinStatus }> {
+		return this.post(`/vereine/${encodeURIComponent(id)}/sperren`);
+	}
+
+	entsperren(id: string): Observable<{ status: VereinStatus }> {
+		return this.post(`/vereine/${encodeURIComponent(id)}/entsperren`);
+	}
+
+	korrigiereSlug(id: string, slug: string): Observable<{ slug: string; einladung: Einladung }> {
+		return this.post(`/vereine/${encodeURIComponent(id)}/slug`, { slug });
+	}
+
+	erneuereErsteEinladung(id: string): Observable<{ einladung: Einladung }> {
+		return this.post(`/vereine/${encodeURIComponent(id)}/einladung-erneuern`);
+	}
+
+	notfallLink(id: string, personId: string): Observable<{ einladung: Einladung }> {
+		return this.post(`/vereine/${encodeURIComponent(id)}/notfall-link`, { personId });
 	}
 }

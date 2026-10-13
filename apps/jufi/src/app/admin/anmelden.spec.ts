@@ -27,7 +27,7 @@ describe('Admin-Anmeldung', () => {
 		knopf(seite, 'Anmelden').click();
 	}
 
-	/** Der Waechter der Verwaltung fragt nach der Anmeldung, ob die Sitzung gilt. */
+	/** Der Waechter der Verwaltung fragt nach der Anmeldung, ob die Sitzung gilt; dann laedt die Vereinsliste. */
 	async function sitzungGilt(): Promise<void> {
 		await vi.waitFor(() =>
 			http
@@ -35,6 +35,8 @@ describe('Admin-Anmeldung', () => {
 				.flush({ benutzername: 'flo', totpAktiv: false, passkeys: 0, wiederherstellungscodesUebrig: 0 }),
 		);
 		await harness.fixture.whenStable();
+		// Die Vereinsliste, bei der die Anmeldung landet, laedt ihre Daten.
+		await vi.waitFor(() => http.expectOne(`${API}/vereine`).flush({ vereine: [] }));
 	}
 
 	it('ohne TOTP fuehrt die Anmeldung zu den Vereinen', async () => {
