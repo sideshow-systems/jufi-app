@@ -22,6 +22,27 @@ pnpm run dev:entwurf
 Der Entwurf läuft dann unter <http://localhost:4300/entwurf/>. Der Stand liegt im `localStorage` des Browsers
 (Schlüssel `jufi-entwurf:v1`); „Entwurf zurücksetzen" im violetten Testmodus-Knopf stellt die Beispieldaten neu her.
 
+## App entwickeln
+
+Die echte App (Teilprojekt 2) liegt in `apps/jufi`, die Kommandozeile in `apps/cli`. Sie braucht Docker für Postgres
+und Mailpit.
+
+```bash
+cp .env.example .env     # Geheimnisse eintragen, Hinweise stehen in der Datei
+pnpm run db:up           # Postgres (127.0.0.1:5433) und Mailpit
+pnpm prisma migrate dev  # Schema in die Entwicklungsdatenbank
+pnpm run demo            # erfundener Verein "Jungfischer Demo"
+pnpm run dev
+```
+
+Die App läuft dann unter <http://localhost:4200/>, der Demo-Verein unter <http://localhost:4200/demo>. Mails der App
+fängt Mailpit unter <http://127.0.0.1:8025> ab. `pnpm run demo` spielt den Demo-Verein jedes Mal frisch ein; andere
+Vereine bleiben unberührt.
+
+Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<projekt>` und brauchen deshalb das
+laufende `pnpm run db:up`. Sie legen ihre Datenbanken selbst an und setzen sie zurück, die Entwicklungsdatenbank
+`jufi` berühren sie nicht.
+
 ## Prüfen
 
 ```bash

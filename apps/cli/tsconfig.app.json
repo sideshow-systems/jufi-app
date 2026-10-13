@@ -1,0 +1,27 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		// Nicht dist: Dort schreibt esbuild das Buendel und raeumt den Ordner vor jedem
+		// Bau leer. Die Typpruefung verlore ihre Deklarationen, behielte aber die
+		// tsbuildinfo und hielte sich fuer aktuell (TS6305 in den Tests).
+		"outDir": "out-tsc/app",
+		"types": ["node"],
+		"rootDir": "src",
+		"tsBuildInfoFile": "out-tsc/app/tsconfig.app.tsbuildinfo"
+	},
+	"include": ["src/**/*.ts"],
+	// Die Tests laufen ueber tsconfig.spec.json; im Bau haben sie und ihre
+	// Testhilfen (vitest, @jufi/db/testing) nichts verloren.
+	"exclude": ["src/**/*.spec.ts", "src/test-*.ts"],
+	"references": [
+		{
+			"path": "../../libs/auth/tsconfig.lib.json"
+		},
+		{
+			"path": "../../libs/db/tsconfig.lib.json"
+		},
+		{
+			"path": "../../libs/domain/tsconfig.lib.json"
+		}
+	]
+}

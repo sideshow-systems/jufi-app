@@ -19,7 +19,9 @@
     "db:down": "docker compose -f docker-compose.dev.yml down",
     "db:psql": "docker exec -it jufi-postgres-dev psql -U jufi -d jufi",
     "db:migrate": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "cli": "nx build cli && node apps/cli/dist/main.js",
+    "demo": "pnpm run cli demo einspielen"
   },
   "nx": {
     "//": "Leere Liste: die Skripte hier sind Abkuerzungen fuer den Menschen. Ohne das wuerde Nx sie als Targets eines Root-Projekts erkennen, und `pnpm test` (nx run-many -t test) wuerde sich selbst aufrufen.",

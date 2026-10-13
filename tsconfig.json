@@ -11,6 +11,9 @@
 		},
 		{
 			"path": "./libs/db"
+		},
+		{
+			"path": "./apps/cli"
 		}
 	],
 	"compilerOptions": {}

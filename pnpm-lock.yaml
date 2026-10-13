@@ -142,6 +142,18 @@ importers:
         specifier: ^4.1.10
         version: 4.1.11(@types/node@24.19.2)(@vitest/coverage-v8@4.1.11)(jsdom@27.4.0(@noble/hashes@2.4.0))(vite@8.3.4(@types/node@24.19.2)(esbuild@0.27.7)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(yaml@2.9.1))
 
+  apps/cli:
+    dependencies:
+      '@jufi/auth':
+        specifier: workspace:*
+        version: link:../../libs/auth
+      '@jufi/db':
+        specifier: workspace:*
+        version: link:../../libs/db
+      '@jufi/domain':
+        specifier: workspace:*
+        version: link:../../libs/domain
+
   libs/auth:
     dependencies:
       '@node-rs/argon2':

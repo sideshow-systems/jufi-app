@@ -1,0 +1,56 @@
+{
+  "name": "@jufi/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "nx": {
+    "name": "cli",
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": [
+          "{options.outputPath}"
+        ],
+        "defaultConfiguration": "production",
+        "options": {
+          "platform": "node",
+          "outputPath": "apps/cli/dist",
+          "format": [
+            "esm"
+          ],
+          "bundle": true,
+          "main": "apps/cli/src/main.ts",
+          "tsConfig": "apps/cli/tsconfig.app.json",
+          "esbuildOptions": {
+            "sourcemap": true,
+            "outExtension": {
+              ".js": ".js"
+            }
+          },
+          "external": [
+            "@prisma/client",
+            "@prisma/adapter-pg",
+            "pg",
+            "@node-rs/argon2"
+          ]
+        },
+        "configurations": {
+          "development": {},
+          "production": {
+            "esbuildOptions": {
+              "sourcemap": false,
+              "outExtension": {
+                ".js": ".js"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@jufi/auth": "workspace:*",
+    "@jufi/db": "workspace:*",
+    "@jufi/domain": "workspace:*"
+  }
+}
