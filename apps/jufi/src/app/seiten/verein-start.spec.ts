@@ -31,7 +31,8 @@ describe('Vereinsseite', () => {
 		await harness.fixture.whenStable();
 		harness.detectChanges();
 
-		expect(harness.routeNativeElement?.textContent).toContain('Jungfischer Demo');
+		// Der Name steht allein, weil kein Artikel zu jedem Vereinsnamen passt.
+		expect(harness.routeNativeElement?.querySelector('h1')?.textContent?.trim()).toBe('Jungfischer Demo');
 		expect(document.documentElement.style.getPropertyValue('--akzent-hell')).not.toBe('');
 		expect(document.title).toBe('Jungfischer Demo');
 	});

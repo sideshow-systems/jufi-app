@@ -27,7 +27,9 @@ const STANDARDTITEL = 'JuFi App';
 			} @else {
 				<main>
 					<jf-karte>
-						<h1>Willkommen bei den {{ v.anzeigename }}</h1>
+						<!-- Name allein statt im Satz: "bei den" passt zu Jungfischer Demo, nicht zu Glonntal Fischereiverein. -->
+						<p class="gruss">Willkommen</p>
+						<h1>{{ v.anzeigename }}</h1>
 					</jf-karte>
 				</main>
 			}
@@ -48,6 +50,10 @@ const STANDARDTITEL = 'JuFi App';
 		}
 		h1 {
 			font-size: var(--schrift-gross);
+		}
+		.gruss {
+			margin-bottom: var(--a1);
+			color: var(--text-gedaempft);
 		}
 	`,
 })
