@@ -9,13 +9,29 @@ import {
 	hashRecoveryCode,
 	hashToken,
 	verifyPassword,
+	verifyTotp,
 } from '@jufi/auth';
 import { createPrismaClientFromEnv, type PlattformAdmin } from '@jufi/db';
 import { randomInt, randomUUID } from 'node:crypto';
 import { generate } from 'otplib';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
+
+// Spione um die Originale: so laesst sich zaehlen, wie viele Versuche wirklich
+// bis zur Pruefung kamen. Am Status allein sieht man das nicht -- auch ohne
+// Schutz gegen gleichzeitige Versuche antworten die spaeten mit 429, nur eben
+// erst nachdem ihr Code geprueft wurde. Verworfen: vi.spyOn auf den
+// Namensraum -- ESM-Exporte sind nicht ueberschreibbar.
+vi.mock('@jufi/auth', async (importOriginal) => {
+	const original = await importOriginal<typeof import('@jufi/auth')>();
+	return {
+		...original,
+		hashPassword: vi.fn(original.hashPassword),
+		verifyPassword: vi.fn(original.verifyPassword),
+		verifyTotp: vi.fn(original.verifyTotp),
+	};
+});
 
 const MINUTE_MS = 60 * 1000;
 const PASSWORT = 'forelle-am-morgen-im-nebel';
@@ -183,6 +199,22 @@ describe('Admin-Einrichtung und -Anmeldung', () => {
 			expect((await post('/einrichtung/abschliessen', { token, passwort: PASSWORT })).status).toBe(200);
 		});
 
+		it('ungueltiger Link kommt nicht bis zum Passwort-Hash', async () => {
+			const { admin } = await legeAdminAn();
+			const tokens = [
+				await legeEinrichtungAn(admin.id, { ablauf: t0 }),
+				await legeEinrichtungAn(admin.id, { eingeloestAm: new Date(t0.getTime() - MINUTE_MS) }),
+				generateLinkToken(),
+			];
+			vi.mocked(hashPassword).mockClear();
+			for (const token of tokens) {
+				const r = await post('/einrichtung/abschliessen', { token, passwort: PASSWORT });
+				expect(r.status).toBe(404);
+				expect(await r.json()).toEqual(LINK_UNGUELTIG);
+			}
+			expect(hashPassword).not.toHaveBeenCalled();
+		});
+
 		it('Doppelklick: zwei gleichzeitige Abschluesse, genau einer gelingt', async () => {
 			const { admin } = await legeAdminAn();
 			const token = await legeEinrichtungAn(admin.id);
@@ -253,6 +285,21 @@ describe('Admin-Einrichtung und -Anmeldung', () => {
 			expect((await post('/anmelden', { benutzername: admin.benutzername, passwort: PASSWORT })).status).toBe(200);
 		});
 
+		it('gleichzeitige Fehlversuche umgehen den Backoff nicht', async () => {
+			const { admin } = await legeAdminAn({ passwort: PASSWORT });
+			vi.mocked(verifyPassword).mockClear();
+			const antworten = await Promise.all(
+				Array.from({ length: 6 }, () =>
+					post('/anmelden', { benutzername: admin.benutzername, passwort: 'falsch-aber-lang' }),
+				),
+			);
+			const status = antworten.map((r) => r.status).sort();
+			// Drei frei, der vierte loest die Sperre aus, alles danach wartet --
+			// ohne dass das Passwort ueberhaupt geprueft wird.
+			expect(status).toEqual([401, 401, 401, 429, 429, 429]);
+			expect(verifyPassword).toHaveBeenCalledTimes(4);
+		});
+
 		it('Backoff je IP laesst sich nicht mit X-Forwarded-For umgehen', async () => {
 			const status: number[] = [];
 			for (let i = 0; i < 4; i++) {
@@ -305,6 +352,28 @@ describe('Admin-Einrichtung und -Anmeldung', () => {
 			expect(r.status).toBe(401);
 			expect(await r.json()).toEqual({ fehler: 'Anmeldung abgelaufen, bitte neu beginnen' });
 			expect(cookieAus(r)).toBeUndefined();
+		});
+
+		it('TOTP aktiv ohne Geheimnis verlangt trotzdem den Code', async () => {
+			const { admin } = await legeAdminAn({ passwort: PASSWORT });
+			await prisma.plattformAdmin.update({ where: { id: admin.id }, data: { totpAktivAm: t0 } });
+			const zwischenmarke = await zwischenmarkeFuer(admin.benutzername);
+			const r = await post('/anmelden/totp', { zwischenmarke, code: '000000' });
+			expect(r.status).toBe(401);
+			expect(await r.json()).toEqual(FEHLGESCHLAGEN);
+			expect(cookieAus(r)).toBeUndefined();
+		});
+
+		it('gleichzeitige falsche Codes umgehen den Backoff nicht', async () => {
+			const { admin } = await legeAdminAn({ passwort: PASSWORT, totp: true });
+			const zwischenmarke = await zwischenmarkeFuer(admin.benutzername);
+			vi.mocked(verifyTotp).mockClear();
+			const antworten = await Promise.all(
+				Array.from({ length: 6 }, () => post('/anmelden/totp', { zwischenmarke, code: '000000' })),
+			);
+			const status = antworten.map((r) => r.status).sort();
+			expect(status).toEqual([401, 401, 401, 429, 429, 429]);
+			expect(verifyTotp).toHaveBeenCalledTimes(4);
 		});
 
 		it('Wiederherstellungscode gilt genau einmal', async () => {

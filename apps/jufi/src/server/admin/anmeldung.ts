@@ -76,20 +76,48 @@ function zuVieleVersuche(res: Response, ms: number): void {
 }
 
 /**
- * Zaehlt einen Fehlversuch und antwortet. Loest genau dieser Versuch die Sperre
- * aus, kommt schon 429 mit der Wartezeit statt 401: sonst erfuhre der Browser
- * erst beim naechsten Versuch, dass er warten muss ("der vierte Fehlversuch ist
- * 429"). Verraten wird damit nichts -- die Antwort haengt nur an der Zahl der
- * Fehlversuche, nicht daran, was falsch war.
+ * Reserviert den Versuch, bevor geprueft wird. Ist einer der Schluessel
+ * gesperrt, liefert sie die Wartezeit und zaehlt nichts. Sonst zaehlt sie den
+ * Versuch sofort als Fehlversuch; ein Erfolg setzt danach mit versuche.reset
+ * zurueck. loestSperreAus merkt sich, ob genau dieser Versuch die Sperre
+ * ausgeloest hat, damit scheitere ihm und nur ihm 429 antwortet.
+ *
+ * Muss vor dem ersten await der Route stehen: Node fuehrt diesen Teil einer
+ * Anfrage am Stueck aus, gleichzeitige Anfragen sehen also schon die Zaehlung
+ * der vorigen. Verworfen: erst nach der Pruefung zaehlen wie hwyd -- alle
+ * gleichzeitigen Anfragen saehen dann dieselbe alte Zahl, und wer das Passwort
+ * kennt, probierte je Sperrfenster beliebig viele TOTP-Codes parallel.
+ * Verworfen auch: hoechstens eine laufende Anfrage je Schluessel -- ein
+ * Doppelklick bekaeme 429, und jede Route braeuchte ein finally zum Freigeben.
  */
-function scheitere(versuche: AttemptTracker, schluessel: string[], res: Response, fehler: object, status = 401): void {
+function reserviere(versuche: AttemptTracker, schluessel: string[]): { wartenMs: number; loestSperreAus: boolean } {
+	const wartenMs = sperre(versuche, schluessel);
+	if (wartenMs > 0) return { wartenMs, loestSperreAus: false };
 	for (const s of schluessel) versuche.fail(s);
+	return { wartenMs: 0, loestSperreAus: sperre(versuche, schluessel) > 0 };
+}
+
+/**
+ * Antwort auf einen gescheiterten, schon reservierten Versuch. Hat genau dieser
+ * Versuch die Sperre ausgeloest, kommt schon 429 mit der Wartezeit statt 401:
+ * sonst erfuhre der Browser erst beim naechsten Versuch, dass er warten muss
+ * ("der vierte Fehlversuch ist 429"). Verraten wird damit nichts -- die Antwort
+ * haengt nur an der Zahl der Fehlversuche, nicht daran, was falsch war.
+ * Fruehere, gleichzeitig laufende Versuche bleiben bei 401, wie nacheinander.
+ */
+function scheitere(
+	versuche: AttemptTracker,
+	schluessel: string[],
+	loestSperreAus: boolean,
+	res: Response,
+	fehler: object,
+): void {
 	const ms = sperre(versuche, schluessel);
-	if (ms > 0) {
+	if (loestSperreAus && ms > 0) {
 		zuVieleVersuche(res, ms);
 		return;
 	}
-	res.status(status).json(fehler);
+	res.status(401).json(fehler);
 }
 
 function leseEinrichtung(marke: string, jetztMs: number): TotpEinrichtung | undefined {
@@ -144,11 +172,23 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				res.status(400).json({ fehler: PASSWORT_HINWEIS[pruefung.grund] });
 				return;
 			}
+			const tokenHash = hashToken(text(req.body?.token));
+			const zeit = jetzt();
+			// Billige Vorpruefung vor Argon2: Die Route ist oeffentlich und ohne
+			// Backoff, sonst kostete jede Anfrage mit erfundenem Token ~19 MiB und
+			// einen Kern. Entscheidend bleibt das bedingte updateMany unten; das hier
+			// laesst nur offensichtlich ungueltige Links frueh scheitern.
+			const offen = await prisma.adminEinrichtung.findFirst({
+				where: { tokenHash, eingeloestAm: null, ablauf: { gt: zeit } },
+				select: { id: true },
+			});
+			if (!offen) {
+				res.status(404).json(LINK_UNGUELTIG);
+				return;
+			}
 			// Vor der Transaktion: Argon2 dauert, und so lange hielte die
 			// Transaktion die Zeile gesperrt.
 			const passwortHash = await hashPassword(passwort);
-			const tokenHash = hashToken(text(req.body?.token));
-			const zeit = jetzt();
 			const ergebnis = await prisma.$transaction(async (tx) => {
 				// Einloesen mit Bedingung statt Lesen-dann-Schreiben: kommen zwei
 				// Anfragen gleichzeitig (Doppelklick), wartet die zweite auf die Sperre
@@ -189,28 +229,32 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 			// req.ip unter trust proxy 1: der letzte Eintrag in X-Forwarded-For, den
 			// Traefik schreibt. Was der Client davor setzt, aendert den Schluessel nicht.
 			const schluessel = [`ip:${req.ip}`, `admin:${benutzername}`];
-			const gesperrt = sperre(versuche, schluessel);
-			if (gesperrt > 0) {
-				zuVieleVersuche(res, gesperrt);
+			const versuch = reserviere(versuche, schluessel);
+			if (versuch.wartenMs > 0) {
+				zuVieleVersuche(res, versuch.wartenMs);
 				return;
 			}
 
 			const admin = benutzername
 				? await prisma.plattformAdmin.findUnique({
 						where: { benutzername },
-						select: { id: true, passwortHash: true, totpGeheimnis: true, totpAktivAm: true },
+						select: { id: true, passwortHash: true, totpAktivAm: true },
 					})
 				: null;
 			// Admin ohne Passwort (Einrichtung offen) wie ein unbekannter Name: auch
 			// er laeuft durch den Platzhalter, sonst verriete die Antwortzeit ihn.
 			const ok = await verifyPassword(admin?.passwortHash ?? PLATZHALTER_HASH, passwort);
 			if (!admin?.passwortHash || !ok) {
-				scheitere(versuche, schluessel, res, FEHLGESCHLAGEN);
+				scheitere(versuche, schluessel, versuch.loestSperreAus, res, FEHLGESCHLAGEN);
 				return;
 			}
 			for (const s of schluessel) versuche.reset(s);
 
-			if (admin.totpAktivAm && admin.totpGeheimnis) {
+			// Nur an totpAktivAm entschieden: Fehlt das Geheimnis trotz aktivem TOTP
+			// (kaputter Datensatz), geht es in den TOTP-Schritt und scheitert dort.
+			// Verworfen: beide Felder verlangen -- dann meldete genau dieser Fehler
+			// mit dem Passwort allein an.
+			if (admin.totpAktivAm) {
 				res.json({
 					schritt: 'totp',
 					zwischenmarke: signiereZwischenmarke(admin.id, umgebung.sitzungsGeheimnis, jetzt().getTime()),
@@ -235,9 +279,9 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				return;
 			}
 			const schluessel = [`totp:${adminId}`];
-			const gesperrt = sperre(versuche, schluessel);
-			if (gesperrt > 0) {
-				zuVieleVersuche(res, gesperrt);
+			const versuch = reserviere(versuche, schluessel);
+			if (versuch.wartenMs > 0) {
+				zuVieleVersuche(res, versuch.wartenMs);
 				return;
 			}
 
@@ -249,7 +293,7 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 			});
 			// Zwischen Passwort und Code zurueckgesetzt (TOTP geloescht): kein Weg mehr hinein.
 			if (!admin?.totpGeheimnis || !admin.totpAktivAm) {
-				res.status(401).json(FEHLGESCHLAGEN);
+				scheitere(versuche, schluessel, versuch.loestSperreAus, res, FEHLGESCHLAGEN);
 				return;
 			}
 
@@ -273,7 +317,7 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				return { token, uebrig };
 			});
 			if (!ergebnis) {
-				scheitere(versuche, schluessel, res, FEHLGESCHLAGEN);
+				scheitere(versuche, schluessel, versuch.loestSperreAus, res, FEHLGESCHLAGEN);
 				return;
 			}
 			versuche.reset(schluessel[0] ?? '');
@@ -332,13 +376,13 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				return;
 			}
 			const schluessel = [`totp-einrichten:${admin.id}`];
-			const gesperrt = sperre(versuche, schluessel);
-			if (gesperrt > 0) {
-				zuVieleVersuche(res, gesperrt);
+			const versuch = reserviere(versuche, schluessel);
+			if (versuch.wartenMs > 0) {
+				zuVieleVersuche(res, versuch.wartenMs);
 				return;
 			}
 			if (!(await verifyTotp(einrichtung.geheimnis, text(req.body?.code)))) {
-				scheitere(versuche, schluessel, res, { fehler: 'Code stimmt nicht' });
+				scheitere(versuche, schluessel, versuch.loestSperreAus, res, { fehler: 'Code stimmt nicht' });
 				return;
 			}
 			versuche.reset(schluessel[0] ?? '');
