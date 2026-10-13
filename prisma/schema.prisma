@@ -14,8 +14,8 @@
 // Prismas Vorgabe Cascade — ein update von Person.vereinId zoege Zugang, Passkeys
 // und Sitzungen still in einen anderen Verein mit.
 //
-// CHECK-Constraints bildet Prisma nicht ab; sie stehen von Hand in der Migration
-// prisma/migrations/*_fundament/migration.sql.
+// CHECK-Constraints bildet Prisma nicht ab; sie stehen von Hand am Ende der
+// Migrationen fundament und email_an_person (prisma/migrations/).
 //
 // Hinweis: `prisma format` schreibt feste zwei Spaces und ist nicht
 // konfigurierbar — daher weicht diese Datei bewusst von der Tab-Regel ab.
@@ -165,7 +165,16 @@ model Person {
   /// Nur Jungfischer: Verwaltung hat den Volljaehrigkeitshinweis mit "Belassen"
   /// quittiert (Spec 5.6).
   volljaehrigGeprueftAm DateTime?
-  /// Nur Erwachsene; leer = kein Jugendleiter.
+  /// Kleingeschrieben und ohne Rand (CHECK person_email), eindeutig je Verein.
+  /// Erwachsene: ihre Kennung; beim Anlegen freiwillig, spaetestens beim Annehmen
+  /// der Einladung Pflicht (das prueft libs/domain, nicht die Datenbank).
+  /// Jungfischer: freiwillig, nur fuer Benachrichtigungen ab TP5. An der Person und
+  /// nicht am Zugang, weil Einladung, erste Leitung und Ansprechpartner die Adresse
+  /// brauchen, bevor es einen Zugang gibt. Verworfen: eine zweite Kopie am Zugang
+  /// -- zwei Adressen liefen auseinander.
+  email                 String?
+  /// Nur Erwachsene; leer = kein Jugendleiter. NOT NULL steht von Hand in der
+  /// Migration email_an_person: Prisma legt Listenfelder ohne an.
   rechte                Recht[]   @default([])
   /// Gesetzt = Grabstein.
   entferntAm            DateTime?
@@ -183,6 +192,9 @@ model Person {
 
   /// Ziel der zusammengesetzten Fremdschluessel (Spec 3.1).
   @@unique([vereinId, id])
+  /// Je Verein, nicht global: Wer in zwei Vereinen ist, hat in jedem eine eigene
+  /// Person, gern mit derselben Adresse (Spec 4.2, Passkey-Name).
+  @@unique([vereinId, email])
   @@index([vereinId, art])
 }
 
@@ -245,10 +257,8 @@ model Zugang {
   verein        Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   personId      String    @unique
   person        Person    @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
-  /// Kleingeschrieben, eindeutig je Verein. Erwachsene: Pflicht und Kennung;
-  /// Jungfischer: freiwillig, nur fuer Benachrichtigungen ab TP5.
-  email         String?
   /// Kleingeschrieben, eindeutig je Verein; nur Jungfischer und ihre Kennung.
+  /// Die Kennung Erwachsener ist Person.email.
   anmeldename   String?
   /// Argon2id.
   passwortHash  String?
@@ -266,9 +276,6 @@ model Zugang {
   /// Prisma verlangt fuer die 1:1-Relation einen Schluessel genau ueber deren
   /// Felder; personId allein ist schon eindeutig.
   @@unique([vereinId, personId])
-  /// Je Verein, nicht global: Wer in zwei Vereinen ist, hat in jedem einen eigenen
-  /// Zugang, gern mit derselben Adresse (Spec 4.2, Passkey-Name).
-  @@unique([vereinId, email])
   @@unique([vereinId, anmeldename])
 }
 

@@ -52,7 +52,7 @@ describe('fuehreAus', () => {
 		const person = await p.person.create({
 			data: { vereinId: verein.id, art: 'ERWACHSENER', vorname: 'Erika', nachname: 'Echt' },
 		});
-		await p.zugang.create({ data: { vereinId: verein.id, personId: person.id, email: 'erika@example.org' } });
+		await p.zugang.create({ data: { vereinId: verein.id, personId: person.id } });
 
 		ausgabe.length = 0;
 		expect(await fuehreAus(['demo', 'einspielen'], deps)).toBe(1);

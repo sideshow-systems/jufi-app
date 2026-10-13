@@ -83,6 +83,18 @@ describe('demoEinspielen', () => {
 		expect(sandra.every((b) => b.beziehung === 'MUTTER' && b.erziehungsberechtigt)).toBe(true);
 	});
 
+	it('Erwachsene haben erfundene Adressen unter example.org', async () => {
+		await demoEinspielen(prisma, BEZUGSTAG);
+
+		const erwachsene = await prisma.person.findMany({ where: { art: 'ERWACHSENER' } });
+		expect(erwachsene).toHaveLength(4);
+		for (const e of erwachsene) {
+			expect(e.email).toBe(`${e.vorname}.${e.nachname}@example.org`.toLowerCase());
+		}
+		// Jungfischer bekommen keine: ihre Adresse ist freiwillig und kommt erst mit TP5.
+		expect(await prisma.person.count({ where: { art: 'JUNGFISCHER', email: { not: null } } })).toBe(0);
+	});
+
 	it('zweimal einspielen ergibt denselben Stand', async () => {
 		await demoEinspielen(prisma, BEZUGSTAG);
 		const erster = await zaehlung();
@@ -129,9 +141,7 @@ describe('demoEinspielen', () => {
 			const person = await prisma.person.create({
 				data: { vereinId: verein.id, art: 'ERWACHSENER', vorname: 'Erika', nachname: 'Echt' },
 			});
-			const zugang = await prisma.zugang.create({
-				data: { vereinId: verein.id, personId: person.id, email: 'erika@example.org' },
-			});
+			const zugang = await prisma.zugang.create({ data: { vereinId: verein.id, personId: person.id } });
 			if (mitSitzung) {
 				await prisma.session.create({
 					data: {

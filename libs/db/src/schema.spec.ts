@@ -115,9 +115,7 @@ describe('Mandantentrennung', () => {
 		const a = await verein();
 		const b = await verein();
 		const erwachsenerB = await erwachsener(b.id);
-		const zugangB = await prisma.zugang.create({
-			data: { vereinId: b.id, personId: erwachsenerB.id, email: `sandra-${eindeutig()}@example.org` },
-		});
+		const zugangB = await prisma.zugang.create({ data: { vereinId: b.id, personId: erwachsenerB.id } });
 
 		expect(
 			await fehlercode(
@@ -134,20 +132,7 @@ describe('Mandantentrennung', () => {
 	});
 });
 
-describe('Kennungen im Zugang', () => {
-	it('gleiche E-Mail in zwei Vereinen erlaubt, im selben Verein abgelehnt', async () => {
-		const a = await verein();
-		const b = await verein();
-		const email = `sandra-${eindeutig()}@example.org`;
-		await prisma.zugang.create({ data: { vereinId: a.id, personId: (await erwachsener(a.id)).id, email } });
-		await prisma.zugang.create({ data: { vereinId: b.id, personId: (await erwachsener(b.id)).id, email } });
-
-		const zweite = await erwachsener(a.id, 'Petra');
-		expect(await fehlercode(prisma.zugang.create({ data: { vereinId: a.id, personId: zweite.id, email } }))).toBe(
-			'P2002',
-		);
-	});
-
+describe('Kennungen', () => {
 	it('gleicher Anmeldename im selben Verein abgelehnt', async () => {
 		const a = await verein();
 		await prisma.zugang.create({
@@ -160,16 +145,10 @@ describe('Kennungen im Zugang', () => {
 		).toBe('P2002');
 	});
 
-	it('E-Mail und Anmeldename nur kleingeschrieben', async () => {
+	it('Anmeldename nur kleingeschrieben', async () => {
 		const a = await verein();
-		const mutter = await erwachsener(a.id);
 		const kind = await jungfischer(a.id);
 
-		expect(
-			await fehlertext(
-				prisma.zugang.create({ data: { vereinId: a.id, personId: mutter.id, email: 'Sandra@Example.org' } }),
-			),
-		).toMatch(/zugang_kleinschreibung/);
 		expect(
 			await fehlertext(prisma.zugang.create({ data: { vereinId: a.id, personId: kind.id, anmeldename: 'Lena' } })),
 		).toMatch(/zugang_kleinschreibung/);
@@ -177,13 +156,42 @@ describe('Kennungen im Zugang', () => {
 		await prisma.zugang.create({ data: { vereinId: a.id, personId: kind.id, anmeldename: 'lena2' } });
 	});
 
-	it('Zugang ohne E-Mail und ohne Anmeldename abgelehnt', async () => {
+	it('E-Mail der Person nur kleingeschrieben und ohne Rand', async () => {
 		const a = await verein();
-		const mutter = await erwachsener(a.id);
+		const basis = { vereinId: a.id, art: 'ERWACHSENER' as const, vorname: 'Sandra', nachname: 'Muster' };
 
-		expect(await fehlertext(prisma.zugang.create({ data: { vereinId: a.id, personId: mutter.id } }))).toMatch(
-			/zugang_kennung/,
+		expect(await fehlertext(prisma.person.create({ data: { ...basis, email: 'Sandra@Example.org' } }))).toMatch(
+			/person_email/,
 		);
+		expect(await fehlertext(prisma.person.create({ data: { ...basis, email: ' sandra@example.org' } }))).toMatch(
+			/person_email/,
+		);
+		expect(await fehlertext(prisma.person.create({ data: { ...basis, email: 'sandra@example.org ' } }))).toMatch(
+			/person_email/,
+		);
+		expect(await fehlertext(prisma.person.create({ data: { ...basis, email: '' } }))).toMatch(/person_email/);
+
+		const person = await prisma.person.create({ data: { ...basis, email: 'sandra@example.org' } });
+		expect(person.email).toBe('sandra@example.org');
+		// Ohne Adresse bleibt erlaubt: Sie ist beim Anlegen freiwillig (Spec 3.3).
+		expect((await prisma.person.create({ data: basis })).email).toBeNull();
+	});
+
+	it('E-Mail ist je Verein eindeutig, nicht vereinsuebergreifend', async () => {
+		const a = await verein();
+		const b = await verein();
+		const email = `sandra-${eindeutig()}@example.org`;
+		const daten = (vereinId: string, vorname: string) => ({
+			vereinId,
+			art: 'ERWACHSENER' as const,
+			vorname,
+			nachname: 'Muster',
+			email,
+		});
+		await prisma.person.create({ data: daten(a.id, 'Sandra') });
+
+		expect(await fehlercode(prisma.person.create({ data: daten(a.id, 'Petra') }))).toBe('P2002');
+		await prisma.person.create({ data: daten(b.id, 'Sandra') });
 	});
 });
 
@@ -241,6 +249,17 @@ describe('Felder je Art der Person', () => {
 			data: { vereinId: a.id, art: 'ERWACHSENER', vorname: 'Sandra', nachname: 'Muster', rechte: ['MITGLIEDER'] },
 		});
 	});
+
+	it('Rechte sind nie NULL', async () => {
+		// Prisma legt Listenfelder ohne NOT NULL an; ein NULL wuerde in einem CHECK
+		// mit cardinality(rechte) als "unbekannt" durchrutschen. Daher von Hand gesetzt.
+		const a = await verein();
+		const mutter = await erwachsener(a.id);
+
+		await expect(prisma.$executeRaw`UPDATE "Person" SET rechte = NULL WHERE id = ${mutter.id}`).rejects.toThrow(
+			/rechte|not-null|null value/i,
+		);
+	});
 });
 
 describe('Familie', () => {
@@ -284,6 +303,23 @@ describe('Verein', () => {
 		).toMatch(/verein_anzeigename/);
 
 		await prisma.verein.create({ data: { ...daten, slug: `genau-${eindeutig()}`, anzeigename: 'x'.repeat(24) } });
+	});
+
+	it('Vereinsfarbe nur als kleingeschriebenes Hex', async () => {
+		const mitFarbe = (farbe: string) =>
+			prisma.verein.create({
+				data: {
+					slug: `farbe-${eindeutig()}`,
+					name: 'Erfundener Fischereiverein',
+					anzeigename: 'Jungfischer Test',
+					farbe,
+				},
+			});
+
+		for (const farbe of ['#0F766E', '0f766e', '#0f766', '#0f766e0', 'rot']) {
+			expect(await fehlertext(mitFarbe(farbe))).toMatch(/verein_farbe/);
+		}
+		expect((await mitFarbe('#0f766e')).farbe).toBe('#0f766e');
 	});
 });
 
@@ -331,9 +367,7 @@ describe('vereinId bleibt fest', () => {
 		const a = await verein();
 		const b = await verein();
 		const mutter = await erwachsener(a.id);
-		const zugang = await prisma.zugang.create({
-			data: { vereinId: a.id, personId: mutter.id, email: `sandra-${eindeutig()}@example.org` },
-		});
+		const zugang = await prisma.zugang.create({ data: { vereinId: a.id, personId: mutter.id } });
 
 		expect(await fehlercode(prisma.person.update({ where: { id: mutter.id }, data: { vereinId: b.id } }))).toBe(
 			'P2003',
@@ -351,9 +385,7 @@ describe('Loeschen', () => {
 
 		const kind = await jungfischer(vereinId);
 		const mutter = await erwachsener(vereinId);
-		const zugang = await prisma.zugang.create({
-			data: { vereinId, personId: mutter.id, email: `sandra-${eindeutig()}@example.org` },
-		});
+		const zugang = await prisma.zugang.create({ data: { vereinId, personId: mutter.id } });
 		const gruppe = await prisma.untergruppe.create({ data: { vereinId, name: 'Hechte' } });
 		const admin = await prisma.plattformAdmin.create({ data: { benutzername: `admin-${eindeutig()}` } });
 

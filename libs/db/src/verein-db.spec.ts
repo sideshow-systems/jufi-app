@@ -187,9 +187,7 @@ describe('vereinDb: Schreiben', () => {
 		// Prisma setzt dabei (vereinId, personId) des Zugangs neu, und ein Zugang
 		// ohne Passkeys und Sitzungen haelt kein Fremdschluessel fest.
 		const { a, b, erwachsenerA, erwachsenerB } = await zweiVereine();
-		const zugangB = await prisma.zugang.create({
-			data: { vereinId: b.id, personId: erwachsenerB.id, email: `petra-${eindeutig()}@example.org` },
-		});
+		const zugangB = await prisma.zugang.create({ data: { vereinId: b.id, personId: erwachsenerB.id } });
 
 		await expect(
 			vereinDb(prisma, a.id).person.update({

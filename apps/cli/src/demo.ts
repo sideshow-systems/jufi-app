@@ -76,8 +76,20 @@ export async function demoEinspielen(
 		});
 		const vereinId = verein.id;
 
+		// Erfundene Adressen unter example.org (reserviert, nie zustellbar), damit die
+		// Admin-Seite im Demo-Verein Ansprechpartner zeigt und nie eine echte Adresse
+		// in Demo-Daten steht. Kleingeschrieben, wie es der CHECK person_email verlangt.
 		const erwachsener = (vorname: string, nachname: string, rechte: Recht[]) =>
-			tx.person.create({ data: { vereinId, art: 'ERWACHSENER', vorname, nachname, rechte } });
+			tx.person.create({
+				data: {
+					vereinId,
+					art: 'ERWACHSENER',
+					vorname,
+					nachname,
+					rechte,
+					email: `${vorname}.${nachname}@example.org`.toLowerCase(),
+				},
+			});
 		const jungfischer = (vorname: string, nachname: string, alter: number, jugendsprecher = false) =>
 			tx.person.create({
 				data: {

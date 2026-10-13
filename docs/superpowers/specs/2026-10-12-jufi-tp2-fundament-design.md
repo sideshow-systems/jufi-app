@@ -1,6 +1,6 @@
 # JuFi App — Teilprojekt 2: Fundament
 
-Stand: 12.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: zur Freigabe
+Stand: 13.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: zur Freigabe
 
 Teilprojekt 2 baut die echte App bis zu dem Punkt, an dem ein Verein **einladen, anmelden und Mitglieder pflegen** kann (Rahmen-Spezifikation `2026-10-11-jufi-rahmen-design.md`, Abschnitt 11). Threads, Module, Medien, Offline-Betrieb und Push folgen in den Teilprojekten 3 bis 5.
 
@@ -159,17 +159,20 @@ Der offizielle Name ist mit 46 Zeichen für Kopfzeile, Passkey-Auswahl und Home-
 
 **`Person`**
 
-| Feld                    | gilt für    | Bedeutung                                                                            |
-| ----------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| `art`                   | alle        | `JUNGFISCHER` oder `ERWACHSENER`                                                     |
-| `vorname`, `nachname`   | alle        | bei entfernten Personen leer                                                         |
-| `geburtsdatum`          | Jungfischer | **Pflicht**; trägt den Hinweis auf die Volljährigkeit (5.6)                          |
-| `jugendsprecher`        | Jungfischer | Merkmal nach Rahmen-Spec 3.5                                                         |
-| `zugangErlaubt`         | Jungfischer | vorbelegt mit ja; Erziehungsberechtigte entscheiden (Rahmen-Spec 4.1)                |
-| `volljaehrigGeprueftAm` | Jungfischer | gesetzt, wenn die Verwaltung den Volljährigkeitshinweis mit „Belassen" quittiert hat |
-| `rechte`                | Erwachsene  | Liste aus Postgres-Enum (siehe unten); leer = kein Jugendleiter                      |
-| `entferntAm`            | alle        | gesetzt = Grabstein (5.8)                                                            |
-| `angelegtAm`            | alle        |                                                                                      |
+| Feld                    | gilt für    | Bedeutung                                                                                                                                                                                         |
+| ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `art`                   | alle        | `JUNGFISCHER` oder `ERWACHSENER`                                                                                                                                                                  |
+| `vorname`, `nachname`   | alle        | bei entfernten Personen leer                                                                                                                                                                      |
+| `geburtsdatum`          | Jungfischer | **Pflicht**; trägt den Hinweis auf die Volljährigkeit (5.6)                                                                                                                                       |
+| `jugendsprecher`        | Jungfischer | Merkmal nach Rahmen-Spec 3.5                                                                                                                                                                      |
+| `zugangErlaubt`         | Jungfischer | vorbelegt mit ja; Erziehungsberechtigte entscheiden (Rahmen-Spec 4.1)                                                                                                                             |
+| `volljaehrigGeprueftAm` | Jungfischer | gesetzt, wenn die Verwaltung den Volljährigkeitshinweis mit „Belassen" quittiert hat                                                                                                              |
+| `email`                 | alle        | kleingeschrieben, eindeutig je Verein; für Erwachsene die Kennung, beim Anlegen freiwillig, spätestens beim Annehmen der Einladung Pflicht; für Jungfischer freiwillig, Benachrichtigungen ab TP5 |
+| `rechte`                | Erwachsene  | Liste aus Postgres-Enum (siehe unten); leer = kein Jugendleiter                                                                                                                                   |
+| `entferntAm`            | alle        | gesetzt = Grabstein (5.8)                                                                                                                                                                         |
+| `angelegtAm`            | alle        |                                                                                                                                                                                                   |
+
+`email` liegt an der Person und nicht am `Zugang`, weil die erste Leitung, die Ansprechpartner (7.3) und jeder Erwachsene, der beim Anlegen eine Adresse bekommt (5.3), sie brauchen, bevor es einen Zugang gibt; der entsteht erst beim Einlösen der Einladung. Verworfen: eine zweite Kopie am `Zugang` — zwei Adressen liefen auseinander. Preis: Der CHECK „E-Mail oder Anmeldename am Zugang" lässt sich über zwei Tabellen nicht ausdrücken und entfällt; das Einlösen der Einladung prüft die Kennung in `libs/domain`.
 
 Rechte: `MITGLIEDER`, `THREADS_ERSTELLEN`, `ALLE_THREADS`, `DOKUMENTE`, `ANTWORTEN_DETAIL`, `JUGENDLEITER_RECHTE`, `EINSTELLUNGEN` (Rahmen-Spec 4.2). Rechte für Bereiche, die erst später entstehen, lassen sich schon in TP2 vergeben.
 
@@ -185,13 +188,14 @@ Die Foto-Einwilligung (Rahmen-Spec 6.6) kommt mit dem Medienbereich in TP4.
 
 **`Zugang`** (0..1 je Person)
 
-| Feld                           | Bedeutung                                                                                                                                     |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `email`                        | kleingeschrieben, eindeutig je Verein; für Erwachsene Pflicht und ihre Kennung; für Jungfischer freiwillig, nur für Benachrichtigungen ab TP5 |
-| `anmeldename`                  | kleingeschrieben, eindeutig je Verein; nur Jungfischer und ihre Kennung                                                                       |
-| `passwortHash`                 | Argon2id, optional                                                                                                                            |
-| `totpGeheimnis`, `totpAktivAm` | optional, nur für Erwachsene mit Rechten                                                                                                      |
-| `angelegtAm`                   |                                                                                                                                               |
+| Feld                           | Bedeutung                                                               |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `anmeldename`                  | kleingeschrieben, eindeutig je Verein; nur Jungfischer und ihre Kennung |
+| `passwortHash`                 | Argon2id, optional                                                      |
+| `totpGeheimnis`, `totpAktivAm` | optional, nur für Erwachsene mit Rechten                                |
+| `angelegtAm`                   |                                                                         |
+
+Die Kennung Erwachsener ist `Person.email` (3.3); der `Zugang` trägt nur den Anmeldenamen der Jungfischer.
 
 Ein `Zugang` ohne Passkey und ohne Passwort entsteht nicht: Er wird erst beim Einlösen der Einladung angelegt, zusammen mit dem ersten Anmeldeweg.
 
@@ -408,7 +412,7 @@ Löschen liegt bewusst **nur** in der Kommandozeile: endgültig und selten (etwa
 ### 7.3 Oberfläche
 
 - **Vereinsliste**: Anzeigename, Slug, Status; Kennzahlen: Jungfischer, Erwachsene, eingerichtete Zugänge, offene Einladungen, letzte Anmeldung im Verein (nur Datum). Speicherverbrauch ab TP4.
-- **Verein anlegen**: offizieller Name, Anzeigename, Slug (aus dem Anzeigenamen vorgeschlagen), Farbe, Logo (optional), dazu die **erste Leitung** mit Vorname, Nachname und E-Mail; sie bekommt alle Rechte. Danach zeigt die Seite den Einladungslink mit fertigem Text, optional geht er per Mail raus.
+- **Verein anlegen**: offizieller Name, Anzeigename, Slug (aus dem Anzeigenamen vorgeschlagen), Farbe, dazu die **erste Leitung** mit Vorname, Nachname und E-Mail; sie bekommt alle Rechte. Das Logo kommt mit den Vereinseinstellungen (Etappe 5): Es braucht Upload jenseits der 100-KB-Grenze und `sharp` für Icons und Manifest, der Verein lädt es dort selbst hoch. Danach zeigt die Seite den Einladungslink mit fertigem Text; per Mail geht er ab Etappe 3 raus, wenn der Mail-Arbeiter entsteht.
 - **Vereinsseite**: Kennzahlen; **Ansprechpartner** = alle Inhaber von „Jugendleiter & Rechte verwalten" mit Name und E-Mail; sperren und entsperren (gesperrt: alle Seiten des Vereins „nicht gefunden"; Sitzungen bleiben, wirken aber erst nach dem Entsperren wieder).
 - **Notfall-Link**: neuer Einladungslink für einen **Ansprechpartner**, für niemanden sonst. Der Ausweg, wenn sich die Leitung ausgesperrt hat und der Reset per Mail nicht hilft. Der Verein sieht das in seiner Verwaltung (6.3); verdeckt kann der Admin kein Konto übernehmen.
 - **Slug korrigieren**: möglich, solange die erste Einladung noch nicht angenommen ist. Danach ist der Slug fest, weil er in Links, Cookies und installierten Apps steckt. Verworfen: Umbenennen mit Weiterleitung vom alten Slug — eigene Tabelle und Regeln für alte Slugs, die ein anderer Verein will, für einen Fall, der kaum vorkommt.
