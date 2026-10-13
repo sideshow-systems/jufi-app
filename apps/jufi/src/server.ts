@@ -4,19 +4,36 @@ import {
 	isMainModule,
 	writeResponseToNodeResponse,
 } from '@angular/ssr/node';
-import { assertSecrets } from '@jufi/auth';
 import { createPrismaClientFromEnv } from '@jufi/db';
 import express from 'express';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './server/app.js';
 import { fehlerbehandlung } from './server/fehler.js';
+import { umgebungAusEnv, type Umgebung } from './server/umgebung.js';
 import { VERSION } from './version.generated.js';
 
 const serverDistFolder = dirname(fileURLToPath(import.meta.url));
 const browserDistFolder = resolve(serverDistFolder, '../browser');
 
-const app = createApp({ prisma: createPrismaClientFromEnv(), version: VERSION });
+// Zuerst: createPrismaClientFromEnv laedt die .env, aus der umgebungAusEnv liest.
+const prisma = createPrismaClientFromEnv();
+
+// Erst pruefen, dann bauen: ein Schluessel mit der falschen Laenge liesse die App
+// sonst fehlerfrei starten, und der Fehler zeigte sich erst bei der ersten
+// Anmeldung. Auf Modulebene statt nur beim Start als Hauptmodul, damit auch
+// pnpm run dev (ng serve laedt diese Datei als Modul) mit einer kaputten .env
+// sofort scheitert, statt bis zur ersten Anmeldung zu laufen. Die Meldung
+// nennt nur die Variablen, nie ihre Werte.
+let umgebung: Umgebung;
+try {
+	umgebung = umgebungAusEnv(process.env);
+} catch (error) {
+	console.error(error instanceof Error ? error.message : error);
+	process.exit(1);
+}
+
+const app = createApp({ prisma, version: VERSION, umgebung });
 
 /**
  * Hinter dem Proxy muss Angular die X-Forwarded-*-Header ausdruecklich
@@ -61,16 +78,6 @@ app.use('/**', (req, res, next) => {
 app.use(fehlerbehandlung);
 
 if (isMainModule(import.meta.url) || process.env['pm_id']) {
-	// Erst pruefen, dann lauschen: ein Schluessel mit der falschen Laenge liesse
-	// die App sonst fehlerfrei starten, und der Fehler zeigte sich erst bei der
-	// ersten Anmeldung.
-	try {
-		assertSecrets();
-	} catch (error) {
-		console.error(error instanceof Error ? error.message : error);
-		process.exit(1);
-	}
-
 	const port = process.env['PORT'] ?? 4000;
 	app.listen(port, () => {
 		console.log(`JuFi laeuft auf http://localhost:${port}`);

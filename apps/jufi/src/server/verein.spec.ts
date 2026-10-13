@@ -1,7 +1,7 @@
 import { createPrismaClientFromEnv } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app.js';
-import { starteTestServer, type TestServer } from './test-setup.js';
+import { starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
 
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
@@ -14,7 +14,9 @@ describe('Verein aus dem Slug', () => {
 	beforeAll(async () => {
 		await legeVereinAn(prisma, { slug: 'glonntal-test', anzeigename: 'Jungfischer Glonntal' });
 		await legeVereinAn(prisma, { slug: 'verein-gesperrt', status: 'GESPERRT' });
-		server = await starteTestServer(createApp({ prisma, version: { version: '1.2.3', commit: 'abc' } }));
+		server = await starteTestServer(
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+		);
 	});
 
 	afterAll(async () => {

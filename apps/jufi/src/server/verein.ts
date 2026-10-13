@@ -1,6 +1,7 @@
 import { vereinDb, type PrismaClient, type Verein, type VereinDb } from '@jufi/db';
 import { pruefeSlug } from '@jufi/domain';
 import { Router, type RequestHandler, type Response } from 'express';
+import { routenAus } from './routen.js';
 
 /** Was vereinAusSlug in res.locals ablegt; die Endpunkte lesen es ueber vereinsKontext. */
 export interface VereinsLocals {
@@ -58,8 +59,11 @@ export function vereinsKontext(res: Response): VereinsLocals {
  * ohne Unter-Router: vereinsRouten liest die Liste aus vereinsApi.stack, und der
  * Mandanten-Test verlangt fuer jeden Eintrag einen Fall. Eine Route in einem
  * Unter-Router bliebe dort unsichtbar und damit ungeprueft.
+ *
+ * caseSensitive wie die App (createApp): ein Router erbt die Einstellung nicht,
+ * /VEREIN fuehrte sonst zur selben Route wie /verein.
  */
-export const vereinsApi = Router();
+export const vereinsApi = Router({ caseSensitive: true });
 
 vereinsApi.get('/verein', async (_req, res, next) => {
 	try {
@@ -76,29 +80,7 @@ export const nichtGefunden: RequestHandler = (_req, res) => {
 	res.status(404).json(NICHT_GEFUNDEN);
 };
 
-interface RouteSchicht {
-	route?: { path?: unknown; methods?: Record<string, boolean> };
-}
-
-/**
- * Methode und Pfad jeder Route von vereinsApi, fuer den Mandanten-Test.
- *
- * Liest Express' interne Schichtenliste (stack). Eine Schicht ohne route
- * (router.use, Unter-Router) oder mit einem Pfad, der kein Text ist, wirft: Der
- * Test koennte sie nicht benennen, und still ueberspringen hiesse, eine
- * ungepruefte Route durchzulassen.
- */
+/** Methode und Pfad jeder Route von vereinsApi, fuer den Mandanten-Test. */
 export function vereinsRouten(): { methode: string; pfad: string }[] {
-	const routen: { methode: string; pfad: string }[] = [];
-	for (const schicht of vereinsApi.stack as RouteSchicht[]) {
-		const route = schicht.route;
-		if (!route || typeof route.path !== 'string') {
-			throw new Error('vereinsApi darf nur Routen mit Textpfad enthalten, keine Unter-Router oder Middleware');
-		}
-		const methoden = Object.entries(route.methods ?? {})
-			.filter(([, aktiv]) => aktiv)
-			.map(([name]) => (name === '_all' ? 'ALL' : name.toUpperCase()));
-		for (const methode of methoden) routen.push({ methode, pfad: route.path });
-	}
-	return routen;
+	return routenAus(vereinsApi, 'vereinsApi');
 }

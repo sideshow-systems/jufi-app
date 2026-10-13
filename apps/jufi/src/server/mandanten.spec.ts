@@ -1,7 +1,7 @@
 import { createPrismaClientFromEnv } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
-import { starteTestServer, type TestServer } from './test-setup.js';
+import { starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
 import { vereinsRouten } from './verein.js';
 
@@ -35,7 +35,9 @@ describe('Mandanten-Test', () => {
 			legeVereinAn(prisma, { slug: 'mandant-fremd' }),
 			legeVereinAn(prisma, { slug: 'mandant-gesperrt', status: 'GESPERRT' }),
 		]);
-		server = await starteTestServer(createApp({ prisma, version: { version: '1.2.3', commit: 'abc' } }));
+		server = await starteTestServer(
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+		);
 		kontext = { url: server.url, eigen, fremd, gesperrt };
 	});
 

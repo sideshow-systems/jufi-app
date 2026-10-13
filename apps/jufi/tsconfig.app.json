@@ -16,7 +16,7 @@
 	"include": ["src/**/*.ts"],
 	// Die Testhilfen der Servertests ziehen vitest und @jufi/db/testing herein;
 	// im Produktionsbau haben sie nichts verloren.
-	"exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/server/test-*.ts"],
+	"exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/server/**/test-*.ts"],
 	"references": [
 		{
 			"path": "../../libs/db/tsconfig.lib.json"

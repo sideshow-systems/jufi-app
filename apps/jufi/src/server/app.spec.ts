@@ -1,7 +1,7 @@
 import { createPrismaClient, createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app.js';
-import { starteTestServer, type TestServer } from './test-setup.js';
+import { starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 
 const VERSION = { version: '1.2.3', commit: 'abc' };
 
@@ -14,15 +14,17 @@ describe('createApp', () => {
 	let abgelehntPrisma: PrismaClient;
 
 	beforeAll(async () => {
-		server = await starteTestServer(createApp({ prisma, version: VERSION }));
+		server = await starteTestServer(createApp({ prisma, version: VERSION, umgebung: TEST_UMGEBUNG }));
 
 		// Port 1 auf 127.0.0.1: nichts lauscht dort, die Verbindung wird sofort abgelehnt.
 		abgelehntPrisma = createPrismaClient({ connectionString: 'postgresql://x:y@127.0.0.1:1/z' });
-		abgelehnt = await starteTestServer(createApp({ prisma: abgelehntPrisma, version: VERSION }));
+		abgelehnt = await starteTestServer(
+			createApp({ prisma: abgelehntPrisma, version: VERSION, umgebung: TEST_UMGEBUNG }),
+		);
 
 		// Eine Datenbank, die nie antwortet: nur $queryRaw wird gebraucht, daher der Cast.
 		const haengendPrisma = { $queryRaw: () => new Promise(() => {}) } as unknown as PrismaClient;
-		haengend = await starteTestServer(createApp({ prisma: haengendPrisma, version: VERSION }));
+		haengend = await starteTestServer(createApp({ prisma: haengendPrisma, version: VERSION, umgebung: TEST_UMGEBUNG }));
 	});
 
 	afterAll(async () => {
