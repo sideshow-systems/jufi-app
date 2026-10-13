@@ -28,15 +28,17 @@ Die echte App (Teilprojekt 2) liegt in `apps/jufi`, die Kommandozeile in `apps/c
 und Mailpit.
 
 ```bash
-cp .env.example .env     # Geheimnisse eintragen, Hinweise stehen in der Datei
+pnpm install
+cp .env.example .env     # SESSION_SECRET und TOTP_ENC_KEY eintragen (Hinweise in der Datei), sonst bricht dev ab
 pnpm run db:up           # Postgres (127.0.0.1:5433) und Mailpit
 pnpm prisma migrate dev  # Schema in die Entwicklungsdatenbank
+pnpm run db:generate     # Prisma-Client erzeugen; er liegt nicht im Repo
 pnpm run demo            # erfundener Verein "Jungfischer Demo"
 pnpm run dev
 ```
 
 Die App läuft dann unter <http://localhost:4200/>, der Demo-Verein unter <http://localhost:4200/demo>. Mails der App
-fängt Mailpit unter <http://127.0.0.1:8025> ab. `pnpm run demo` spielt den Demo-Verein jedes Mal frisch ein; andere
+fängt Mailpit unter <http://127.0.0.1:8025> ab. Nach jeder Schemaänderung ist `pnpm run db:generate` erneut nötig. `pnpm run demo` spielt den Demo-Verein jedes Mal frisch ein; andere
 Vereine bleiben unberührt.
 
 Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<projekt>` und brauchen deshalb das

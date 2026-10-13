@@ -7,6 +7,7 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 - `apps/entwurf` ist der klickbare Entwurf (Teilprojekt 1) und **Wegwerfcode**. Erhalten bleiben das Workspace-Grundgerüst, die Gestaltung und die Erkenntnisse aus den Rückmeldungen.
 - Lokal: `pnpm run dev:entwurf` → http://localhost:4300/entwurf/
 - `apps/jufi` ist die **echte App** (Teilprojekt 2). Lokal: `pnpm run dev` → http://localhost:4200/ (Demo-Verein: `pnpm run demo`, dann `/demo`).
+- Nach dem Klonen und nach jeder Schemaänderung `pnpm run db:generate` — der Prisma-Client liegt nicht im Repo.
 - Tests brauchen laufendes Postgres: erst `pnpm run db:up`. Jedes Projekt hat seine Testdatenbank `jufi_test_<projekt>`.
 - Vereinsdaten in Vereins-Routen **nur** über `vereinDb` (setzt den Verein in jede Abfrage); der schlichte `PrismaClient` ist Plattform-Operationen vorbehalten (Admin, CLI).
 
