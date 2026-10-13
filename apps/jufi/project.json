@@ -17,6 +17,7 @@
 		},
 		"build": {
 			"//options.externalDependencies": "Eine Liste, ein Bauteil-Buendel: der Schalter gilt fuer Browser- und Server-Ausgabe gleichermassen. Diese Pakete braucht nur der Server (native Bindungen oder Node-Laufzeit), kein Bauteil zieht sie in den Browser. Zieht eines doch ein Bauteil herein, bleibt im Browser-Buendel ein import stehen, den kein Browser aufloesen kann.",
+			"//options.allowedCommonJsDependencies": "qrcode ist CommonJS und zieht dijkstrajs und pngjs mit. Es wird nur beim Einrichten des zweiten Faktors nachgeladen (admin/totp-einrichtung.ts), das Startbuendel der Mitglieder enthaelt es nicht; die Optimierungs-Warnung beschreibt also keinen Verlust, der hier eintritt. Verworfen: ein ESM-QR-Paket -- ein Paket mehr in der Lieferkette fuer eine Warnung.",
 			"//configurations.production.optimization": "inlineCritical ist aus, weil das kritische CSS das Stylesheet ueber ein onload-Attribut nachlaedt, das script-src 'self' der Sicherheits-Header sperren wuerde (Begruendung in deploy/nginx-sicherheit.conf).",
 			"executor": "@angular/build:application",
 			"dependsOn": ["stamp"],
@@ -32,6 +33,7 @@
 					"entry": "apps/jufi/src/server.ts"
 				},
 				"outputMode": "server",
+				"allowedCommonJsDependencies": ["qrcode", "dijkstrajs", "pngjs"],
 				"externalDependencies": ["@node-rs/argon2", "@prisma/client", "@prisma/adapter-pg", "pg", "otplib", "express"],
 				"security": {
 					"allowedHosts": ["test.jufi-app.de", "localhost", "127.0.0.1"]
