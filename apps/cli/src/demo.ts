@@ -1,6 +1,5 @@
 import { Recht, type Beziehung, type PrismaClient } from '@jufi/db';
-
-export const DEMO_SLUG = 'demo';
+import { DEMO_SLUG } from '@jufi/domain';
 
 const ALLE_RECHTE = Object.values(Recht);
 
