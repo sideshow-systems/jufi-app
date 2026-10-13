@@ -6,6 +6,10 @@ const GUELTIG = {
 	TOTP_ENC_KEY: Buffer.alloc(32, 1).toString('base64'),
 	DATABASE_URL: 'postgresql://erfunden',
 	BASIS_URL: 'https://jufi.test',
+	SMTP_HOST: 'mail.jufi.test',
+	SMTP_PORT: '587',
+	MAIL_ABSENDER: 'app@jufi.test',
+	MAIL_ANTWORT: 'kontakt@jufi.test',
 };
 
 describe('umgebungAusEnv', () => {
@@ -15,6 +19,10 @@ describe('umgebungAusEnv', () => {
 			sitzungsGeheimnis: 'x'.repeat(32),
 			webauthnRpId: undefined,
 			webauthnOrigin: undefined,
+			smtp: { host: 'mail.jufi.test', port: 587, user: undefined, pass: undefined },
+			mailAbsender: 'app@jufi.test',
+			mailAntwort: 'kontakt@jufi.test',
+			mailBetreffPraefix: '',
 		});
 	});
 
@@ -27,5 +35,33 @@ describe('umgebungAusEnv', () => {
 	it('wirft bei fehlenden Geheimnissen, ohne Werte zu nennen', () => {
 		expect(() => umgebungAusEnv({ ...GUELTIG, SESSION_SECRET: 'kurz' })).toThrow(/SESSION_SECRET/);
 		expect(() => umgebungAusEnv({ ...GUELTIG, SESSION_SECRET: 'kurz' })).not.toThrow(/kurz/);
+	});
+
+	it('liest SMTP-Zugangsdaten und Betreffpraefix; leere Zugangsdaten gelten als nicht gesetzt', () => {
+		const u = umgebungAusEnv({
+			...GUELTIG,
+			SMTP_USER: 'nutzer',
+			SMTP_PASS: 'erfunden',
+			MAIL_BETREFF_PRAEFIX: '[Lokal] ',
+		});
+		expect(u.smtp).toEqual({ host: 'mail.jufi.test', port: 587, user: 'nutzer', pass: 'erfunden' });
+		expect(u.mailBetreffPraefix).toBe('[Lokal] ');
+		expect(umgebungAusEnv({ ...GUELTIG, SMTP_USER: '', SMTP_PASS: '' }).smtp.user).toBeUndefined();
+	});
+
+	it.each(['SMTP_HOST', 'SMTP_PORT', 'MAIL_ABSENDER', 'MAIL_ANTWORT'])(
+		'wirft ohne %s und nennt nur den Namen',
+		(name) => {
+			const env: Record<string, string | undefined> = { ...GUELTIG, [name]: undefined };
+			expect(() => umgebungAusEnv(env)).toThrow(new RegExp(name));
+			expect(() => umgebungAusEnv({ ...GUELTIG, [name]: '' })).toThrow(new RegExp(name));
+			// Kein Wert einer anderen Variable gelangt in die Meldung.
+			expect(() => umgebungAusEnv(env)).not.toThrow(/jufi\.test/);
+		},
+	);
+
+	it('wirft bei einem Port, der keine Portnummer ist, ohne den Wert zu nennen', () => {
+		expect(() => umgebungAusEnv({ ...GUELTIG, SMTP_PORT: 'abc' })).toThrow(/SMTP_PORT/);
+		expect(() => umgebungAusEnv({ ...GUELTIG, SMTP_PORT: 'abc' })).not.toThrow(/abc/);
 	});
 });

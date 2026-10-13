@@ -34,7 +34,15 @@
 				},
 				"outputMode": "server",
 				"allowedCommonJsDependencies": ["qrcode", "dijkstrajs", "pngjs"],
-				"externalDependencies": ["@node-rs/argon2", "@prisma/client", "@prisma/adapter-pg", "pg", "otplib", "express"],
+				"externalDependencies": [
+					"@node-rs/argon2",
+					"@prisma/client",
+					"@prisma/adapter-pg",
+					"pg",
+					"otplib",
+					"express",
+					"nodemailer"
+				],
 				"security": {
 					"allowedHosts": ["test.jufi-app.de", "localhost", "127.0.0.1"]
 				}

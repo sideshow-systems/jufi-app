@@ -13,7 +13,16 @@ export interface Umgebung {
 	/** Leer heisst: aus dem Host-Header ableiten (resolveRelyingParty), lokal genuegt das. */
 	webauthnRpId?: string;
 	webauthnOrigin?: string;
+	/** Ausgehender Mailserver; lokal Mailpit. Zugangsdaten nur, wenn der Server sie verlangt. */
+	smtp: { host: string; port: number; user?: string; pass?: string };
+	mailAbsender: string;
+	/** Reply-To: Antworten auf Systemmails sollen bei einem Menschen landen, nicht beim Absenderpostfach. */
+	mailAntwort: string;
+	/** Steht vor jedem Betreff; leer in Produktion. */
+	mailBetreffPraefix: string;
 }
+
+const MAIL_PFLICHT = ['SMTP_HOST', 'SMTP_PORT', 'MAIL_ABSENDER', 'MAIL_ANTWORT'] as const;
 
 /**
  * Wirft mit allen Beanstandungen auf einmal (assertSecrets), nie mit den Werten.
@@ -22,6 +31,17 @@ export interface Umgebung {
  */
 export function umgebungAusEnv(env: Record<string, string | undefined>): Umgebung {
 	assertSecrets(env);
+	// Eigene Pruefung statt assertSecrets zu erweitern: das sind keine Geheimnisse
+	// und gehoeren nicht in die Bibliothek fuer die Anmeldung. Wie dort nennt die
+	// Meldung nur die Namen, nie Werte.
+	const beanstandet: string[] = MAIL_PFLICHT.filter((name) => !env[name]);
+	const port = Number(env['SMTP_PORT']);
+	if (env['SMTP_PORT'] && !(Number.isInteger(port) && port > 0 && port < 65536)) {
+		beanstandet.push('SMTP_PORT (keine Portnummer)');
+	}
+	if (beanstandet.length > 0) {
+		throw new Error(`Umgebung unvollstaendig oder ungueltig: ${beanstandet.join(', ')}`);
+	}
 	return {
 		// Nach assertSecrets gesetzt; der Typ weiss das nicht.
 		basisUrl: env['BASIS_URL'] ?? '',
@@ -30,5 +50,15 @@ export function umgebungAusEnv(env: Record<string, string | undefined>): Umgebun
 		// sonst haette resolveRelyingParty eine leere rpId.
 		webauthnRpId: env['WEBAUTHN_RP_ID'] || undefined,
 		webauthnOrigin: env['WEBAUTHN_ORIGIN'] || undefined,
+		smtp: {
+			host: env['SMTP_HOST'] ?? '',
+			port,
+			// Leer wie nicht gesetzt: nodemailer wuerde sonst mit leerem Benutzer eine Anmeldung versuchen.
+			user: env['SMTP_USER'] || undefined,
+			pass: env['SMTP_PASS'] || undefined,
+		},
+		mailAbsender: env['MAIL_ABSENDER'] ?? '',
+		mailAntwort: env['MAIL_ANTWORT'] ?? '',
+		mailBetreffPraefix: env['MAIL_BETREFF_PRAEFIX'] ?? '',
 	};
 }
