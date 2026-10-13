@@ -1,0 +1,41 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noPropertyAccessFromIndexSignature": true,
+		"experimentalDecorators": true,
+		"moduleResolution": "bundler",
+		"module": "preserve",
+		"composite": false,
+		"declaration": false,
+		"declarationMap": false,
+		"emitDeclarationOnly": false,
+		// Die App ist kein pnpm-Paket, die Bibliotheken liegen daher nicht in
+		// node_modules/@jufi. Verworfen: die App als Workspace-Paket mit
+		// workspace:*-Abhaengigkeiten anlegen -- das braeuchte ein package.json
+		// samt Lockfile-Eintraegen fuer etwas, das paths in einer Zeile leistet
+		// (wie in hwyd). Die Servertests loesen dasselbe in vitest.server.config.mts auf.
+		"paths": {
+			"@jufi/domain": ["../../libs/domain/src/index.ts"],
+			"@jufi/db": ["../../libs/db/src/index.ts"],
+			"@jufi/db/testing": ["../../libs/db/src/testing.ts"],
+			"@jufi/auth": ["../../libs/auth/src/index.ts"]
+		},
+		"lib": ["es2022", "dom", "dom.iterable"]
+	},
+	"angularCompilerOptions": {
+		"enableI18nLegacyMessageIdFormat": false,
+		"strictInjectionParameters": true,
+		"strictInputAccessModifiers": true,
+		"strictTemplates": true
+	},
+	"files": [],
+	"include": [],
+	"references": [
+		{
+			"path": "./tsconfig.app.json"
+		},
+		{
+			"path": "./tsconfig.spec.json"
+		}
+	]
+}

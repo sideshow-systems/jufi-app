@@ -1,0 +1,13 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"types": ["vitest/globals", "node"],
+		"composite": false,
+		"declaration": false,
+		"emitDeclarationOnly": false,
+		// Siehe tsconfig.app.json: noEmit:true liesse den Angular-Testrunner
+		// kein TypeScript-Programm laden.
+		"noEmit": false
+	},
+	"include": ["src/**/*.ts", "src/**/*.d.ts"]
+}

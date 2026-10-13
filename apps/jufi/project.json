@@ -1,0 +1,119 @@
+{
+	"name": "jufi",
+	"$schema": "../../node_modules/nx/schemas/project-schema.json",
+	"projectType": "application",
+	"prefix": "jf",
+	"sourceRoot": "apps/jufi/src",
+	"tags": [],
+	"targets": {
+		"stamp": {
+			"//": "Schreibt apps/jufi/src/version.generated.ts. Haengt an build, serve, test-server und typecheck, weil die Datei nicht im Repo liegt (siehe .gitignore) und der Import sonst ins Leere zeigt. Nicht zwischengespeichert: sie soll den echten HEAD abbilden, nicht den von vorletzter Woche.",
+			"executor": "nx:run-commands",
+			"cache": false,
+			"options": {
+				"cwd": "{workspaceRoot}",
+				"commands": ["node tools/version-stamp.mjs"]
+			}
+		},
+		"build": {
+			"//options.externalDependencies": "Eine Liste, ein Bauteil-Buendel: der Schalter gilt fuer Browser- und Server-Ausgabe gleichermassen. Diese Pakete braucht nur der Server (native Bindungen oder Node-Laufzeit), kein Bauteil zieht sie in den Browser. Zieht eines doch ein Bauteil herein, bleibt im Browser-Buendel ein import stehen, den kein Browser aufloesen kann.",
+			"//configurations.production.optimization": "inlineCritical ist aus, weil das kritische CSS das Stylesheet ueber ein onload-Attribut nachlaedt, das script-src 'self' der Sicherheits-Header sperren wuerde (Begruendung in deploy/nginx-sicherheit.conf).",
+			"executor": "@angular/build:application",
+			"dependsOn": ["stamp"],
+			"outputs": ["{options.outputPath}"],
+			"defaultConfiguration": "production",
+			"options": {
+				"outputPath": "dist/apps/jufi",
+				"browser": "apps/jufi/src/main.ts",
+				"tsConfig": "apps/jufi/tsconfig.app.json",
+				"styles": ["apps/jufi/src/styles.css"],
+				"server": "apps/jufi/src/main.server.ts",
+				"ssr": {
+					"entry": "apps/jufi/src/server.ts"
+				},
+				"outputMode": "server",
+				"externalDependencies": ["@node-rs/argon2", "@prisma/client", "@prisma/adapter-pg", "pg", "otplib", "express"],
+				"security": {
+					"allowedHosts": ["test.jufi-app.de", "localhost", "127.0.0.1"]
+				}
+			},
+			"configurations": {
+				"production": {
+					"budgets": [
+						{
+							"type": "initial",
+							"maximumWarning": "500kb",
+							"maximumError": "1mb"
+						},
+						{
+							"type": "anyComponentStyle",
+							"maximumWarning": "6kb",
+							"maximumError": "8kb"
+						}
+					],
+					"outputHashing": "all",
+					"optimization": {
+						"scripts": true,
+						"styles": { "minify": true, "inlineCritical": false },
+						"fonts": true
+					}
+				},
+				"development": {
+					"optimization": false,
+					"extractLicenses": false,
+					"sourceMap": true
+				}
+			}
+		},
+		"serve": {
+			"continuous": true,
+			"dependsOn": ["stamp"],
+			"executor": "@angular/build:dev-server",
+			"defaultConfiguration": "development",
+			"options": {
+				"port": 4200
+			},
+			"configurations": {
+				"production": {
+					"buildTarget": "jufi:build:production"
+				},
+				"development": {
+					"buildTarget": "jufi:build:development"
+				}
+			}
+		},
+		"typecheck": {
+			"executor": "nx:run-commands",
+			"cache": true,
+			"inputs": ["default", "^default"],
+			"options": {
+				"cwd": "apps/jufi",
+				"commands": ["tsc -p tsconfig.app.json --noEmit", "tsc -p tsconfig.spec.json --noEmit"],
+				"parallel": false
+			},
+			"dependsOn": ["^typecheck", "stamp"]
+		},
+		"test": {
+			"//": "include ist relativ zu sourceRoot (apps/jufi/src), nicht zur Wurzel: src/app/** fand keine Datei. Nur src/app -- die Dateien unter src/server laufen in test-server, denn sie brauchen Node und eine Datenbank statt jsdom.",
+			"executor": "@angular/build:unit-test",
+			"dependsOn": ["stamp"],
+			"outputs": ["{workspaceRoot}/coverage/apps/jufi"],
+			"options": {
+				"buildTarget": "jufi:build:development",
+				"tsConfig": "apps/jufi/tsconfig.spec.json",
+				"runner": "vitest",
+				"include": ["app/**/*.spec.ts"]
+			}
+		},
+		"test-server": {
+			"//": "Eigener Lauf in Node, weil der Angular-Testrunner jsdom und den Angular-Bau mitbringt, Server-Tests aber eine echte Datenbank und kein DOM brauchen.",
+			"executor": "nx:run-commands",
+			"cache": false,
+			"dependsOn": ["stamp"],
+			"options": {
+				"cwd": "{workspaceRoot}",
+				"commands": ["vitest run -c apps/jufi/vitest.server.config.mts"]
+			}
+		}
+	}
+}

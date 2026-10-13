@@ -1,0 +1,28 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"types": ["node"],
+		"composite": false,
+		"declaration": false,
+		"emitDeclarationOnly": false,
+		// noEmit MUSS false bleiben (Erfahrung aus HWYD). Mit sourceMap
+		// (Entwicklungs-Konfiguration) laesst der Angular-Compiler jede Datei durch
+		// die TypeScript-Emit-Stufe laufen; bei noEmit:true liefert die nichts
+		// zurueck und Build wie Testrunner melden "File not found in TypeScript
+		// compilation". Nicht-Emittieren erledigt das typecheck-Target ueber
+		// --noEmit auf der Kommandozeile.
+		"noEmit": false
+	},
+	"include": ["src/**/*.ts"],
+	// Die Testhilfen der Servertests ziehen vitest und @jufi/db/testing herein;
+	// im Produktionsbau haben sie nichts verloren.
+	"exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/server/test-*.ts"],
+	"references": [
+		{
+			"path": "../../libs/db/tsconfig.lib.json"
+		},
+		{
+			"path": "../../libs/auth/tsconfig.lib.json"
+		}
+	]
+}
