@@ -1,3 +1,4 @@
+import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
@@ -17,6 +18,9 @@ interface Kontext {
 	eigenesCookie: string;
 	/** Token einer offenen Einladung im Verein eigen. */
 	einladungsToken: string;
+	/** Kennung und Passwort einer Person mit TOTP im Verein eigen. */
+	totpPerson: { kennung: string; passwort: string };
+	prisma: PrismaClient;
 }
 
 /**
@@ -74,6 +78,49 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		});
 		expect(r.status).toBe(200);
 	},
+	'POST /anmelden': async (k) => {
+		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/anmelden`, { methode: 'POST', body: {} })).status).toBe(404);
+		// Die Kennung aus eigen gibt es in fremd nicht.
+		const r = await sende(k.url, `/${k.fremd.slug}/api/v1/anmelden`, { methode: 'POST', body: k.totpPerson });
+		expect(r.status).toBe(401);
+	},
+	'POST /anmelden/totp': async (k) => {
+		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/anmelden/totp`, { methode: 'POST', body: {} })).status).toBe(
+			404,
+		);
+		const passwort = await sende(k.url, `/${k.eigen.slug}/api/v1/anmelden`, { methode: 'POST', body: k.totpPerson });
+		const { zwischenmarke } = (await passwort.json()) as { zwischenmarke: string };
+		expect(zwischenmarke).toBeTruthy();
+		// Die Marke aus eigen fuehrt in fremd nicht weiter, auch mit einem Wiederherstellungscode nicht.
+		const r = await sende(k.url, `/${k.fremd.slug}/api/v1/anmelden/totp`, {
+			methode: 'POST',
+			body: { zwischenmarke, wiederherstellungscode: 'egal' },
+		});
+		expect(r.status).toBe(401);
+	},
+	'POST /anmelden/passkey-optionen': async (k) => {
+		expect(
+			(await sende(k.url, `/${k.gesperrt.slug}/api/v1/anmelden/passkey-optionen`, { methode: 'POST' })).status,
+		).toBe(404);
+	},
+	'POST /anmelden/passkey': async (k) => {
+		expect(
+			(await sende(k.url, `/${k.gesperrt.slug}/api/v1/anmelden/passkey`, { methode: 'POST', body: {} })).status,
+		).toBe(404);
+		// Eine Challenge aus eigen ist in fremd unbekannt.
+		const o = await sende(k.url, `/${k.eigen.slug}/api/v1/anmelden/passkey-optionen`, { methode: 'POST' });
+		const { optionen } = (await o.json()) as { optionen: { challenge: string } };
+		const clientDataJSON = Buffer.from(JSON.stringify({ challenge: optionen.challenge })).toString('base64url');
+		const r = await sende(k.url, `/${k.fremd.slug}/api/v1/anmelden/passkey`, {
+			methode: 'POST',
+			body: {
+				antwort: { id: 'cred-mandant', rawId: 'cred-mandant', type: 'public-key', response: { clientDataJSON } },
+			},
+		});
+		expect(r.status).toBe(401);
+		// Die Challenge bleibt in eigen liegen: fremd hat sie weder gesehen noch verbraucht.
+		expect(await k.prisma.webauthnChallenge.count({ where: { challenge: optionen.challenge } })).toBe(1);
+	},
 	'GET /ich': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/ich`)).status).toBe(404);
 		// Das Cookie aus eigen gilt in fremd nicht: angemeldet ist nur, wer dort eine Sitzung hat.
@@ -124,6 +171,16 @@ describe('Mandanten-Test', () => {
 		]);
 		server = await starteTestServer(app);
 		const { cookie } = await legeMitgliedAn(prisma, eigen, { art: 'ERWACHSENER' });
+		const totpPerson = { kennung: 'mandant-totp@example.test', passwort: 'gruene-forelle-am-see' };
+		const { zugangId } = await legeMitgliedAn(prisma, eigen, {
+			art: 'ERWACHSENER',
+			email: totpPerson.kennung,
+			passwort: totpPerson.passwort,
+		});
+		await prisma.zugang.update({
+			where: { id: zugangId },
+			data: { totpGeheimnis: encryptSecret(generateTotpSecret()), totpAktivAm: new Date() },
+		});
 		kontext = {
 			url: server.url,
 			eigen,
@@ -131,6 +188,8 @@ describe('Mandanten-Test', () => {
 			gesperrt,
 			eigenesCookie: cookie,
 			einladungsToken: await einladungsToken(prisma, eigen),
+			totpPerson,
+			prisma,
 		};
 	});
 
