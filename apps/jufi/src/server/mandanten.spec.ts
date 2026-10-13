@@ -1,7 +1,8 @@
-import { createPrismaClientFromEnv } from '@jufi/db';
+import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
+import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
@@ -14,6 +15,8 @@ interface Kontext {
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
+	/** Token einer offenen Einladung im Verein eigen. */
+	einladungsToken: string;
 }
 
 /**
@@ -25,6 +28,35 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Ohne Objekt-ID: der Verein kommt allein aus dem Slug. Geprueft wird,
 		// dass ein gesperrter fremder Verein nichts preisgibt.
 		expect((await fetch(`${k.url}/${k.gesperrt.slug}/api/v1/verein`)).status).toBe(404);
+	},
+	'POST /einladung/pruefen': async (k) => {
+		for (const verein of [k.fremd, k.gesperrt]) {
+			const r = await sende(k.url, `/${verein.slug}/api/v1/einladung/pruefen`, {
+				methode: 'POST',
+				body: { token: k.einladungsToken },
+			});
+			expect(r.status).toBe(404);
+		}
+		// Weder Fremde noch die Anfragen eben haben die Einladung angetastet.
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/einladung/pruefen`, {
+			methode: 'POST',
+			body: { token: k.einladungsToken },
+		});
+		expect(r.status).toBe(200);
+	},
+	'POST /einladung/passkey-optionen': async (k) => {
+		for (const verein of [k.fremd, k.gesperrt]) {
+			const r = await sende(k.url, `/${verein.slug}/api/v1/einladung/passkey-optionen`, {
+				methode: 'POST',
+				body: { token: k.einladungsToken },
+			});
+			expect(r.status).toBe(404);
+		}
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/einladung/passkey-optionen`, {
+			methode: 'POST',
+			body: { token: k.einladungsToken },
+		});
+		expect(r.status).toBe(200);
 	},
 	'GET /ich': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/ich`)).status).toBe(404);
@@ -46,6 +78,22 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	},
 };
 
+/** Eine offene Einladung im Verein eigen; der Test schickt ihr Token an fremde Vereine. */
+async function einladungsToken(prisma: PrismaClient, eigen: { id: string }): Promise<string> {
+	const person = await prisma.person.create({
+		data: { vereinId: eigen.id, art: 'ERWACHSENER', vorname: 'Einla', nachname: 'Dung', email: 'einla@example.test' },
+	});
+	return prisma.$transaction((tx) =>
+		erzeugeEinladung(tx, {
+			vereinId: eigen.id,
+			personId: person.id,
+			art: 'EINLADUNG',
+			erstelltVonPersonId: null,
+			jetzt: new Date(),
+		}),
+	);
+}
+
 describe('Mandanten-Test', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
@@ -60,7 +108,14 @@ describe('Mandanten-Test', () => {
 		]);
 		server = await starteTestServer(app);
 		const { cookie } = await legeMitgliedAn(prisma, eigen, { art: 'ERWACHSENER' });
-		kontext = { url: server.url, eigen, fremd, gesperrt, eigenesCookie: cookie };
+		kontext = {
+			url: server.url,
+			eigen,
+			fremd,
+			gesperrt,
+			eigenesCookie: cookie,
+			einladungsToken: await einladungsToken(prisma, eigen),
+		};
 	});
 
 	afterAll(async () => {

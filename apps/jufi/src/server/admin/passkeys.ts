@@ -91,7 +91,7 @@ export async function nimmAdminChallenge(
  * Relying Party dieser Anfrage; WEBAUTHN_RP_ID und WEBAUTHN_ORIGIN haben
  * Vorrang vor dem Host-Header (Umgebung), lokal genuegt der Header.
  */
-function relyingParty(req: Request, deps: VolleAppDeps): RelyingParty {
+export function relyingParty(req: Request, deps: Pick<VolleAppDeps, 'umgebung'>): RelyingParty {
 	return resolveRelyingParty({
 		host: req.headers.host,
 		secure: req.secure,
