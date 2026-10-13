@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { mitStandardwerten, type AppDeps } from '../abhaengigkeiten.js';
 import { routenAus } from '../routen.js';
+import { anmeldeRouten } from './anmeldung.js';
 import { adminKontext, brauchtAdmin, loescheAdminCookie } from './sitzung.js';
 
 /**
@@ -8,7 +9,12 @@ import { adminKontext, brauchtAdmin, loescheAdminCookie } from './sitzung.js';
  * Alles andere verlangt brauchtAdmin; schutz.spec.ts prueft, dass jede Route in
  * genau einer der beiden Listen steht.
  */
-export const OEFFENTLICHE_ADMIN_ROUTEN: readonly string[] = [];
+export const OEFFENTLICHE_ADMIN_ROUTEN: readonly string[] = [
+	'POST /einrichtung/pruefen',
+	'POST /einrichtung/abschliessen',
+	'POST /anmelden',
+	'POST /anmelden/totp',
+];
 
 /**
  * Alle Endpunkte unter /admin/api/v1. Jeder haengt direkt an diesem Router, ohne
@@ -22,8 +28,11 @@ export const OEFFENTLICHE_ADMIN_ROUTEN: readonly string[] = [];
  * Uhr, Umgebung und Backoff aus deps brauchen.
  */
 export function adminApi(appDeps: AppDeps): Router {
-	const { prisma } = mitStandardwerten(appDeps);
+	const deps = mitStandardwerten(appDeps);
+	const { prisma } = deps;
 	const router = Router({ caseSensitive: true });
+
+	anmeldeRouten(router, deps);
 
 	router.get('/ich', brauchtAdmin, async (_req, res, next) => {
 		try {
