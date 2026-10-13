@@ -45,6 +45,24 @@ Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<proj
 laufende `pnpm run db:up`. Sie legen ihre Datenbanken selbst an und setzen sie zurück, die Entwicklungsdatenbank
 `jufi` berühren sie nicht.
 
+## Admin anlegen
+
+Den ersten Plattform-Admin legt nur die Kommandozeile an; die Oberfläche kann das bewusst nicht. `BASIS_URL` in der
+`.env` muss gesetzt sein, denn der Befehl baut daraus den Link.
+
+```bash
+pnpm run cli admin anlegen <name>
+```
+
+Der Befehl gibt einen Einrichtungslink aus (`<BASIS_URL>/admin/einrichten#<token>`). Den Link im Browser öffnen und
+Passwort sowie TOTP setzen. Er gilt 1 Stunde und nur einmal, und er funktioniert nur unter der `BASIS_URL`, aus der er
+gebaut wurde: Wer die App unter einer anderen Adresse betreibt, muss `BASIS_URL` vorher dorthin setzen.
+
+Sind Passwort, TOTP und Passkeys verloren, setzt `pnpm run cli admin zuruecksetzen <name>` den Admin zurück
+(löscht Passwort, Passkeys, TOTP und Sitzungen) und gibt einen neuen Einrichtungslink aus.
+`pnpm run cli verein loeschen <slug>` löscht einen Verein mit allen Daten; zur Bestätigung ist der Slug einzutippen.
+Das Admin-Protokoll bleibt dabei erhalten.
+
 ## Prüfen
 
 ```bash

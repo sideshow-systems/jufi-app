@@ -1,13 +1,14 @@
 import { Recht, type Beziehung, type PrismaClient } from '@jufi/db';
 import { DEMO_SLUG } from '@jufi/domain';
+import { CliFehler } from './fehler.js';
 
 const ALLE_RECHTE = Object.values(Recht);
 
 /**
- * Eigene Klasse, damit fuehreAus die Verweigerung als erwartete Meldung mit Exit-Code 1
+ * Erbt von CliFehler, damit fuehreAus die Verweigerung als erwartete Meldung mit Exit-Code 1
  * ausgibt und sie nicht mit einem Datenbankfehler verwechselt.
  */
-export class DemoGeschuetztFehler extends Error {
+export class DemoGeschuetztFehler extends CliFehler {
 	constructor(zugaenge: number, sitzungen: number) {
 		super(
 			`Der Verein mit dem Slug "${DEMO_SLUG}" hat ${zugaenge} Zugang/Zugaenge und ${sitzungen} Sitzung(en), ` +
