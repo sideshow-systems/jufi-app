@@ -287,6 +287,62 @@ describe('Verein', () => {
 	});
 });
 
+describe('Besitzer einer WebAuthn-Challenge', () => {
+	const challenge = () => ({ challenge: eindeutig(), purpose: 'register', expiresAt: new Date('2027-01-01') });
+
+	it('personId ohne vereinId abgelehnt', async () => {
+		const a = await verein();
+		const kind = await jungfischer(a.id);
+
+		// Ohne vereinId prueft der zusammengesetzte Fremdschluessel nichts (MATCH SIMPLE).
+		expect(await fehlertext(prisma.webauthnChallenge.create({ data: { ...challenge(), personId: kind.id } }))).toMatch(
+			/webauthn_challenge_besitzer/,
+		);
+		expect(
+			await fehlertext(prisma.webauthnChallenge.create({ data: { ...challenge(), personId: 'gibt-es-nicht' } })),
+		).toMatch(/webauthn_challenge_besitzer/);
+	});
+
+	it('vereinId zusammen mit adminId abgelehnt', async () => {
+		const a = await verein();
+		const admin = await prisma.plattformAdmin.create({ data: { benutzername: `admin-${eindeutig()}` } });
+
+		expect(
+			await fehlertext(
+				prisma.webauthnChallenge.create({ data: { ...challenge(), vereinId: a.id, adminId: admin.id } }),
+			),
+		).toMatch(/webauthn_challenge_besitzer/);
+	});
+
+	it('gueltige Admin- und Vereinszeilen erlaubt', async () => {
+		const a = await verein();
+		const kind = await jungfischer(a.id);
+		const admin = await prisma.plattformAdmin.create({ data: { benutzername: `admin-${eindeutig()}` } });
+
+		await prisma.webauthnChallenge.create({ data: { ...challenge(), adminId: admin.id } });
+		await prisma.webauthnChallenge.create({ data: { ...challenge() } });
+		await prisma.webauthnChallenge.create({ data: { ...challenge(), vereinId: a.id, personId: kind.id } });
+		await prisma.webauthnChallenge.create({ data: { ...challenge(), vereinId: a.id } });
+	});
+});
+
+describe('vereinId bleibt fest', () => {
+	it('Person mit Zugang laesst sich nicht in einen anderen Verein verschieben', async () => {
+		const a = await verein();
+		const b = await verein();
+		const mutter = await erwachsener(a.id);
+		const zugang = await prisma.zugang.create({
+			data: { vereinId: a.id, personId: mutter.id, email: `sandra-${eindeutig()}@example.org` },
+		});
+
+		expect(await fehlercode(prisma.person.update({ where: { id: mutter.id }, data: { vereinId: b.id } }))).toBe(
+			'P2003',
+		);
+		expect((await prisma.zugang.findUniqueOrThrow({ where: { id: zugang.id } })).vereinId).toBe(a.id);
+		expect((await prisma.person.findUniqueOrThrow({ where: { id: mutter.id } })).vereinId).toBe(a.id);
+	});
+});
+
 describe('Loeschen', () => {
 	it('Verein loeschen entfernt alle Vereinsdaten, AdminProtokoll bleibt', async () => {
 		const a = await verein('weg');

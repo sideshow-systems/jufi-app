@@ -8,6 +8,12 @@
 // einziger Fehler im Code waere dann ein Leck. Dass vereinId dabei in mehreren
 // Relationen eines Modells steckt, ist gewollt.
 //
+// Alle zusammengesetzten Relationen tragen onUpdate: NoAction. Damit ist die
+// vereinId einer Person, Untergruppe oder eines Zugangs praktisch unveraenderlich,
+// sobald etwas auf die Zeile verweist — zweiter Riegel neben vereinDb. Verworfen:
+// Prismas Vorgabe Cascade — ein update von Person.vereinId zoege Zugang, Passkeys
+// und Sitzungen still in einen anderen Verein mit.
+//
 // CHECK-Constraints bildet Prisma nicht ab; sie stehen von Hand in der Migration
 // prisma/migrations/*_fundament/migration.sql.
 //
@@ -186,9 +192,9 @@ model Bezugsperson {
   vereinId             String
   verein               Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   erwachsenerId        String
-  erwachsener          Person    @relation("BezugspersonErwachsener", fields: [vereinId, erwachsenerId], references: [vereinId, id], onDelete: Cascade)
+  erwachsener          Person    @relation("BezugspersonErwachsener", fields: [vereinId, erwachsenerId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   jungfischerId        String
-  jungfischer          Person    @relation("BezugspersonJungfischer", fields: [vereinId, jungfischerId], references: [vereinId, id], onDelete: Cascade)
+  jungfischer          Person    @relation("BezugspersonJungfischer", fields: [vereinId, jungfischerId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   beziehung            Beziehung
   /// Nur bei ANDERE, dort Pflicht (CHECK bezugsperson_freitext).
   beziehungFreitext    String?
@@ -221,9 +227,9 @@ model UntergruppeMitglied {
   vereinId      String
   verein        Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   untergruppeId String
-  untergruppe   Untergruppe @relation(fields: [vereinId, untergruppeId], references: [vereinId, id], onDelete: Cascade)
+  untergruppe   Untergruppe @relation(fields: [vereinId, untergruppeId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   personId      String
-  person        Person      @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+  person        Person      @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([untergruppeId, personId])
   @@index([vereinId, personId])
@@ -238,7 +244,7 @@ model Zugang {
   vereinId      String
   verein        Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   personId      String    @unique
-  person        Person    @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+  person        Person    @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   /// Kleingeschrieben, eindeutig je Verein. Erwachsene: Pflicht und Kennung;
   /// Jungfischer: freiwillig, nur fuer Benachrichtigungen ab TP5.
   email         String?
@@ -273,7 +279,7 @@ model Passkey {
   vereinId     String
   verein       Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   zugangId     String
-  zugang       Zugang    @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade)
+  zugang       Zugang    @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   /// Credential-ID des Authenticators, base64url. Global eindeutig: Bei der
   /// Anmeldung ohne allowCredentials steht der Verein des Passkeys erst nach dem
   /// Nachschlagen fest ("Dieser Passkey gehoert nicht zu diesem Verein", Spec 4.3).
@@ -301,7 +307,7 @@ model RecoveryCode {
   vereinId    String
   verein      Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   zugangId    String
-  zugang      Zugang    @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade)
+  zugang      Zugang    @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   codeHash    String
   verwendetAm DateTime?
 
@@ -318,6 +324,12 @@ model RecoveryCode {
 /// vereinId null gehoert dem Plattform-Admin. Verworfen: eine zweite Tabelle fuer
 /// Admin-Challenges — Challenges tragen keine Personendaten, eine Kopie braechte
 /// nichts.
+///
+/// Der CHECK webauthn_challenge_besitzer (Migration mandantenschutz_nachgeschaerft)
+/// haelt die beiden Arten auseinander: personId nur mit vereinId, adminId nur ohne.
+/// Ohne ihn liesse der zusammengesetzte Fremdschluessel eine Zeile mit personId und
+/// vereinId null ungeprueft durch (MATCH SIMPLE), und sie ueberlebte das Loeschen
+/// des Vereins als scheinbare Admin-Zeile.
 model WebauthnChallenge {
   id        String          @id @default(cuid())
   challenge String          @unique
@@ -328,9 +340,9 @@ model WebauthnChallenge {
   /// Authenticators feststeht. Person statt Zugang, weil der Zugang beim
   /// Annehmen der Einladung erst mit dem ersten Passkey entsteht (Spec 4.2).
   personId  String?
-  person    Person?         @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+  person    Person?         @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   /// Gegenstueck zu personId fuer Admin-Challenges. Eine Zeile mit adminId hat
-  /// nie eine vereinId, verbindet also keine Vereinsdaten mit dem Admin.
+  /// nie eine vereinId (CHECK), verbindet also keine Vereinsdaten mit dem Admin.
   adminId   String?
   admin     PlattformAdmin? @relation(fields: [adminId], references: [id], onDelete: Cascade)
   /// 'register' oder 'authenticate'. Verhindert, dass eine Challenge aus der
@@ -349,7 +361,7 @@ model Session {
   vereinId       String
   verein         Verein   @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   zugangId       String
-  zugang         Zugang   @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade)
+  zugang         Zugang   @relation(fields: [vereinId, zugangId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   tokenHash      String   @unique
   ablauf         DateTime
   zuletztGesehen DateTime @default(now())
@@ -366,7 +378,7 @@ model Einladung {
   vereinId            String
   verein              Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   personId            String
-  person              Person       @relation("EinladungPerson", fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade)
+  person              Person       @relation("EinladungPerson", fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   art                 EinladungArt
   tokenHash           String       @unique
   ablauf              DateTime
@@ -380,7 +392,7 @@ model Einladung {
   /// hart (Spec 5.8). Das Loeschen eines Vereins nimmt sie ueber die eigene
   /// Relation zum Verein mit (Begruendung bei Einwilligung).
   erstelltVonPersonId String?
-  erstelltVon         Person?      @relation("EinladungErstelltVon", fields: [vereinId, erstelltVonPersonId], references: [vereinId, id], onDelete: NoAction)
+  erstelltVon         Person?      @relation("EinladungErstelltVon", fields: [vereinId, erstelltVonPersonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
   angelegtAm          DateTime     @default(now())
 
   @@index([vereinId, personId, art])
@@ -404,10 +416,10 @@ model Einwilligung {
   /// Befuerchtung, RESTRICT pruefe mitten in der Kaskade, traf nicht zu; NO ACTION
   /// liesse sich aber spaeter aufschieben, RESTRICT nie.
   jungfischerId    String
-  jungfischer      Person          @relation("EinwilligungJungfischer", fields: [vereinId, jungfischerId], references: [vereinId, id], onDelete: NoAction)
+  jungfischer      Person          @relation("EinwilligungJungfischer", fields: [vereinId, jungfischerId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
   /// Person, die eingewilligt hat (erziehungsberechtigte Bezugsperson).
   erteiltVon       String
-  erteiltVonPerson Person          @relation("EinwilligungErteiltVon", fields: [vereinId, erteiltVon], references: [vereinId, id], onDelete: NoAction)
+  erteiltVonPerson Person          @relation("EinwilligungErteiltVon", fields: [vereinId, erteiltVon], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
   art              EinwilligungArt
   /// Fassung des Einwilligungstexts, der angezeigt wurde.
   textVersion      String
