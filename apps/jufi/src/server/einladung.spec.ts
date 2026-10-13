@@ -70,7 +70,7 @@ describe('Einladungen', () => {
 		const link = einladungsLink('http://jufi.test', 'glonntal', 'abc_123-XYZ');
 		expect(link).toBe('http://jufi.test/glonntal/einladung#abc_123-XYZ');
 		expect(leitungsEinladungsText({ vorname: 'Thomas', anzeigename: 'Jungfischer Glonntal', link })).toBe(
-			'Hallo Thomas, du bist als Leitung von „Jungfischer Glonntal" in die JuFi App eingeladen. ' +
+			'Hallo Thomas, du bist als Leitung von „Jungfischer Glonntal“ in die JuFi App eingeladen. ' +
 				'Richte hier deinen Zugang ein – der Link gilt 14 Tage und nur für dich:\n' +
 				'http://jufi.test/glonntal/einladung#abc_123-XYZ',
 		);

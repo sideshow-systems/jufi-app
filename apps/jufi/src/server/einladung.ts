@@ -58,7 +58,7 @@ export function einladungsLink(basisUrl: string, slug: string, token: string): s
  */
 export function leitungsEinladungsText(t: { vorname: string; anzeigename: string; link: string }): string {
 	return (
-		`Hallo ${t.vorname}, du bist als Leitung von „${t.anzeigename}" in die JuFi App eingeladen. ` +
+		`Hallo ${t.vorname}, du bist als Leitung von „${t.anzeigename}“ in die JuFi App eingeladen. ` +
 		`Richte hier deinen Zugang ein – der Link gilt 14 Tage und nur für dich:\n${t.link}`
 	);
 }

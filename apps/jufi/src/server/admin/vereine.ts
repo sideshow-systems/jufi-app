@@ -12,7 +12,7 @@ import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { einladungsLink, leitungsEinladungsText } from '../einladung.js';
 import { asynchron, text } from './asynchron.js';
-import { adminDaten, type NeuerVerein } from './daten.js';
+import type { AdminDaten, NeuerVerein } from './daten.js';
 import { adminKontext, brauchtAdmin } from './sitzung.js';
 
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
@@ -65,13 +65,19 @@ function pruefeNeuenVerein(
 }
 
 /**
- * Vereine ansehen und anlegen. Haengt direkt an den Router aus adminApi (siehe
- * api.ts). Bekommt adminDaten statt des PrismaClient: Was der Admin aus Vereinen
- * liest, steht so nur in daten.ts (Spec 7.4).
+ * Was die Vereinsrouten brauchen: Uhr, Umgebung und adminDaten -- ausdruecklich
+ * ohne prisma. Die Grenze "nur daten.ts liest Vereinstabellen" (Spec 7.4) haelt
+ * so die Signatur fest und nicht die Disziplin beim naechsten Einfuegen einer
+ * Route. Verworfen: VolleAppDeps durchreichen und prisma nur nicht benutzen.
  */
-export function vereinsRouten(router: Router, deps: VolleAppDeps): void {
-	const { jetzt, umgebung } = deps;
-	const daten = adminDaten(deps.prisma);
+export type VereinsRoutenDeps = Pick<VolleAppDeps, 'jetzt' | 'umgebung'> & { daten: AdminDaten };
+
+/**
+ * Vereine ansehen und anlegen. Haengt direkt an den Router aus adminApi (siehe
+ * api.ts).
+ */
+export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
+	const { jetzt, umgebung, daten } = deps;
 
 	router.get(
 		'/vereine',

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { mitStandardwerten, type AppDeps } from '../abhaengigkeiten.js';
 import { routenAus } from '../routen.js';
 import { anmeldeRouten } from './anmeldung.js';
+import { adminDaten } from './daten.js';
 import { passkeyRouten } from './passkeys.js';
 import { adminKontext, brauchtAdmin, loescheAdminCookie } from './sitzung.js';
 import { vereinsRouten } from './vereine.js';
@@ -38,7 +39,8 @@ export function adminApi(appDeps: AppDeps): Router {
 
 	anmeldeRouten(router, deps);
 	passkeyRouten(router, deps);
-	vereinsRouten(router, deps);
+	// Ohne prisma: die Vereinsrouten lesen Vereinsdaten nur ueber adminDaten.
+	vereinsRouten(router, { jetzt: deps.jetzt, umgebung: deps.umgebung, daten: adminDaten(prisma) });
 
 	router.get('/ich', brauchtAdmin, async (_req, res, next) => {
 		try {
