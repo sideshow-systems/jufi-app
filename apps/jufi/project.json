@@ -94,7 +94,7 @@
 			"dependsOn": ["^typecheck", "stamp"]
 		},
 		"test": {
-			"//": "include ist relativ zu sourceRoot (apps/jufi/src), nicht zur Wurzel: src/app/** fand keine Datei. Nur src/app -- die Dateien unter src/server laufen in test-server, denn sie brauchen Node und eine Datenbank statt jsdom.",
+			"//": "include ist relativ zu sourceRoot (apps/jufi/src), nicht zur Wurzel: src/app/** fand keine Datei. Nur src/app -- die Dateien unter src/server laufen in test-server, denn sie brauchen Node und eine Datenbank statt jsdom. watch ist ausdruecklich aus, weil der Angular-Testrunner es sonst an isTTY() koppelt: im Terminal bliebe pnpm test im Watch-Modus haengen, in CI nicht. Von Hand weiter moeglich mit --watch.",
 			"executor": "@angular/build:unit-test",
 			"dependsOn": ["stamp"],
 			"outputs": ["{workspaceRoot}/coverage/apps/jufi"],
@@ -102,6 +102,7 @@
 				"buildTarget": "jufi:build:development",
 				"tsConfig": "apps/jufi/tsconfig.spec.json",
 				"runner": "vitest",
+				"watch": false,
 				"include": ["app/**/*.spec.ts"]
 			}
 		},

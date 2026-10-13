@@ -19,7 +19,13 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "db"
+    "name": "db",
+    "targets": {
+      "test": {
+        "//": "Echte Datenbank: Das Ergebnis haengt vom Zustand der Datenbank und von den Migrationen ab, nicht nur von Dateien dieses Projekts. Zwischengespeichert wuerde ein Lauf als bestanden gelten, ohne dass eine neue Migration je gegen eine frische Datenbank lief. prisma/ steht zusaetzlich in sharedGlobals (nx.json), damit auch der Hash der uebrigen Ziele (typecheck, build) Schemaaenderungen sieht. Gleiche Entscheidung wie bei jufi:test-server. Offen: die vom Plugin erzeugten test-ci--Ziele sind noch zwischengespeichert; vor dem Einrichten von CI nachziehen.",
+        "cache": false
+      }
+    }
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
