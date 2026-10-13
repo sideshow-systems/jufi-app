@@ -16,6 +16,9 @@ const GESCHUETZT = [
 	'POST /konto/totp/bestaetigen',
 	'POST /konto/passkey/optionen',
 	'POST /konto/passkey',
+	'GET /vereine',
+	'POST /vereine',
+	'GET /vereine/:id',
 ];
 
 describe('Schutz der Admin-Routen', () => {

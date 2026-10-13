@@ -4,6 +4,7 @@ import { routenAus } from '../routen.js';
 import { anmeldeRouten } from './anmeldung.js';
 import { passkeyRouten } from './passkeys.js';
 import { adminKontext, brauchtAdmin, loescheAdminCookie } from './sitzung.js';
+import { vereinsRouten } from './vereine.js';
 
 /**
  * Admin-Routen, die ohne Sitzung erreichbar sein muessen (Anmelden, Einrichten).
@@ -37,6 +38,7 @@ export function adminApi(appDeps: AppDeps): Router {
 
 	anmeldeRouten(router, deps);
 	passkeyRouten(router, deps);
+	vereinsRouten(router, deps);
 
 	router.get('/ich', brauchtAdmin, async (_req, res, next) => {
 		try {
