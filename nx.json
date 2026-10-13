@@ -9,8 +9,44 @@
 		],
 		"sharedGlobals": []
 	},
+	"plugins": [
+		{
+			"plugin": "@nx/js/typescript",
+			"options": {
+				"typecheck": {
+					"targetName": "typecheck"
+				},
+				"build": {
+					"targetName": "build",
+					"configName": "tsconfig.lib.json",
+					"buildDepsName": "build-deps",
+					"watchDepsName": "watch-deps"
+				}
+			}
+		},
+		{
+			"plugin": "@nx/vitest",
+			"options": {
+				"testTargetName": "test",
+				"ciTargetName": "test-ci",
+				"testMode": "watch"
+			}
+		}
+	],
 	"analytics": false,
 	"targetDefaults": {
+		"@nx/esbuild:esbuild": {
+			"cache": true,
+			"dependsOn": ["^build"],
+			"inputs": [
+				"production",
+				"^production",
+				{
+					"json": "{workspaceRoot}/tsconfig.json",
+					"fields": ["extends", "files", "include"]
+				}
+			]
+		},
 		"@angular/build:application": {
 			"cache": true,
 			"dependsOn": ["^build"],

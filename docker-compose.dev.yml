@@ -1,0 +1,45 @@
+# Lokale Entwicklung: Postgres und Mailpit im Container.
+# Der Angular-Dev-Server laeuft nativ auf dem Mac, weil Datei-Watching in Docker
+# auf macOS zaeh ist.
+#
+# Port 5433 statt 5432: HWYD (../hwyd) belegt auf demselben Rechner schon 5432,
+# beide Stacks sollen gleichzeitig laufen koennen.
+#
+# Mailpit faengt jede Mail ab, die die App lokal verschickt (Weboberflaeche auf
+# 127.0.0.1:8025). So verlaesst lokal keine Mail den Rechner, auch nicht an
+# erfundene Adressen, die zufaellig echt sind.
+#
+# ACHTUNG: YAML verbietet Tabs zur Einrueckung. Diese Datei nutzt bewusst Spaces.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: jufi-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jufi
+      POSTGRES_PASSWORD: jufi_dev_only
+      POSTGRES_DB: jufi
+      # Deterministische Sortierung, damit lokale und Server-Ergebnisse gleich sind
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+    ports:
+      # Nur lokal gebunden. Auf dem Server wird kein Port veroeffentlicht.
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - jufi-pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jufi -d jufi']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: jufi-mailpit-dev
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
+
+volumes:
+  jufi-pgdata-dev:

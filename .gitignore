@@ -36,3 +36,9 @@ env.deploy
 # Von tools/entwurf-konfig.mjs bei jedem Bau geschrieben. Enthaelt die
 # WhatsApp-Nummer fuer Rueckmeldungen, die nicht ins Repo gehoert (Spec TP1 5.5).
 apps/entwurf/src/konfig.generated.ts
+
+# Teilprojekt 2: erzeugte Dateien. Der Prisma-Client und die Versionsdatei
+# entstehen bei jedem Bau und gehoeren nicht ins Repo.
+apps/jufi/src/version.generated.ts
+libs/db/src/generated/
+apps/cli/dist/
