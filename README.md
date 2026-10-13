@@ -29,7 +29,7 @@ und Mailpit.
 
 ```bash
 pnpm install
-cp .env.example .env     # SESSION_SECRET und TOTP_ENC_KEY eintragen (Hinweise in der Datei), sonst bricht dev ab
+cp .env.example .env     # SESSION_SECRET und TOTP_ENC_KEY eintragen (Hinweise in der Datei); pnpm run dev laeuft auch ohne, der Produktionsstart bricht ohne sie ab
 pnpm run db:up           # Postgres (127.0.0.1:5433) und Mailpit
 pnpm prisma migrate dev  # Schema in die Entwicklungsdatenbank
 pnpm run db:generate     # Prisma-Client erzeugen; er liegt nicht im Repo
