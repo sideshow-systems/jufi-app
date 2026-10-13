@@ -15,6 +15,8 @@ export interface AttemptState {
 export const FREE_ATTEMPTS = 3;
 const BASE_DELAY_MS = 1_000;
 export const MAX_DELAY_MS = 15 * 60 * 1_000;
+/** Obergrenze für gemerkte Schlüssel, damit erfundene Kennungen den Speicher nicht füllen. */
+export const MAX_SCHLUESSEL = 10_000;
 
 export function lockoutMs(failures: number): number {
 	if (failures <= FREE_ATTEMPTS) return 0;
@@ -47,8 +49,27 @@ export class AttemptTracker {
 
 	constructor(private readonly now: () => number = () => Date.now()) {}
 
+	/**
+	 * Ein Schlüssel, dessen letzter Fehlversuch länger als die Höchstsperre
+	 * zurückliegt, wird vergessen. Anmeldenamen von Kindern sind erratbar: ohne
+	 * Verfall sperrte ein Fehlversuch von letzter Woche die Kennung dauerhaft
+	 * lang, und ein Angreifer könnte den Speicher mit erfundenen Kennungen füllen.
+	 */
+	private aktuell(key: string): AttemptState | undefined {
+		const state = this.states.get(key);
+		if (state && this.now() - state.lastFailureAt > MAX_DELAY_MS) {
+			this.states.delete(key);
+			return undefined;
+		}
+		return state;
+	}
+
+	has(key: string): boolean {
+		return this.aktuell(key) !== undefined;
+	}
+
 	remaining(key: string): number {
-		return remainingLockoutMs(this.states.get(key), this.now());
+		return remainingLockoutMs(this.aktuell(key), this.now());
 	}
 
 	isLocked(key: string): boolean {
@@ -56,8 +77,15 @@ export class AttemptTracker {
 	}
 
 	fail(key: string): AttemptState {
-		const next = recordFailure(this.states.get(key), this.now());
+		const next = recordFailure(this.aktuell(key), this.now());
+		// Neu einfügen statt überschreiben, damit die Map-Reihenfolge der letzten
+		// Aktivität folgt und beim Überlauf der am längsten ruhende Schlüssel geht.
+		this.states.delete(key);
 		this.states.set(key, next);
+		if (this.states.size > MAX_SCHLUESSEL) {
+			const aeltester = this.states.keys().next().value;
+			if (aeltester !== undefined) this.states.delete(aeltester);
+		}
 		return next;
 	}
 
