@@ -11,7 +11,7 @@ import {
 } from '@jufi/domain';
 import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
-import { einladungsLink, leitungsEinladungsText } from '../einladung.js';
+import { einladungsLink, leitungsEinladungsText, notfallLinkText } from '../einladung.js';
 import { asynchron, text } from './asynchron.js';
 import type { AdminDaten, NeuerVerein, NeueEinladung } from './daten.js';
 import { adminKontext, brauchtAdmin } from './sitzung.js';
@@ -20,6 +20,7 @@ const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
 const SLUG_VERGEBEN = { fehler: 'Dieser Slug ist vergeben', feld: 'slug' };
 const SLUG_FEST = { fehler: 'Der Slug ist fest, seit die erste Einladung angenommen wurde' };
 const SCHON_ANGENOMMEN = { fehler: 'Die erste Einladung ist schon angenommen' };
+const VEREIN_GESPERRT = { fehler: 'Der Verein ist gesperrt – erst entsperren' };
 const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 /**
  * Ohne Grenze liefe ein 90-kB-Name (nur express.json begrenzt auf 100 kB) in die
@@ -84,9 +85,13 @@ function pruefeNeuenVerein(
 export type VereinsRoutenDeps = Pick<VolleAppDeps, 'jetzt' | 'umgebung'> & { daten: AdminDaten };
 
 /** Link und fertiger Text zum Kopieren, wie nach dem Anlegen eines Vereins. */
-function einladung(basisUrl: string, e: NeueEinladung): { link: string; text: string } {
+function einladung(
+	basisUrl: string,
+	e: NeueEinladung,
+	baueText: typeof leitungsEinladungsText = leitungsEinladungsText,
+): { link: string; text: string } {
 	const link = einladungsLink(basisUrl, e.slug, e.token);
-	return { link, text: leitungsEinladungsText({ vorname: e.vorname, anzeigename: e.anzeigename, link }) };
+	return { link, text: baueText({ vorname: e.vorname, anzeigename: e.anzeigename, link }) };
 }
 
 function nichtGefunden(res: Response): void {
@@ -210,6 +215,7 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 			const { admin } = adminKontext(res);
 			const ergebnis = await daten.erneuereErsteEinladung(req.params['id'] ?? '', admin.id, jetzt());
 			if (ergebnis === null) nichtGefunden(res);
+			else if (ergebnis === 'gesperrt') res.status(409).json(VEREIN_GESPERRT);
 			else if (ergebnis === 'angenommen') res.status(409).json(SCHON_ANGENOMMEN);
 			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis) });
 		}),
@@ -227,7 +233,8 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 			const { admin } = adminKontext(res);
 			const ergebnis = await daten.notfallLink(req.params['id'] ?? '', text(b['personId']), admin.id, jetzt());
 			if (ergebnis === null) nichtGefunden(res);
-			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis) });
+			else if (ergebnis === 'gesperrt') res.status(409).json(VEREIN_GESPERRT);
+			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis, notfallLinkText) });
 		}),
 	);
 }

@@ -62,3 +62,17 @@ export function leitungsEinladungsText(t: { vorname: string; anzeigename: string
 		`Richte hier deinen Zugang ein – der Link gilt 14 Tage und nur für dich:\n${t.link}`
 	);
 }
+
+/**
+ * Text fuer den Notfall-Link. Eigener Text statt leitungsEinladungsText, weil
+ * derselbe Link bei vorhandenem Zugang die Zugangsdaten loescht (Spec 4.4): Wer
+ * ihn bekommt, soll vorher lesen, warum er kommt und was das Einloesen bewirkt.
+ * Die 14 Tage stehen wortgleich wie dort.
+ */
+export function notfallLinkText(t: { vorname: string; anzeigename: string; link: string }): string {
+	return (
+		`Hallo ${t.vorname}, für „${t.anzeigename}“ in der JuFi App gibt es einen neuen Zugangslink für dich. ` +
+		`Altes Passwort, Passkeys und alle angemeldeten Geräte werden dabei gelöscht. ` +
+		`Richte hier deinen Zugang neu ein – der Link gilt 14 Tage und nur für dich:\n${t.link}`
+	);
+}

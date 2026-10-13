@@ -1,4 +1,11 @@
-import { Recht, type AdminAktion, type Prisma, type PrismaClient, type VereinStatus } from '@jufi/db';
+import {
+	Recht,
+	sperreVereinszeile,
+	type AdminAktion,
+	type Prisma,
+	type PrismaClient,
+	type VereinStatus,
+} from '@jufi/db';
 import { erzeugeEinladung } from '../einladung.js';
 
 /**
@@ -134,12 +141,28 @@ function ersteLeitung(db: Prisma.TransactionClient, vereinId: string) {
  * keinen gibt, ist die erste Einladung nicht angenommen: Der Slug steckt noch in
  * keinem Link, Cookie oder installierter App (Spec 7.3).
  *
- * Gelesen ohne Sperre: Ein Einloesen, das gleichzeitig mit einer Slug-Korrektur
- * laeuft, koennte noch den alten Slug sehen. Das Einloesen entsteht erst in
- * Etappe 3; dort muss es die Vereinszeile sperren, wenn das zaehlen soll.
+ * Die Aufrufer in Transaktionen sperren vorher die Vereinszeile
+ * (sperreVereinszeile): Das Einloesen sperrt sie ebenfalls, ein gleichzeitiges
+ * Einloesen und eine Slug-Korrektur oder Erneuerung laufen so nacheinander und
+ * die spaetere sieht den Zugang. Ohne Sperre sahe sie noch den alten Stand.
  */
 async function istAngenommen(db: Prisma.TransactionClient, vereinId: string): Promise<boolean> {
 	return (await db.zugang.findFirst({ where: { vereinId }, select: { id: true } })) !== null;
+}
+
+/**
+ * Sperrt die Vereinszeile; false, wenn es den Verein nicht gibt. Der Zaehler-
+ * Update wirft P2025 fuer eine unbekannte id, und die Route soll dafuer 404
+ * antworten statt 500.
+ */
+async function sperreWennVorhanden(tx: Prisma.TransactionClient, vereinId: string): Promise<boolean> {
+	try {
+		await sperreVereinszeile(tx, vereinId);
+		return true;
+	} catch (error) {
+		if ((error as { code?: unknown } | null)?.code === 'P2025') return false;
+		throw error;
+	}
 }
 
 export function adminDaten(prisma: PrismaClient) {
@@ -147,11 +170,11 @@ export function adminDaten(prisma: PrismaClient) {
 	 * Kennzahlen fuer mehrere Vereine mit vier Abfragen insgesamt statt vier je
 	 * Verein: Die Liste waechst mit der Zahl der Vereine. Verworfen: _count in
 	 * verein.findMany -- es zaehlt jede Relation nur einmal (Jungfischer und
-	 * Erwachsene sind beide personen) und liefert kein max(angelegtAm) der Sitzungen.
+	 * Erwachsene sind beide personen) und liefert kein max(letzteAnmeldungAm) der Zugaenge.
 	 */
 	async function kennzahlen(vereinIds: string[], jetzt: Date): Promise<Map<string, Kennzahlen>> {
 		const inVereinen = { vereinId: { in: vereinIds } };
-		const [personen, zugaenge, einladungen, sitzungen] = await Promise.all([
+		const [personen, zugaenge, einladungen, anmeldungen] = await Promise.all([
 			// Grabsteine (Spec 5.8) sind keine Mitglieder mehr.
 			prisma.person.groupBy({
 				by: ['vereinId', 'art'],
@@ -164,7 +187,9 @@ export function adminDaten(prisma: PrismaClient) {
 				where: { ...inVereinen, eingeloestAm: null, ablauf: { gt: jetzt } },
 				_count: { _all: true },
 			}),
-			prisma.session.groupBy({ by: ['vereinId'], where: inVereinen, _max: { angelegtAm: true } }),
+			// Vom Zugang statt aus den Sitzungen: Die laufen ab und werden beim Abmelden
+			// geloescht, die letzte Anmeldung soll dadurch nicht verschwinden.
+			prisma.zugang.groupBy({ by: ['vereinId'], where: inVereinen, _max: { letzteAnmeldungAm: true } }),
 		]);
 
 		const ergebnis = new Map<string, Kennzahlen>(
@@ -180,9 +205,9 @@ export function adminDaten(prisma: PrismaClient) {
 		}
 		for (const z of zugaenge) zeile(z.vereinId).zugaenge = z._count._all;
 		for (const e of einladungen) zeile(e.vereinId).offeneEinladungen = e._count._all;
-		for (const s of sitzungen) {
-			const juengste = s._max.angelegtAm;
-			zeile(s.vereinId).letzteAnmeldung = juengste ? berlinerDatum(juengste) : null;
+		for (const a of anmeldungen) {
+			const juengste = a._max.letzteAnmeldungAm;
+			zeile(a.vereinId).letzteAnmeldung = juengste ? berlinerDatum(juengste) : null;
 		}
 		return ergebnis;
 	}
@@ -411,6 +436,7 @@ export function adminDaten(prisma: PrismaClient) {
 		): Promise<{ token: string; vorname: string; anzeigename: string } | 'fest' | 'vergeben' | null> {
 			try {
 				return await prisma.$transaction(async (tx) => {
+					if (!(await sperreWennVorhanden(tx, id))) return null;
 					const verein = await tx.verein.findUnique({ where: { id }, select: { anzeigename: true } });
 					if (!verein) return null;
 					if (await istAngenommen(tx, id)) return 'fest';
@@ -448,10 +474,17 @@ export function adminDaten(prisma: PrismaClient) {
 			id: string,
 			adminId: string,
 			jetzt: Date,
-		): Promise<NeueEinladung | 'angenommen' | null> {
+		): Promise<NeueEinladung | 'angenommen' | 'gesperrt' | null> {
 			return prisma.$transaction(async (tx) => {
-				const verein = await tx.verein.findUnique({ where: { id }, select: { slug: true, anzeigename: true } });
+				if (!(await sperreWennVorhanden(tx, id))) return null;
+				const verein = await tx.verein.findUnique({
+					where: { id },
+					select: { slug: true, anzeigename: true, status: true },
+				});
 				if (!verein) return null;
+				// Ein Link fuer einen gesperrten Verein fuehrte ins Leere (vereinAusSlug
+				// findet ihn nicht); erst entsperren, dann einladen.
+				if (verein.status === 'GESPERRT') return 'gesperrt';
 				if (await istAngenommen(tx, id)) return 'angenommen';
 				const einladung = await ersteLeitung(tx, id);
 				if (!einladung) return null;
@@ -490,13 +523,22 @@ export function adminDaten(prisma: PrismaClient) {
 		 * Einladungen, und erzeugeEinladung ersetzt so auch einen frueheren
 		 * Notfall-Link an dieselbe Person, statt ihn weiter gelten zu lassen.
 		 */
-		async notfallLink(id: string, personId: string, adminId: string, jetzt: Date): Promise<NeueEinladung | null> {
+		async notfallLink(
+			id: string,
+			personId: string,
+			adminId: string,
+			jetzt: Date,
+		): Promise<NeueEinladung | 'gesperrt' | null> {
 			return prisma.$transaction(async (tx) => {
+				if (!(await sperreWennVorhanden(tx, id))) return null;
 				const person = await tx.person.findFirst({
 					where: { id: personId, vereinId: id, entferntAm: null, rechte: { has: 'JUGENDLEITER_RECHTE' } },
-					select: { id: true, vorname: true, verein: { select: { slug: true, anzeigename: true } } },
+					select: { id: true, vorname: true, verein: { select: { slug: true, anzeigename: true, status: true } } },
 				});
 				if (!person) return null;
+				// Nach dem Personenpruefen: Fuer eine fremde Person bleibt es 404, auch im
+				// gesperrten Verein; "gesperrt" sagt nur, was der Admin ohnehin sieht.
+				if (person.verein.status === 'GESPERRT') return 'gesperrt';
 
 				const token = await erzeugeEinladung(tx, {
 					vereinId: id,

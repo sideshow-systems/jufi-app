@@ -1,9 +1,10 @@
 import { generateLinkToken, hashToken } from '@jufi/auth';
-import { createPrismaClientFromEnv, Recht } from '@jufi/db';
+import { createPrismaClientFromEnv, Recht, sperreVereinszeile } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { leitungsEinladungsText } from '../einladung.js';
+import { leitungsEinladungsText, notfallLinkText } from '../einladung.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
+import { adminDaten } from './daten.js';
 import { meldeAdminAn } from './test-admin.js';
 
 const ALLE_RECHTE = Object.values(Recht);
@@ -272,6 +273,66 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 		});
 	});
 
+	describe('Rennen mit einer laufenden Einloesung', () => {
+		/**
+		 * Spielt eine Einloesung nach: sperrt die Vereinszeile, nimmt die Einladung an
+		 * und legt den Zugang an, aber committet erst auf Zuruf. So ist die Admin-Aktion
+		 * nachweislich gleichzeitig gestartet statt nur danach.
+		 */
+		async function halteEinloesung(vereinId: string, personId: string) {
+			let freigabe!: () => void;
+			const warten = new Promise<void>((r) => (freigabe = r));
+			let gesperrt!: () => void;
+			const istGesperrt = new Promise<void>((r) => (gesperrt = r));
+			const transaktion = prisma.$transaction(async (tx) => {
+				await sperreVereinszeile(tx, vereinId);
+				await tx.einladung.updateMany({ where: { vereinId, personId }, data: { eingeloestAm: uhr } });
+				await tx.zugang.create({ data: { vereinId, personId } });
+				gesperrt();
+				await warten;
+			});
+			await istGesperrt;
+			return { transaktion, freigabe };
+		}
+
+		async function nachWarteZeit<T>(p: Promise<T>): Promise<boolean> {
+			const fertig = Symbol('fertig');
+			const ergebnis = await Promise.race([
+				p.then(() => fertig),
+				new Promise((r) => setTimeout(() => r('wartet'), 200)),
+			]);
+			return ergebnis === fertig;
+		}
+
+		it('Slug-Korrektur wartet auf eine laufende Einloesung', async () => {
+			const { id, leitungId } = await legeAn('aktion-rennen-slug');
+			const { transaktion, freigabe } = await halteEinloesung(id, leitungId);
+
+			const korrektur = adminDaten(prisma).korrigiereSlug(id, 'aktion-rennen-slug-neu', adminId, uhr);
+			expect(await nachWarteZeit(korrektur)).toBe(false);
+
+			freigabe();
+			await transaktion;
+			expect(await korrektur).toBe('fest');
+			expect((await prisma.verein.findUniqueOrThrow({ where: { id } })).slug).toBe('aktion-rennen-slug');
+		});
+
+		it('Erneuern wartet auf eine laufende Einloesung', async () => {
+			const { id, leitungId } = await legeAn('aktion-rennen-erneuern');
+			const { transaktion, freigabe } = await halteEinloesung(id, leitungId);
+			const vorher = await prisma.einladung.count({ where: { vereinId: id } });
+
+			const erneuert = adminDaten(prisma).erneuereErsteEinladung(id, adminId, uhr);
+			expect(await nachWarteZeit(erneuert)).toBe(false);
+
+			freigabe();
+			await transaktion;
+			expect(await erneuert).toBe('angenommen');
+			expect(await prisma.einladung.count({ where: { vereinId: id } })).toBe(vorher);
+			expect((await protokoll(id)).map((p) => p.aktion)).toEqual(['VEREIN_ANGELEGT']);
+		});
+	});
+
 	describe('Notfall-Link', () => {
 		it('Notfall-Link fuer einen Ansprechpartner', async () => {
 			const { id, leitungId } = await legeAn('aktion-notfall');
@@ -292,7 +353,7 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 			const body = (await r.json()) as { einladung: Einladung };
 			expect(body.einladung.link.startsWith('http://jufi.test/aktion-notfall/einladung#')).toBe(true);
 			expect(body.einladung.text).toBe(
-				leitungsEinladungsText({ vorname: 'Petra', anzeigename: 'Jungfischer Aktionen', link: body.einladung.link }),
+				notfallLinkText({ vorname: 'Petra', anzeigename: 'Jungfischer Aktionen', link: body.einladung.link }),
 			);
 			const token = body.einladung.link.split('#')[1] ?? '';
 
@@ -379,6 +440,40 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 			expect(await prisma.einladung.findMany({ where: { vereinId: { in: [id, fremd.id] } } })).toEqual(vorher);
 			expect(await prisma.adminProtokoll.count({ where: { aktion: 'NOTFALL_LINK', vereinId: id } })).toBe(0);
 			expect(await prisma.adminProtokoll.count({ where: { aktion: 'NOTFALL_LINK', vereinId: fremd.id } })).toBe(0);
+		});
+
+		it('Notfall-Link und Erneuern bei gesperrtem Verein sind 409, keine Einladung, kein Protokoll', async () => {
+			const { id, leitungId } = await legeAn('aktion-notfall-gesperrt');
+			expect((await post(`/vereine/${id}/sperren`)).status).toBe(200);
+			const einladungenVorher = await prisma.einladung.findMany({ where: { vereinId: id } });
+			const protokollVorher = await protokoll(id);
+
+			const notfall = await post(`/vereine/${id}/notfall-link`, { personId: leitungId });
+			expect(notfall.status).toBe(409);
+			expect(await notfall.json()).toEqual({ fehler: 'Der Verein ist gesperrt – erst entsperren' });
+			const erneuern = await post(`/vereine/${id}/einladung-erneuern`);
+			expect(erneuern.status).toBe(409);
+			expect(await erneuern.json()).toEqual({ fehler: 'Der Verein ist gesperrt – erst entsperren' });
+
+			expect(await prisma.einladung.findMany({ where: { vereinId: id } })).toEqual(einladungenVorher);
+			expect(await protokoll(id)).toEqual(protokollVorher);
+		});
+
+		it('Notfall-Link trägt den eigenen Text', async () => {
+			const { id, leitungId } = await legeAn('aktion-notfall-text');
+
+			// Vor der Annahme, sonst waere Erneuern 409.
+			const erneuert = (await (await post(`/vereine/${id}/einladung-erneuern`)).json()) as { einladung: Einladung };
+			expect(erneuert.einladung.text).not.toContain('angemeldeten Geräte');
+
+			const notfall = (await (await post(`/vereine/${id}/notfall-link`, { personId: leitungId })).json()) as {
+				einladung: Einladung;
+			};
+			expect(notfall.einladung.text).toContain('angemeldeten Geräte');
+			expect(notfall.einladung.text).toContain(notfall.einladung.link);
+			expect(notfall.einladung.text).toBe(
+				notfallLinkText({ vorname: 'Thomas', anzeigename: 'Jungfischer Aktionen', link: notfall.einladung.link }),
+			);
 		});
 	});
 });
