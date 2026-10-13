@@ -58,6 +58,22 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		});
 		expect(r.status).toBe(200);
 	},
+	'POST /einladung/einloesen': async (k) => {
+		for (const verein of [k.fremd, k.gesperrt]) {
+			const r = await sende(k.url, `/${verein.slug}/api/v1/einladung/einloesen`, {
+				methode: 'POST',
+				body: { token: k.einladungsToken, kennung: 'einla@example.test', passwort: 'gruene-forelle-am-see' },
+			});
+			expect(r.status).toBe(404);
+		}
+		// Nicht im eigenen Verein einloesen: die anderen Faelle brauchen die Einladung
+		// noch offen. Dass sie unangetastet ist, zeigt pruefen.
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/einladung/pruefen`, {
+			methode: 'POST',
+			body: { token: k.einladungsToken },
+		});
+		expect(r.status).toBe(200);
+	},
 	'GET /ich': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/ich`)).status).toBe(404);
 		// Das Cookie aus eigen gilt in fremd nicht: angemeldet ist nur, wer dort eine Sitzung hat.
