@@ -5,6 +5,7 @@ import { adminAusSitzung } from './admin/sitzung.js';
 import { fehlerbehandlung } from './fehler.js';
 import { healthRouter } from './health.js';
 import { sicherheitsHeader } from './sicherheit.js';
+import { mitgliedAusSitzung } from './mitglieder/sitzung.js';
 import { pruefeUrsprung } from './ursprung.js';
 import { nichtGefunden, vereinAusSlug, vereinsApi } from './verein.js';
 
@@ -44,7 +45,7 @@ export function createApp(appDeps: AppDeps): express.Express {
 	// nichtGefunden steht hier und nicht im Router, damit auch unbekannte Pfade
 	// JSON-404 liefern, bevor server.ts den Angular-Handler dahinter haengt.
 	app.use('/admin/api/v1', adminAusSitzung(deps), adminApi(deps), nichtGefunden);
-	app.use('/:slug/api/v1', vereinAusSlug(deps.prisma), vereinsApi, nichtGefunden);
+	app.use('/:slug/api/v1', vereinAusSlug(deps.prisma), mitgliedAusSitzung(deps), vereinsApi(deps), nichtGefunden);
 
 	// Hier schon, damit Tests die Fehlerantworten ohne server.ts sehen. server.ts
 	// registriert sie ein zweites Mal hinter dem Angular-Handler, weil Express
