@@ -20,7 +20,8 @@ const VERBORGEN = ['Katrin', 'Muster', 'Sandra', 'Hans', 'Huber', 'Lena', 'Max',
  * nicht die ganze Antwort: In den Kopfzeilen stuende etwa "Max-Age", und das
  * ist kein Name.
  *
- * Task 9 ergaenzt die Antworten seiner Endpunkte.
+ * Die Antworten der Vereinsaktionen (sperren, Einladung, Notfall-Link) gehoeren
+ * dazu: Ihr Einladungstext nennt einen Namen, und der darf nur der der Leitung sein.
  */
 describe('Admin-Datenschutz: nur Kennzahlen und Ansprechpartner', () => {
 	const prisma = createPrismaClientFromEnv();
@@ -28,6 +29,7 @@ describe('Admin-Datenschutz: nur Kennzahlen und Ansprechpartner', () => {
 	let server: TestServer;
 	let cookie = '';
 	let vereinId = '';
+	let leitungId = '';
 
 	beforeAll(async () => {
 		server = await starteTestServer(
@@ -49,6 +51,7 @@ describe('Admin-Datenschutz: nur Kennzahlen und Ansprechpartner', () => {
 		});
 		expect(r.status).toBe(201);
 		vereinId = ((await r.json()) as { id: string }).id;
+		leitungId = (await prisma.person.findFirstOrThrow({ where: { vereinId } })).id;
 
 		const erwachsener = (vorname: string, nachname: string, rechte: Recht[]) =>
 			prisma.person.create({
@@ -105,6 +108,16 @@ describe('Admin-Datenschutz: nur Kennzahlen und Ansprechpartner', () => {
 		return JSON.stringify(await r.json());
 	}
 
+	/**
+	 * Ohne das Token hinter dem #: 43 Zufallszeichen enthalten "Max" oder "Hans"
+	 * etwa einmal in tausend Laeufen, und der Test schluege dann ohne Grund an.
+	 */
+	async function aktion(pfad: string, mitBody: unknown = {}): Promise<string> {
+		const r = await sende(server.url, `/admin/api/v1${pfad}`, { methode: 'POST', cookie, body: mitBody });
+		expect(r.status).toBe(200);
+		return JSON.stringify(await r.json()).replace(/#[A-Za-z0-9_-]+/g, '#');
+	}
+
 	function enthalteneNamen(text: string): string[] {
 		return VERBORGEN.filter((name) => text.includes(name));
 	}
@@ -117,5 +130,24 @@ describe('Admin-Datenschutz: nur Kennzahlen und Ansprechpartner', () => {
 		const text = await body(`/vereine/${vereinId}`);
 		expect(enthalteneNamen(text)).toEqual([]);
 		expect(text).toContain('Thomas');
+	});
+
+	it('Sperren und Entsperren nennen niemanden', async () => {
+		for (const pfad of ['sperren', 'entsperren']) {
+			expect(enthalteneNamen(await aktion(`/vereine/${vereinId}/${pfad}`))).toEqual([]);
+		}
+	});
+
+	it('Notfall-Link, Einladung erneuern und Slug korrigieren nennen nur die Leitung', async () => {
+		const antworten = [
+			await aktion(`/vereine/${vereinId}/notfall-link`, { personId: leitungId }),
+			await aktion(`/vereine/${vereinId}/einladung-erneuern`),
+			// Zuletzt: Danach heisst der Verein anders.
+			await aktion(`/vereine/${vereinId}/slug`, { slug: 'datenschutz-neu' }),
+		];
+		for (const text of antworten) {
+			expect(enthalteneNamen(text)).toEqual([]);
+			expect(text).toContain('Thomas');
+		}
 	});
 });

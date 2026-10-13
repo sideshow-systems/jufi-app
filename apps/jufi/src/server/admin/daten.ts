@@ -1,4 +1,4 @@
-import { Recht, type AdminAktion, type PrismaClient, type VereinStatus } from '@jufi/db';
+import { Recht, type AdminAktion, type Prisma, type PrismaClient, type VereinStatus } from '@jufi/db';
 import { erzeugeEinladung } from '../einladung.js';
 
 /**
@@ -104,6 +104,44 @@ function istSlugVergeben(error: unknown): boolean {
 	);
 }
 
+/** Was eine erneuerte Einladung der Route mitgibt, damit sie Link und Text bauen kann. */
+export interface NeueEinladung {
+	token: string;
+	vorname: string;
+	anzeigename: string;
+	slug: string;
+}
+
+/**
+ * Die Person der ersten Leitung: wen der Admin zuletzt eingeladen hat
+ * (erstelltVonPersonId null = vom Admin). Verworfen: ein eigenes Feld am Verein
+ * -- es liefe auseinander, sobald die Einladung erneuert wird.
+ *
+ * Auch ein Notfall-Link ist eine Admin-Einladung. Vor der Annahme ist das egal:
+ * Dann ist die erste Leitung der einzige Ansprechpartner, ein Notfall-Link
+ * trifft also dieselbe Person. Danach fragt niemand mehr nach der ersten Leitung.
+ */
+function ersteLeitung(db: Prisma.TransactionClient, vereinId: string) {
+	return db.einladung.findFirst({
+		where: { vereinId, art: 'EINLADUNG', erstelltVonPersonId: null },
+		orderBy: [{ angelegtAm: 'desc' }, { id: 'desc' }],
+		select: { person: { select: { id: true, vorname: true, nachname: true } } },
+	});
+}
+
+/**
+ * Der erste Zugang entsteht erst beim Einloesen einer Einladung. Solange es
+ * keinen gibt, ist die erste Einladung nicht angenommen: Der Slug steckt noch in
+ * keinem Link, Cookie oder installierter App (Spec 7.3).
+ *
+ * Gelesen ohne Sperre: Ein Einloesen, das gleichzeitig mit einer Slug-Korrektur
+ * laeuft, koennte noch den alten Slug sehen. Das Einloesen entsteht erst in
+ * Etappe 3; dort muss es die Vereinszeile sperren, wenn das zaehlen soll.
+ */
+async function istAngenommen(db: Prisma.TransactionClient, vereinId: string): Promise<boolean> {
+	return (await db.zugang.findFirst({ where: { vereinId }, select: { id: true } })) !== null;
+}
+
 export function adminDaten(prisma: PrismaClient) {
 	/**
 	 * Kennzahlen fuer mehrere Vereine mit vier Abfragen insgesamt statt vier je
@@ -178,14 +216,14 @@ export function adminDaten(prisma: PrismaClient) {
 			});
 			if (!verein) return null;
 
-			const [zahlen, ansprechpartner, hatZugang, protokoll] = await Promise.all([
+			const [zahlen, ansprechpartner, angenommen, protokoll] = await Promise.all([
 				kennzahlen([id], jetzt),
 				prisma.person.findMany({
 					where: { vereinId: id, entferntAm: null, rechte: { has: 'JUGENDLEITER_RECHTE' } },
 					select: { id: true, vorname: true, nachname: true, email: true },
 					orderBy: [{ nachname: 'asc' }, { vorname: 'asc' }],
 				}),
-				prisma.zugang.findFirst({ where: { vereinId: id }, select: { id: true } }),
+				istAngenommen(prisma, id),
 				prisma.adminProtokoll.findMany({
 					where: { vereinId: id },
 					select: { zeitpunkt: true, aktion: true, admin: { select: { benutzername: true } } },
@@ -195,23 +233,13 @@ export function adminDaten(prisma: PrismaClient) {
 				}),
 			]);
 
-			// Der erste Zugang entsteht erst beim Einloesen einer Einladung. Solange
-			// es keinen gibt, ist die erste Einladung nicht angenommen: Der Slug steckt
-			// noch in keinem Link, Cookie oder installierter App (Spec 7.3).
-			const slugAenderbar = hatZugang === null;
-			let ersteLeitung: VereinDetails['ersteLeitung'] = null;
+			const slugAenderbar = !angenommen;
+			let leitung: VereinDetails['ersteLeitung'] = null;
 			if (slugAenderbar) {
-				// Die Leitung ist, wen der Admin zuletzt eingeladen hat (erstelltVonPersonId
-				// null = vom Admin). Verworfen: ein eigenes Feld am Verein -- es liefe
-				// auseinander, sobald die Einladung erneuert wird.
-				const einladung = await prisma.einladung.findFirst({
-					where: { vereinId: id, art: 'EINLADUNG', erstelltVonPersonId: null },
-					orderBy: [{ angelegtAm: 'desc' }, { id: 'desc' }],
-					select: { person: { select: { id: true, vorname: true, nachname: true } } },
-				});
+				const einladung = await ersteLeitung(prisma, id);
 				if (einladung) {
 					const { person } = einladung;
-					ersteLeitung = { personId: person.id, vorname: person.vorname, nachname: person.nachname };
+					leitung = { personId: person.id, vorname: person.vorname, nachname: person.nachname };
 				}
 			}
 
@@ -230,7 +258,7 @@ export function adminDaten(prisma: PrismaClient) {
 					nachname: p.nachname,
 					email: p.email,
 				})),
-				ersteLeitung,
+				ersteLeitung: leitung,
 				slugAenderbar,
 				protokoll: protokoll.map((p) => ({
 					zeitpunkt: p.zeitpunkt.toISOString(),
@@ -311,6 +339,181 @@ export function adminDaten(prisma: PrismaClient) {
 				if (istSlugVergeben(error)) return 'vergeben';
 				throw error;
 			}
+		},
+
+		/** Fuer Routen, die vor dem Pruefen der Eingabe wissen muessen, ob es den Verein gibt. */
+		async gibtVerein(id: string): Promise<boolean> {
+			return (await prisma.verein.findUnique({ where: { id }, select: { id: true } })) !== null;
+		},
+
+		/**
+		 * Sperren und entsperren. 'unveraendert' ohne Protokolleintrag: Ein zweiter
+		 * Klick auf "sperren" hat nichts getan, und das Protokoll belegt Handlungen.
+		 * Die Sitzungen des Vereins bleiben (Spec 7.3); sie wirken erst nach dem
+		 * Entsperren wieder, weil vereinAusSlug gesperrte Vereine nicht findet.
+		 *
+		 * updateMany mit dem alten Status in der Bedingung statt Lesen und dann
+		 * Schreiben: Zwei gleichzeitige Klicks saehen sonst beide "aktiv" und
+		 * schrieben beide einen Eintrag. So wartet der zweite auf die Zeilensperre
+		 * des ersten, findet den Status schon gesetzt und aendert nichts.
+		 */
+		async setzeStatus(
+			id: string,
+			status: VereinStatus,
+			adminId: string,
+			jetzt: Date,
+		): Promise<'geaendert' | 'unveraendert' | null> {
+			return prisma.$transaction(async (tx) => {
+				const { count } = await tx.verein.updateMany({ where: { id, status: { not: status } }, data: { status } });
+				const verein = await tx.verein.findUnique({ where: { id }, select: { slug: true } });
+				if (!verein) return null;
+				if (count === 0) return 'unveraendert';
+				await tx.adminProtokoll.create({
+					data: {
+						adminId,
+						zeitpunkt: jetzt,
+						aktion: status === 'GESPERRT' ? 'GESPERRT' : 'ENTSPERRT',
+						vereinId: id,
+						vereinSlug: verein.slug,
+					},
+				});
+				return 'geaendert';
+			});
+		},
+
+		/**
+		 * Neuer Slug vor der Annahme der ersten Einladung (Spec 7.3). Die offene
+		 * Einladung zeigte auf den alten Slug und fuehrte nach der Korrektur ins
+		 * Leere; deshalb wird sie gleich mit erneuert, mit zwei Protokolleintraegen.
+		 * Der Slug kommt geprueft aus vereine.ts.
+		 *
+		 * 'fest' vor 'vergeben': Nach der Annahme ist jeder neue Slug falsch, ob
+		 * frei oder nicht. 'vergeben' entscheidet wie beim Anlegen der eindeutige
+		 * Index in einem Schritt statt eines Nachsehens vorher.
+		 *
+		 * Der eigene, unveraenderte Slug laeuft durch: Der Index stoert sich nicht an
+		 * derselben Zeile, und das Ergebnis -- eine erneuerte Einladung -- schadet
+		 * nicht. Verworfen: ein eigener Fehler dafuer, eine Regel mehr fuer einen
+		 * Klick, den die Oberflaeche ohnehin kaum anbietet.
+		 *
+		 * null auch, wenn es keine Admin-Einladung gibt: Dann gibt es keine erste
+		 * Leitung, deren Einladung umzustellen waere. Vereine aus der Admin-Seite
+		 * haben immer eine; ohne sie (von Hand angelegt) ist die Aktion nicht vorgesehen.
+		 */
+		async korrigiereSlug(
+			id: string,
+			slug: string,
+			adminId: string,
+			jetzt: Date,
+		): Promise<{ token: string; vorname: string; anzeigename: string } | 'fest' | 'vergeben' | null> {
+			try {
+				return await prisma.$transaction(async (tx) => {
+					const verein = await tx.verein.findUnique({ where: { id }, select: { anzeigename: true } });
+					if (!verein) return null;
+					if (await istAngenommen(tx, id)) return 'fest';
+					const einladung = await ersteLeitung(tx, id);
+					if (!einladung) return null;
+					const { person } = einladung;
+
+					await tx.verein.update({ where: { id }, data: { slug } });
+					const token = await erzeugeEinladung(tx, {
+						vereinId: id,
+						personId: person.id,
+						art: 'EINLADUNG',
+						erstelltVonPersonId: null,
+						jetzt,
+					});
+					const eintrag = { adminId, zeitpunkt: jetzt, vereinId: id, vereinSlug: slug };
+					await tx.adminProtokoll.create({ data: { ...eintrag, aktion: 'SLUG_KORRIGIERT' } });
+					await tx.adminProtokoll.create({
+						data: { ...eintrag, aktion: 'ERSTE_EINLADUNG_ERNEUERT', betroffenePersonId: person.id },
+					});
+					return { token, vorname: person.vorname, anzeigename: verein.anzeigename };
+				});
+			} catch (error) {
+				if (istSlugVergeben(error)) return 'vergeben';
+				throw error;
+			}
+		},
+
+		/**
+		 * Neuer Link fuer die erste Leitung, solange sie noch nicht angenommen hat
+		 * (verloren, abgelaufen). Danach ist das Sache des Vereins oder des
+		 * Notfall-Links. null wie bei korrigiereSlug auch ohne Admin-Einladung.
+		 */
+		async erneuereErsteEinladung(
+			id: string,
+			adminId: string,
+			jetzt: Date,
+		): Promise<NeueEinladung | 'angenommen' | null> {
+			return prisma.$transaction(async (tx) => {
+				const verein = await tx.verein.findUnique({ where: { id }, select: { slug: true, anzeigename: true } });
+				if (!verein) return null;
+				if (await istAngenommen(tx, id)) return 'angenommen';
+				const einladung = await ersteLeitung(tx, id);
+				if (!einladung) return null;
+				const { person } = einladung;
+
+				const token = await erzeugeEinladung(tx, {
+					vereinId: id,
+					personId: person.id,
+					art: 'EINLADUNG',
+					erstelltVonPersonId: null,
+					jetzt,
+				});
+				await tx.adminProtokoll.create({
+					data: {
+						adminId,
+						zeitpunkt: jetzt,
+						aktion: 'ERSTE_EINLADUNG_ERNEUERT',
+						vereinId: id,
+						vereinSlug: verein.slug,
+						betroffenePersonId: person.id,
+					},
+				});
+				return { token, vorname: person.vorname, anzeigename: verein.anzeigename, slug: verein.slug };
+			});
+		},
+
+		/**
+		 * Einladungslink fuer einen Ansprechpartner dieses Vereins, fuer niemanden
+		 * sonst (Spec 7.3): nicht fuer Kinder, Eltern, Verwaltung ohne
+		 * "Jugendleiter & Rechte verwalten", Entfernte oder Personen anderer Vereine.
+		 * Alle diese Faelle sind null, damit der Admin nicht ueber die Antwort
+		 * erfaehrt, wer es sonst gibt. Die Bedingung steht in derselben Abfrage wie
+		 * der Verein, damit eine personId aus einem fremden Verein nie passt.
+		 *
+		 * Art EINLADUNG statt RESET: Spec 4.1 fuehrt den Notfall-Link unter den
+		 * Einladungen, und erzeugeEinladung ersetzt so auch einen frueheren
+		 * Notfall-Link an dieselbe Person, statt ihn weiter gelten zu lassen.
+		 */
+		async notfallLink(id: string, personId: string, adminId: string, jetzt: Date): Promise<NeueEinladung | null> {
+			return prisma.$transaction(async (tx) => {
+				const person = await tx.person.findFirst({
+					where: { id: personId, vereinId: id, entferntAm: null, rechte: { has: 'JUGENDLEITER_RECHTE' } },
+					select: { id: true, vorname: true, verein: { select: { slug: true, anzeigename: true } } },
+				});
+				if (!person) return null;
+
+				const token = await erzeugeEinladung(tx, {
+					vereinId: id,
+					personId: person.id,
+					art: 'EINLADUNG',
+					erstelltVonPersonId: null,
+					jetzt,
+				});
+				await tx.adminProtokoll.create({
+					data: {
+						adminId,
+						zeitpunkt: jetzt,
+						aktion: 'NOTFALL_LINK',
+						vereinId: id,
+						vereinSlug: person.verein.slug,
+						betroffenePersonId: person.id,
+					},
+				});
+				return { token, vorname: person.vorname, anzeigename: person.verein.anzeigename, slug: person.verein.slug };
+			});
 		},
 	};
 }

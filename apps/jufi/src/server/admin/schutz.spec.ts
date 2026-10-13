@@ -19,6 +19,11 @@ const GESCHUETZT = [
 	'GET /vereine',
 	'POST /vereine',
 	'GET /vereine/:id',
+	'POST /vereine/:id/sperren',
+	'POST /vereine/:id/entsperren',
+	'POST /vereine/:id/slug',
+	'POST /vereine/:id/einladung-erneuern',
+	'POST /vereine/:id/notfall-link',
 ];
 
 describe('Schutz der Admin-Routen', () => {

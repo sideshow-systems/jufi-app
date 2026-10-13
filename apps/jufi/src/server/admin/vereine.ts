@@ -1,3 +1,4 @@
+import type { VereinStatus } from '@jufi/db';
 import {
 	normalisiereEmail,
 	normalisiereFarbe,
@@ -8,15 +9,17 @@ import {
 	pruefeVereinsname,
 	SLUG_HINWEIS,
 } from '@jufi/domain';
-import type { Router } from 'express';
+import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { einladungsLink, leitungsEinladungsText } from '../einladung.js';
 import { asynchron, text } from './asynchron.js';
-import type { AdminDaten, NeuerVerein } from './daten.js';
+import type { AdminDaten, NeuerVerein, NeueEinladung } from './daten.js';
 import { adminKontext, brauchtAdmin } from './sitzung.js';
 
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
 const SLUG_VERGEBEN = { fehler: 'Dieser Slug ist vergeben', feld: 'slug' };
+const SLUG_FEST = { fehler: 'Der Slug ist fest, seit die erste Einladung angenommen wurde' };
+const SCHON_ANGENOMMEN = { fehler: 'Die erste Einladung ist schon angenommen' };
 const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 
 type Feld = 'name' | 'anzeigename' | 'slug' | 'farbe' | 'vorname' | 'nachname' | 'email';
@@ -72,8 +75,19 @@ function pruefeNeuenVerein(
  */
 export type VereinsRoutenDeps = Pick<VolleAppDeps, 'jetzt' | 'umgebung'> & { daten: AdminDaten };
 
+/** Link und fertiger Text zum Kopieren, wie nach dem Anlegen eines Vereins. */
+function einladung(basisUrl: string, e: NeueEinladung): { link: string; text: string } {
+	const link = einladungsLink(basisUrl, e.slug, e.token);
+	return { link, text: leitungsEinladungsText({ vorname: e.vorname, anzeigename: e.anzeigename, link }) };
+}
+
+function nichtGefunden(res: Response): void {
+	res.status(404).json(NICHT_GEFUNDEN);
+}
+
 /**
- * Vereine ansehen und anlegen. Haengt direkt an den Router aus adminApi (siehe
+ * Vereine ansehen, anlegen, sperren, Slug korrigieren und Einladungen erneuern
+ * (Spec 7.3). Haengt direkt an den Router aus adminApi (siehe
  * api.ts).
  */
 export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
@@ -102,14 +116,15 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 				res.status(409).json(SLUG_VERGEBEN);
 				return;
 			}
-			const link = einladungsLink(umgebung.basisUrl, angelegt.slug, angelegt.token);
 			res.status(201).json({
 				id: angelegt.id,
 				slug: angelegt.slug,
-				einladung: {
-					link,
-					text: leitungsEinladungsText({ vorname: angelegt.leitung.vorname, anzeigename: angelegt.anzeigename, link }),
-				},
+				einladung: einladung(umgebung.basisUrl, {
+					token: angelegt.token,
+					vorname: angelegt.leitung.vorname,
+					anzeigename: angelegt.anzeigename,
+					slug: angelegt.slug,
+				}),
 			});
 		}),
 	);
@@ -120,10 +135,91 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 		asynchron(async (req, res) => {
 			const details = await daten.vereinsdetails(req.params['id'] ?? '', jetzt());
 			if (!details) {
-				res.status(404).json(NICHT_GEFUNDEN);
+				nichtGefunden(res);
 				return;
 			}
 			res.json(details);
+		}),
+	);
+
+	/**
+	 * 200 mit dem Status auch, wenn er schon so war: Das Ziel des Klicks ist
+	 * erreicht, ein Fehler wuerde die Oberflaeche nur verwirren (Doppelklick,
+	 * zweiter Tab).
+	 */
+	function statusRoute(pfad: string, status: VereinStatus): void {
+		router.post(
+			`/vereine/:id/${pfad}`,
+			brauchtAdmin,
+			asynchron(async (req, res) => {
+				const { admin } = adminKontext(res);
+				const ergebnis = await daten.setzeStatus(req.params['id'] ?? '', status, admin.id, jetzt());
+				if (!ergebnis) {
+					nichtGefunden(res);
+					return;
+				}
+				res.json({ status });
+			}),
+		);
+	}
+	statusRoute('sperren', 'GESPERRT');
+	statusRoute('entsperren', 'AKTIV');
+
+	/**
+	 * Reihenfolge der Antworten: unbekannter Verein (404), Format (400), fest
+	 * (409), vergeben (409). Den Verein gibt es nur dann vorab nachzusehen, wenn
+	 * das Format nicht stimmt; sonst sagt es die Korrektur selbst, in ihrer
+	 * Transaktion. Verworfen: das Format erst in daten.ts pruefen -- die Pruefung
+	 * der Eingabe steht fuer alle Routen hier.
+	 */
+	router.post(
+		'/vereine/:id/slug',
+		brauchtAdmin,
+		asynchron(async (req, res) => {
+			const id = req.params['id'] ?? '';
+			const b = (req.body ?? {}) as Record<string, unknown>;
+			// Nicht normalisiert, aus demselben Grund wie beim Anlegen (pruefeNeuenVerein).
+			const slug = text(b['slug']);
+			const pruefung = pruefeNeuenSlug(slug);
+			if (!pruefung.ok) {
+				if (!(await daten.gibtVerein(id))) nichtGefunden(res);
+				else res.status(400).json({ fehler: SLUG_HINWEIS[pruefung.grund], feld: 'slug' });
+				return;
+			}
+			const { admin } = adminKontext(res);
+			const ergebnis = await daten.korrigiereSlug(id, slug, admin.id, jetzt());
+			if (ergebnis === null) nichtGefunden(res);
+			else if (ergebnis === 'fest') res.status(409).json(SLUG_FEST);
+			else if (ergebnis === 'vergeben') res.status(409).json(SLUG_VERGEBEN);
+			else res.json({ slug, einladung: einladung(umgebung.basisUrl, { ...ergebnis, slug }) });
+		}),
+	);
+
+	router.post(
+		'/vereine/:id/einladung-erneuern',
+		brauchtAdmin,
+		asynchron(async (req, res) => {
+			const { admin } = adminKontext(res);
+			const ergebnis = await daten.erneuereErsteEinladung(req.params['id'] ?? '', admin.id, jetzt());
+			if (ergebnis === null) nichtGefunden(res);
+			else if (ergebnis === 'angenommen') res.status(409).json(SCHON_ANGENOMMEN);
+			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis) });
+		}),
+	);
+
+	/**
+	 * Jede Person, die kein Ansprechpartner dieses Vereins ist, ist "nicht
+	 * gefunden" -- auch eine, die es gibt (Spec 7.3, Rahmen-Spec 8).
+	 */
+	router.post(
+		'/vereine/:id/notfall-link',
+		brauchtAdmin,
+		asynchron(async (req, res) => {
+			const b = (req.body ?? {}) as Record<string, unknown>;
+			const { admin } = adminKontext(res);
+			const ergebnis = await daten.notfallLink(req.params['id'] ?? '', text(b['personId']), admin.id, jetzt());
+			if (ergebnis === null) nichtGefunden(res);
+			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis) });
 		}),
 	);
 }
