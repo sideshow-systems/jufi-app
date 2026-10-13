@@ -15,13 +15,23 @@ import type { ErrorRequestHandler } from 'express';
  * Geloggt wird der Pfad ohne Query: spaetere Links tragen Einmal-Tokens in der
  * Query, die nicht im Log stehen sollen.
  */
-export const fehlerbehandlung: ErrorRequestHandler = (error, req, res, _next) => {
+export const fehlerbehandlung: ErrorRequestHandler = (error, req, res, next) => {
 	const status = (error as { status?: unknown } | null)?.status;
 	const code = typeof status === 'number' ? status : (error as { statusCode?: unknown } | null)?.statusCode;
 	const istClientfehler = typeof code === 'number' && code >= 400 && code < 500;
 
 	if (!istClientfehler) console.error(`[${req.method} ${req.path}]`, error);
-	if (res.headersSent) return;
+	// server.ts streamt die Angular-Antwort: Scheitert das nach den ersten Bytes, ist
+	// der Status gesendet und eine JSON-Fehlerantwort nicht mehr moeglich. Einfach
+	// zurueckzukehren liesse die Antwort offen, der Client wartete bis zum Timeout.
+	// next(error) uebergibt an Expresss Standardbehandlung, die die Verbindung
+	// abbricht -- ein abgebrochener Body ist fuer den Client ehrlicher als ein
+	// stummes Haengen. Verworfen: selbst res.end() rufen, das taeuschte eine
+	// vollstaendige, aber abgeschnittene Antwort vor.
+	if (res.headersSent) {
+		next(error);
+		return;
+	}
 
 	if (istClientfehler) {
 		res.status(code).json({ fehler: code === 413 ? 'Anfrage zu groß' : 'Ungültige Anfrage' });
