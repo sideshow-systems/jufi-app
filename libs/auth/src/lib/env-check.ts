@@ -74,12 +74,17 @@ export function checkSecrets(env: Record<string, string | undefined> = process.e
 		problems.push({ variable: 'BASIS_URL', problem: 'ist nicht gesetzt' });
 	} else if (!isAbsoluteHttpUrl(basis)) {
 		problems.push({ variable: 'BASIS_URL', problem: 'muss eine absolute http(s)-URL sein' });
-	} else if (basis.endsWith('/')) {
-		// Links in E-Mails entstehen als BASIS_URL + "/pfad". Ein Schrägstrich am
-		// Ende ergäbe "//" im Link, den manche Mailprogramme und Proxys nicht
-		// zusammenfassen. Verworfen: den Schrägstrich still abschneiden — dann
-		// stimmte die Konfiguration nicht mit dem überein, was im Log steht.
-		problems.push({ variable: 'BASIS_URL', problem: 'darf nicht mit einem Schrägstrich enden' });
+	} else if (new URL(basis).origin !== basis) {
+		// Die Origin-Prüfung für schreibende Anfragen vergleicht den Origin-Header
+		// mit diesem Wert, und Links in E-Mails entstehen als BASIS_URL + "/pfad".
+		// Ein Pfad, eine Query oder ein Schrägstrich am Ende machten den Vergleich
+		// nie gleich bzw. ergäben "//" im Link. Verworfen: still auf den Ursprung
+		// kürzen — dann stimmte die Konfiguration nicht mit dem überein, was im
+		// Log steht.
+		problems.push({
+			variable: 'BASIS_URL',
+			problem: 'muss ein reiner Ursprung sein (Schema, Host, Port, ohne Pfad und ohne Schrägstrich am Ende)',
+		});
 	}
 
 	return problems;

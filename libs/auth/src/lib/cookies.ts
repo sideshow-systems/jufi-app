@@ -13,6 +13,20 @@
 export const MITGLIEDER_COOKIE = 'jufi_sitzung';
 export const ADMIN_COOKIE = 'jufi_admin';
 
+/**
+ * Admin-Sitzung: 12 Stunden ab Anmeldung, ohne Verlängerung (Spec 4.1/7.1). Eine
+ * Verlängerung bei Benutzung hieße, dass ein offener Browser den Zugang auf die
+ * ganze Plattform unbegrenzt am Leben hält; hier muss der Admin sich jeden Tag
+ * neu ausweisen. Der Wert gilt für Cookie (Max-Age) und Ablauf in der Datenbank.
+ */
+export const ADMIN_SITZUNG_SEKUNDEN = 12 * 60 * 60;
+
+/**
+ * Das Admin-Cookie gilt nur im Admin-Bereich. Mit Pfad `/` ginge es an jeden
+ * Verein und an die Vereins-API mit; so sieht keine Vereinsseite je dieses Token.
+ */
+export const ADMIN_COOKIE_PFAD = '/admin/';
+
 export interface CookieOptions {
 	path: string;
 	maxAgeSeconds: number;

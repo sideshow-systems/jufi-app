@@ -74,6 +74,21 @@ describe('BASIS_URL', () => {
 		expect(checkSecrets({ ...gut }).map((p) => p.variable)).toEqual(['BASIS_URL']);
 	});
 
+	/**
+	 * Die Origin-Pruefung (Spec 4.5) vergleicht den Origin-Header mit diesem Wert.
+	 * Ein Pfad, Query oder Schraegstrich am Ende wuerde nie gleich sein.
+	 */
+	it('verlangt einen reinen Ursprung, ohne Pfad, Query und Schraegstrich', () => {
+		for (const bad of ['https://test.jufi-app.de/', 'https://test.jufi-app.de/app', 'https://test.jufi-app.de?x=1']) {
+			const problems = checkSecrets({ ...complete, BASIS_URL: bad });
+			expect(
+				problems.map((p) => p.variable),
+				bad,
+			).toEqual(['BASIS_URL']);
+			expect(problems[0].problem).toContain('reiner Ursprung');
+		}
+	});
+
 	it('nimmt http fuer die lokale Entwicklung an', () => {
 		expect(checkSecrets({ ...complete, BASIS_URL: 'http://localhost:4200' })).toEqual([]);
 	});

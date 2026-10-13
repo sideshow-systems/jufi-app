@@ -159,6 +159,9 @@ importers:
       '@node-rs/argon2':
         specifier: ^2.2.2
         version: 2.2.2
+      '@simplewebauthn/server':
+        specifier: ^13.3.3
+        version: 13.3.3
       otplib:
         specifier: ^13.5.0
         version: 13.5.0

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { ADMIN_COOKIE, MITGLIEDER_COOKIE, readCookie, serializeClearedCookie, serializeCookie } from './cookies.js';
+import {
+	ADMIN_COOKIE,
+	ADMIN_COOKIE_PFAD,
+	ADMIN_SITZUNG_SEKUNDEN,
+	MITGLIEDER_COOKIE,
+	readCookie,
+	serializeClearedCookie,
+	serializeCookie,
+} from './cookies.js';
 
 describe('serializeCookie', () => {
 	const opts = { path: '/glonntal/', maxAgeSeconds: 3600, secure: true };
@@ -80,5 +88,19 @@ describe('readCookie', () => {
 
 	it('behaelt base64url-Zeichen im Wert', () => {
 		expect(readCookie('jufi_sitzung=a-b_c9', 'jufi_sitzung')).toBe('a-b_c9');
+	});
+});
+
+describe('Admin-Cookie', () => {
+	it('gilt 12 Stunden und nur im Admin-Bereich', () => {
+		expect(ADMIN_SITZUNG_SEKUNDEN).toBe(43200);
+		expect(ADMIN_COOKIE_PFAD).toBe('/admin/');
+		expect(
+			serializeCookie(ADMIN_COOKIE, 'tok', {
+				path: ADMIN_COOKIE_PFAD,
+				maxAgeSeconds: ADMIN_SITZUNG_SEKUNDEN,
+				secure: true,
+			}),
+		).toBe('jufi_admin=tok; Path=/admin/; HttpOnly; SameSite=Lax; Max-Age=43200; Secure');
 	});
 });
