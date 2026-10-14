@@ -1,5 +1,5 @@
 import { AttemptTracker, decryptSecret, hashRecoveryCode, MITGLIEDER_COOKIE, verifyPassword } from '@jufi/auth';
-import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
+import { createPrismaClientFromEnv, sperreVereinszeile, vereinDb } from '@jufi/db';
 import { randomInt, randomUUID } from 'node:crypto';
 import { generate } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,15 @@ import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test
 import { legeVereinAn } from '../test-vereine.js';
 import { legeSitzungAn } from './sitzung.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
+
+// Spion um das Original: ein Test kann so genau vor der Sperre die Sitzung
+// loeschen, wie es ein gleichzeitiges Einloesen eines Reset-Links taete.
+// Verworfen: Einloesen und Profil parallel starten -- ob die Sitzung vor oder
+// nach der Pruefung verschwindet, hinge vom Zufall ab, der Test bewiese wenig.
+vi.mock('@jufi/db', async (importOriginal) => {
+	const original = await importOriginal<typeof import('@jufi/db')>();
+	return { ...original, sperreVereinszeile: vi.fn(original.sperreVereinszeile) };
+});
 
 const PASSWORT = 'gruene-forelle-am-see';
 const NEU = 'blauer-hecht-im-weiher';
@@ -472,6 +481,108 @@ describe('Profil', () => {
 				const r = await api('/profil/totp/bestaetigen', { methode: 'POST', cookie: m.cookie, body });
 				expect(r.status, JSON.stringify(body)).toBe(400);
 			}
+		});
+	});
+
+	describe('Sitzung endet waehrend der Anfrage (Reset-Link eingeloest, Spec 4.4)', () => {
+		/**
+		 * Loescht beim naechsten sperreVereinszeile alle Sitzungen des Zugangs, bevor
+		 * die Sperre greift -- so wie es ein Einloesen tut, das die Sperre knapp
+		 * vor der Profil-Anfrage bekommt.
+		 */
+		function sitzungEndetVorDerSperre(zugangId: string) {
+			const original = vi.mocked(sperreVereinszeile).getMockImplementation();
+			vi.mocked(sperreVereinszeile).mockImplementationOnce(async (tx, vereinId) => {
+				await prisma.session.deleteMany({ where: { zugangId } });
+				return original?.(tx, vereinId);
+			});
+		}
+		const NICHT_ANGEMELDET = { fehler: 'nicht angemeldet' };
+
+		it('Passwort setzen ohne vorhandenes schreibt nichts', async () => {
+			const m = await erwachsener({ passwort: null });
+			await passkey(m.zugangId);
+			sitzungEndetVorDerSperre(m.zugangId);
+			const r = await api('/profil/passwort', { methode: 'POST', cookie: m.cookie, body: { neu: NEU } });
+			expect(r.status).toBe(401);
+			expect(await r.json()).toEqual(NICHT_ANGEMELDET);
+			expect((await prisma.zugang.findUniqueOrThrow({ where: { id: m.zugangId } })).passwortHash).toBeNull();
+		});
+
+		it('Passwort aendern schreibt nichts', async () => {
+			const m = await erwachsener();
+			sitzungEndetVorDerSperre(m.zugangId);
+			const r = await api('/profil/passwort', {
+				methode: 'POST',
+				cookie: m.cookie,
+				body: { neu: NEU, alt: PASSWORT },
+			});
+			expect(r.status).toBe(401);
+			const zugang = await prisma.zugang.findUniqueOrThrow({ where: { id: m.zugangId } });
+			expect(await verifyPassword(zugang.passwortHash ?? '', PASSWORT)).toBe(true);
+		});
+
+		it('Passkey hinzufuegen legt keinen an', async () => {
+			const m = await erwachsener();
+			const r0 = await api('/profil/passkeys/optionen', { methode: 'POST', cookie: m.cookie });
+			const { optionen } = (await r0.json()) as { optionen: { challenge: string } };
+			verifyRegistration.mockResolvedValue({
+				credentialId: `cred-${randomUUID()}`,
+				publicKey: 'cHVibGljLWtleQ',
+				counter: 0,
+				transports: [],
+				backedUp: false,
+			});
+			sitzungEndetVorDerSperre(m.zugangId);
+			const r = await api('/profil/passkeys', {
+				methode: 'POST',
+				cookie: m.cookie,
+				body: { antwort: antwort(optionen.challenge) },
+			});
+			expect(r.status).toBe(401);
+			expect(await prisma.passkey.count({ where: { zugangId: m.zugangId } })).toBe(0);
+		});
+
+		it('Passkey umbenennen und loeschen aendern nichts', async () => {
+			const m = await erwachsener();
+			const pk = await passkey(m.zugangId, 'Alt');
+			sitzungEndetVorDerSperre(m.zugangId);
+			const umbenennen = await api(`/profil/passkeys/${pk.id}`, {
+				methode: 'PATCH',
+				cookie: m.cookie,
+				body: { label: 'Neu' },
+			});
+			expect(umbenennen.status).toBe(401);
+			expect((await prisma.passkey.findUniqueOrThrow({ where: { id: pk.id } })).label).toBe('Alt');
+
+			// Neue Sitzung, damit die zweite Anfrage die Anmeldung passiert.
+			const token = await legeSitzungAn(vereinDb(prisma, verein.id), { zugangId: m.zugangId, jetzt: new Date() });
+			sitzungEndetVorDerSperre(m.zugangId);
+			const loeschen = await api(`/profil/passkeys/${pk.id}`, {
+				methode: 'DELETE',
+				cookie: `${MITGLIEDER_COOKIE}=${token}`,
+			});
+			expect(loeschen.status).toBe(401);
+			expect(await prisma.passkey.count({ where: { id: pk.id } })).toBe(1);
+		});
+
+		it('TOTP bestaetigen aktiviert nichts', async () => {
+			const m = await erwachsener({ rechte: ['MITGLIEDER'] });
+			const start = (await (await api('/profil/totp/start', { methode: 'POST', cookie: m.cookie })).json()) as {
+				marke: string;
+				geheimnis: string;
+			};
+			sitzungEndetVorDerSperre(m.zugangId);
+			const r = await api('/profil/totp/bestaetigen', {
+				methode: 'POST',
+				cookie: m.cookie,
+				body: { marke: start.marke, code: await generate({ secret: start.geheimnis }) },
+			});
+			expect(r.status).toBe(401);
+			const zugang = await prisma.zugang.findUniqueOrThrow({ where: { id: m.zugangId } });
+			expect(zugang.totpAktivAm).toBeNull();
+			expect(zugang.totpGeheimnis).toBeNull();
+			expect(await prisma.recoveryCode.count({ where: { zugangId: m.zugangId } })).toBe(0);
 		});
 	});
 

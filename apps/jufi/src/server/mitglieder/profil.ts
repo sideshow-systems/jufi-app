@@ -12,9 +12,9 @@ import {
 	verifyPassword,
 	verifyTotp,
 } from '@jufi/auth';
-import { sperreVereinszeile, type Person } from '@jufi/db';
+import { sperreVereinszeile, type Person, type VereinDb } from '@jufi/db';
 import { PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
-import type { Router } from 'express';
+import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron, text } from '../admin/asynchron.js';
 import { relyingParty } from '../admin/passkeys.js';
@@ -83,6 +83,45 @@ function leseEinrichtung(marke: string, jetztMs: number): TotpEinrichtung | unde
 }
 
 type Antwort = Parameters<typeof challengeAusAntwort>[0];
+
+/** Der Transaktions-Client von vereinDb, wie $transaction ihn uebergibt. */
+type Tx = Parameters<Parameters<VereinDb['$transaction']>[0]>[0];
+
+const SITZUNG_BEENDET = Symbol('Sitzung beendet');
+const NICHT_ANGEMELDET = { fehler: 'nicht angemeldet' };
+
+/**
+ * Fuehrt einen Schreibvorgang des Profils nur aus, solange die Sitzung der
+ * Anfrage noch besteht, und zwar unter der Sperre der Vereinszeile. Das
+ * Einloesen eines Reset- oder Einladungslinks sperrt dieselbe Zeile und loescht
+ * dabei alle Sitzungen und Anmeldewege (Spec 4.4): ohne diese Pruefung legte
+ * ein verlorenes Geraet, dessen Anfrage die Anmeldung noch vor dem Einloesen
+ * passiert hat, danach einen Passkey, ein Passwort oder TOTP an, das den Reset
+ * ueberlebt. Mit der Sperre ist die Reihenfolge eindeutig: entweder schreibt
+ * das Profil zuerst und das Einloesen raeumt es weg, oder das Einloesen kommt
+ * zuerst und die Sitzung ist hier schon fort.
+ *
+ * Verworfen: nur die Sitzung pruefen, ohne Sperre -- unter READ COMMITTED
+ * saehe die Pruefung die Sitzung noch, waehrend das Einloesen gerade loescht.
+ * Verworfen auch: die Sitzung nur in mitgliedAusSitzung pruefen -- zwischen
+ * dort und dem Schreiben liegen Argon2 und die Passkey-Pruefung.
+ *
+ * Liefert SITZUNG_BEENDET, bevor irgendetwas geschrieben ist; die Route
+ * antwortet dann wie bei einer abgelaufenen Sitzung mit 401.
+ */
+async function inEigenerSitzung<T>(res: Response, arbeit: (tx: Tx) => Promise<T>): Promise<T | typeof SITZUNG_BEENDET> {
+	const { verein, db } = vereinsKontext(res);
+	const { sitzungId } = mitgliedKontext(res);
+	return db.$transaction(async (tx) => {
+		await sperreVereinszeile(tx, verein.id);
+		if ((await tx.session.count({ where: { id: sitzungId } })) !== 1) return SITZUNG_BEENDET;
+		return arbeit(tx);
+	});
+}
+
+function sitzungBeendet(res: Response): void {
+	res.status(401).json(NICHT_ANGEMELDET);
+}
 
 /**
  * Profil, Abmelden und die eigenen Anmeldewege. Haengt die Routen an den Router
@@ -173,7 +212,6 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 		'/profil/passwort',
 		brauchtMitglied,
 		asynchron(async (req, res) => {
-			const { db } = vereinsKontext(res);
 			const { zugang, sitzungId } = mitgliedKontext(res);
 			const neu = text(req.body?.neu);
 			const pruefung = pruefePasswort(neu);
@@ -206,8 +244,8 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 
 			// Vor der Transaktion: Argon2 dauert, und so lange hielte sie Zeilen gesperrt.
 			const passwortHash = await hashPassword(neu);
-			const geaendert = await db.$transaction(async (tx) => {
-				// Nur wenn das Passwort noch das geprueft ist: setzten zwei Anfragen
+			const geaendert = await inEigenerSitzung(res, async (tx) => {
+				// Nur wenn das Passwort noch das gepruefte ist: setzten zwei Anfragen
 				// gleichzeitig eins (die zweite ohne alt, weil beim Lesen noch keins da
 				// war), ueberschriebe sie sonst ein Passwort, das sie nie kannte.
 				// Verworfen: einfach update -- dann genuegte die Sitzung allein, um ein
@@ -225,6 +263,10 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 				await tx.session.deleteMany({ where: { zugangId: zugang.id, id: { not: sitzungId } } });
 				return true;
 			});
+			if (geaendert === SITZUNG_BEENDET) {
+				sitzungBeendet(res);
+				return;
+			}
 			if (!geaendert) {
 				res.status(409).json(PASSWORT_GEAENDERT);
 				return;
@@ -305,20 +347,26 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 
 			const label = name ?? passkeyLabel(req.get('user-agent'));
 			try {
-				// create statt upsert: ein Upsert uebernaehme eine credentialId, die
-				// schon einem anderen Zugang gehoert, womoeglich in einem anderen Verein.
-				const passkey = await db.passkey.create({
-					data: {
-						zugangId: zugang.id,
-						credentialId: ergebnis.credentialId,
-						publicKey: ergebnis.publicKey,
-						counter: ergebnis.counter,
-						transports: ergebnis.transports,
-						backedUp: ergebnis.backedUp,
-						label,
-					},
-					select: { id: true, label: true },
-				});
+				const passkey = await inEigenerSitzung(res, (tx) =>
+					// create statt upsert: ein Upsert uebernaehme eine credentialId, die
+					// schon einem anderen Zugang gehoert, womoeglich in einem anderen Verein.
+					tx.passkey.create({
+						data: {
+							zugangId: zugang.id,
+							credentialId: ergebnis.credentialId,
+							publicKey: ergebnis.publicKey,
+							counter: ergebnis.counter,
+							transports: ergebnis.transports,
+							backedUp: ergebnis.backedUp,
+							label,
+						},
+						select: { id: true, label: true },
+					}),
+				);
+				if (passkey === SITZUNG_BEENDET) {
+					sitzungBeendet(res);
+					return;
+				}
 				res.status(201).json(passkey);
 			} catch (error) {
 				// P2002: credentialId schon vergeben (excludeCredentials haelt das
@@ -336,7 +384,6 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 		'/profil/passkeys/:id',
 		brauchtMitglied,
 		asynchron(async (req, res) => {
-			const { db } = vereinsKontext(res);
 			const { zugang } = mitgliedKontext(res);
 			const label = passkeyName(req.body?.label);
 			if (label === undefined) {
@@ -345,11 +392,17 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 			}
 			// updateMany mit zugangId statt update ueber die Id: ein fremder Passkey
 			// zaehlt 0 und ist damit nicht gefunden, ohne vorher gelesen zu werden.
-			const { count } = await db.passkey.updateMany({
-				where: { id: req.params['id'] ?? '', zugangId: zugang.id },
-				data: { label },
-			});
-			if (count !== 1) {
+			// In der eigenen Sitzung wie jedes Schreiben hier, auch wenn ein
+			// Umbenennen nach einem Reset wenig anrichtete: eine Regel fuer alle
+			// Schreibwege ist leichter zu pruefen als eine Abwaegung je Route.
+			const ergebnis = await inEigenerSitzung(res, (tx) =>
+				tx.passkey.updateMany({ where: { id: req.params['id'] ?? '', zugangId: zugang.id }, data: { label } }),
+			);
+			if (ergebnis === SITZUNG_BEENDET) {
+				sitzungBeendet(res);
+				return;
+			}
+			if (ergebnis.count !== 1) {
 				res.status(404).json(NICHT_GEFUNDEN);
 				return;
 			}
@@ -361,10 +414,10 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 		'/profil/passkeys/:id',
 		brauchtMitglied,
 		asynchron(async (req, res) => {
-			const { verein, db } = vereinsKontext(res);
 			const { zugang } = mitgliedKontext(res);
 			const id = req.params['id'] ?? '';
-			const ergebnis = await db.$transaction(async (tx) => {
+			// inEigenerSitzung sperrt die Vereinszeile, bevor gezaehlt wird.
+			const ergebnis = await inEigenerSitzung(res, async (tx) => {
 				// Erst sperren, dann zaehlen: loeschte jemand zwei Passkeys zugleich, saehe
 				// sonst jede Anfrage den jeweils anderen noch und beide loeschten -- der
 				// Zugang stuende ohne Anmeldeweg da. Die Vereinszeile, weil das Einloesen
@@ -373,7 +426,6 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 				// Prisma kennt keine Zeilensperre; Serializable -- dann scheiterte eine
 				// der beiden mit einem Serialisierungsfehler, den jede Route erst in einen
 				// Wiederholversuch uebersetzen muesste.
-				await sperreVereinszeile(tx, verein.id);
 				const passkey = await tx.passkey.findFirst({ where: { id, zugangId: zugang.id }, select: { id: true } });
 				if (!passkey) return 'nicht gefunden' as const;
 				// Passwort frisch lesen, nicht aus der Sitzung: es kann inzwischen gesetzt sein.
@@ -383,6 +435,10 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 				await tx.passkey.delete({ where: { id } });
 				return 'geloescht' as const;
 			});
+			if (ergebnis === SITZUNG_BEENDET) {
+				sitzungBeendet(res);
+				return;
+			}
 			if (ergebnis === 'nicht gefunden') {
 				res.status(404).json(NICHT_GEFUNDEN);
 				return;
@@ -441,7 +497,6 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 		'/profil/totp/bestaetigen',
 		brauchtMitglied,
 		asynchron(async (req, res) => {
-			const { db } = vereinsKontext(res);
 			const { person, zugang } = mitgliedKontext(res);
 			if (!totpMoeglich(person)) {
 				res.status(403).json(KEINE_RECHTE);
@@ -469,7 +524,7 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 			versuche.reset(schluessel[0] ?? '');
 
 			const zeit = jetzt();
-			const aktiviert = await db.$transaction(async (tx) => {
+			const aktiviert = await inEigenerSitzung(res, async (tx) => {
 				// Nur wenn TOTP noch nicht aktiv ist: eine zweite, aeltere Marke aus
 				// einem anderen Tab ersetzte sonst das gerade eingerichtete Geheimnis
 				// still -- an start vorbei, das bei aktivem TOTP 409 sagt.
@@ -485,6 +540,10 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 				});
 				return true;
 			});
+			if (aktiviert === SITZUNG_BEENDET) {
+				sitzungBeendet(res);
+				return;
+			}
 			if (!aktiviert) {
 				res.status(409).json(TOTP_SCHON_EINGERICHTET);
 				return;
