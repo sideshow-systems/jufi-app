@@ -26,7 +26,7 @@ export const routes: Routes = [
 			},
 			{
 				path: 'einladung',
-				loadComponent: () => import('./verein/platzhalter').then((m) => m.PlatzhalterEinladungComponent),
+				loadComponent: () => import('./verein/einladung').then((m) => m.EinladungComponent),
 			},
 			{
 				path: 'zugang-verloren',
