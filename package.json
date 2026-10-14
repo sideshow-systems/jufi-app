@@ -5,6 +5,7 @@
   "private": true,
   "//packageManager": "Gepinnt, damit corepack im Docker-Build dieselbe pnpm-Version nimmt wie lokal (Erfahrung aus HWYD: ohne das Feld zieht corepack die neueste).",
   "packageManager": "pnpm@10.34.5",
+  "//scripts": "deploy:app und nicht deploy: pnpm deploy ist pnpms eingebautes Workspace-Deploy, und wer das run vergaesse, loeste jenes statt dieses Skripts aus. Probelauf: pnpm run deploy:app --dry-run. image:app baut dasselbe Image ohne Tore als jufi:local, zum Anprobieren von Hand.",
   "scripts": {
     "dev": "pnpm run db:up && nx serve jufi",
     "dev:entwurf": "nx serve entwurf",
@@ -15,6 +16,8 @@
     "format:check": "prettier --check .",
     "image:entwurf": "docker build -f Dockerfile.entwurf -t jufi-entwurf:local .",
     "deploy:entwurf": "bash tools/deploy-entwurf.sh",
+    "image:app": "docker build -t jufi:local --build-arg APP_VERSION=$(node -p \"require('./package.json').version\") --build-arg GIT_COMMIT=$(git rev-parse HEAD) .",
+    "deploy:app": "bash tools/deploy.sh",
     "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
     "db:down": "docker compose -f docker-compose.dev.yml down",
     "db:psql": "docker exec -it jufi-postgres-dev psql -U jufi -d jufi",

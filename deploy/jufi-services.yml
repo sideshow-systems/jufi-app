@@ -1,0 +1,180 @@
+# Dienste der echten App (Teilprojekt 2) fuer die gemeinsame Compose-Datei auf
+# dem Server. Muster: ../hwyd/deploy/hwyd-services.yml.
+#
+# ACHTUNG: YAML verbietet Tabs zur Einrueckung. Diese Datei nutzt bewusst Spaces.
+#
+# **Das ist kein eigenstaendiger Stack.** Dieser Block gehoert in
+# `/home/paperless/paperless-ngx/docker-compose.yml`, wo auch paperless, traefik,
+# HWYD und der Entwurf (deploy/jufi-entwurf.yml) wohnen -- ein Docker-Netz
+# (paperless_default), ein Traefik. Die Datei hier ist die versionierte Fassung
+# davon: was auf dem Server steht, soll hier nachvollziehbar sein. Eingefuegt wird
+# einmalig von Hand; die Dienste unter `services:`, das Volume unter das
+# vorhandene `volumes:`. tools/deploy.sh prueft nur, dass es da ist.
+#
+# Die Werte kommen aus der gemeinsamen `.env` neben der Compose-Datei, alle mit
+# `JUFI_`-Praefix (Vorlage: deploy/env.jufi.example).
+#
+# Anwenden (immer nur JuFi-Dienste nennen, nie ein blankes `up -d`, sonst fasst
+# Compose auch paperless an). Datenbank, Migration und Mailpit kommen ueber
+# depends_on mit:
+#   docker compose up -d jufi
+
+services:
+  # --- Datenbank -------------------------------------------------------------
+  jufi-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${JUFI_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${JUFI_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${JUFI_POSTGRES_DB}
+      # Gleiche Sortierung wie in der Entwicklung (docker-compose.dev.yml),
+      # damit Abfrageergebnisse identisch sind.
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+    # Kein `ports:`. Von aussen nicht erreichbar, auch nicht ueber localhost.
+    command:
+      - postgres
+      # Bewusst klein, Werte wie bei HWYD: paperless (rund 600 MB), MariaDB,
+      # Redis und mehrere Apps teilen sich 3,7 GB, und **es gibt keinen Swap** --
+      # eine Spitze heisst, der OOM-Killer sucht sich ein Opfer. Fuer die
+      # Mitgliederlisten einiger Jugendgruppen sind 128 MB ueberreichlich.
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=25
+      - -c
+      - log_min_duration_statement=500
+    # Harte Grenze, damit ein Ausrutscher hier nicht paperless umbringt.
+    mem_limit: 384m
+    volumes:
+      - jufi-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${JUFI_POSTGRES_USER} -d ${JUFI_POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # --- Migrationen: ein Durchlauf, dann fertig --------------------------------
+  # Eigener Dienst, nicht im Entrypoint der App. Eine gescheiterte Migration im
+  # Entrypoint erzeugt eine App in der Neustartschleife; hier ist sie ein
+  # sichtbar gescheiterter Deploy, und die alte Version laeuft weiter.
+  jufi-migrate:
+    image: sideshowsystems/jufi:${JUFI_IMAGE_TAG:-latest}
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    restart: 'no'
+    # Nur DATABASE_URL: mehr liest prisma.config.ts nicht. Anders als bei HWYD
+    # stehen die Sitzungs- und TOTP-Geheimnisse hier nicht -- ein Dienst, der
+    # ein Geheimnis nicht braucht, soll es auch nicht in `docker inspect` zeigen.
+    environment:
+      DATABASE_URL: postgresql://${JUFI_POSTGRES_USER}:${JUFI_POSTGRES_PASSWORD}@jufi-db:5432/${JUFI_POSTGRES_DB}?schema=public
+    mem_limit: 256m
+    depends_on:
+      jufi-db:
+        condition: service_healthy
+
+  # --- Mail-Falle --------------------------------------------------------------
+  # Auf der Testumgebung verlaesst keine Mail den Server: Mailpit faengt alles ab,
+  # wie lokal. Testdaten enthalten erfundene Adressen, die zufaellig echt sein
+  # koennen, und eine Einladung an eine fremde Person waere ein Datenschutzfall.
+  #
+  # **Keine Traefik-Route und kein oeffentlicher Port.** Die Mails enthalten
+  # Einladungs- und Zuruecksetzen-Links im Klartext; wer die Oberflaeche sieht,
+  # kann jeden Zugang uebernehmen. Die Oberflaeche ist deshalb nur an 127.0.0.1
+  # des Servers gebunden und von aussen nur per SSH-Tunnel erreichbar:
+  #
+  #   ssh -L 8025:127.0.0.1:8025 <server>   dann im Browser http://127.0.0.1:8025
+  #
+  # SMTP (1025) ist gar nicht veroeffentlicht -- die App erreicht ihn ueber das
+  # Docker-Netz unter dem Dienstnamen. Ohne Volume: die Mails sind nach einem
+  # Neustart weg, und das ist fuer eine Mail-Falle richtig so.
+  #
+  # Kommt echter Versand, faellt dieser Dienst weg, und SMTP_* der App zeigen auf
+  # den echten Server (dann ohne MAIL_BETREFF_PRAEFIX).
+  jufi-mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    mem_limit: 64m
+    ports:
+      - '127.0.0.1:8025:8025'
+    labels:
+      # Kein Router. Ausdruecklich aus statt nur ohne Labels: ob Traefik
+      # unbeschriftete Container von selbst veroeffentlicht (exposedByDefault),
+      # steht in der Traefik-Konfiguration und nicht hier -- diese Zeile haelt
+      # unabhaengig davon dicht.
+      - 'traefik.enable=false'
+
+  # --- App -------------------------------------------------------------------
+  jufi:
+    image: sideshowsystems/jufi:${JUFI_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${JUFI_POSTGRES_USER}:${JUFI_POSTGRES_PASSWORD}@jufi-db:5432/${JUFI_POSTGRES_DB}?schema=public
+      SESSION_SECRET: ${JUFI_SESSION_SECRET}
+      TOTP_ENC_KEY: ${JUFI_TOTP_ENC_KEY}
+      # Ursprung fuer die Origin-Pruefung schreibender Anfragen (server/ursprung.ts)
+      # und fuer Links in Mails und aus der CLI. Reiner Ursprung, ohne Schraegstrich
+      # am Ende -- sonst bricht die Startpruefung ab (libs/auth env-check).
+      BASIS_URL: https://app-test.jufi-app.de
+      # Passkeys. Hier ausdruecklich gesetzt und nicht aus dem Host-Header
+      # abgeleitet: ein Schluessel haengt an dieser Domain, und das soll nicht von
+      # einem Header abhaengen. Aendert sich die Domain, sind alle Passkeys
+      # wertlos und muessen neu eingerichtet werden -- Passwort und TOTP bleiben.
+      WEBAUTHN_RP_ID: app-test.jufi-app.de
+      WEBAUTHN_ORIGIN: https://app-test.jufi-app.de
+      SMTP_HOST: jufi-mailpit
+      SMTP_PORT: '1025'
+      MAIL_ABSENDER: app@jufi-app.de
+      MAIL_ANTWORT: kontakt@jufi-app.de
+      # Damit eine Mail aus der Testumgebung nie wie eine echte aussieht.
+      MAIL_BETREFF_PRAEFIX: '[Test] '
+    depends_on:
+      jufi-db:
+        condition: service_healthy
+      jufi-migrate:
+        condition: service_completed_successfully
+      # Nur gestartet, nicht gesund: Mailpit hat keinen Healthcheck, und der
+      # Mail-Arbeiter versucht es im naechsten Takt erneut. Steht hier, damit
+      # `up -d jufi` die Mail-Falle mitbringt und kein Dienst vergessen wird.
+      jufi-mailpit:
+        condition: service_started
+    # Gemessen im Rauchtest von tools/deploy.sh: rund 65 MB im Leerlauf. Die
+    # Grenze laesst Platz fuer argon2 beim Anmelden (19 MB je laufendem Hash,
+    # libs/auth passwords.ts) und schuetzt die anderen Apps auf dem Server.
+    # Halb so viel wie HWYD (512m), weil hier kein Analyse-Endpunkt grosse
+    # Antworten im Speicher baut.
+    mem_limit: 256m
+    # Wie im Image (Dockerfile), hier noch einmal, damit der Block fuer sich lesbar
+    # ist: Node **und** Datenbank, und in der Startphase jede Sekunde, weil
+    # Traefik den Dienst erst bei healthy aufnimmt.
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:4000/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    # Kein `ports:`. Erreichbar nur ueber Traefik.
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.jufi.rule=Host(`app-test.jufi-app.de`)'
+      # Traefik terminiert TLS selbst per Let's Encrypt, wie bei HWYD und dem
+      # Entwurf. Deshalb **kein** Middleware-Label, das X-Forwarded-Proto setzt:
+      # Traefik setzt den Header von sich aus richtig, weil es das TLS-Ende ist,
+      # und die App vertraut genau einem Proxy (trust proxy 1, server/app.ts).
+      - 'traefik.http.routers.jufi.entrypoints=websecure'
+      - 'traefik.http.routers.jufi.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.jufi.loadbalancer.server.port=4000'
+      # Express komprimiert nicht von selbst, und Traefik macht es billiger als
+      # Node -- und fuer alle Dienste gleich.
+      - 'traefik.http.middlewares.jufi-compress.compress=true'
+      - 'traefik.http.routers.jufi.middlewares=jufi-compress'
+
+volumes:
+  # Die Mitgliederdaten. Eine Sicherung gibt es noch nicht (wie bei HWYD per
+  # restic ausser Haus) -- vor echten Daten nachziehen.
+  jufi-pgdata:
