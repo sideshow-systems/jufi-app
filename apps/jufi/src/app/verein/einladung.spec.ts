@@ -379,6 +379,6 @@ describe('Einladung annehmen', () => {
 		expect(seite.textContent).toContain('noch einmal an');
 		const navigiert = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
 		await klick('Zur App');
-		expect(navigiert).toHaveBeenCalledWith('/demo/');
+		expect(navigiert).toHaveBeenCalledWith('/demo');
 	});
 });

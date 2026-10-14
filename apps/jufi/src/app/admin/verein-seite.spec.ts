@@ -205,6 +205,95 @@ describe('Vereinsseite', () => {
 		expect(o.seite.textContent).toContain('neuer Link');
 	});
 
+	it('Einladung erneuern schickt ohne Kaestchen einen leeren Body', async () => {
+		const o = await oeffne();
+
+		knopf(o.seite, 'Einladung für Thomas erneuern').click();
+		await vi.waitFor(() => {
+			const anfrage = o.http.expectOne(`${API}/vereine/v1/einladung-erneuern`);
+			expect(anfrage.request.body).toEqual({});
+			anfrage.flush({ einladung: EINLADUNG, mailEingereiht: false });
+		});
+		await laedtNeu(o, verein());
+
+		expect(o.seite.textContent).not.toContain('Mail ist eingereiht');
+	});
+
+	it('Einladung erneuern mit gesetztem Kaestchen sendet perMail und zeigt den Hinweis', async () => {
+		const o = await oeffne();
+
+		expect(o.seite.textContent).toContain('Zusätzlich per Mail senden');
+		o.seite.querySelector<HTMLInputElement>('input[name=per-mail-einladung]')?.click();
+		await stabil(o.harness);
+		knopf(o.seite, 'Einladung für Thomas erneuern').click();
+		await vi.waitFor(() => {
+			const anfrage = o.http.expectOne(`${API}/vereine/v1/einladung-erneuern`);
+			expect(anfrage.request.body).toEqual({ perMail: true });
+			anfrage.flush({ einladung: EINLADUNG, mailEingereiht: true });
+		});
+		await laedtNeu(o, verein());
+
+		expect(o.seite.textContent).toContain('Mail ist eingereiht');
+		expect(o.seite.textContent).toContain('neuer Link');
+	});
+
+	it('Notfall-Link mit gesetztem Kaestchen sendet perMail und zeigt den Hinweis', async () => {
+		const o = await oeffne();
+
+		o.seite.querySelector<HTMLInputElement>('input[name=per-mail-p1]')?.click();
+		await stabil(o.harness);
+		knopf(o.seite, 'Notfall-Link erzeugen').click();
+		await stabil(o.harness);
+		knopf(dialog(o.seite) as HTMLElement, 'Link erzeugen').click();
+		await vi.waitFor(() => {
+			const anfrage = o.http.expectOne(`${API}/vereine/v1/notfall-link`);
+			expect(anfrage.request.body).toEqual({ personId: 'p1', perMail: true });
+			anfrage.flush({ einladung: EINLADUNG, mailEingereiht: true });
+		});
+		await laedtNeu(o, verein());
+
+		expect(o.seite.textContent).toContain('Mail ist eingereiht');
+	});
+
+	it('ohne E-Mail-Adresse laesst sich das Mail-Kaestchen nicht setzen', async () => {
+		const o = await oeffne(
+			verein({ ansprechpartner: [{ personId: 'p1', vorname: 'Thomas', nachname: 'Beispiel', email: null }] }),
+		);
+
+		expect(o.seite.querySelector<HTMLInputElement>('input[name=per-mail-p1]')?.disabled).toBe(true);
+	});
+
+	it('409 gesperrt zeigt den Text des Servers statt eines allgemeinen Fehlers', async () => {
+		const o = await oeffne();
+
+		knopf(o.seite, 'Einladung für Thomas erneuern').click();
+		await vi.waitFor(() =>
+			o.http
+				.expectOne(`${API}/vereine/v1/einladung-erneuern`)
+				.flush({ fehler: 'Der Verein ist gesperrt – erst entsperren' }, { status: 409, statusText: 'Conflict' }),
+		);
+		await stabil(o.harness);
+
+		expect(o.seite.querySelector('[role=alert]')?.textContent).toContain('Der Verein ist gesperrt – erst entsperren');
+		expect(o.seite.textContent).not.toContain('Unerwarteter Fehler');
+	});
+
+	it('409 gesperrt beim Notfall-Link zeigt ebenfalls den Text des Servers', async () => {
+		const o = await oeffne();
+
+		knopf(o.seite, 'Notfall-Link erzeugen').click();
+		await stabil(o.harness);
+		knopf(dialog(o.seite) as HTMLElement, 'Link erzeugen').click();
+		await vi.waitFor(() =>
+			o.http
+				.expectOne(`${API}/vereine/v1/notfall-link`)
+				.flush({ fehler: 'Der Verein ist gesperrt – erst entsperren' }, { status: 409, statusText: 'Conflict' }),
+		);
+		await stabil(o.harness);
+
+		expect(o.seite.querySelector('[role=alert]')?.textContent).toContain('Der Verein ist gesperrt – erst entsperren');
+	});
+
 	it('ein unbekannter Verein ist nicht gefunden', async () => {
 		const o = await oeffneVerwaltung('/admin/vereine/v1');
 		o.http.expectOne(`${API}/vereine/v1`).flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });

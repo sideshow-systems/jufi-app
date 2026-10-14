@@ -11,7 +11,7 @@ import {
 } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { KarteComponent } from '../gestaltung/ui';
-import { AdminApi, type Einladung } from './admin-api';
+import { AdminApi, type EinladungAntwort } from './admin-api';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { EinladungAnzeigeComponent } from './einladung-anzeige';
 import { wertVon } from '../gemeinsam/formular';
@@ -43,6 +43,9 @@ const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 						Schick der ersten Leitung diesen Text. Er enthält den Link, mit dem sie die Vereinsverwaltung einrichtet.
 					</p>
 				</jf-karte>
+				@if (a.mailEingereiht) {
+					<p class="hinweis" role="status">Mail ist eingereiht und geht gleich raus.</p>
+				}
 				<jf-einladung-anzeige [einladung]="a.einladung" />
 				<div class="reihe">
 					<a class="knopf primaer" [routerLink]="['/admin/vereine', a.id]">Zur Vereinsseite</a>
@@ -166,6 +169,10 @@ const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 								<span class="fehler" id="fehler-email">{{ text }}</span>
 							}
 						</label>
+						<label class="haken breit">
+							<input type="checkbox" name="per-mail" [checked]="perMail()" (change)="perMail.set(gesetzt($event))" />
+							Zusätzlich per Mail senden
+						</label>
 					</div>
 				</jf-karte>
 
@@ -233,6 +240,10 @@ const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 		p {
 			margin: 0;
 		}
+		.hinweis {
+			color: var(--erfolg);
+			font-weight: 600;
+		}
 		.reihe {
 			display: flex;
 			flex-wrap: wrap;
@@ -253,6 +264,7 @@ export class AdminVereinNeuComponent {
 	protected readonly vorname = signal('');
 	protected readonly nachname = signal('');
 	protected readonly email = signal('');
+	protected readonly perMail = signal(false);
 
 	/**
 	 * Solange die Person den Slug nicht selbst angefasst hat, folgt er dem Anzeigenamen.
@@ -263,9 +275,10 @@ export class AdminVereinNeuComponent {
 	protected readonly laeuft = signal(false);
 	protected readonly fehler = signal<Fehler>({});
 	protected readonly allgemeinerFehler = signal<string | null>(null);
-	protected readonly angelegt = signal<{ id: string; slug: string; einladung: Einladung } | null>(null);
+	protected readonly angelegt = signal<({ id: string; slug: string } & EinladungAntwort) | null>(null);
 
 	protected readonly wert = wertVon;
+	protected readonly gesetzt = (ereignis: Event): boolean => (ereignis.target as HTMLInputElement).checked;
 
 	/**
 	 * Schon beim Tippen: Ein reservierter Slug (demo) oder ein falsches Zeichen soll
@@ -309,6 +322,8 @@ export class AdminVereinNeuComponent {
 				nachname: this.nachname().trim(),
 				email: normalisiereEmail(this.email()),
 			},
+			// Nur wenn angekreuzt: Der Server schickt eine Mail nur bei einem echten true, ein false waere ueberfluessig.
+			...(this.perMail() ? { perMail: true as const } : {}),
 		};
 		// Dieselben Regeln wie der Server (vereine.ts), damit ein Tippfehler keinen Weg ueber das Netz braucht.
 		const fehler: Fehler = {};

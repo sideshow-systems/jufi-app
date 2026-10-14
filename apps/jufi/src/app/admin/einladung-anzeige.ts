@@ -4,9 +4,9 @@ import { KarteComponent } from '../gestaltung/ui';
 import type { Einladung } from './admin-api';
 
 /**
- * Der fertige Einladungstext mit Link, zum Kopieren und Weitergeben. Bis zum
- * Mail-Arbeiter (Etappe 3) ist das der einzige Weg, die Einladung zur Person zu
- * bringen: Der Admin schickt den Text selbst, etwa per Messenger.
+ * Der fertige Einladungstext mit Link, zum Kopieren und Weitergeben.
+ * Der Admin schickt den Text selbst, etwa per Messenger; die Mail ist nur ein
+ * zusaetzlicher Weg, den er bei Bedarf ankreuzt.
  */
 @Component({
 	selector: 'jf-einladung-anzeige',
@@ -24,14 +24,7 @@ import type { Einladung } from './admin-api';
 					Kopieren geht hier nicht – klicke auf den Text, er wird markiert, und kopiere ihn von Hand.
 				</p>
 			}
-			<p class="klein gedaempft">
-				Der Link gilt 14 Tage.
-				<!--
-					Der letzte Satz ist vorlaeufig und faellt in Etappe 3 weg: Bis dahin gibt es noch
-					keine Anmeldung der Vereinsseite, die einen Einladungslink einloesen koennte.
-				-->
-				Annehmen lässt er sich, sobald die Anmeldung fertig ist (Etappe 3).
-			</p>
+			<p class="klein gedaempft">Der Link gilt 14 Tage.</p>
 		</jf-karte>
 	`,
 	styles: `

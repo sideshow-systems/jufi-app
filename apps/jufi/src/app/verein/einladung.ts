@@ -299,7 +299,9 @@ export class EinladungComponent implements OnInit {
 	}
 
 	protected async zurApp(): Promise<void> {
-		await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/`);
+		// Ohne Schraegstrich am Ende: navigateByUrl('/demo/') ergibt ein leeres letztes Segment,
+		// das keine Route trifft (Nicht gefunden, der Waechter lief gar nicht).
+		await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}`);
 	}
 
 	/** Die feste Kennung gehoert nicht in den Body: Der Server kennt sie und wertet eine mitgeschickte nicht aus. */

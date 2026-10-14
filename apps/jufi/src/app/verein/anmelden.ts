@@ -208,7 +208,8 @@ export class AnmeldenComponent {
 		this.laeuft.set(true);
 		this.fehler.set(null);
 		try {
-			if (await schritt()) await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/`);
+			// Ohne Schraegstrich am Ende, siehe zurApp in einladung.ts.
+			if (await schritt()) await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}`);
 		} catch (ursache) {
 			const fehler = alsApiFehler(ursache);
 			this.fehler.set(fehlertext(fehler));

@@ -65,7 +65,7 @@ describe('Anmeldung im Verein', () => {
 		expect(anfrage.request.body).toEqual({ kennung: '  Flo@Example.org ', passwort: 'ein-langes-passwort' });
 		anfrage.flush({ schritt: 'fertig' });
 		await stabil();
-		expect(navigiert).toHaveBeenCalledWith('/demo/');
+		expect(navigiert).toHaveBeenCalledWith('/demo');
 	});
 
 	it('bei totp erscheint das Codefeld statt des Passworts, der Code geht mit der Zwischenmarke', async () => {
@@ -84,7 +84,7 @@ describe('Anmeldung im Verein', () => {
 		expect(anfrage.request.body).toEqual({ zwischenmarke: 'marke-1', code: '123456' });
 		anfrage.flush({ schritt: 'fertig', wiederherstellungscodesUebrig: 9 });
 		await stabil();
-		expect(navigiert).toHaveBeenCalledWith('/demo/');
+		expect(navigiert).toHaveBeenCalledWith('/demo');
 	});
 
 	it('der Wiederherstellungscode geht statt des Codes an den Server', async () => {
@@ -134,7 +134,7 @@ describe('Anmeldung im Verein', () => {
 			http.expectOne(`${API}/anmelden/passkey`).flush({ schritt: 'fertig' });
 		});
 		await stabil();
-		expect(navigiert).toHaveBeenCalledWith('/demo/');
+		expect(navigiert).toHaveBeenCalledWith('/demo');
 	});
 
 	it('ein abgebrochener Passkey-Dialog zeigt keinen Fehlertext', async () => {

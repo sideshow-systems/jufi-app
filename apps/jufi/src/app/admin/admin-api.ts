@@ -79,6 +79,14 @@ export interface NeuerVerein {
 	slug: string;
 	farbe: string;
 	leitung: { vorname: string; nachname: string; email: string };
+	/** Nur true oder gar nicht: Der Server wertet nichts anderes als true. */
+	perMail?: true;
+}
+
+/** Jede Antwort, die eine Einladung liefert, sagt auch, ob eine Mail dazu eingereiht ist. */
+export interface EinladungAntwort {
+	einladung: Einladung;
+	mailEingereiht: boolean;
 }
 
 /**
@@ -154,7 +162,7 @@ export class AdminApi {
 			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
-	legeVereinAn(verein: NeuerVerein): Observable<{ id: string; slug: string; einladung: Einladung }> {
+	legeVereinAn(verein: NeuerVerein): Observable<{ id: string; slug: string } & EinladungAntwort> {
 		return this.post('/vereine', verein);
 	}
 
@@ -176,11 +184,15 @@ export class AdminApi {
 		return this.post(`/vereine/${encodeURIComponent(id)}/slug`, { slug });
 	}
 
-	erneuereErsteEinladung(id: string): Observable<{ einladung: Einladung }> {
-		return this.post(`/vereine/${encodeURIComponent(id)}/einladung-erneuern`);
+	erneuereErsteEinladung(id: string, perMail = false): Observable<EinladungAntwort> {
+		// Ohne Kaestchen bleibt der Body leer wie bisher: perMail fehlt, statt false zu sein.
+		return this.post(`/vereine/${encodeURIComponent(id)}/einladung-erneuern`, perMail ? { perMail: true } : {});
 	}
 
-	notfallLink(id: string, personId: string): Observable<{ einladung: Einladung }> {
-		return this.post(`/vereine/${encodeURIComponent(id)}/notfall-link`, { personId });
+	notfallLink(id: string, personId: string, perMail = false): Observable<EinladungAntwort> {
+		return this.post(`/vereine/${encodeURIComponent(id)}/notfall-link`, {
+			personId,
+			...(perMail ? { perMail: true } : {}),
+		});
 	}
 }

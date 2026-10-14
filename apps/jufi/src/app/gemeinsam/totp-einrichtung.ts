@@ -122,9 +122,16 @@ export interface TotpStart {
 		}
 		.spalten {
 			display: grid;
-			grid-template-columns: auto 1fr;
+			grid-template-columns: auto minmax(0, 1fr);
 			gap: var(--a5);
 			align-items: start;
+		}
+		/* Am Telefon untereinander: Der Code (218 px samt Rand) liesse neben dem Text keinen Platz, die Seite braeche seitlich aus. */
+		@media (max-width: 36rem) {
+			.spalten {
+				grid-template-columns: minmax(0, 1fr);
+				gap: var(--a4);
+			}
 		}
 		.rest {
 			display: grid;
