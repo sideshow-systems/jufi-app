@@ -8,6 +8,7 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 - Lokal: `pnpm run dev:entwurf` → http://localhost:4300/entwurf/
 - `apps/jufi` ist die **echte App** (Teilprojekt 2). Lokal: `pnpm run dev` → http://localhost:4200/ (Demo-Verein: `pnpm run demo`, dann `/demo`).
 - Etappe 3 ist da: Mitglieder nehmen Einladungen an und melden sich unter `/<slug>/anmelden` an (Passkey, Passwort, TOTP, „Passwort vergessen?"). Mails fängt lokal Mailpit ab (http://localhost:8025, braucht `pnpm run db:up`).
+- Deployment der echten App: `pnpm run deploy:app` nach https://app-test.jufi-app.de (README, „Deployment der echten App“). Erster Admin dort: `docker compose exec jufi node apps/cli/dist/main.js admin anlegen <name>`; Mails per `ssh -L 8025:127.0.0.1:8025`.
 - Ersten Admin lokal anlegen: `pnpm run cli admin anlegen <name>` gibt den Einrichtungslink aus (braucht `BASIS_URL` in der `.env`).
 - Nach dem Klonen und nach jeder Schemaänderung `pnpm run db:generate` — der Prisma-Client liegt nicht im Repo.
 - Tests brauchen laufendes Postgres: erst `pnpm run db:up`. Jedes Projekt hat seine Testdatenbank `jufi_test_<projekt>`.
@@ -44,6 +45,9 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 ## Was nachweislich stolpert
 
 - **`pnpm run deploy:entwurf`, nie `pnpm deploy`.** Letzteres ist pnpms eingebautes Workspace-Deploy.
+- **`pnpm run deploy:app`, nie `pnpm deploy`.** Gleicher Grund. Probelauf: `pnpm run deploy:app --dry-run` (braucht `pnpm run db:up` und Docker).
+- **`apps/jufi/src/server.ts` läuft auch beim Bau** — Angular führt sie zur Routenextraktion in einem Worker-Thread aus. Alles mit Umgebung, Datenbank oder Nebenwirkung gehört in `betriebsApp()` (nur im Hauptthread), sonst scheitert der Docker-Bau, der weder `.env` noch Datenbank hat.
+- **Neue Domain der App** braucht einen Eintrag in `security.allowedHosts` (`apps/jufi/project.json`) und damit ein neues Image; sonst antwortet jede Seite mit 400, während `/healthz` grün bleibt.
 - **Entscheidungen über Vereinsdaten, die „angenommen oder nicht" lauten** (Einlösen, Erneuern, Notfall-Link, Slug-Korrektur), beginnen mit `sperreVereinszeile`. Ohne diese Sperre überholen sich zwei gleichzeitige Anfragen.
 - **Vor jedem `git push`: `pnpm exec prettier --check .`** — weder Build noch Tests prüfen das.
 - `git push` und Deployment nur, wenn der Eigentümer es ausdrücklich sagt. Vor einem Deployment schaut er sich den Stand lokal an.

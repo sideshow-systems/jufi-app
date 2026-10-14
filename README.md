@@ -112,3 +112,51 @@ bash tools/deploy-entwurf.sh
 
 Der Probelauf prüft Format, Tests und Typen, baut Bündel und Image und macht einen Rauchtest gegen einen lokalen
 Container, ohne etwas zu übertragen. Der echte Lauf überträgt das Image und startet nur `jufi-entwurf` neu.
+
+## Deployment der echten App
+
+Die echte App wird als Node-Image (`Dockerfile`, `sideshowsystems/jufi`) lokal gebaut und per SSH übertragen, ohne
+Registry. Auf dem Server wohnt sie wie der Entwurf in der gemeinsamen Compose-Datei hinter Traefik, unter
+<https://app-test.jufi-app.de>, mit eigener Datenbank (`jufi-db`), einem Migrationsdienst (`jufi-migrate`) und einer
+Mail-Falle (`jufi-mailpit`): auf der Testumgebung verlässt keine Mail den Server.
+
+Einmalig von Hand auf dem Server (das Skript legt dort nichts an, es prüft nur):
+
+1. DNS-Eintrag `app-test.jufi-app.de` auf den Server.
+2. Den Block aus [`deploy/jufi-services.yml`](deploy/jufi-services.yml) in
+   `/home/paperless/paperless-ngx/docker-compose.yml` übernehmen (Dienste unter `services:`, `jufi-pgdata` unter
+   `volumes:`).
+3. Die Variablen aus [`deploy/env.jufi.example`](deploy/env.jufi.example) in der dortigen `.env` **auf dem Server
+   erzeugen** (Befehl steht in der Datei). `JUFI_TOTP_ENC_KEY` zusätzlich in den Passwortmanager.
+
+Lokal: `.env.deploy` wie beim Entwurf, Docker und die Entwicklungsdatenbank (`pnpm run db:up`, für die Tests).
+
+```bash
+pnpm run deploy:app --dry-run   # Tore, Bau, Rauchtest; überträgt nichts
+pnpm run deploy:app             # dazu Übertragen, Ausrollen, Nachprüfen
+```
+
+Der Probelauf prüft Format, Tests und Typen, baut das Image und startet es gegen eine Wegwerf-Datenbank: Migrationen,
+`/healthz` mit dem gebauten Commit, eine Seite unter dem Host der Domain, Docker-Healthcheck und die CLI im Image. Der
+echte Lauf prüft zusätzlich, dass Compose-Block und `JUFI_`-Variablen auf dem Server stehen, überträgt das Image, setzt
+`JUFI_IMAGE_TAG` auf den Commit, startet nur `jufi` (Datenbank, Migration und Mailpit kommen über `depends_on` mit)
+und vergleicht den Commit in `/healthz` von innen und von außen.
+
+**Erster Admin** — die CLI liegt im Image, `BASIS_URL` kommt aus der Umgebung des Dienstes:
+
+```bash
+cd /home/paperless/paperless-ngx
+docker compose exec jufi node apps/cli/dist/main.js admin anlegen <name>
+```
+
+Der ausgegebene Link führt nach `https://app-test.jufi-app.de/admin/einrichten#…` und gilt 1 Stunde.
+
+**Mails lesen** — Mailpit ist absichtlich nicht öffentlich (die Mails enthalten Einladungs- und Zurücksetzen-Links),
+sondern nur an `127.0.0.1` des Servers gebunden:
+
+```bash
+ssh -L 8025:127.0.0.1:8025 <server>
+```
+
+Dann im Browser <http://127.0.0.1:8025>. Läuft lokal schon Mailpit auf 8025, einen anderen lokalen Port nehmen
+(`-L 18025:127.0.0.1:8025`).
