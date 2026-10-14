@@ -6,6 +6,16 @@ export const MAIL_MAX_VERSUCHE = 10;
 
 const MINUTE_MS = 60 * 1000;
 const TAG_MS = 24 * 60 * MINUTE_MS;
+/**
+ * So lange bleibt eine gesendete Mail als Zeile stehen, dann loescht warte()
+ * sie. Der Text ist dann schon leer (siehe sendeFaellige); was bleibt, sind
+ * Adresse, Betreff und bezug -- personenbezogen und ohne Zweck mehr: der
+ * Hinweis "nicht zustellbar" (Spec 5.3) braucht nur Zeilen, die nicht gesendet
+ * wurden, und die bleiben. 30 Tage reichen, um bei einer Rueckfrage ("die Mail
+ * kam nie an") nachzusehen, ob und wann sie rausging. Verworfen: sofort nach
+ * dem Versand loeschen -- dann gaebe es diese Antwort nicht.
+ */
+export const GESENDETE_MAIL_AUFBEWAHRUNG_MS = 30 * TAG_MS;
 /** Mails je Durchlauf; der Rest kommt im naechsten, damit ein Stau den Takt nicht ewig blockiert. */
 const STAPEL = 50;
 
@@ -77,9 +87,15 @@ export function starteMailArbeiter(e: {
 			if (beansprucht.count !== 1) continue;
 			try {
 				await e.versand.sende({ empfaenger: mail.empfaenger, betreff: mail.betreff, text: mail.text });
+				// Der Text enthaelt Einladungs-, Notfall- oder Reset-Links mit Token im
+				// Klartext; gespeichert sein darf ein Token nur als Hash (Spec 4.1).
+				// Nach dem Versand braucht ihn niemand mehr, also im selben Schreiben
+				// leeren. Leerer String statt null: die Spalte ist Pflicht, und eine
+				// Migration nur dafuer lohnt nicht. Eine ungesendete Zeile behaelt
+				// ihren Text zwangslaeufig, sonst gaebe es keinen naechsten Versuch.
 				await e.prisma.mailWarteschlange.update({
 					where: { id: mail.id },
-					data: { gesendetAm: e.jetzt(), fehler: null },
+					data: { gesendetAm: e.jetzt(), fehler: null, text: '' },
 				});
 				log(`Mail ${mail.id} gesendet`);
 			} catch (fehler) {
@@ -90,11 +106,18 @@ export function starteMailArbeiter(e: {
 		}
 	}
 
-	/** Abgelaufene Challenges und Sitzungen: sonst wuchsen die Tabellen mit jeder Anmeldung. */
+	/**
+	 * Abgelaufene Challenges und Sitzungen: sonst wuchsen die Tabellen mit jeder
+	 * Anmeldung. Dazu gesendete Mails nach der Aufbewahrungsfrist; ungesendete
+	 * bleiben, sie tragen den Hinweis "nicht zustellbar".
+	 */
 	async function warte(): Promise<void> {
 		const jetzt = e.jetzt();
 		await e.prisma.webauthnChallenge.deleteMany({ where: { expiresAt: { lt: jetzt } } });
 		await e.prisma.session.deleteMany({ where: { ablauf: { lt: jetzt } } });
+		await e.prisma.mailWarteschlange.deleteMany({
+			where: { gesendetAm: { lt: new Date(jetzt.getTime() - GESENDETE_MAIL_AUFBEWAHRUNG_MS) } },
+		});
 	}
 
 	function tick(): Promise<void> {

@@ -210,6 +210,7 @@ Weitere Tabellen:
 - **`Einladung`**: `vereinId`, `personId`, `art` (`EINLADUNG` oder `RESET`), `tokenHash`, `ablauf`, `eingeloestAm`, `erstelltVon` (Person oder Plattform-Admin). Ein neuer Link macht den offenen alten derselben Art für dieselbe Person ungültig; es gibt also nie zwei gültige.
 - **`Einwilligung`**: `vereinId`, `jungfischerId`, `erteiltVon`, `art` (vorerst nur `DSGVO_ART8`), `textVersion`, `erteiltAm`, `widerrufenAm`. Einwilligungen werden nie gelöscht, nur widerrufen; so bleibt nachweisbar, wer wann eingewilligt hat. Beim Entfernen einer Person bleiben sie ebenfalls stehen.
 - **`MailWarteschlange`**: `vereinId` (optional), `empfaenger`, `betreff`, `text`, `versuche`, `naechsterVersuch`, `gesendetAm`, `fehler`, `bezug` (z. B. Einladung). Gehört schon in TP2: Der Reset-Dialog muss sofort antworten können, ohne über die Antwortzeit zu verraten, ob es die Adresse gibt.
+  - Der `text` enthält Einladungs-, Notfall- und Reset-Links mit Token im Klartext. Der Arbeiter leert ihn beim erfolgreichen Versand und löscht gesendete Zeilen nach 30 Tagen. Eine noch nicht gesendete Zeile behält den Link zwangsläufig, sonst gäbe es keinen nächsten Versuch; das ist die einzige Stelle, an der ein Token ungehasht in der Datenbank steht. Einlösbar ist es dort nur, solange der Link gilt; eine endgültig gescheiterte Zeile bleibt für den Hinweis „Einladungsmail nicht zustellbar" (5.3) stehen.
 
 ### 3.5 Bewusst nicht in Teilprojekt 2
 

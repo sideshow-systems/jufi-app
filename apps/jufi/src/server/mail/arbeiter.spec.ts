@@ -2,12 +2,20 @@ import { createPrismaClientFromEnv } from '@jufi/db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { MAIL_MAX_VERSUCHE, naechsterAbstandMs, starteMailArbeiter } from './arbeiter.js';
+import {
+	GESENDETE_MAIL_AUFBEWAHRUNG_MS,
+	MAIL_MAX_VERSUCHE,
+	naechsterAbstandMs,
+	starteMailArbeiter,
+} from './arbeiter.js';
 import type { MailVersand } from './versand.js';
 
 const MINUTE_MS = 60 * 1000;
 const STUNDE_MS = 60 * MINUTE_MS;
 const ADRESSE = 'geheim-empfaenger@jufi.test';
+const TAG_MS = 24 * STUNDE_MS;
+/** Wie ein Einladungs- oder Reset-Link, nur erfunden. */
+const LINK = 'https://jufi.test/verein/einladung#erfundenes-token-1234567890';
 
 describe('naechsterAbstandMs', () => {
 	it('verdoppelt ab 5 Minuten und deckelt bei 24 Stunden', () => {
@@ -59,16 +67,18 @@ describe('Mail-Arbeiter', () => {
 		});
 	}
 
-	async function legeAn(daten: { naechsterVersuch?: Date; versuche?: number } = {}) {
+	async function legeAn(daten: { naechsterVersuch?: Date; versuche?: number; gesendetAm?: Date; bezug?: string } = {}) {
 		n += 1;
 		return prisma.mailWarteschlange.create({
 			data: {
 				vereinId: verein.id,
 				empfaenger: ADRESSE,
 				betreff: `Betreff ${n}`,
-				text: `Text ${n}`,
+				text: `Text ${n}: ${LINK}`,
 				naechsterVersuch: daten.naechsterVersuch ?? t0,
 				versuche: daten.versuche ?? 0,
+				gesendetAm: daten.gesendetAm,
+				bezug: daten.bezug,
 			},
 		});
 	}
@@ -89,6 +99,62 @@ describe('Mail-Arbeiter', () => {
 		expect(danach.gesendetAm).toEqual(jetzt);
 		expect(danach.versuche).toBe(1);
 		expect(danach.fehler).toBeNull();
+	});
+
+	it('leert nach dem Versand den Text, damit der Link nicht in der Datenbank bleibt (Spec 4.1)', async () => {
+		const mail = await legeAn();
+		const a = arbeiter();
+		await a.tick();
+		await a.stoppe();
+		// Gesendet wurde der volle Text mit Link ...
+		expect(sende.mock.calls[0]?.[0].text).toContain(LINK);
+		// ... gespeichert bleibt er nicht.
+		const danach = await prisma.mailWarteschlange.findUniqueOrThrow({ where: { id: mail.id } });
+		expect(danach.text).toBe('');
+		expect(danach.text).not.toContain('erfundenes-token');
+		expect(danach.gesendetAm).toEqual(jetzt);
+	});
+
+	it('behaelt den Text einer gescheiterten Mail fuer den naechsten Versuch', async () => {
+		const mail = await legeAn();
+		sende.mockRejectedValueOnce(new Error('Verbindung abgelehnt'));
+		const a = arbeiter();
+		await a.tick();
+		let z = await prisma.mailWarteschlange.findUniqueOrThrow({ where: { id: mail.id } });
+		expect(z.gesendetAm).toBeNull();
+		expect(z.text).toBe(mail.text);
+
+		jetzt = new Date(t0.getTime() + 5 * MINUTE_MS);
+		await a.tick();
+		await a.stoppe();
+		expect(eigeneAufrufe()[1]?.[0].text).toBe(mail.text);
+		z = await prisma.mailWarteschlange.findUniqueOrThrow({ where: { id: mail.id } });
+		expect(z.text).toBe('');
+	});
+
+	it('loescht gesendete Mails nach der Aufbewahrungsfrist, juengere und ungesendete bleiben', async () => {
+		const alt = await legeAn({
+			gesendetAm: new Date(t0.getTime() - GESENDETE_MAIL_AUFBEWAHRUNG_MS - MINUTE_MS),
+			bezug: 'einladung:alt',
+		});
+		const jung = await legeAn({
+			gesendetAm: new Date(t0.getTime() - GESENDETE_MAIL_AUFBEWAHRUNG_MS + MINUTE_MS),
+			bezug: 'einladung:jung',
+		});
+		// Gescheitert und laengst aufgegeben: sie traegt den Hinweis "nicht zustellbar" (Spec 5.3).
+		const gescheitert = await legeAn({
+			naechsterVersuch: new Date(t0.getTime() - 400 * TAG_MS),
+			versuche: MAIL_MAX_VERSUCHE,
+			bezug: 'einladung:gescheitert',
+		});
+		const a = arbeiter();
+		await a.tick();
+		await a.stoppe();
+		const uebrig = await prisma.mailWarteschlange.findMany({
+			where: { id: { in: [alt.id, jung.id, gescheitert.id] } },
+			select: { id: true },
+		});
+		expect(uebrig.map((z) => z.id).sort()).toEqual([jung.id, gescheitert.id].sort());
 	});
 
 	it('laesst eine noch nicht faellige Mail liegen', async () => {
