@@ -44,7 +44,7 @@ const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 					</p>
 				</jf-karte>
 				@if (a.mailEingereiht) {
-					<p class="hinweis" role="status">Mail ist eingereiht und geht gleich raus.</p>
+					<p class="mail-hinweis" role="status">Mail ist eingereiht und geht gleich raus.</p>
 				}
 				<jf-einladung-anzeige [einladung]="a.einladung" />
 				<div class="reihe">
@@ -240,7 +240,7 @@ const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 		p {
 			margin: 0;
 		}
-		.hinweis {
+		.mail-hinweis {
 			color: var(--erfolg);
 			font-weight: 600;
 		}

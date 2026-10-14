@@ -71,7 +71,7 @@ interface Frage {
 				<section class="ergebnis" aria-label="Neue Einladung">
 					<h2>{{ e.titel }}</h2>
 					@if (e.mailEingereiht) {
-						<p class="hinweis" role="status">Mail ist eingereiht und geht gleich raus.</p>
+						<p class="mail-hinweis" role="status">Mail ist eingereiht und geht gleich raus.</p>
 					}
 					<jf-einladung-anzeige [einladung]="e.einladung" />
 				</section>
@@ -334,7 +334,7 @@ interface Frage {
 			justify-content: flex-end;
 			gap: var(--a1) var(--a4);
 		}
-		.hinweis {
+		.mail-hinweis {
 			color: var(--erfolg);
 			font-weight: 600;
 		}

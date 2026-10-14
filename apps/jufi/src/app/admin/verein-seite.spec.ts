@@ -235,6 +235,9 @@ describe('Vereinsseite', () => {
 
 		expect(o.seite.textContent).toContain('Mail ist eingereiht');
 		expect(o.seite.textContent).toContain('neuer Link');
+		// Eigene Klasse: .hinweis gehoert dem Slug-Hinweis, eine gemeinsame Regel faerbte ihn gruen.
+		expect(o.seite.querySelector('[role=status]')?.classList.contains('mail-hinweis')).toBe(true);
+		expect(o.seite.querySelector('#slug-hinweis')?.classList.contains('mail-hinweis')).toBe(false);
 	});
 
 	it('Notfall-Link mit gesetztem Kaestchen sendet perMail und zeigt den Hinweis', async () => {

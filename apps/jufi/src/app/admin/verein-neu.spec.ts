@@ -130,6 +130,7 @@ describe('Verein anlegen', () => {
 		await stabil(o.harness);
 
 		expect(o.seite.textContent).toContain('Mail ist eingereiht');
+		expect(o.seite.querySelector('[role=status]')?.classList.contains('mail-hinweis')).toBe(true);
 		// Der Text bleibt trotzdem stehen: Die Mail ist ein zusaetzlicher Weg, kein Ersatz.
 		expect(o.seite.textContent).toContain('dein Link');
 	});
