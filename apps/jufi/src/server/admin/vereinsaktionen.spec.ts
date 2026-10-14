@@ -542,9 +542,9 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 				betreff: erwartet.betreff,
 				text: erwartet.text,
 				bezug: `einladung:${(await einladungZu(body.einladung.link)).id}`,
+				naechsterVersuch: uhr,
+				gesendetAm: null,
 			});
-			// Ohne gesendetAm und naechsterVersuch: der Arbeiter aus mail/arbeiter.spec.ts
-			// laeuft mit derselben Uhr parallel und kann die Zeile schon beansprucht haben.
 			expect(zeilen[0]?.text).toContain(body.einladung.link);
 		});
 

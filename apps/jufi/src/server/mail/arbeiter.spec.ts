@@ -20,7 +20,13 @@ describe('naechsterAbstandMs', () => {
 
 describe('Mail-Arbeiter', () => {
 	const prisma = createPrismaClientFromEnv();
-	const t0 = new Date('2026-10-13T08:00:00Z');
+	// Weit vor jeder Uhr der anderen Testdateien: Der Arbeiter arbeitet
+	// plattformweit, faellig (naechsterVersuch <= jetzt) und abgelaufen (< jetzt)
+	// sind so nur die Zeilen dieses Tests. Mit der gemeinsamen Test-Uhr
+	// beanspruchte er Mails und loeschte Challenges, die parallel laufende Dateien
+	// gerade pruefen. Verworfen: Dateien nacheinander laufen lassen (langsamer)
+	// oder einen Vereinsfilter im Arbeiter nur fuer Tests.
+	const t0 = new Date('2000-01-01T08:00:00Z');
 	let jetzt = t0;
 	let verein: { id: string };
 	let n = 0;
@@ -186,7 +192,11 @@ describe('Mail-Arbeiter', () => {
 	it('stoppe wartet auf einen haengenden Versand', async () => {
 		await legeAn();
 		let frei!: () => void;
-		sende.mockImplementation(() => new Promise<void>((r) => (frei = r)));
+		// Nur die eigene Mail haengt; eine fremde, die doch faellig waere, darf frei
+		// nicht ueberschreiben.
+		sende.mockImplementation((m) =>
+			m.empfaenger === ADRESSE ? new Promise<void>((r) => (frei = r)) : Promise.resolve(),
+		);
 		const a = arbeiter();
 		const tick = a.tick();
 		await vi.waitFor(() => expect(eigeneAufrufe()).toHaveLength(1));

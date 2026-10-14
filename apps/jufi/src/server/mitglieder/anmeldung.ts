@@ -34,6 +34,8 @@ import { legeSitzungAn, setzeMitgliederCookie } from './sitzung.js';
  */
 
 const FEHLGESCHLAGEN = { fehler: 'Anmeldung fehlgeschlagen' };
+/** RFC 5321; laenger ist keine Adresse und erst recht kein Anmeldename. */
+const MAX_KENNUNG = 254;
 const ABGELAUFEN = { fehler: 'Anmeldung abgelaufen, bitte neu beginnen' };
 /**
  * Eigener Text statt "Anmeldung fehlgeschlagen" (Spec 4.3, Entscheidung 3): das
@@ -65,9 +67,16 @@ function darfHinein(person: Person): boolean {
  * mitzieht.
  */
 function normalisiereKennung(roh: string): { art: 'email' | 'anmeldename'; wert: string } {
-	return roh.includes('@')
-		? { art: 'email', wert: normalisiereEmail(roh) }
-		: { art: 'anmeldename', wert: normalisiereBenutzername(roh) };
+	const kennung = roh.includes('@')
+		? { art: 'email' as const, wert: normalisiereEmail(roh) }
+		: { art: 'anmeldename' as const, wert: normalisiereBenutzername(roh) };
+	// Laenger als jede moegliche Kennung (Adresse hoechstens 254 Zeichen,
+	// Anmeldename 30) ist wie leer: findet niemanden, und alle teilen sich einen
+	// Backoff-Schluessel. Sonst laege jeder 90-kB-Body bis zu 15 Minuten als
+	// Schluessel im Speicher. Nur die Laenge, nicht pruefeEmail/pruefeAnmeldename:
+	// eine gespeicherte Kennung, die einer spaeter verschaerften Pruefung nicht
+	// mehr genuegt, soll sich weiter anmelden koennen.
+	return kennung.wert.length > MAX_KENNUNG ? { ...kennung, wert: '' } : kennung;
 }
 
 /**

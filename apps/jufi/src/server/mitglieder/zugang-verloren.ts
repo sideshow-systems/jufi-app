@@ -78,8 +78,12 @@ export function zugangVerlorenRouten(
 		asynchron(async (req, res) => {
 			const { verein, db } = vereinsKontext(res);
 			const email = normalisiereEmail(text(req.body?.email));
+			const gueltig = pruefeEmail(email);
 			// Normalisiert im Schluessel, sonst zaehlten "A@x.de" und "a@x.de " getrennt.
-			const schluessel = [`m-reset-ip:${req.ip}`, `m-reset:${verein.id}:${email}`];
+			// Nur eine gueltige Adresse (hoechstens 254 Zeichen), alles andere teilt
+			// sich den leeren Schluessel: sonst laege jeder 90-kB-Body bis zu 15 Minuten
+			// lang als Schluessel im Speicher. Ungueltiges erzeugt ohnehin keine Mail.
+			const schluessel = [`m-reset-ip:${req.ip}`, `m-reset:${verein.id}:${gueltig ? email : ''}`];
 			const versuch = reserviere(versuche, schluessel);
 			if (versuch.wartenMs > 0 || versuch.loestSperreAus) {
 				zuVieleVersuche(res, versuch.wartenMs || sperre(versuche, schluessel));
@@ -89,7 +93,7 @@ export function zugangVerlorenRouten(
 			// Erst antworten, dann arbeiten: Inhalt und Dauer der Antwort haengen so
 			// an nichts, was die Datenbank weiss (Spec 3.4/4.4).
 			res.json(OK);
-			if (!pruefeEmail(email)) return;
+			if (!gueltig) return;
 			const zeit = jetzt();
 			nachlauf.starte(() => setzeZurueck(db, { vereinId: verein.id, email, jetzt: zeit, basisUrl: umgebung.basisUrl }));
 		}),

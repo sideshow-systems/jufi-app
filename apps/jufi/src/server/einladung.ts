@@ -46,6 +46,8 @@ export async function erzeugeEinladungMitId(
 	tx: Prisma.TransactionClient,
 	e: NeueEinladungEingabe & { vereinId: string },
 ): Promise<{ id: string; token: string }> {
+	// Ersetzungsregel Spec 3.4; dieselbe Bedingung steht in erzeugeVereinsEinladung,
+	// beide muessen gleich bleiben.
 	await tx.einladung.deleteMany({
 		where: { vereinId: e.vereinId, personId: e.personId, art: e.art, eingeloestAm: null },
 	});
@@ -76,6 +78,8 @@ export async function erzeugeVereinsEinladung(
 	db: Pick<VereinDb, 'einladung'>,
 	e: NeueEinladungEingabe,
 ): Promise<{ id: string; token: string }> {
+	// Ersetzungsregel Spec 3.4 wie in erzeugeEinladungMitId (den Verein setzt
+	// vereinDb); beide muessen gleich bleiben.
 	await db.einladung.deleteMany({ where: { personId: e.personId, art: e.art, eingeloestAm: null } });
 	const token = generateLinkToken();
 	const { id } = await db.einladung.create({ data: einladungsZeile(e, token), select: { id: true } });

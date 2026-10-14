@@ -46,6 +46,7 @@ describe('Anmelden', () => {
 	// Jeder Test eine eigene Adresse, damit sich Fehlversuche verschiedener Tests
 	// im Backoff je IP nicht addieren (trust proxy 1 nimmt X-Forwarded-For).
 	let ip = '';
+	let versuche: AttemptTracker;
 
 	const verifyRegistration = vi.fn<WebauthnPruefer['verifyRegistration']>();
 	const verifyAuthentication = vi.fn<WebauthnPruefer['verifyAuthentication']>();
@@ -64,6 +65,7 @@ describe('Anmelden', () => {
 		verifyAuthentication.mockReset();
 		vi.mocked(verifyPassword).mockClear();
 		// Fester AttemptTracker je Test: kein Zaehler aus einem anderen Test.
+		versuche = new AttemptTracker(() => uhr.getTime());
 		await server?.schliessen();
 		server = await starteTestServer(
 			createApp({
@@ -71,7 +73,7 @@ describe('Anmelden', () => {
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
 				jetzt: () => uhr,
-				anmeldeVersuche: new AttemptTracker(() => uhr.getTime()),
+				anmeldeVersuche: versuche,
 				webauthn: { verifyRegistration, verifyAuthentication },
 			}),
 		);
@@ -126,6 +128,19 @@ describe('Anmelden', () => {
 		(await prisma.zugang.findUniqueOrThrow({ where: { id: zugangId } })).letzteAnmeldungAm;
 
 	describe('Passwort', () => {
+		it('eine 90-kB-Kennung ist 401 wie jede falsche und landet nicht im Backoff-Schluessel', async () => {
+			const fail = vi.spyOn(versuche, 'fail');
+			// Knapp unter der Grenze von express.json (100 kB), sonst antwortete schon der Parser.
+			for (const kennung of [`${'a'.repeat(90_000)}@example.test`, 'b'.repeat(90_000)]) {
+				const r = await post(verein, '/anmelden', { kennung, passwort: PASSWORT });
+				expect(r.status).toBe(401);
+				expect(await r.json()).toEqual(FEHLGESCHLAGEN);
+			}
+			const schluessel = fail.mock.calls.map(([k]) => k);
+			expect(schluessel.length).toBeGreaterThan(0);
+			expect(Math.max(...schluessel.map((k) => k.length))).toBeLessThan(400);
+		});
+
 		it('Erwachsener meldet sich mit E-Mail und Passwort an', async () => {
 			const { email, zugangId } = await erwachsener(verein);
 			const r = await post(verein, '/anmelden', { kennung: email, passwort: PASSWORT });

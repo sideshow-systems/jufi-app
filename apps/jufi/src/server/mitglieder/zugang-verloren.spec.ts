@@ -16,11 +16,10 @@ type V = { id: string; slug: string };
 
 describe('Zugang verloren', () => {
 	const prisma = createPrismaClientFromEnv();
-	// Spaeter als die Uhr von mail/arbeiter.spec.ts: dessen Arbeiter beansprucht
-	// faellige Mails aller Vereine, unsere Zeilen sollen dabei nie faellig sein.
-	const uhr = new Date('2027-03-01T08:00:00Z');
+	const uhr = new Date('2026-10-13T08:00:00Z');
 	let server: TestServer;
 	let nachlauf: Nachlauf;
+	let versuche: AttemptTracker;
 	let verein: V;
 	let fremd: V;
 	let gesperrt: V;
@@ -41,6 +40,7 @@ describe('Zugang verloren', () => {
 	async function frischeApp() {
 		await nachlauf?.warteAufAlle();
 		nachlauf = new Nachlauf();
+		versuche = new AttemptTracker(() => uhr.getTime());
 		await server?.schliessen();
 		server = await starteTestServer(
 			createApp({
@@ -48,7 +48,7 @@ describe('Zugang verloren', () => {
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
 				jetzt: () => uhr,
-				anmeldeVersuche: new AttemptTracker(() => uhr.getTime()),
+				anmeldeVersuche: versuche,
 				nachlauf,
 			}),
 		);
@@ -132,8 +132,8 @@ describe('Zugang verloren', () => {
 		expect(r.status).toBe(200);
 		bodies.push(await r.text());
 		for (const fall of stumm) {
-			// Alle ungueltigen Eingaben normalisieren zum selben leeren Schluessel und
-			// teilten sich sonst den Zaehler; hier geht es nur um die Antwort.
+			// Alles, was keine gueltige Adresse ist (leer, kein Text, kein-at), teilt
+			// sich den leeren Schluessel und damit den Zaehler; hier geht es nur um die Antwort.
 			await frischeApp();
 			const a = await verloren(verein, fall.body);
 			expect(a.status, fall.name).toBe(200);
@@ -285,6 +285,18 @@ describe('Zugang verloren', () => {
 			expect((await verloren(verein, {}, andere)).status).toBe(429);
 			await nachlauf.warteAufAlle();
 		});
+	});
+
+	it('eine 90-kB-Adresse ist 200 wie jede ungueltige und landet nicht im Backoff-Schluessel', async () => {
+		const fail = vi.spyOn(versuche, 'fail');
+		// Knapp unter der Grenze von express.json (100 kB), sonst antwortete schon der Parser.
+		const r = await verloren(verein, { email: `${'a'.repeat(90_000)}@example.test` });
+		expect(r.status).toBe(200);
+		expect(await r.json()).toEqual(OK);
+		const schluessel = fail.mock.calls.map(([k]) => k);
+		expect(schluessel).toHaveLength(2);
+		expect(Math.max(...schluessel.map((k) => k.length))).toBeLessThan(400);
+		await nachlauf.warteAufAlle();
 	});
 
 	it('Gesperrter Verein ist 404', async () => {
