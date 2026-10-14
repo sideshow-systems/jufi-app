@@ -3,11 +3,13 @@ import {
 	encryptSecret,
 	generateRecoveryCodes,
 	generateTotpSecret,
+	hashPassword,
 	hashRecoveryCode,
 	MITGLIEDER_COOKIE,
 	verifyPassword,
+	verifyTotp,
 } from '@jufi/auth';
-import { createPrismaClientFromEnv } from '@jufi/db';
+import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
 import { randomInt, randomUUID } from 'node:crypto';
 import { generate } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,14 +18,22 @@ import { PLATZHALTER_HASH } from '../admin/anmeldung.js';
 import { createApp } from '../app.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
+import { legeSitzungAn } from './sitzung.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
 
 // Spion um das Original: so laesst sich zeigen, dass auch eine unbekannte
 // Kennung durch Argon2 laeuft. Verworfen: die Antwortzeit messen -- auf einem
 // belasteten Testrechner schwankt sie mehr als der Unterschied, der zaehlt.
+// Beide Spione erlauben ausserdem, genau zwischen Pruefung und Sitzung einen
+// Reset oder Passwortwechsel committen zu lassen; parallel gestartet hinge die
+// Reihenfolge vom Zufall ab, und der Test bewiese wenig.
 vi.mock('@jufi/auth', async (importOriginal) => {
 	const original = await importOriginal<typeof import('@jufi/auth')>();
-	return { ...original, verifyPassword: vi.fn(original.verifyPassword) };
+	return {
+		...original,
+		verifyPassword: vi.fn(original.verifyPassword),
+		verifyTotp: vi.fn(original.verifyTotp),
+	};
 });
 
 const PASSWORT = 'gruene-forelle-am-see';
@@ -127,6 +137,26 @@ describe('Anmelden', () => {
 	const letzteAnmeldung = async (zugangId: string) =>
 		(await prisma.zugang.findUniqueOrThrow({ where: { id: zugangId } })).letzteAnmeldungAm;
 
+	const sitzungen = (zugangId: string) => prisma.session.count({ where: { zugangId } });
+
+	/**
+	 * Was das Einloesen eines Reset-Links mit einem bestehenden Zugang tut
+	 * (einladung.ts, Spec 4.4): alle alten Wege und Sitzungen weg, neues Passwort.
+	 * Direkt in der Datenbank, weil hier nur zaehlt, dass es zwischen Pruefung und
+	 * Sitzung committet ist; das Einloesen selbst pruefen seine eigenen Tests.
+	 */
+	async function resetet(zugangId: string) {
+		await prisma.$transaction([
+			prisma.passkey.deleteMany({ where: { zugangId } }),
+			prisma.recoveryCode.deleteMany({ where: { zugangId } }),
+			prisma.session.deleteMany({ where: { zugangId } }),
+			prisma.zugang.update({
+				where: { id: zugangId },
+				data: { passwortHash: await hashPassword('neues-passwort-nach-reset'), totpGeheimnis: null, totpAktivAm: null },
+			}),
+		]);
+	}
+
 	describe('Passwort', () => {
 		it('eine 90-kB-Kennung ist 401 wie jede falsche und landet nicht im Backoff-Schluessel', async () => {
 			const fail = vi.spyOn(versuche, 'fail');
@@ -193,6 +223,48 @@ describe('Anmelden', () => {
 				expect(await r.json()).toEqual(FEHLGESCHLAGEN);
 				expect(cookieAus(r)).toBeUndefined();
 			}
+		});
+
+		describe('Reset oder Passwortwechsel zwischen Pruefung und Sitzung (Spec 4.4)', () => {
+			it('ein eingeloester Reset-Link: 401, keine Sitzung', async () => {
+				const m = await erwachsener(verein);
+				vi.mocked(verifyPassword).mockImplementationOnce(async (hash, passwort) => {
+					const ok = await verifyPassword(hash, passwort);
+					await resetet(m.zugangId);
+					return ok;
+				});
+				const r = await post(verein, '/anmelden', { kennung: m.email, passwort: PASSWORT });
+				expect(r.status).toBe(401);
+				expect(await r.json()).toEqual(FEHLGESCHLAGEN);
+				expect(cookieAus(r)).toBeUndefined();
+				expect(await sitzungen(m.zugangId)).toBe(0);
+				expect(await letzteAnmeldung(m.zugangId)).toEqual(angelegt);
+			});
+
+			it('ein Passwortwechsel im Profil: 401, nur die Sitzung des Wechsels bleibt', async () => {
+				const m = await erwachsener(verein);
+				// Eigene Sitzung zur Testuhr: die aus legeMitgliedAn stammt von "angelegt"
+				// und ist bei t0 laengst abgelaufen.
+				const token = await legeSitzungAn(vereinDb(prisma, verein.id), { zugangId: m.zugangId, jetzt: t0 });
+				let wechsel: Response | undefined;
+				vi.mocked(verifyPassword).mockImplementationOnce(async (hash, passwort) => {
+					const ok = await verifyPassword(hash, passwort);
+					// Ueber die echte Route: sie beendet die anderen Sitzungen, die
+					// Anmeldung darf danach keine neue mehr hinzufuegen.
+					wechsel = await sende(server.url, `/${verein.slug}/api/v1/profil/passwort`, {
+						methode: 'POST',
+						cookie: `${MITGLIEDER_COOKIE}=${token}`,
+						body: { alt: PASSWORT, neu: 'blauer-hecht-im-weiher' },
+					});
+					return ok;
+				});
+				const r = await post(verein, '/anmelden', { kennung: m.email, passwort: PASSWORT });
+				expect(wechsel?.status).toBe(200);
+				expect(r.status).toBe(401);
+				expect(await r.json()).toEqual(FEHLGESCHLAGEN);
+				expect(cookieAus(r)).toBeUndefined();
+				expect(await sitzungen(m.zugangId)).toBe(1);
+			});
 		});
 
 		it('unbekannte Kennung prueft gegen den Platzhalter-Hash', async () => {
@@ -359,6 +431,25 @@ describe('Anmelden', () => {
 		it('fehlender Body ist 401, kein 500', async () => {
 			expect((await post(verein, '/anmelden/totp')).status).toBe(401);
 		});
+
+		it('ein Reset zwischen Code-Pruefung und Sitzung: 401, keine Sitzung (Spec 4.4)', async () => {
+			const m = await erwachsener(verein);
+			const { geheimnis } = await mitTotp(m.zugangId);
+			const marke = await zwischenmarke(verein, m.email);
+			vi.mocked(verifyTotp).mockImplementationOnce(async (secret, code) => {
+				const ok = await verifyTotp(secret, code);
+				await resetet(m.zugangId);
+				return ok;
+			});
+			const r = await post(verein, '/anmelden/totp', {
+				zwischenmarke: marke,
+				code: await generate({ secret: geheimnis }),
+			});
+			expect(r.status).toBe(401);
+			expect(await r.json()).toEqual(FEHLGESCHLAGEN);
+			expect(cookieAus(r)).toBeUndefined();
+			expect(await sitzungen(m.zugangId)).toBe(0);
+		});
 	});
 
 	describe('Passkey', () => {
@@ -497,6 +588,23 @@ describe('Anmelden', () => {
 				expect(r.status).toBe(401);
 				expect(await r.json()).toEqual(FEHLGESCHLAGEN);
 			}
+		});
+
+		it('ein Reset zwischen Pruefung und Sitzung: 401 statt 500, keine Sitzung (Spec 4.4)', async () => {
+			const m = await erwachsener(verein);
+			const credentialId = await passkey(verein, m.zugangId);
+			const { challenge } = await optionen(verein);
+			// Der Reset loescht den Passkey, nachdem er gelesen und geprueft wurde.
+			verifyAuthentication.mockImplementationOnce(async () => {
+				await resetet(m.zugangId);
+				return { counter: 3 };
+			});
+			const r = await post(verein, '/anmelden/passkey', { antwort: antwort(challenge, credentialId) });
+			expect(r.status).toBe(401);
+			expect(await r.json()).toEqual(FEHLGESCHLAGEN);
+			expect(cookieAus(r)).toBeUndefined();
+			expect(await sitzungen(m.zugangId)).toBe(0);
+			expect(await letzteAnmeldung(m.zugangId)).toEqual(angelegt);
 		});
 
 		it('Backoff je IP', async () => {

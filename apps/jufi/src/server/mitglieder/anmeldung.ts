@@ -8,7 +8,7 @@ import {
 	verifyPassword,
 	verifyTotp,
 } from '@jufi/auth';
-import type { Person, VereinDb, Zugang } from '@jufi/db';
+import { sperreVereinszeile, type Person, type VereinDb, type Zugang } from '@jufi/db';
 import { normalisiereBenutzername, normalisiereEmail } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
@@ -154,7 +154,24 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				});
 				return;
 			}
-			const token = await legeSitzungAn(db, { zugangId: zugang.id, jetzt: jetzt(), userAgent: req.get('user-agent') });
+			const zeit = jetzt();
+			const userAgent = req.get('user-agent');
+			const token = await db.$transaction(async (tx) => {
+				// Argon2 lief ohne Sperre, und ein Reset-Link oder Passwortwechsel kann
+				// inzwischen committet haben. Beide loeschen die Sitzungen (Spec 4.4);
+				// eine danach angelegte ueberlebte sie 90 Tage. Darum unter derselben
+				// Sperre wie Einloesen und Profil, und nur, wenn der gepruefte Hash noch
+				// gilt. Verworfen: Argon2 unter der Sperre -- dann stuende jede andere
+				// Vereinsentscheidung ~50 ms je Anmeldeversuch still, auch fuer Raten.
+				await sperreVereinszeile(tx, verein.id);
+				if ((await tx.zugang.count({ where: { id: zugang.id, passwortHash: hash } })) !== 1) return undefined;
+				return legeSitzungAn(tx, { zugangId: zugang.id, jetzt: zeit, userAgent });
+			});
+			if (!token) {
+				// Dieselbe Antwort wie beim falschen Passwort: das alte gilt ja nicht mehr.
+				scheitere(versuche, schluessel, versuch.loestSperreAus, res, FEHLGESCHLAGEN);
+				return;
+			}
 			setzeMitgliederCookie(req, res, verein.slug, token);
 			res.json({ schritt: 'fertig' });
 		}),
@@ -191,6 +208,15 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 			const codeStimmt = code ? await verifyTotp(decryptSecret(zugang.totpGeheimnis), code) : false;
 			const userAgent = req.get('user-agent');
 			const ergebnis = await db.$transaction(async (tx) => {
+				// Wie beim Passwort: der Code wurde ohne Sperre geprueft, ein Reset-Link
+				// kann TOTP, Codes und Sitzungen inzwischen geloescht haben. Gilt das
+				// gepruefte Geheimnis nicht mehr, entsteht keine Sitzung -- auch nicht
+				// mit einem Wiederherstellungscode, die der Reset ebenfalls loescht.
+				await sperreVereinszeile(tx, verein.id);
+				const unveraendert = await tx.zugang.count({
+					where: { id: zugangId, totpGeheimnis: zugang.totpGeheimnis, totpAktivAm: { not: null } },
+				});
+				if (unveraendert !== 1) return undefined;
 				if (!codeStimmt) {
 					if (code || !wiederherstellungscode) return undefined;
 					// Bedingtes updateMany statt Lesen-dann-Schreiben: zwei gleichzeitige
@@ -305,12 +331,26 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 
 			const userAgent = req.get('user-agent');
 			const token = await db.$transaction(async (tx) => {
+				// Die Pruefung lief ohne Sperre; ein Reset-Link oder das Loeschen im
+				// Profil kann den Passkey inzwischen entfernt haben, samt Sitzungen.
+				// Unter der Sperre und nur, wenn es ihn noch gibt. updateMany statt
+				// update: ein fehlender Passkey zaehlt 0 und wird zur ueblichen 401,
+				// update warf P2025 und endete als 500.
+				await sperreVereinszeile(tx, verein.id);
 				// Den Zaehler uebernimmt, was die Pruefung meldet, auch 0: synchronisierte
 				// Schluessel melden immer 0, und die Bibliothek wertet das nicht als Klon
 				// (siehe Passkey.counter im Schema).
-				await tx.passkey.update({ where: { id: passkey.id }, data: { counter: geprueft.counter, lastUsedAt: zeit } });
+				const { count } = await tx.passkey.updateMany({
+					where: { id: passkey.id, zugangId: passkey.zugangId },
+					data: { counter: geprueft.counter, lastUsedAt: zeit },
+				});
+				if (count !== 1) return undefined;
 				return legeSitzungAn(tx, { zugangId: passkey.zugangId, jetzt: zeit, userAgent });
 			});
+			if (!token) {
+				scheitert();
+				return;
+			}
 			versuche.reset(schluessel[0] ?? '');
 			setzeMitgliederCookie(req, res, verein.slug, token);
 			res.json({ schritt: 'fertig' });
