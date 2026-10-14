@@ -96,6 +96,10 @@ describe('Einladung annehmen', () => {
 	it('entfernt das Token aus der Adresse und fragt damit die Pruefung', async () => {
 		http = TestBed.inject(HttpTestingController);
 		harness = await RouterTestingHarness.create();
+		// Der Harness setzt die Adresse selbst nie; ohne diese Zeile waere der Hash auch ohne
+		// replaceState in der Seite leer und der Test ohne Beweiskraft.
+		history.replaceState(null, '', '/demo/einladung#tok-1');
+		expect(location.hash).toBe('#tok-1');
 		const navigation = harness.navigateByUrl('/demo/einladung#tok-1');
 		await vi.waitFor(() => {
 			http.expectOne(`${API}/verein`).flush({ slug: 'demo', anzeigename: 'X', farbe: '#1d4ed8', hatLogo: false });
@@ -311,6 +315,43 @@ describe('Einladung annehmen', () => {
 		http.expectOne(`${API}/einladung/passkey-optionen`).flush({ optionen: { challenge: 'c2' } });
 		await vi.waitFor(() => http.expectOne(`${API}/einladung/einloesen`).flush({ vorname: 'Sandra' }));
 		expect(aufrufe).toBe(2);
+	});
+
+	it('400 beim Passkey zeigt den Servertext, der naechste Versuch holt neue Optionen', async () => {
+		hinzufuegen = async (wege) => {
+			await new Promise((ok, fehler) => wege.optionen().subscribe({ next: ok, error: fehler }));
+			await new Promise((ok, fehler) => wege.senden({ id: 'p' }).subscribe({ next: ok, error: fehler }));
+			return 'fertig';
+		};
+		await oeffne(ERWACHSENE);
+		await klick('Weiter');
+		await klick('Weiter');
+		knopf(seite, 'Passkey einrichten').click();
+		http.expectOne(`${API}/einladung/passkey-optionen`).flush({ optionen: { challenge: 'c' } });
+		await vi.waitFor(() =>
+			http
+				.expectOne(`${API}/einladung/einloesen`)
+				.flush({ fehler: 'Der Passkey konnte nicht eingerichtet werden' }, { status: 400, statusText: 'Bad Request' }),
+		);
+		await warteAuf(() => seite.querySelector('[role=alert]') !== null);
+		expect(seite.querySelector('[role=alert]')?.textContent).toContain('Der Passkey konnte nicht eingerichtet werden');
+		await klick('Passkey einrichten');
+		http.expectOne(`${API}/einladung/passkey-optionen`).flush({ optionen: { challenge: 'c2' } });
+		await vi.waitFor(() => http.expectOne(`${API}/einladung/einloesen`).flush({ vorname: 'Sandra' }));
+	});
+
+	it('409 ohne Feld (Einwilligung fehlt) zeigt den Servertext im Schritt Zugang', async () => {
+		await oeffne(ERWACHSENE);
+		await klick('Weiter');
+		await klick('Weiter');
+		tippe(seite, 'input[name=passwort]', 'Forelle am Glonnbach');
+		await klick('Zugang einrichten');
+		http
+			.expectOne(`${API}/einladung/einloesen`)
+			.flush({ fehler: 'Die Einwilligung der Familie fehlt noch' }, { status: 409, statusText: 'Conflict' });
+		await stabil();
+		expect(seite.querySelector('[role=alert]')?.textContent).toContain('Die Einwilligung der Familie fehlt noch');
+		expect(seite.querySelector('input[name=kennung]')).toBeNull();
 	});
 
 	it('404 beim Einloesen zeigt den Hinweis zum ungueltigen Link', async () => {
