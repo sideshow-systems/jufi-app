@@ -22,7 +22,7 @@ export const routes: Routes = [
 			{ path: '', component: VereinStartComponent, pathMatch: 'full', canActivate: [mitgliedAngemeldet] },
 			{
 				path: 'anmelden',
-				loadComponent: () => import('./verein/platzhalter').then((m) => m.PlatzhalterAnmeldenComponent),
+				loadComponent: () => import('./verein/anmelden').then((m) => m.AnmeldenComponent),
 			},
 			{
 				path: 'einladung',
@@ -30,7 +30,7 @@ export const routes: Routes = [
 			},
 			{
 				path: 'zugang-verloren',
-				loadComponent: () => import('./verein/platzhalter').then((m) => m.PlatzhalterZugangVerlorenComponent),
+				loadComponent: () => import('./verein/zugang-verloren').then((m) => m.ZugangVerlorenComponent),
 			},
 			{
 				path: 'profil',

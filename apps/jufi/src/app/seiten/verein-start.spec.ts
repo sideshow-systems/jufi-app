@@ -76,6 +76,8 @@ describe('Vereinsseite', () => {
 		await navigation;
 
 		expect(TestBed.inject(Router).url).toBe('/demo/anmelden');
+		// Die Anmeldeseite laedt ihren Vereinskopf; hier zaehlt nur das Ziel der Umleitung.
+		http.match('/demo/api/v1/verein');
 	});
 
 	it('zeigt Nicht gefunden, wenn der Server den Verein nicht kennt (404 auf ich)', async () => {
