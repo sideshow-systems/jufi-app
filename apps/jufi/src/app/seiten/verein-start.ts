@@ -1,8 +1,12 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject, input, signal } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
+import { Router, RouterLink } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { VereinApi } from '../daten/verein-api';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { ThemaService } from '../gestaltung/thema';
 import { KarteComponent } from '../gestaltung/ui';
+import { MitgliederApi } from '../verein/mitglieder-api';
 import { NichtGefundenComponent } from './nicht-gefunden';
 
 /** Gleich dem title in index.html; dorthin faellt der Titel zurueck, sobald kein Verein mehr gezeigt wird. */
@@ -11,7 +15,7 @@ const STANDARDTITEL = 'JuFi App';
 /** Platzhalter der Vereinsseite: zeigt, dass Slug, API und Vereinsfarbe zusammenspielen. */
 @Component({
 	selector: 'jf-verein-start',
-	imports: [KarteComponent, NichtGefundenComponent],
+	imports: [KarteComponent, NichtGefundenComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@if (verein.error()) {
@@ -30,6 +34,14 @@ const STANDARDTITEL = 'JuFi App';
 						<!-- Name allein statt im Satz: "bei den" passt zu Jungfischer Demo, nicht zu Glonntal Fischereiverein. -->
 						<p class="gruss">Willkommen</p>
 						<h1>{{ v.anzeigename }}</h1>
+						<!-- Schlicht, bis die Huelle mit Navigation kommt (Etappe 5): Profil und Abmelden muessen schon jetzt erreichbar sein. -->
+						<div class="reihe">
+							<a class="knopf" [routerLink]="['/', slug(), 'profil']">Profil</a>
+							<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden()">Abmelden</button>
+						</div>
+						@if (abmeldefehler(); as text) {
+							<p class="fehler" role="alert">{{ text }}</p>
+						}
 					</jf-karte>
 				</main>
 			}
@@ -55,6 +67,15 @@ const STANDARDTITEL = 'JuFi App';
 			margin-bottom: var(--a1);
 			color: var(--text-gedaempft);
 		}
+		.reihe {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--a3);
+		}
+		.fehler {
+			margin: var(--a3) 0 0;
+			color: var(--fehler);
+		}
 	`,
 })
 export class VereinStartComponent {
@@ -62,7 +83,12 @@ export class VereinStartComponent {
 	readonly slug = input.required<string>();
 
 	private readonly api = inject(VereinApi);
+	private readonly mitglieder = inject(MitgliederApi);
+	private readonly router = inject(Router);
 	private readonly thema = inject(ThemaService);
+
+	protected readonly laeuft = signal(false);
+	protected readonly abmeldefehler = signal<string | null>(null);
 
 	// Neuer Slug, neue Anfrage; eine noch laufende wird dabei verworfen.
 	protected readonly verein = rxResource({
@@ -87,5 +113,20 @@ export class VereinStartComponent {
 				});
 			}
 		});
+	}
+
+	protected async abmelden(): Promise<void> {
+		if (this.laeuft()) return;
+		this.laeuft.set(true);
+		this.abmeldefehler.set(null);
+		try {
+			await firstValueFrom(this.mitglieder.abmelden(this.slug()));
+			await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
+		} catch (ursache) {
+			// Bleibt die Person auf der Seite, weiss sie, dass die Sitzung noch steht: kein stilles Scheitern.
+			this.abmeldefehler.set(fehlertext(alsApiFehler(ursache)));
+		} finally {
+			this.laeuft.set(false);
+		}
 	}
 }

@@ -4,6 +4,8 @@ import {
 	ADMIN_COOKIE_PFAD,
 	ADMIN_SITZUNG_SEKUNDEN,
 	MITGLIEDER_COOKIE,
+	MITGLIEDER_SITZUNG_SEKUNDEN,
+	mitgliederCookiePfad,
 	readCookie,
 	serializeClearedCookie,
 	serializeCookie,
@@ -102,5 +104,23 @@ describe('Admin-Cookie', () => {
 				secure: true,
 			}),
 		).toBe('jufi_admin=tok; Path=/admin/; HttpOnly; SameSite=Lax; Max-Age=43200; Secure');
+	});
+});
+
+describe('Mitglieder-Cookie', () => {
+	it('gilt nur unter dem Pfad des eigenen Vereins', () => {
+		expect(mitgliederCookiePfad('glonntal')).toBe('/glonntal/');
+	});
+
+	it('traegt 90 Tage, Pfad, HttpOnly und SameSite=Lax', () => {
+		const c = serializeCookie(MITGLIEDER_COOKIE, 'abc', {
+			path: mitgliederCookiePfad('glonntal'),
+			maxAgeSeconds: MITGLIEDER_SITZUNG_SEKUNDEN,
+			secure: false,
+		});
+		expect(c).toContain('Path=/glonntal/');
+		expect(c).toContain('Max-Age=7776000');
+		expect(c).toContain('HttpOnly');
+		expect(c).toContain('SameSite=Lax');
 	});
 });

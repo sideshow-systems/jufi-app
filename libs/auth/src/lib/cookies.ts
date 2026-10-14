@@ -27,6 +27,22 @@ export const ADMIN_SITZUNG_SEKUNDEN = 12 * 60 * 60;
  */
 export const ADMIN_COOKIE_PFAD = '/admin/';
 
+/**
+ * Mitglieder-Sitzung: 90 Tage ab der letzten Verlängerung (Global Constraints). Die
+ * Jugendgruppe meldet sich nicht jede Woche an; 12 Stunden wie beim Admin trieben
+ * Kinder und Eltern ständig zur Anmeldung. Wert für Cookie (Max-Age) und Ablauf.
+ */
+export const MITGLIEDER_SITZUNG_SEKUNDEN = 90 * 24 * 60 * 60;
+
+/**
+ * Das Mitglieder-Cookie gilt nur unter dem Pfad des eigenen Vereins. Mit Pfad `/`
+ * ginge es an jeden Verein und an die Verwaltung mit; so bleibt die Sitzung in
+ * ihrem Verein, auch wenn jemand in mehreren Mitglied ist.
+ */
+export function mitgliederCookiePfad(slug: string): string {
+	return `/${slug}/`;
+}
+
 export interface CookieOptions {
 	path: string;
 	maxAgeSeconds: number;

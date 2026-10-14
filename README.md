@@ -45,6 +45,23 @@ Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<proj
 laufende `pnpm run db:up`. Sie legen ihre Datenbanken selbst an und setzen sie zurück, die Entwicklungsdatenbank
 `jufi` berühren sie nicht.
 
+## Mail
+
+Der Mail-Arbeiter im Serverprozess versendet die Mails aus der Warteschlange (Einladung, „Passwort vergessen?"). Er
+liest `SMTP_HOST` und `SMTP_PORT` (lokal 127.0.0.1:1025), `MAIL_ABSENDER`, `MAIL_ANTWORT` und `MAIL_BETREFF_PRAEFIX`
+aus der `.env`. Lokal fängt Mailpit alles ab und zeigt es unter <http://localhost:8025>; echte Adressen erreicht nichts.
+
+### Einladung lokal ausprobieren
+
+```bash
+pnpm run db:up
+pnpm run dev
+```
+
+Den Admin wie unten anlegen, unter <http://localhost:4200/admin> anmelden und einen Verein mit der Option „per Mail"
+anlegen. Die Einladungsmail liegt in Mailpit; den Link darin öffnen und den Zugang einrichten. Nur erfundene Daten
+verwenden.
+
 ## Admin anlegen
 
 Den ersten Plattform-Admin legt nur die Kommandozeile an; die Oberfläche kann das bewusst nicht. `BASIS_URL` in der

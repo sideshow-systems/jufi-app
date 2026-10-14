@@ -35,16 +35,17 @@ type ChallengeSpeicher = Pick<PrismaClient, 'webauthnChallenge'>;
  * bei der noch niemand feststeht (Passkey ohne Benutzernamen); sonst gehoert die
  * Challenge diesem Admin und taugt nur fuer ihn. vereinId bleibt immer leer.
  *
- * Raeumt vorher abgelaufene Challenges weg, alle, auch die der Vereine: sie sind
- * ohnehin unbrauchbar, und so braucht es keinen eigenen Aufraeum-Takt. Verworfen:
+ * Raeumt vorher abgelaufene Admin-Challenges weg (vereinId leer; adminId allein
+ * taugt nicht als Merkmal, weil eine Anmeldung ohne Namen adminId null hat), damit es keinen eigenen Aufraeum-Takt braucht. Verworfen:
  * ein Zeitgeber -- die Tabelle waechst nur durch Anmeldeversuche, ein
  * Aufraeumen bei jedem Anlegen haelt sie ohne zusaetzlichen Prozess klein.
+ * Zeilen der Vereine gehoeren deren Code und bleiben unberuehrt.
  */
 export async function speichereAdminChallenge(
 	prisma: ChallengeSpeicher,
 	eingabe: { challenge: string; purpose: ChallengePurpose; adminId: string | null; jetzt: Date },
 ): Promise<void> {
-	await prisma.webauthnChallenge.deleteMany({ where: { expiresAt: { lte: eingabe.jetzt } } });
+	await prisma.webauthnChallenge.deleteMany({ where: { vereinId: null, expiresAt: { lte: eingabe.jetzt } } });
 	await prisma.webauthnChallenge.create({
 		data: {
 			challenge: eingabe.challenge,
@@ -68,18 +69,19 @@ export async function speichereAdminChallenge(
  * braeuchte ein try/catch um einen Prisma-Fehlercode.
  *
  * undefined bei fehlender Zeile, falschem Zweck, Ablauf oder gesetzter
- * vereinId: eine Vereins-Challenge taugt nie fuer den Admin. Die Bibliothek
+ * vereinId: eine Vereins-Challenge taugt nie fuer den Admin und bleibt liegen. Die Bibliothek
  * prueft Zweck und Ablauf nicht selbst (anders als hwyd), das geschieht hier.
  */
 export async function nimmAdminChallenge(
 	prisma: ChallengeSpeicher,
 	eingabe: { challenge: string; purpose: ChallengePurpose; jetzt: Date },
 ): Promise<{ adminId: string | null } | undefined> {
-	const zeile = await prisma.webauthnChallenge.findUnique({ where: { challenge: eingabe.challenge } });
+	// vereinId null schon in der Suche: eine Vereins-Challenge wird weder
+	// eingeloest noch verbraucht, sie gehoert dem Vereinscode.
+	const zeile = await prisma.webauthnChallenge.findFirst({ where: { challenge: eingabe.challenge, vereinId: null } });
 	if (!zeile) return undefined;
 	const { count } = await prisma.webauthnChallenge.deleteMany({ where: { id: zeile.id } });
 	if (count !== 1) return undefined;
-	if (zeile.vereinId !== null) return undefined;
 	if (zeile.purpose !== eingabe.purpose) return undefined;
 	if (zeile.expiresAt <= eingabe.jetzt) return undefined;
 	return { adminId: zeile.adminId };
@@ -89,7 +91,7 @@ export async function nimmAdminChallenge(
  * Relying Party dieser Anfrage; WEBAUTHN_RP_ID und WEBAUTHN_ORIGIN haben
  * Vorrang vor dem Host-Header (Umgebung), lokal genuegt der Header.
  */
-function relyingParty(req: Request, deps: VolleAppDeps): RelyingParty {
+export function relyingParty(req: Request, deps: Pick<VolleAppDeps, 'umgebung'>): RelyingParty {
 	return resolveRelyingParty({
 		host: req.headers.host,
 		secure: req.secure,

@@ -2,7 +2,7 @@ import { generateLinkToken, hashToken } from '@jufi/auth';
 import { createPrismaClientFromEnv } from '@jufi/db';
 import { EINLADUNG_GUELTIG_MS } from '@jufi/domain';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { einladungsLink, erzeugeEinladung, leitungsEinladungsText } from './einladung.js';
+import { einladungsLink, erzeugeEinladung, leitungsEinladungsText, notfallLinkText } from './einladung.js';
 import { legeVereinAn } from './test-vereine.js';
 
 describe('Einladungen', () => {
@@ -74,5 +74,18 @@ describe('Einladungen', () => {
 				'Richte hier deinen Zugang ein – der Link gilt 14 Tage und nur für dich:\n' +
 				'http://jufi.test/glonntal/einladung#abc_123-XYZ',
 		);
+	});
+
+	it('Notfall-Text nennt den Grund, die Folgen und die Gueltigkeit', () => {
+		const text = notfallLinkText({
+			vorname: 'Thomas',
+			anzeigename: 'Jungfischer Glonntal',
+			link: 'http://jufi.test/glonntal/einladung#abc',
+		});
+		expect(text).toContain('Thomas');
+		expect(text).toContain('Jungfischer Glonntal');
+		expect(text).toContain('http://jufi.test/glonntal/einladung#abc');
+		expect(text).toContain('14 Tage');
+		expect(text).toContain('Altes Passwort, Passkeys und alle angemeldeten Geräte werden dabei gelöscht');
 	});
 });

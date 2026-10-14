@@ -102,6 +102,39 @@ describe('Verein anlegen', () => {
 		expect(o.seite.querySelector('input[name=email]')).not.toBeNull();
 	});
 
+	it('ohne gesetztes Kaestchen fehlt perMail im Body', async () => {
+		const o = await oeffne();
+		await fuelleAus(o);
+		expect(o.seite.textContent).toContain('Zusätzlich per Mail senden');
+		expect(o.seite.querySelector<HTMLInputElement>('input[name=per-mail]')?.checked).toBe(false);
+		knopf(o.seite, 'Verein anlegen').click();
+
+		const anfrage = o.http.expectOne(`${API}/vereine`);
+		expect('perMail' in anfrage.request.body).toBe(false);
+		anfrage.flush({ id: 'neu-1', slug: 'jungfischer-mueller', einladung: EINLADUNG, mailEingereiht: false });
+		await stabil(o.harness);
+
+		expect(o.seite.textContent).not.toContain('Mail ist eingereiht');
+	});
+
+	it('mit gesetztem Kaestchen geht perMail true mit, und die Antwort zeigt den Hinweis', async () => {
+		const o = await oeffne();
+		await fuelleAus(o);
+		o.seite.querySelector<HTMLInputElement>('input[name=per-mail]')?.click();
+		await stabil(o.harness);
+		knopf(o.seite, 'Verein anlegen').click();
+
+		const anfrage = o.http.expectOne(`${API}/vereine`);
+		expect(anfrage.request.body.perMail).toBe(true);
+		anfrage.flush({ id: 'neu-1', slug: 'jungfischer-mueller', einladung: EINLADUNG, mailEingereiht: true });
+		await stabil(o.harness);
+
+		expect(o.seite.textContent).toContain('Mail ist eingereiht');
+		expect(o.seite.querySelector('[role=status]')?.classList.contains('mail-hinweis')).toBe(true);
+		// Der Text bleibt trotzdem stehen: Die Mail ist ein zusaetzlicher Weg, kein Ersatz.
+		expect(o.seite.textContent).toContain('dein Link');
+	});
+
 	it('409 beim Slug zeigt den Fehler am Slug-Feld', async () => {
 		const o = await oeffne();
 		await fuelleAus(o);

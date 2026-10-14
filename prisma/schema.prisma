@@ -93,22 +93,27 @@ enum AdminAktion {
 // --- Verein -------------------------------------------------------------------
 
 model Verein {
-  id          String       @id @default(cuid())
+  id           String       @id @default(cuid())
   /// Kleinbuchstaben, Ziffern, Bindestriche, 3–30 Zeichen (CHECK verein_slug).
   /// Reservierte Slugs prueft libs/domain; die Liste waechst mit den Routen und
   /// gehoert deshalb nicht in einen CHECK.
-  slug        String       @unique
+  slug         String       @unique
   /// Offizieller Name, z.B. fuer Einwilligungstext, Kontakt, Fusszeile der Mails.
-  name        String
+  name         String
   /// Hoechstens 24 Zeichen (CHECK verein_anzeigename): Kopfzeile, Passkey-Name,
   /// Home-Bildschirm, Betreff der Mails.
-  anzeigename String
+  anzeigename  String
   /// Vereinsfarbe als Hex-Wert; alles Weitere wird daraus abgeleitet.
-  farbe       String
+  farbe        String
   /// Freitext. Optional, weil "Verein anlegen" (Spec 7.3) ihn nicht abfragt.
-  kontakt     String?
-  status      VereinStatus @default(AKTIV)
-  angelegtAm  DateTime     @default(now())
+  kontakt      String?
+  status       VereinStatus @default(AKTIV)
+  angelegtAm   DateTime     @default(now())
+  /// Zaehler nur zum Sperren: Wer ihn erhoeht, haelt die Vereinszeile bis zum Ende
+  /// seiner Transaktion; parallele Anmeldungen und Einloesungen im selben Verein
+  /// laufen dadurch nacheinander. Gewaehlt statt SELECT ... FOR UPDATE (Roh-SQL ist in
+  /// vereinDb gesperrt) und statt Advisory Locks (haengen an Verbindungen, nicht an Zeilen).
+  sperrzaehler Int          @default(0)
 
   logo                  VereinLogo?
   personen              Person[]
@@ -252,20 +257,22 @@ model UntergruppeMitglied {
 /// 0..1 je Person. Entsteht erst beim Einloesen der Einladung, zusammen mit dem
 /// ersten Anmeldeweg — einen Zugang ohne Passkey und ohne Passwort gibt es nicht.
 model Zugang {
-  id            String    @id @default(cuid())
-  vereinId      String
-  verein        Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
-  personId      String    @unique
-  person        Person    @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  id                String    @id @default(cuid())
+  vereinId          String
+  verein            Verein    @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  personId          String    @unique
+  person            Person    @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
   /// Kleingeschrieben, eindeutig je Verein; nur Jungfischer und ihre Kennung.
   /// Die Kennung Erwachsener ist Person.email.
-  anmeldename   String?
+  anmeldename       String?
   /// Argon2id.
-  passwortHash  String?
+  passwortHash      String?
   /// Verschluesselt mit TOTP_ENC_KEY; nur Erwachsene mit Rechten.
-  totpGeheimnis String?
-  totpAktivAm   DateTime?
-  angelegtAm    DateTime  @default(now())
+  totpGeheimnis     String?
+  totpAktivAm       DateTime?
+  /// Zeitpunkt der letzten erfolgreichen Anmeldung; null, solange noch nie angemeldet.
+  letzteAnmeldungAm DateTime?
+  angelegtAm        DateTime  @default(now())
 
   passkeys      Passkey[]
   recoveryCodes RecoveryCode[]

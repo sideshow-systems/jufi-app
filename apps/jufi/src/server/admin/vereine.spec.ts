@@ -228,7 +228,12 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 			data: { vereinId, art: 'ERWACHSENER', vorname: 'Clara', nachname: 'Erfunden', rechte: ALLE_RECHTE },
 		});
 		await prisma.person.create({ data: { vereinId, art: 'ERWACHSENER', vorname: 'Dieter', nachname: 'Erfunden' } });
-		const zugang = await prisma.zugang.create({ data: { vereinId, personId: erwachsener.id } });
+		// Die Kennzahl kommt vom Zugang, nicht von den Sitzungen: Sie bleibt, wenn
+		// Sitzungen ablaufen oder beim Abmelden geloescht werden.
+		const zugang = await prisma.zugang.create({
+			data: { vereinId, personId: erwachsener.id, letzteAnmeldungAm: new Date('2026-10-01T10:00:00Z') },
+		});
+		// Juenger als die Anmeldung am Zugang, damit der Test eine Ableitung aus Sitzungen erwischt.
 		// 23:30 UTC ist in Berlin (Sommerzeit) schon der naechste Tag.
 		await prisma.session.create({
 			data: {
@@ -265,10 +270,47 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 			slug: 'kennzahlen-test',
 			anzeigename: 'Kennzahlen',
 			status: 'AKTIV',
-			kennzahlen: { jungfischer: 2, erwachsene: 2, zugaenge: 1, offeneEinladungen: 1, letzteAnmeldung: '2026-10-13' },
+			kennzahlen: { jungfischer: 2, erwachsene: 2, zugaenge: 1, offeneEinladungen: 1, letzteAnmeldung: '2026-10-01' },
 		});
 		const namen = vereine.map((v) => v.anzeigename);
 		expect(namen).toEqual([...namen].sort((a, b) => a.localeCompare(b, 'de')));
+	});
+
+	it('Kennzahl letzte Anmeldung nimmt den juengsten Zugang und ist null ohne Anmeldung', async () => {
+		const verein = await legeVereinAn(prisma, { slug: 'kennzahl-anmeldung', anzeigename: 'Anmeldung' });
+		const vereinId = verein.id;
+		const person = (vorname: string) =>
+			prisma.person.create({ data: { vereinId, art: 'ERWACHSENER', vorname, nachname: 'Erfunden' } });
+		const a = await person('Anna');
+		const b = await person('Bert');
+		const ohne = await prisma.zugang.create({ data: { vereinId, personId: a.id } });
+		const abfrage = async () => {
+			const { vereine } = (await (await hole('/vereine')).json()) as {
+				vereine: { id: string; kennzahlen: { letzteAnmeldung: string | null } }[];
+			};
+			return vereine.find((v) => v.id === vereinId)?.kennzahlen.letzteAnmeldung;
+		};
+
+		// Nur eine Sitzung, keine Anmeldung am Zugang: noch nichts.
+		await prisma.session.create({
+			data: {
+				vereinId,
+				zugangId: ohne.id,
+				tokenHash: hashToken(generateLinkToken()),
+				ablauf: new Date(uhr.getTime() + 90 * TAG_MS),
+				angelegtAm: new Date('2026-10-12T10:00:00Z'),
+			},
+		});
+		expect(await abfrage()).toBeNull();
+
+		await prisma.zugang.update({
+			where: { id: ohne.id },
+			data: { letzteAnmeldungAm: new Date('2026-09-01T10:00:00Z') },
+		});
+		await prisma.zugang.create({
+			data: { vereinId, personId: b.id, letzteAnmeldungAm: new Date('2026-10-05T10:00:00Z') },
+		});
+		expect(await abfrage()).toBe('2026-10-05');
 	});
 
 	it('Vor- und Nachname mit genau 100 Zeichen werden angenommen', async () => {

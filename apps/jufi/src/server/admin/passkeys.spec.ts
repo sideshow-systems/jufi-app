@@ -6,6 +6,7 @@ import { createApp } from '../app.js';
 import type { WebauthnPruefer } from '../abhaengigkeiten.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
+import { nimmAdminChallenge, speichereAdminChallenge } from './passkeys.js';
 import { meldeAdminAn } from './test-admin.js';
 
 const FEHLGESCHLAGEN = { fehler: 'Anmeldung fehlgeschlagen' };
@@ -180,8 +181,42 @@ describe('Admin-Passkeys', () => {
 			expect(r.status).toBe(401);
 			expect(await r.json()).toEqual(FEHLGESCHLAGEN);
 			expect(verifyAuthentication).not.toHaveBeenCalled();
-			// Eingeloest wird sie trotzdem: eine fremde Challenge soll nicht liegen bleiben.
-			expect(await prisma.webauthnChallenge.findUnique({ where: { challenge } })).toBeNull();
+			// Die Zeile gehoert dem Verein und bleibt: der Admin-Code fasst sie nicht an.
+			expect(await prisma.webauthnChallenge.findUnique({ where: { challenge } })).not.toBeNull();
+		});
+
+		it('Admin-Code laesst Vereins-Challenges stehen', async () => {
+			const verein = await legeVereinAn(prisma, { slug: `passkey-${randomUUID().slice(0, 8)}` });
+			const vereinsChallenge = (abgelaufen: boolean) => ({
+				challenge: `verein-${randomUUID()}`,
+				vereinId: verein.id,
+				purpose: 'register' as const,
+				expiresAt: new Date(t0.getTime() + (abgelaufen ? -1 : WEBAUTHN_CHALLENGE_TTL_MS)),
+			});
+			const alteVerein = vereinsChallenge(true);
+			const gueltigeVerein = vereinsChallenge(false);
+			await prisma.webauthnChallenge.createMany({ data: [alteVerein, gueltigeVerein] });
+
+			// Das Anlegen raeumt abgelaufene Admin-Zeilen, aber keine des Vereins.
+			const adminChallenge = `admin-${randomUUID()}`;
+			await speichereAdminChallenge(prisma, {
+				challenge: adminChallenge,
+				purpose: 'register',
+				adminId: null,
+				jetzt: t0,
+			});
+			expect(await prisma.webauthnChallenge.findUnique({ where: { challenge: alteVerein.challenge } })).not.toBeNull();
+
+			expect(await nimmAdminChallenge(prisma, { challenge: adminChallenge, purpose: 'register', jetzt: t0 })).toEqual({
+				adminId: null,
+			});
+			expect(
+				await nimmAdminChallenge(prisma, { challenge: gueltigeVerein.challenge, purpose: 'register', jetzt: t0 }),
+			).toBeUndefined();
+			expect(await prisma.webauthnChallenge.findUnique({ where: { challenge: alteVerein.challenge } })).not.toBeNull();
+			expect(
+				await prisma.webauthnChallenge.findUnique({ where: { challenge: gueltigeVerein.challenge } }),
+			).not.toBeNull();
 		});
 
 		it('Challenge gilt nur einmal', async () => {

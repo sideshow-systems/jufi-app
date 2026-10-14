@@ -26,3 +26,40 @@ const EMAIL_MAX = 254;
 export function pruefeEmail(s: string): boolean {
 	return s.length <= EMAIL_MAX && EMAIL.test(s);
 }
+
+// Der Anmeldename der Jungfischer teilt das Muster des Benutzernamens, darf aber kein
+// "@" enthalten (das Muster erlaubt es ohnehin nicht): So bleibt eine Kennung eindeutig
+// als E-Mail oder als Anmeldename erkennbar, ohne dass die Anmeldung raten muss.
+export function pruefeAnmeldename(s: string): boolean {
+	return pruefeBenutzername(s) && !s.includes('@');
+}
+
+const UMSCHRIFT: Record<string, string> = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss' };
+
+// Umlaute werden vor der NFD-Zerlegung umgeschrieben; sonst wuerde aus "ö" ein "o"
+// und "Jörg" hiesse "jorg" statt "joerg".
+export function anmeldenameVorschlag(vorname: string, vergeben: ReadonlySet<string>): string {
+	let stamm = vorname
+		.toLowerCase()
+		.replace(/[äöüß]/g, (c) => UMSCHRIFT[c])
+		.normalize('NFD')
+		.replace(/[^a-z0-9]/g, '');
+	while (stamm.length < 3) stamm += '1';
+	if (!vergeben.has(stamm)) return stamm;
+	for (let n = 2; ; n++) {
+		const kandidat = `${stamm}${n}`;
+		if (!vergeben.has(kandidat)) return kandidat;
+	}
+}
+
+export function pruefeKennung(
+	art: 'ERWACHSENER' | 'JUNGFISCHER',
+	roh: string,
+): { ok: true; wert: string } | { ok: false; grund: 'ungueltig' } {
+	if (art === 'ERWACHSENER') {
+		const wert = normalisiereEmail(roh);
+		return pruefeEmail(wert) ? { ok: true, wert } : { ok: false, grund: 'ungueltig' };
+	}
+	const wert = normalisiereBenutzername(roh);
+	return pruefeAnmeldename(wert) ? { ok: true, wert } : { ok: false, grund: 'ungueltig' };
+}

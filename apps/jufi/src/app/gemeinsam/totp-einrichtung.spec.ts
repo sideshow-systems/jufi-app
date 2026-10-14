@@ -1,6 +1,8 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { adminTestAnbieter, knopf, tippe } from './test-hilfen';
+import { map } from 'rxjs';
+import { AdminApi } from '../admin/admin-api';
+import { adminTestAnbieter, knopf, tippe } from '../admin/test-hilfen';
 import { TotpEinrichtungComponent } from './totp-einrichtung';
 
 // jsdom hat kein canvas; der QR-Code ist hier nicht der Gegenstand.
@@ -21,6 +23,12 @@ describe('TotpEinrichtungComponent', () => {
 
 	async function oeffne() {
 		const fixture = TestBed.createComponent(TotpEinrichtungComponent);
+		// Wie die Admin-Seiten: Die Aufrufe der Admin-API kommen als Eingaben herein.
+		const api = TestBed.inject(AdminApi);
+		fixture.componentRef.setInput('starten', () =>
+			api.totpStart().pipe(map((s) => ({ ...s, marke: s.zwischenmarke }))),
+		);
+		fixture.componentRef.setInput('bestaetigen', (marke: string, code: string) => api.totpBestaetigen(marke, code));
 		const eingerichtet = vi.fn();
 		fixture.componentInstance.eingerichtet.subscribe(eingerichtet);
 		fixture.detectChanges();

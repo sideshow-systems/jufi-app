@@ -37,8 +37,10 @@ const TOTP_SCHON_EINGERICHTET = { fehler: 'TOTP ist schon eingerichtet' };
  * hashPassword. Fuer unbekannte Namen und Admins vor der Einrichtung: geprueft
  * wird trotzdem, damit die Antwortzeit nicht verraet, ob es den Namen gibt
  * (wie hwyd). Verworfen: sofort 401 -- die fehlenden ~50 ms Argon2 waeren messbar.
+ * Exportiert, weil die Mitglieder-Anmeldung (mitglieder/anmeldung.ts) denselben
+ * braucht; eine Kopie koennte mit anderen Parametern auseinanderlaufen.
  */
-const PLATZHALTER_HASH =
+export const PLATZHALTER_HASH =
 	'$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$0000000000000000000000000000000000000000000';
 
 /**

@@ -1,19 +1,11 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import type {
 	PublicKeyCredentialCreationOptionsJSON,
 	PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
 import { catchError, type Observable, throwError } from 'rxjs';
-
-/** Wie jeder Fehler der Admin-API bei der Seite ankommt (statt HttpErrorResponse). */
-export interface AdminFehler {
-	/** 0 heisst: keine Antwort bekommen (Netz). */
-	status: number;
-	fehler: string;
-	feld?: string;
-	wartenSekunden?: number;
-}
+import { alsApiFehler } from '../gemeinsam/api-fehler';
 
 export interface AdminIch {
 	benutzername: string;
@@ -87,50 +79,14 @@ export interface NeuerVerein {
 	slug: string;
 	farbe: string;
 	leitung: { vorname: string; nachname: string; email: string };
+	/** Nur true oder gar nicht: Der Server wertet nichts anderes als true. */
+	perMail?: true;
 }
 
-const KEINE_VERBINDUNG = 'Keine Verbindung – nochmal versuchen';
-
-/**
- * Macht aus allem, was ein HTTP-Aufruf werfen kann, einen AdminFehler. Ein
- * Netzfehler hat keinen Koerper; ein Koerper ohne fehler-Feld (etwa die
- * HTML-Fehlerseite eines Proxys) bekommt denselben Allgemeintext.
- */
-export function alsAdminFehler(ursache: unknown): AdminFehler {
-	if (ursache instanceof HttpErrorResponse) {
-		const koerper: unknown = ursache.error;
-		const feldweise = koerper && typeof koerper === 'object' ? (koerper as Record<string, unknown>) : {};
-		return {
-			status: ursache.status,
-			fehler:
-				typeof feldweise['fehler'] === 'string'
-					? feldweise['fehler']
-					: ursache.status === 0
-						? KEINE_VERBINDUNG
-						: 'Unerwarteter Fehler',
-			...(typeof feldweise['feld'] === 'string' ? { feld: feldweise['feld'] } : {}),
-			...(typeof feldweise['wartenSekunden'] === 'number' ? { wartenSekunden: feldweise['wartenSekunden'] } : {}),
-		};
-	}
-	if (istAdminFehler(ursache)) return ursache;
-	return { status: 0, fehler: ursache instanceof Error ? ursache.message : 'Unerwarteter Fehler' };
-}
-
-export function istAdminFehler(wert: unknown): wert is AdminFehler {
-	return (
-		!!wert &&
-		typeof wert === 'object' &&
-		typeof (wert as AdminFehler).status === 'number' &&
-		typeof (wert as AdminFehler).fehler === 'string'
-	);
-}
-
-/** Der Satz unter dem Formular: bei 429 mit Wartezeit, sonst der Text des Servers. */
-export function fehlertext(fehler: AdminFehler): string {
-	if (fehler.status === 429 && fehler.wartenSekunden !== undefined) {
-		return `Zu viele Versuche – bitte in ${fehler.wartenSekunden} Sekunden erneut`;
-	}
-	return fehler.fehler;
+/** Jede Antwort, die eine Einladung liefert, sagt auch, ob eine Mail dazu eingereiht ist. */
+export interface EinladungAntwort {
+	einladung: Einladung;
+	mailEingereiht: boolean;
 }
 
 /**
@@ -144,13 +100,13 @@ export class AdminApi {
 	private post<T>(pfad: string, koerper: object = {}): Observable<T> {
 		return this.http
 			.post<T>(`/admin/api/v1${pfad}`, koerper)
-			.pipe(catchError((e: unknown) => throwError(() => alsAdminFehler(e))));
+			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
 	ich(): Observable<AdminIch> {
 		return this.http
 			.get<AdminIch>('/admin/api/v1/ich')
-			.pipe(catchError((e: unknown) => throwError(() => alsAdminFehler(e))));
+			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
 	abmelden(): Observable<void> {
@@ -203,17 +159,17 @@ export class AdminApi {
 	vereine(): Observable<{ vereine: VereinZeile[] }> {
 		return this.http
 			.get<{ vereine: VereinZeile[] }>('/admin/api/v1/vereine')
-			.pipe(catchError((e: unknown) => throwError(() => alsAdminFehler(e))));
+			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
-	legeVereinAn(verein: NeuerVerein): Observable<{ id: string; slug: string; einladung: Einladung }> {
+	legeVereinAn(verein: NeuerVerein): Observable<{ id: string; slug: string } & EinladungAntwort> {
 		return this.post('/vereine', verein);
 	}
 
 	verein(id: string): Observable<VereinDetails> {
 		return this.http
 			.get<VereinDetails>(`/admin/api/v1/vereine/${encodeURIComponent(id)}`)
-			.pipe(catchError((e: unknown) => throwError(() => alsAdminFehler(e))));
+			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
 	sperren(id: string): Observable<{ status: VereinStatus }> {
@@ -228,11 +184,15 @@ export class AdminApi {
 		return this.post(`/vereine/${encodeURIComponent(id)}/slug`, { slug });
 	}
 
-	erneuereErsteEinladung(id: string): Observable<{ einladung: Einladung }> {
-		return this.post(`/vereine/${encodeURIComponent(id)}/einladung-erneuern`);
+	erneuereErsteEinladung(id: string, perMail = false): Observable<EinladungAntwort> {
+		// Ohne Kaestchen bleibt der Body leer wie bisher: perMail fehlt, statt false zu sein.
+		return this.post(`/vereine/${encodeURIComponent(id)}/einladung-erneuern`, perMail ? { perMail: true } : {});
 	}
 
-	notfallLink(id: string, personId: string): Observable<{ einladung: Einladung }> {
-		return this.post(`/vereine/${encodeURIComponent(id)}/notfall-link`, { personId });
+	notfallLink(id: string, personId: string, perMail = false): Observable<EinladungAntwort> {
+		return this.post(`/vereine/${encodeURIComponent(id)}/notfall-link`, {
+			personId,
+			...(perMail ? { perMail: true } : {}),
+		});
 	}
 }

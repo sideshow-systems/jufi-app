@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, map, type Observable } from 'rxjs';
 import { KarteComponent, PilleComponent } from '../gestaltung/ui';
-import { AdminApi, alsAdminFehler, fehlertext, type AdminIch } from './admin-api';
-import { PasskeyBrowser } from './passkey-browser';
-import { TotpEinrichtungComponent } from './totp-einrichtung';
+import { AdminApi, type AdminIch } from './admin-api';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
+import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
+import { TotpEinrichtungComponent, type TotpStart as TotpStartBauteil } from '../gemeinsam/totp-einrichtung';
 
 @Component({
 	selector: 'jf-admin-konto',
@@ -40,7 +41,11 @@ import { TotpEinrichtungComponent } from './totp-einrichtung';
 							}
 						</p>
 					} @else if (totpOffen()) {
-						<jf-totp-einrichtung (eingerichtet)="totpFertig()" />
+						<jf-totp-einrichtung
+							[starten]="totpStarten"
+							[bestaetigen]="totpBestaetigen"
+							(eingerichtet)="totpFertig()"
+						/>
 					} @else {
 						<p class="gedaempft">Mit einer Authenticator-App schützt du das Konto auch bei bekanntem Passwort.</p>
 						<button type="button" class="knopf primaer" (click)="totpOffen.set(true)">Einrichten</button>
@@ -106,6 +111,12 @@ export class AdminKontoComponent implements OnInit {
 	private readonly router = inject(Router);
 	protected readonly passkeys = inject(PasskeyBrowser);
 
+	/** Die Aufrufe der Admin-API fuer das gemeinsame TOTP-Bauteil; Admin nennt die Marke Zwischenmarke. */
+	protected readonly totpStarten = (): Observable<TotpStartBauteil> =>
+		this.api.totpStart().pipe(map((s) => ({ ...s, marke: s.zwischenmarke })));
+	protected readonly totpBestaetigen = (marke: string, code: string): Observable<unknown> =>
+		this.api.totpBestaetigen(marke, code);
+
 	protected readonly ich = signal<AdminIch | null>(null);
 	protected readonly ladefehler = signal<string | null>(null);
 	protected readonly totpOffen = signal(false);
@@ -121,7 +132,7 @@ export class AdminKontoComponent implements OnInit {
 		try {
 			this.ich.set(await firstValueFrom(this.api.ich()));
 		} catch (ursache) {
-			const fehler = alsAdminFehler(ursache);
+			const fehler = alsApiFehler(ursache);
 			// Die Sitzung laeuft nach 12 Stunden ab, auch bei offener Seite; der Waechter
 			// greift nur beim Betreten des Bereichs. Dann zurueck zur Anmeldung.
 			if (fehler.status === 401) await this.router.navigateByUrl('/admin/anmelden');
@@ -141,7 +152,11 @@ export class AdminKontoComponent implements OnInit {
 		this.laeuft.set(true);
 		this.passkeyMeldung.set(null);
 		try {
-			const ausgang = await this.passkeys.hinzufuegen();
+			const ausgang = await this.passkeys.hinzufuegen({
+				optionen: () => this.api.passkeyHinzufuegenOptionen(),
+				senden: (antwort) => this.api.passkeyHinzufuegen(antwort),
+				schonVorhanden: 'Dieses Gerät hat schon einen Passkey für den Admin-Bereich.',
+			});
 			if (ausgang === 'fertig') {
 				this.passkeyMeldung.set('Passkey hinzugefügt.');
 				void this.lade();
@@ -151,7 +166,7 @@ export class AdminKontoComponent implements OnInit {
 				);
 			}
 		} catch (ursache) {
-			this.passkeyMeldung.set(fehlertext(alsAdminFehler(ursache)));
+			this.passkeyMeldung.set(fehlertext(alsApiFehler(ursache)));
 		} finally {
 			this.laeuft.set(false);
 		}
@@ -162,7 +177,7 @@ export class AdminKontoComponent implements OnInit {
 		try {
 			await firstValueFrom(this.api.abmelden());
 		} catch (ursache) {
-			const f = alsAdminFehler(ursache);
+			const f = alsApiFehler(ursache);
 			// 401: keine Sitzung mehr, also abgemeldet -- wie bei Erfolg zur Anmeldung.
 			if (f.status !== 401) {
 				this.passkeyMeldung.set(`Abmelden fehlgeschlagen – ${fehlertext(f)}`);

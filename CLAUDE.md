@@ -7,6 +7,7 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 - `apps/entwurf` ist der klickbare Entwurf (Teilprojekt 1) und **Wegwerfcode**. Erhalten bleiben das Workspace-Grundgerüst, die Gestaltung und die Erkenntnisse aus den Rückmeldungen.
 - Lokal: `pnpm run dev:entwurf` → http://localhost:4300/entwurf/
 - `apps/jufi` ist die **echte App** (Teilprojekt 2). Lokal: `pnpm run dev` → http://localhost:4200/ (Demo-Verein: `pnpm run demo`, dann `/demo`).
+- Etappe 3 ist da: Mitglieder nehmen Einladungen an und melden sich unter `/<slug>/anmelden` an (Passkey, Passwort, TOTP, „Passwort vergessen?"). Mails fängt lokal Mailpit ab (http://localhost:8025, braucht `pnpm run db:up`).
 - Ersten Admin lokal anlegen: `pnpm run cli admin anlegen <name>` gibt den Einrichtungslink aus (braucht `BASIS_URL` in der `.env`).
 - Nach dem Klonen und nach jeder Schemaänderung `pnpm run db:generate` — der Prisma-Client liegt nicht im Repo.
 - Tests brauchen laufendes Postgres: erst `pnpm run db:up`. Jedes Projekt hat seine Testdatenbank `jufi_test_<projekt>`.
@@ -43,5 +44,6 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 ## Was nachweislich stolpert
 
 - **`pnpm run deploy:entwurf`, nie `pnpm deploy`.** Letzteres ist pnpms eingebautes Workspace-Deploy.
+- **Entscheidungen über Vereinsdaten, die „angenommen oder nicht" lauten** (Einlösen, Erneuern, Notfall-Link, Slug-Korrektur), beginnen mit `sperreVereinszeile`. Ohne diese Sperre überholen sich zwei gleichzeitige Anfragen.
 - **Vor jedem `git push`: `pnpm exec prettier --check .`** — weder Build noch Tests prüfen das.
 - `git push` und Deployment nur, wenn der Eigentümer es ausdrücklich sagt. Vor einem Deployment schaut er sich den Stand lokal an.

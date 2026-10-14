@@ -19,6 +19,11 @@ export const TEST_TOTP_SCHLUESSEL = Buffer.alloc(32, 7).toString('base64');
 export const TEST_UMGEBUNG: Umgebung = {
 	basisUrl: 'http://jufi.test',
 	sitzungsGeheimnis: TEST_SITZUNGSGEHEIMNIS,
+	// Erfundene Werte; kein Test baut eine echte SMTP-Verbindung auf.
+	smtp: { host: 'smtp.jufi.test', port: 1025 },
+	mailAbsender: 'app@jufi.test',
+	mailAntwort: 'kontakt@jufi.test',
+	mailBetreffPraefix: '',
 };
 
 const LESENDE_METHODEN = ['GET', 'HEAD', 'OPTIONS'];

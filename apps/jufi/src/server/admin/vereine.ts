@@ -11,15 +11,18 @@ import {
 } from '@jufi/domain';
 import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
-import { einladungsLink, leitungsEinladungsText } from '../einladung.js';
+import { einladungsLink, leitungsEinladungsText, notfallLinkText } from '../einladung.js';
 import { asynchron, text } from './asynchron.js';
-import type { AdminDaten, NeuerVerein, NeueEinladung } from './daten.js';
+import { einladungsMail } from '../mail/texte.js';
+import type { AdminDaten, EinladungsMailBauer, NeuerVerein, NeueEinladung } from './daten.js';
 import { adminKontext, brauchtAdmin } from './sitzung.js';
 
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
 const SLUG_VERGEBEN = { fehler: 'Dieser Slug ist vergeben', feld: 'slug' };
 const SLUG_FEST = { fehler: 'Der Slug ist fest, seit die erste Einladung angenommen wurde' };
 const SCHON_ANGENOMMEN = { fehler: 'Die erste Einladung ist schon angenommen' };
+const VEREIN_GESPERRT = { fehler: 'Der Verein ist gesperrt – erst entsperren' };
+const KEINE_ADRESSE = { fehler: 'Für diese Person ist keine E-Mail hinterlegt' };
 const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 /**
  * Ohne Grenze liefe ein 90-kB-Name (nur express.json begrenzt auf 100 kB) in die
@@ -84,9 +87,22 @@ function pruefeNeuenVerein(
 export type VereinsRoutenDeps = Pick<VolleAppDeps, 'jetzt' | 'umgebung'> & { daten: AdminDaten };
 
 /** Link und fertiger Text zum Kopieren, wie nach dem Anlegen eines Vereins. */
-function einladung(basisUrl: string, e: NeueEinladung): { link: string; text: string } {
+function einladung(
+	basisUrl: string,
+	e: NeueEinladung,
+	baueText: typeof leitungsEinladungsText = leitungsEinladungsText,
+): { link: string; text: string } {
 	const link = einladungsLink(basisUrl, e.slug, e.token);
-	return { link, text: leitungsEinladungsText({ vorname: e.vorname, anzeigename: e.anzeigename, link }) };
+	return { link, text: baueText({ vorname: e.vorname, anzeigename: e.anzeigename, link }) };
+}
+
+/**
+ * Nur ein echtes true schickt eine Mail. Verworfen: Wahrheitswerte wie "true"
+ * oder 1 gelten lassen -- eine Mail ist eine Wirkung nach aussen, die nur
+ * ausloesen soll, wer das Kaestchen wirklich gesetzt hat.
+ */
+function perMail(body: unknown): boolean {
+	return ((body ?? {}) as Record<string, unknown>)['perMail'] === true;
 }
 
 function nichtGefunden(res: Response): void {
@@ -100,6 +116,18 @@ function nichtGefunden(res: Response): void {
  */
 export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 	const { jetzt, umgebung, daten } = deps;
+
+	/** Der Mailbauer fuer daten.ts, oder undefined, wenn keine Mail gewuenscht ist. */
+	function mailBauer(body: unknown, art: 'einladung' | 'notfall'): EinladungsMailBauer | undefined {
+		if (!perMail(body)) return undefined;
+		return (e) =>
+			einladungsMail({
+				vorname: e.vorname,
+				anzeigename: e.anzeigename,
+				link: einladungsLink(umgebung.basisUrl, e.slug, e.token),
+				art,
+			});
+	}
 
 	router.get(
 		'/vereine',
@@ -119,7 +147,7 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 				return;
 			}
 			const { admin } = adminKontext(res);
-			const angelegt = await daten.legeVereinAn(pruefung.eingabe, admin.id, jetzt());
+			const angelegt = await daten.legeVereinAn(pruefung.eingabe, admin.id, jetzt(), mailBauer(req.body, 'einladung'));
 			if (angelegt === 'vergeben') {
 				res.status(409).json(SLUG_VERGEBEN);
 				return;
@@ -133,6 +161,7 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 					anzeigename: angelegt.anzeigename,
 					slug: angelegt.slug,
 				}),
+				mailEingereiht: angelegt.mailEingereiht,
 			});
 		}),
 	);
@@ -208,10 +237,17 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 		brauchtAdmin,
 		asynchron(async (req, res) => {
 			const { admin } = adminKontext(res);
-			const ergebnis = await daten.erneuereErsteEinladung(req.params['id'] ?? '', admin.id, jetzt());
+			const ergebnis = await daten.erneuereErsteEinladung(
+				req.params['id'] ?? '',
+				admin.id,
+				jetzt(),
+				mailBauer(req.body, 'einladung'),
+			);
 			if (ergebnis === null) nichtGefunden(res);
+			else if (ergebnis === 'gesperrt') res.status(409).json(VEREIN_GESPERRT);
 			else if (ergebnis === 'angenommen') res.status(409).json(SCHON_ANGENOMMEN);
-			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis) });
+			else if (ergebnis === 'ohneAdresse') res.status(400).json(KEINE_ADRESSE);
+			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis), mailEingereiht: ergebnis.mailEingereiht });
 		}),
 	);
 
@@ -225,9 +261,22 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 		asynchron(async (req, res) => {
 			const b = (req.body ?? {}) as Record<string, unknown>;
 			const { admin } = adminKontext(res);
-			const ergebnis = await daten.notfallLink(req.params['id'] ?? '', text(b['personId']), admin.id, jetzt());
+			const ergebnis = await daten.notfallLink(
+				req.params['id'] ?? '',
+				text(b['personId']),
+				admin.id,
+				jetzt(),
+				mailBauer(b, 'notfall'),
+			);
 			if (ergebnis === null) nichtGefunden(res);
-			else res.json({ einladung: einladung(umgebung.basisUrl, ergebnis) });
+			else if (ergebnis === 'gesperrt') res.status(409).json(VEREIN_GESPERRT);
+			else if (ergebnis === 'ohneAdresse') res.status(400).json(KEINE_ADRESSE);
+			else {
+				res.json({
+					einladung: einladung(umgebung.basisUrl, ergebnis, notfallLinkText),
+					mailEingereiht: ergebnis.mailEingereiht,
+				});
+			}
 		}),
 	);
 }

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { AttemptTracker, FREE_ATTEMPTS, isLocked, lockoutMs, MAX_DELAY_MS, recordFailure } from './rate-limit.js';
+import {
+	AttemptTracker,
+	MAX_SCHLUESSEL,
+	FREE_ATTEMPTS,
+	isLocked,
+	lockoutMs,
+	MAX_DELAY_MS,
+	recordFailure,
+} from './rate-limit.js';
 
 describe('lockoutMs', () => {
 	it('sperrt die ersten Versuche nicht', () => {
@@ -64,5 +72,23 @@ describe('AttemptTracker', () => {
 		for (let i = 0; i < 5; i++) t.fail('konto');
 		t.reset('konto');
 		expect(t.isLocked('konto')).toBe(false);
+	});
+
+	it('Fehlversuche verfallen nach Ruhe', () => {
+		let now = 0;
+		const t = new AttemptTracker(() => now);
+		for (let i = 0; i < 4; i++) t.fail('kind');
+		expect(t.isLocked('kind')).toBe(true);
+		now += 16 * 60 * 1_000;
+		expect(t.remaining('kind')).toBe(0);
+		expect(t.fail('kind').failures).toBe(1);
+	});
+
+	it('Der Speicher ist begrenzt', () => {
+		const t = new AttemptTracker(() => 0);
+		for (let i = 0; i <= MAX_SCHLUESSEL; i++) t.fail(`k${i}`);
+		expect(t.has('k0')).toBe(false);
+		expect(t.remaining('k0')).toBe(0);
+		expect(t.has(`k${MAX_SCHLUESSEL}`)).toBe(true);
 	});
 });

@@ -2,9 +2,10 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { KarteComponent } from '../gestaltung/ui';
-import { AdminApi, alsAdminFehler, fehlertext } from './admin-api';
-import { wertVon } from './formular';
-import { PasskeyBrowser } from './passkey-browser';
+import { AdminApi } from './admin-api';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
+import { wertVon } from '../gemeinsam/formular';
+import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
 
 /** Was der Server sagt, wenn die Zwischenmarke (5 Minuten) verfallen ist; dann beginnt die Anmeldung von vorn. */
 const MARKE_ABGELAUFEN = 'Anmeldung abgelaufen, bitte neu beginnen';
@@ -160,7 +161,10 @@ export class AdminAnmeldenComponent {
 	protected async mitPasskey(): Promise<void> {
 		if (this.laeuft()) return;
 		await this.versuche(async () => {
-			const ausgang = await this.passkeys.anmelden();
+			const ausgang = await this.passkeys.anmelden({
+				optionen: () => this.api.passkeyAnmeldeOptionen(),
+				senden: (antwort) => this.api.passkeyAnmelden(antwort),
+			});
 			if (ausgang === 'abgelehnt') {
 				this.fehler.set(
 					'Der Browser hat sofort abgelehnt – meist liegt hier kein Passkey. Melde dich mit Passwort an.',
@@ -181,7 +185,7 @@ export class AdminAnmeldenComponent {
 		try {
 			if (await schritt()) await this.router.navigateByUrl('/admin/vereine');
 		} catch (ursache) {
-			const fehler = alsAdminFehler(ursache);
+			const fehler = alsApiFehler(ursache);
 			this.fehler.set(fehlertext(fehler));
 			if (this.zwischenmarke() !== null && fehler.fehler === MARKE_ABGELAUFEN) {
 				// Die Marke gilt nicht mehr, ein Code allein hilft nicht: Passwort neu.

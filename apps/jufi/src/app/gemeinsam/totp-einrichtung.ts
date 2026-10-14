@@ -4,15 +4,27 @@ import {
 	computed,
 	effect,
 	ElementRef,
-	inject,
+	input,
 	OnInit,
 	output,
 	signal,
 	viewChild,
 } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
-import { AdminApi, alsAdminFehler, fehlertext, type TotpStart } from './admin-api';
+import { firstValueFrom, type Observable } from 'rxjs';
+import { alsApiFehler, fehlertext } from './api-fehler';
 import { wertVon } from './formular';
+
+/**
+ * Was der Start der Einrichtung liefert. Die Marke ist der verschluesselte
+ * Einrichtungszustand; Admin und Mitglieder nennen sie verschieden, die Seiten
+ * des Admin-Bereichs uebersetzen.
+ */
+export interface TotpStart {
+	marke: string;
+	geheimnis: string;
+	uri: string;
+	wiederherstellungscodes: string[];
+}
 
 /**
  * Zweiter Faktor einrichten: QR-Code, Geheimnis, Bestaetigungscode, Wiederherstellungscodes.
@@ -43,7 +55,7 @@ import { wertVon } from './formular';
 					<div class="rest">
 						<p>Scanne den Code mit der Authenticator-App oder gib dort das Geheimnis ein:</p>
 						<code class="geheimnis">{{ geheimnisGruppiert() }}</code>
-						<form (submit)="bestaetigen($event)">
+						<form (submit)="absenden($event)">
 							<label class="feld">
 								Code aus der Authenticator-App
 								<input
@@ -110,9 +122,16 @@ import { wertVon } from './formular';
 		}
 		.spalten {
 			display: grid;
-			grid-template-columns: auto 1fr;
+			grid-template-columns: auto minmax(0, 1fr);
 			gap: var(--a5);
 			align-items: start;
+		}
+		/* Am Telefon untereinander: Der Code (218 px samt Rand) liesse neben dem Text keinen Platz, die Seite braeche seitlich aus. */
+		@media (max-width: 36rem) {
+			.spalten {
+				grid-template-columns: minmax(0, 1fr);
+				gap: var(--a4);
+			}
 		}
 		.rest {
 			display: grid;
@@ -167,8 +186,15 @@ import { wertVon } from './formular';
 	`,
 })
 export class TotpEinrichtungComponent implements OnInit {
-	private readonly api = inject(AdminApi);
 	private readonly leinwand = viewChild<ElementRef<HTMLCanvasElement>>('qr');
+
+	/**
+	 * Die Aufrufe kommen als Eingaben statt aus einem Dienst: Admin und Mitglieder
+	 * haben verschiedene Endpunkte. Verworfen: das Bauteil kennt beide APIs und
+	 * fragt nach dem Bereich -- es wuerde jeden neuen Bereich mitziehen.
+	 */
+	readonly starten = input.required<() => Observable<TotpStart>>();
+	readonly bestaetigen = input.required<(marke: string, code: string) => Observable<unknown>>();
 
 	/**
 	 * Die Person hat die Wiederherstellungscodes gesichert und will weiter. Nicht
@@ -216,24 +242,24 @@ export class TotpEinrichtungComponent implements OnInit {
 		this.code.set('');
 		this.qrFehler.set(false);
 		try {
-			this.start.set(await firstValueFrom(this.api.totpStart()));
+			this.start.set(await firstValueFrom(this.starten()()));
 		} catch (ursache) {
 			this.start.set(null);
-			this.fehler.set(fehlertext(alsAdminFehler(ursache)));
+			this.fehler.set(fehlertext(alsApiFehler(ursache)));
 		}
 	}
 
-	protected async bestaetigen(ereignis: Event): Promise<void> {
+	protected async absenden(ereignis: Event): Promise<void> {
 		ereignis.preventDefault();
 		const s = this.start();
 		if (!s || this.laeuft()) return;
 		this.laeuft.set(true);
 		this.fehler.set(null);
 		try {
-			await firstValueFrom(this.api.totpBestaetigen(s.zwischenmarke, this.code().trim()));
+			await firstValueFrom(this.bestaetigen()(s.marke, this.code().trim()));
 			this.bestaetigtIntern.set(true);
 		} catch (ursache) {
-			const f = alsAdminFehler(ursache);
+			const f = alsApiFehler(ursache);
 			this.fehler.set(fehlertext(f));
 			// 400: Zwischenmarke verfallen (10 Minuten) -- der Code allein hilft nicht, es braucht ein neues Geheimnis.
 			this.abgelaufen.set(f.status === 400);

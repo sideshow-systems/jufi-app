@@ -53,14 +53,13 @@ describe('fuehreAus', () => {
 		const verein = await p.verein.create({
 			data: { slug: 'demo', name: 'Echter Verein e.V.', anzeigename: 'Echter Verein', farbe: '#1d4ed8' },
 		});
-		const person = await p.person.create({
-			data: { vereinId: verein.id, art: 'ERWACHSENER', vorname: 'Erika', nachname: 'Echt' },
+		await p.person.create({
+			data: { vereinId: verein.id, art: 'ERWACHSENER', vorname: 'Erika', nachname: 'Echt', email: 'leitung@verein.de' },
 		});
-		await p.zugang.create({ data: { vereinId: verein.id, personId: person.id } });
 
 		ausgabe.length = 0;
 		expect(await fuehreAus(['demo', 'einspielen'], deps)).toBe(1);
-		expect(ausgabe.join('\n')).toMatch(/Zugang/);
+		expect(ausgabe.join('\n')).toMatch(/example\.org/);
 		expect(await p.verein.count({ where: { id: verein.id } })).toBe(1);
 
 		await p.verein.deleteMany();

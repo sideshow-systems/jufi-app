@@ -4,18 +4,11 @@ import { pruefeNeuenSlug, SLUG_HINWEIS } from '@jufi/domain';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { datumDeutsch, zeitpunktBerlin } from '../gestaltung/format';
 import { AbschnittComponent, KarteComponent, PilleComponent } from '../gestaltung/ui';
-import {
-	AdminApi,
-	alsAdminFehler,
-	fehlertext,
-	type AdminAktion,
-	type AdminFehler,
-	type Einladung,
-	type VereinDetails,
-} from './admin-api';
+import { AdminApi, type AdminAktion, type EinladungAntwort, type VereinDetails } from './admin-api';
+import { alsApiFehler, fehlertext, type ApiFehler } from '../gemeinsam/api-fehler';
 import { BestaetigungComponent } from './bestaetigung';
 import { EinladungAnzeigeComponent } from './einladung-anzeige';
-import { wertVon } from './formular';
+import { wertVon } from '../gemeinsam/formular';
 
 const AKTION_TEXT: Record<AdminAktion, string> = {
 	VEREIN_ANGELEGT: 'Verein angelegt',
@@ -77,6 +70,9 @@ interface Frage {
 			@if (ergebnis(); as e) {
 				<section class="ergebnis" aria-label="Neue Einladung">
 					<h2>{{ e.titel }}</h2>
+					@if (e.mailEingereiht) {
+						<p class="mail-hinweis" role="status">Mail ist eingereiht und geht gleich raus.</p>
+					}
 					<jf-einladung-anzeige [einladung]="e.einladung" />
 				</section>
 			}
@@ -117,15 +113,27 @@ interface Frage {
 									<strong>{{ a.vorname }} {{ a.nachname }}</strong>
 									<div class="gedaempft klein">{{ a.email ?? 'Keine E-Mail-Adresse' }}</div>
 								</div>
-								<button
-									type="button"
-									class="knopf klein"
-									[disabled]="laeuft()"
-									[attr.aria-label]="'Notfall-Link für ' + a.vorname + ' erzeugen'"
-									(click)="frageNotfallLink(a.personId, a.vorname)"
-								>
-									Notfall-Link erzeugen
-								</button>
+								<div class="rechts">
+									<label class="haken">
+										<input
+											type="checkbox"
+											[attr.name]="'per-mail-' + a.personId"
+											[disabled]="a.email === null"
+											[checked]="mailNotfall().has(a.personId)"
+											(change)="setzeMailNotfall(a.personId, gesetzt($event))"
+										/>
+										Zusätzlich per Mail senden
+									</label>
+									<button
+										type="button"
+										class="knopf klein"
+										[disabled]="laeuft()"
+										[attr.aria-label]="'Notfall-Link für ' + a.vorname + ' erzeugen'"
+										(click)="frageNotfallLink(a.personId, a.vorname)"
+									>
+										Notfall-Link erzeugen
+									</button>
+								</div>
 							</div>
 						} @empty {
 							<p class="gedaempft leer">Noch kein Ansprechpartner.</p>
@@ -182,9 +190,20 @@ interface Frage {
 									<strong>Erste Einladung</strong>
 									<div class="gedaempft klein">Noch nicht angenommen. Der bisherige Link gilt danach nicht mehr.</div>
 								</div>
-								<button type="button" class="knopf" [disabled]="laeuft()" (click)="erneuereEinladung(l.vorname)">
-									Einladung für {{ l.vorname }} erneuern
-								</button>
+								<div class="rechts">
+									<label class="haken">
+										<input
+											type="checkbox"
+											name="per-mail-einladung"
+											[checked]="mailEinladung()"
+											(change)="mailEinladung.set(gesetzt($event))"
+										/>
+										Zusätzlich per Mail senden
+									</label>
+									<button type="button" class="knopf" [disabled]="laeuft()" (click)="erneuereEinladung(l.vorname)">
+										Einladung für {{ l.vorname }} erneuern
+									</button>
+								</div>
 							</div>
 						}
 					</jf-karte>
@@ -308,6 +327,17 @@ interface Frage {
 		.leer {
 			margin: 0;
 		}
+		.rechts {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: flex-end;
+			gap: var(--a1) var(--a4);
+		}
+		.mail-hinweis {
+			color: var(--erfolg);
+			font-weight: 600;
+		}
 		form.aktion {
 			align-items: flex-end;
 		}
@@ -359,7 +389,11 @@ export class AdminVereinSeiteComponent {
 	protected readonly aktionsfehler = signal<string | null>(null);
 	protected readonly laeuft = signal(false);
 	protected readonly frage = signal<Frage | null>(null);
-	protected readonly ergebnis = signal<{ titel: string; einladung: Einladung } | null>(null);
+	protected readonly ergebnis = signal<({ titel: string } & EinladungAntwort) | null>(null);
+
+	/** Wer per Mail bekommen soll, je Person; fuer die erste Einladung ein eigenes Kaestchen. */
+	protected readonly mailNotfall = signal<ReadonlySet<string>>(new Set());
+	protected readonly mailEinladung = signal(false);
 
 	protected readonly slugEingabe = signal('');
 	private readonly serverSlugFehler = signal<string | null>(null);
@@ -376,6 +410,7 @@ export class AdminVereinSeiteComponent {
 	);
 
 	protected readonly wert = wertVon;
+	protected readonly gesetzt = (ereignis: Event): boolean => (ereignis.target as HTMLInputElement).checked;
 	protected readonly datum = datumDeutsch;
 	protected readonly zeitpunkt = zeitpunktBerlin;
 	protected readonly aktionText = (aktion: AdminAktion) => AKTION_TEXT[aktion];
@@ -415,8 +450,8 @@ export class AdminVereinSeiteComponent {
 	}
 
 	/** 401 heisst: Sitzung abgelaufen (siehe Konto). Dann zur Anmeldung; sonst kommt der Fehler zurueck. */
-	private async pruefeSitzung(ursache: unknown): Promise<AdminFehler | null> {
-		const fehler = alsAdminFehler(ursache);
+	private async pruefeSitzung(ursache: unknown): Promise<ApiFehler | null> {
+		const fehler = alsApiFehler(ursache);
 		if (fehler.status !== 401) return fehler;
 		await this.router.navigateByUrl('/admin/anmelden');
 		return null;
@@ -466,16 +501,25 @@ export class AdminVereinSeiteComponent {
 			text: `Neuen Einladungslink für ${vorname} erzeugen? Der Verein sieht das in seiner Verwaltung.`,
 			bestaetigung: 'Link erzeugen',
 			aktion: () =>
-				this.ausfuehren(this.api.notfallLink(this.id(), personId), (a) =>
-					this.ergebnis.set({ titel: `Notfall-Link für ${vorname}`, einladung: a.einladung }),
+				this.ausfuehren(this.api.notfallLink(this.id(), personId, this.mailNotfall().has(personId)), (a) =>
+					this.ergebnis.set({ titel: `Notfall-Link für ${vorname}`, ...a }),
 				),
 		});
 	}
 
 	protected erneuereEinladung(vorname: string): Promise<void> {
-		return this.ausfuehren(this.api.erneuereErsteEinladung(this.id()), (a) =>
-			this.ergebnis.set({ titel: `Neue Einladung für ${vorname}`, einladung: a.einladung }),
+		return this.ausfuehren(this.api.erneuereErsteEinladung(this.id(), this.mailEinladung()), (a) =>
+			this.ergebnis.set({ titel: `Neue Einladung für ${vorname}`, ...a }),
 		);
+	}
+
+	protected setzeMailNotfall(personId: string, an: boolean): void {
+		this.mailNotfall.update((alt) => {
+			const neu = new Set(alt);
+			if (an) neu.add(personId);
+			else neu.delete(personId);
+			return neu;
+		});
 	}
 
 	protected slugGeaendert(wert: string): void {
@@ -487,7 +531,12 @@ export class AdminVereinSeiteComponent {
 		ereignis.preventDefault();
 		if (this.laeuft() || !this.slugAenderbar()) return;
 		await this.ausfuehren(this.api.korrigiereSlug(this.id(), this.slugEingabe()), (a) =>
-			this.ergebnis.set({ titel: 'Slug korrigiert – neuer Einladungslink', einladung: a.einladung }),
+			// Beim Slug gibt es keine Mail-Option: Der alte Link ist ohnehin ungueltig, der neue geht an den Admin.
+			this.ergebnis.set({
+				titel: 'Slug korrigiert – neuer Einladungslink',
+				einladung: a.einladung,
+				mailEingereiht: false,
+			}),
 		);
 	}
 }

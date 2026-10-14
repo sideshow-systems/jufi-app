@@ -1,6 +1,11 @@
 import { vereinDb, type PrismaClient, type Verein, type VereinDb } from '@jufi/db';
 import { pruefeSlug } from '@jufi/domain';
 import { Router, type RequestHandler, type Response } from 'express';
+import type { VolleAppDeps } from './abhaengigkeiten.js';
+import { anmeldeRouten } from './mitglieder/anmeldung.js';
+import { einladungsRouten } from './mitglieder/einladung.js';
+import { profilRouten } from './mitglieder/profil.js';
+import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
 import { routenAus } from './routen.js';
 
 /** Was vereinAusSlug in res.locals ablegt; die Endpunkte lesen es ueber vereinsKontext. */
@@ -56,31 +61,42 @@ export function vereinsKontext(res: Response): VereinsLocals {
 
 /**
  * Alle Endpunkte unter /:slug/api/v1. Jeder haengt direkt an diesem einen Router,
- * ohne Unter-Router: vereinsRouten liest die Liste aus vereinsApi.stack, und der
+ * ohne Unter-Router: vereinsRouten liest die Liste aus dessen stack, und der
  * Mandanten-Test verlangt fuer jeden Eintrag einen Fall. Eine Route in einem
  * Unter-Router bliebe dort unsichtbar und damit ungeprueft.
  *
- * caseSensitive wie die App (createApp): ein Router erbt die Einstellung nicht,
- * /VEREIN fuehrte sonst zur selben Route wie /verein.
+ * Eine Funktion statt eines festen Routers: die Routen brauchen Uhr, Umgebung
+ * und Backoff aus deps (wie adminApi). caseSensitive wie die App (createApp):
+ * ein Router erbt die Einstellung nicht, /VEREIN fuehrte sonst zur selben Route
+ * wie /verein.
  */
-export const vereinsApi = Router({ caseSensitive: true });
+export function vereinsApi(deps: VolleAppDeps): Router {
+	const router = Router({ caseSensitive: true });
 
-vereinsApi.get('/verein', async (_req, res, next) => {
-	try {
-		const { verein, db } = vereinsKontext(res);
-		// count statt Logo laden: das Bild bleibt in der Datenbank.
-		const hatLogo = (await db.vereinLogo.count()) > 0;
-		res.json({ slug: verein.slug, anzeigename: verein.anzeigename, farbe: verein.farbe, hatLogo });
-	} catch (error) {
-		next(error);
-	}
-});
+	router.get('/verein', async (_req, res, next) => {
+		try {
+			const { verein, db } = vereinsKontext(res);
+			// count statt Logo laden: das Bild bleibt in der Datenbank.
+			const hatLogo = (await db.vereinLogo.count()) > 0;
+			res.json({ slug: verein.slug, anzeigename: verein.anzeigename, farbe: verein.farbe, hatLogo });
+		} catch (error) {
+			next(error);
+		}
+	});
+
+	einladungsRouten(router, deps);
+	anmeldeRouten(router, deps);
+	profilRouten(router, deps);
+	zugangVerlorenRouten(router, deps);
+
+	return router;
+}
 
 export const nichtGefunden: RequestHandler = (_req, res) => {
 	res.status(404).json(NICHT_GEFUNDEN);
 };
 
 /** Methode und Pfad jeder Route von vereinsApi, fuer den Mandanten-Test. */
-export function vereinsRouten(): { methode: string; pfad: string }[] {
-	return routenAus(vereinsApi, 'vereinsApi');
+export function vereinsRouten(router: Router): { methode: string; pfad: string }[] {
+	return routenAus(router, 'vereinsApi');
 }
