@@ -1,3 +1,7 @@
+# Bau-Kontext des Entwurfs (Dockerfile.entwurf). Das Image der echten App
+# (Dockerfile) hat seinen eigenen in Dockerfile.dockerignore; BuildKit nimmt die
+# Datei neben dem Dockerfile vor dieser hier.
+#
 # Alles ausschliessen, dann gezielt hereinlassen: das Image braucht nur das
 # fertige Buendel und die nginx-Konfiguration. Sonst schickt jeder Bau
 # node_modules an Docker, und eine .env koennte im Image landen.

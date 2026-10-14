@@ -1,0 +1,49 @@
+# Bau-Kontext fuer das Image der echten App (Dockerfile).
+#
+# Warum eine eigene Datei statt .dockerignore: der Entwurf (Dockerfile.entwurf)
+# braucht das Gegenteil -- nur das fertige Buendel und die nginx-Konfiguration,
+# keine Quellen. BuildKit nimmt <Dockerfile>.dockerignore vor .dockerignore, so
+# bekommt jedes Image seinen eigenen Kontext, und .dockerignore bleibt die des
+# Entwurfs. Verworfen: eine gemeinsame Liste fuer beide -- dann laegen die Quellen
+# im Kontext des Entwurfs oder das Buendel im Kontext der App, und wer eine Zeile
+# fuer das eine Image aendert, bricht das andere.
+#
+# Ein Bau ohne BuildKit sieht diese Datei nicht, nimmt .dockerignore und
+# scheitert sofort am fehlenden package.json -- laut, nicht mit einem Image voller
+# Fremdkram.
+#
+# Alles ausschliessen, dann gezielt hereinlassen. Ein Kontext mit node_modules
+# oder .env ist der haeufigste Weg, ein Geheimnis in ein Image zu backen.
+*
+
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!nx.json
+!tsconfig.base.json
+!tsconfig.json
+!prisma.config.ts
+
+!apps/
+!libs/
+!prisma/
+!tools/
+
+# Und aus diesen Baeumen wieder heraus, was nicht ins Image gehoert.
+**/node_modules
+**/dist
+**/out-tsc
+**/.angular
+**/*.tsbuildinfo
+**/__screenshots__
+**/.env
+**/.env.*
+
+# Der Entwurf wird hier nicht gebaut. Sein konfig.generated.ts traegt die
+# WhatsApp-Nummer, die nicht ins Repo gehoert -- und erst recht nicht in ein Image.
+apps/entwurf/
+
+# Erzeugte Dateien, die der Bau selbst neu schreibt. Der lokale Stand waere im
+# besten Fall ueberfluessig, im schlechtesten ein veralteter Prisma-Client.
+libs/db/src/generated/
+apps/jufi/src/version.generated.ts
