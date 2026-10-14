@@ -1,6 +1,6 @@
 # JuFi App — Teilprojekt 2: Fundament
 
-Stand: 13.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: zur Freigabe
+Stand: 14.10.2026 · Ergebnis des Brainstormings vom 13.10.2026, nachgezogen mit Etappe 3 · Status: zur Freigabe
 
 Teilprojekt 2 baut die echte App bis zu dem Punkt, an dem ein Verein **einladen, anmelden und Mitglieder pflegen** kann (Rahmen-Spezifikation `2026-10-11-jufi-rahmen-design.md`, Abschnitt 11). Threads, Module, Medien, Offline-Betrieb und Push folgen in den Teilprojekten 3 bis 5.
 
@@ -41,14 +41,14 @@ Preis der Kopie: Eine Sicherheitskorrektur in einem Projekt muss im anderen von 
 
 Jede Etappe ist für sich lauffähig, bekommt einen eigenen Plan und wird vom Eigentümer lokal abgenommen, bevor die nächste beginnt.
 
-| #   | Etappe                  | Inhalt                                                                                                     | Abschnitte |
-| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------- | ---------- |
-| 1   | Gerüst                  | `apps/jufi`, `apps/cli`, `libs/domain`, `libs/db`, `libs/auth`; Postgres und Mailpit lokal; Healthcheck    | 2, 3       |
-| 2   | Plattform-Admin         | CLI zum Anlegen, `/admin` mit Anmeldung, Vereine anlegen, sperren, erste Einladung, Protokoll              | 7          |
-| 3   | Einladung und Anmeldung | Einladung annehmen, Passkey, Passwort, Anmeldename, TOTP, Zurücksetzen per Mail, Sitzungen, Backoff        | 4          |
-| 4   | Mitglieder pflegen      | Personen, Familie, Jugendsprecher, Untergruppen, Rechte, Einwilligung, Volljährigkeit, Entfernen           | 5          |
-| 5   | Oberflächen             | Mitglieder-Hülle (Start, Mehr, Profil, Meine Jungfischer), Verwaltungs-Hülle, PWA-Manifest, Plattformseite | 6          |
-| 6   | Betrieb                 | Dienste auf dem Server, Deploy, Rollback, Sicherung mit Wiederherstellungsprobe, Mail-Versand              | 8          |
+| #   | Etappe                  | Inhalt                                                                                                             | Abschnitte |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------- |
+| 1   | Gerüst                  | `apps/jufi`, `apps/cli`, `libs/domain`, `libs/db`, `libs/auth`; Postgres und Mailpit lokal; Healthcheck            | 2, 3       |
+| 2   | Plattform-Admin         | CLI zum Anlegen, `/admin` mit Anmeldung, Vereine anlegen, sperren, erste Einladung, Protokoll                      | 7          |
+| 3   | Einladung und Anmeldung | Einladung annehmen, Passkey, Passwort, Anmeldename, TOTP, Zurücksetzen per Mail, Sitzungen, Backoff, Mail-Arbeiter | 4          |
+| 4   | Mitglieder pflegen      | Personen, Familie, Jugendsprecher, Untergruppen, Rechte, Einwilligung, Volljährigkeit, Entfernen                   | 5          |
+| 5   | Oberflächen             | Mitglieder-Hülle (Start, Mehr, Profil, Meine Jungfischer), Verwaltungs-Hülle, PWA-Manifest, Plattformseite         | 6          |
+| 6   | Betrieb                 | Dienste auf dem Server, Deploy, Rollback, Sicherung mit Wiederherstellungsprobe, Mail-Versand                      | 8          |
 
 Die API-Endpunkte einer Etappe entstehen zusammen mit den Bauteilen, die sie brauchen. Etappe 5 baut die beiden Hüllen fertig aus (Navigation, Start, Profil, Gestaltung, Messungen); die Seiten, die Etappen 2 bis 4 brauchen, entstehen dort bereits in schlichter Form.
 
@@ -139,15 +139,16 @@ Ergänzt Rahmen-Spezifikation 5.4.
 
 **`Verein`**
 
-| Feld          | Bedeutung                                                                                                                    |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `slug`        | eindeutig; Kleinbuchstaben, Ziffern, Bindestriche; 3–30 Zeichen; nicht reserviert                                            |
-| `name`        | offizieller Name, z. B. „Glonntal Fischereiverein 1889 e.V. Petershausen"; in Einwilligungstext, Kontakt, Fußzeile der Mails |
-| `anzeigename` | höchstens 24 Zeichen, z. B. „Jungfischer Glonntal"; in Kopfzeile, Passkey-Name, Home-Bildschirm, Betreff der Mails           |
-| `farbe`       | Vereinsfarbe als Hex-Wert; alles Weitere wird daraus abgeleitet (Rahmen-Spec 5.1.1)                                          |
-| `kontakt`     | Freitext                                                                                                                     |
-| `status`      | `AKTIV` oder `GESPERRT`                                                                                                      |
-| `angelegtAm`  |                                                                                                                              |
+| Feld           | Bedeutung                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slug`         | eindeutig; Kleinbuchstaben, Ziffern, Bindestriche; 3–30 Zeichen; nicht reserviert                                                                                                                                                                                                                                                                                                                                                                                                |
+| `name`         | offizieller Name, z. B. „Glonntal Fischereiverein 1889 e.V. Petershausen"; in Einwilligungstext, Kontakt, Fußzeile der Mails                                                                                                                                                                                                                                                                                                                                                     |
+| `anzeigename`  | höchstens 24 Zeichen, z. B. „Jungfischer Glonntal"; in Kopfzeile, Passkey-Name, Home-Bildschirm, Betreff der Mails                                                                                                                                                                                                                                                                                                                                                               |
+| `farbe`        | Vereinsfarbe als Hex-Wert; alles Weitere wird daraus abgeleitet (Rahmen-Spec 5.1.1)                                                                                                                                                                                                                                                                                                                                                                                              |
+| `kontakt`      | Freitext                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `status`       | `AKTIV` oder `GESPERRT`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sperrzaehler` | technisch, nie fachlich gelesen: Jede Transaktion, die anhand von „erste Einladung angenommen?" entscheidet (Einlösen, Erneuern, Notfall-Link, Slug-Korrektur), erhöht ihn zuerst und sperrt so die Vereinszeile bis zum Ende der Transaktion. Verworfen: `SELECT … FOR UPDATE` — `vereinDb` verbietet Rohabfragen, und eine Ausnahme dort höhlte die Sperre aus, die Etappe 1 gebaut hat; ebenso die Isolation `Serializable`, die Wiederholschleifen in jeder Route verlangte. |
+| `angelegtAm`   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 Der offizielle Name ist mit 46 Zeichen für Kopfzeile, Passkey-Auswahl und Home-Bildschirm zu lang; deshalb zwei Namen. Der `gruppenname` aus Rahmen-Spec 7.3 entfällt, weil der Anzeigename ihn abdeckt.
 
@@ -188,12 +189,13 @@ Die Foto-Einwilligung (Rahmen-Spec 6.6) kommt mit dem Medienbereich in TP4.
 
 **`Zugang`** (0..1 je Person)
 
-| Feld                           | Bedeutung                                                               |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| `anmeldename`                  | kleingeschrieben, eindeutig je Verein; nur Jungfischer und ihre Kennung |
-| `passwortHash`                 | Argon2id, optional                                                      |
-| `totpGeheimnis`, `totpAktivAm` | optional, nur für Erwachsene mit Rechten                                |
-| `angelegtAm`                   |                                                                         |
+| Feld                           | Bedeutung                                                                                             |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `anmeldename`                  | kleingeschrieben, eindeutig je Verein; nur Jungfischer und ihre Kennung                               |
+| `passwortHash`                 | Argon2id, optional                                                                                    |
+| `totpGeheimnis`, `totpAktivAm` | optional, nur für Erwachsene mit Rechten                                                              |
+| `letzteAnmeldungAm`            | Zeitpunkt der letzten erfolgreichen Anmeldung; speist die Kennzahl „letzte Anmeldung im Verein" (7.3) |
+| `angelegtAm`                   |                                                                                                       |
 
 Die Kennung Erwachsener ist `Person.email` (3.3); der `Zugang` trägt nur den Anmeldenamen der Jungfischer.
 
@@ -234,7 +236,7 @@ Weitere Tabellen:
 Eine Seite mit Schritten:
 
 1. **Begrüßung**: „Hallo Sandra, willkommen bei den Jungfischern Glonntal." Ein abgelaufener oder benutzter Link zeigt „Dieser Link gilt nicht mehr – frag nach einem neuen".
-2. **Einwilligung** (nur Erziehungsberechtigte, je eigenem minderjährigem Kind): Häkchen für die Einwilligung nach Art. 8 DSGVO mit dem Text in seiner aktuellen Fassung, dazu „Soll Lena einen eigenen Zugang bekommen?" (vorbelegt: ja). Ohne Einwilligung bleibt das Kind ohne Zugang; die Familie handelt dann in seinem Namen. Hat schon eine andere erziehungsberechtigte Person eingewilligt, steht das dort, und der Schritt ist freiwillig.
+2. **Einwilligung** (nur Erziehungsberechtigte, je eigenem minderjährigem Kind): Häkchen für die Einwilligung nach Art. 8 DSGVO mit dem Text in seiner aktuellen Fassung, dazu „Soll Lena einen eigenen Zugang bekommen?" (vorbelegt: ja). Ohne Einwilligung bleibt das Kind ohne Zugang; die Familie handelt dann in seinem Namen. Die Oberfläche folgt mit Etappe 4; Etappe 3 prüft nur das Vorhandensein einer gültigen Einwilligung beim Einlösen. Hat schon eine andere erziehungsberechtigte Person eingewilligt, steht das dort, und der Schritt ist freiwillig.
 3. **Kennung**: Erwachsene bestätigen ihre E-Mail (vorbelegt, änderbar, eindeutig im Verein). Jungfischer wählen ihren Anmeldenamen; vorbelegt ist der Vorname, ist er vergeben, schlägt die App „lena2" vor.
 4. **Zugang einrichten**: Kann das Gerät Passkeys, steht der Passkey vorne, sonst ein Passwort; beides zusammen geht auch.
 5. **Fertig**: Die Person ist angemeldet. Ein Hinweis erklärt, wie man die App auf den Home-Bildschirm holt, und dass man sich dort noch einmal anmeldet (iOS teilt die Sitzung des WhatsApp-Browsers nicht mit der installierten App; mit Passkey ist das ein Tipp).
@@ -253,7 +255,7 @@ Unter `/<slug>/anmelden`:
 - Kennung (E-Mail bei Erwachsenen, Anmeldename bei Jungfischern) plus Passwort; mit TOTP danach Code oder Wiederherstellungscode.
 - Fehlermeldung immer nur „Anmeldung fehlgeschlagen", ohne Hinweis, ob die Kennung existiert.
 - Backoff je Kennung und je IP wie in hwyd (drei freie Versuche, dann verdoppelnd bis 15 Minuten).
-- Ein Passkey eines anderen Vereins ergibt „Dieser Passkey gehört nicht zu diesem Verein". Das verrät nichts, denn nur der Besitzer kann ihn vorlegen.
+- Ein Passkey eines anderen Vereins ergibt „Dieser Passkey gehört nicht zu diesem Verein". Das verrät nichts, denn nur der Besitzer kann ihn vorlegen. Die Anmeldung schlägt den Passkey nur im eigenen Verein nach; „fremd" und „gelöscht" sind für sie dasselbe und bekommen dieselbe Meldung. Verworfen: globales Nachschlagen ohne Vereinsfilter, nur um beides zu unterscheiden.
 - Gesperrter oder unbekannter Verein: „nicht gefunden".
 
 ### 4.4 Zugang verloren
@@ -413,7 +415,7 @@ Löschen liegt bewusst **nur** in der Kommandozeile: endgültig und selten (etwa
 
 - **Vereinsliste**: Anzeigename, Slug, Status; Kennzahlen: Jungfischer, Erwachsene, eingerichtete Zugänge, offene Einladungen, letzte Anmeldung im Verein (nur Datum). Speicherverbrauch ab TP4.
 - **Verein anlegen**: offizieller Name, Anzeigename, Slug (aus dem Anzeigenamen vorgeschlagen), Farbe, dazu die **erste Leitung** mit Vorname, Nachname und E-Mail; sie bekommt alle Rechte. Das Logo kommt mit den Vereinseinstellungen (Etappe 5): Es braucht Upload jenseits der 100-KB-Grenze und `sharp` für Icons und Manifest, der Verein lädt es dort selbst hoch. Danach zeigt die Seite den Einladungslink mit fertigem Text; per Mail geht er ab Etappe 3 raus, wenn der Mail-Arbeiter entsteht.
-- **Vereinsseite**: Kennzahlen; **Ansprechpartner** = alle Inhaber von „Jugendleiter & Rechte verwalten" mit Name und E-Mail; sperren und entsperren (gesperrt: alle Seiten des Vereins „nicht gefunden"; Sitzungen bleiben, wirken aber erst nach dem Entsperren wieder).
+- **Vereinsseite**: Kennzahlen; **Ansprechpartner** = alle Inhaber von „Jugendleiter & Rechte verwalten" mit Name und E-Mail; sperren und entsperren (gesperrt: alle Seiten des Vereins „nicht gefunden"; Sitzungen bleiben, wirken aber erst nach dem Entsperren wieder). Bei gesperrtem Verein sind Erneuern und Notfall-Link nicht möglich (409): Der Link führte bis zum Entsperren ins Leere, und eine Mail dorthin wäre schlimmer als ein Klick mehr.
 - **Notfall-Link**: neuer Einladungslink für einen **Ansprechpartner**, für niemanden sonst. Der Ausweg, wenn sich die Leitung ausgesperrt hat und der Reset per Mail nicht hilft. Der Verein sieht das in seiner Verwaltung (6.3); verdeckt kann der Admin kein Konto übernehmen.
 - **Slug korrigieren**: möglich, solange die erste Einladung noch nicht angenommen ist. Danach ist der Slug fest, weil er in Links, Cookies und installierten Apps steckt. Verworfen: Umbenennen mit Weiterleitung vom alten Slug — eigene Tabelle und Regeln für alte Slugs, die ein anderer Verein will, für einen Fall, der kaum vorkommt.
 
