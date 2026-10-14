@@ -65,6 +65,9 @@ describe('Mitglieder-Sitzung', () => {
 		expect(await r.json()).toEqual({
 			person: { id: m.personId, vorname: 'Anna', nachname: 'Beispiel', art: 'ERWACHSENER', rechte: ['MITGLIEDER'] },
 			kennung: 'anna-ich@example.test',
+			passkeys: [],
+			hatPasswort: false,
+			totp: { moeglich: true, aktiv: false, wiederherstellungscodesUebrig: 0 },
 		});
 	});
 

@@ -10,6 +10,8 @@ import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-
 import { legeVereinAn } from './test-vereine.js';
 import { vereinsApi, vereinsRouten } from './verein.js';
 
+type Passkey = Awaited<ReturnType<PrismaClient['passkey']['findUniqueOrThrow']>>;
+
 interface Kontext {
 	url: string;
 	eigen: { slug: string };
@@ -24,6 +26,31 @@ interface Kontext {
 	prisma: PrismaClient;
 	/** Der Nachlauf der App, damit ein Fall auf die Arbeit nach der Antwort warten kann. */
 	nachlauf: Nachlauf;
+	/** Ein Passkey eines Zugangs im Verein fremd, wie er vor den Faellen war. */
+	fremderPasskey: Passkey;
+}
+
+/**
+ * Profil-Routen ohne Objekt-Id: im gesperrten Verein 404, und das Cookie aus
+ * eigen gilt in fremd nicht. Eine Id gibt es dort nicht, die Person ist immer
+ * die der Sitzung.
+ */
+async function profilOhneId(k: Kontext, methode: string, pfad: string): Promise<void> {
+	expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1${pfad}`, { methode, body: {} })).status).toBe(404);
+	expect(
+		(await sende(k.url, `/${k.fremd.slug}/api/v1${pfad}`, { methode, body: {}, cookie: k.eigenesCookie })).status,
+	).toBe(401);
+}
+
+/** Mitglied aus eigen greift mit der Id eines Passkeys aus fremd zu: 404, der Datensatz bleibt. */
+async function fremderPasskeyBleibt(k: Kontext, methode: string): Promise<void> {
+	const r = await sende(k.url, `/${k.eigen.slug}/api/v1/profil/passkeys/${k.fremderPasskey.id}`, {
+		methode,
+		body: { label: 'Uebernommen' },
+		cookie: k.eigenesCookie,
+	});
+	expect(r.status).toBe(404);
+	expect(await k.prisma.passkey.findUnique({ where: { id: k.fremderPasskey.id } })).toEqual(k.fremderPasskey);
 }
 
 /**
@@ -154,6 +181,13 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 			(await sende(k.url, `/${k.fremd.slug}/api/v1/abmelden`, { methode: 'POST', cookie: k.eigenesCookie })).status,
 		).toBe(401);
 	},
+	'POST /profil/passwort': (k) => profilOhneId(k, 'POST', '/profil/passwort'),
+	'POST /profil/passkeys/optionen': (k) => profilOhneId(k, 'POST', '/profil/passkeys/optionen'),
+	'POST /profil/passkeys': (k) => profilOhneId(k, 'POST', '/profil/passkeys'),
+	'PATCH /profil/passkeys/:id': (k) => fremderPasskeyBleibt(k, 'PATCH'),
+	'DELETE /profil/passkeys/:id': (k) => fremderPasskeyBleibt(k, 'DELETE'),
+	'POST /profil/totp/start': (k) => profilOhneId(k, 'POST', '/profil/totp/start'),
+	'POST /profil/totp/bestaetigen': (k) => profilOhneId(k, 'POST', '/profil/totp/bestaetigen'),
 	'POST /abmelden/alle': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden/alle`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -193,7 +227,20 @@ describe('Mandanten-Test', () => {
 			legeVereinAn(prisma, { slug: 'mandant-gesperrt', status: 'GESPERRT' }),
 		]);
 		server = await starteTestServer(app);
-		const { cookie } = await legeMitgliedAn(prisma, eigen, { art: 'ERWACHSENER' });
+		// Mit Recht, damit TOTP fuer sie moeglich waere: der Fall soll an der
+		// Vereinsgrenze scheitern, nicht an fehlenden Rechten.
+		const { cookie } = await legeMitgliedAn(prisma, eigen, { art: 'ERWACHSENER', rechte: ['MITGLIEDER'] });
+		// Mit Passwort, damit ein Loeschen nicht schon am letzten Anmeldeweg scheiterte.
+		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
+		const fremderPasskey = await prisma.passkey.create({
+			data: {
+				vereinId: fremd.id,
+				zugangId: nachbar.zugangId,
+				credentialId: `cred-mandant-${nachbar.zugangId}`,
+				publicKey: 'cHVibGljLWtleQ',
+				label: 'Telefon in fremd',
+			},
+		});
 		const totpPerson = { kennung: 'mandant-totp@example.test', passwort: 'gruene-forelle-am-see' };
 		const { zugangId } = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
@@ -214,6 +261,7 @@ describe('Mandanten-Test', () => {
 			totpPerson,
 			prisma,
 			nachlauf,
+			fremderPasskey,
 		};
 	});
 
