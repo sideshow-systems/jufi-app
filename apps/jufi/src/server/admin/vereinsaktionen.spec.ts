@@ -3,6 +3,7 @@ import { createPrismaClientFromEnv, Recht, sperreVereinszeile } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { leitungsEinladungsText, notfallLinkText } from '../einladung.js';
+import { einladungsMail } from '../mail/texte.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { adminDaten } from './daten.js';
 import { meldeAdminAn } from './test-admin.js';
@@ -498,6 +499,168 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 			const r = await post('/vereine/gibt-es-nicht/notfall-link', { personId: 'egal' });
 			expect(r.status).toBe(404);
 			expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		});
+	});
+
+	describe('per Mail', () => {
+		const KEINE_ADRESSE = { fehler: 'Für diese Person ist keine E-Mail hinterlegt' };
+		const NEUER_VEREIN = {
+			name: 'Fischereiverein Mail e.V.',
+			anzeigename: 'Jungfischer Mail',
+			farbe: '#0f766e',
+			leitung: { vorname: 'Thomas', nachname: 'Beispiel', email: '  Thomas.Mail@Example.ORG ' },
+		};
+
+		function mails(vereinId: string) {
+			return prisma.mailWarteschlange.findMany({
+				where: { vereinId },
+				orderBy: [{ angelegtAm: 'asc' }, { id: 'asc' }],
+			});
+		}
+
+		/** Die eine offene Einladung zu diesem Link, fuer den bezug der Mail. */
+		function einladungZu(link: string) {
+			return prisma.einladung.findFirstOrThrow({ where: { tokenHash: hashToken(link.split('#')[1] ?? '') } });
+		}
+
+		it('Verein anlegen mit perMail: Mail an die Leitung mit dem Link aus der Antwort', async () => {
+			const r = await post('/vereine', { ...NEUER_VEREIN, slug: 'mail-anlegen', perMail: true });
+			expect(r.status).toBe(201);
+			const body = (await r.json()) as { id: string; einladung: Einladung; mailEingereiht: boolean };
+			expect(body.mailEingereiht).toBe(true);
+
+			const zeilen = await mails(body.id);
+			expect(zeilen).toHaveLength(1);
+			const erwartet = einladungsMail({
+				vorname: 'Thomas',
+				anzeigename: 'Jungfischer Mail',
+				link: body.einladung.link,
+				art: 'einladung',
+			});
+			expect(zeilen[0]).toMatchObject({
+				empfaenger: 'thomas.mail@example.org',
+				betreff: erwartet.betreff,
+				text: erwartet.text,
+				bezug: `einladung:${(await einladungZu(body.einladung.link)).id}`,
+			});
+			// Ohne gesendetAm und naechsterVersuch: der Arbeiter aus mail/arbeiter.spec.ts
+			// laeuft mit derselben Uhr parallel und kann die Zeile schon beansprucht haben.
+			expect(zeilen[0]?.text).toContain(body.einladung.link);
+		});
+
+		it('Verein anlegen mit perMail: false oder ohne Feld reiht nichts ein', async () => {
+			for (const [slug, extra] of [
+				['mail-ohne', {}],
+				['mail-falsch', { perMail: false }],
+				['mail-text', { perMail: 'true' }],
+			] as const) {
+				const r = await post('/vereine', { ...NEUER_VEREIN, slug, ...extra });
+				expect(r.status, slug).toBe(201);
+				const body = (await r.json()) as { id: string; mailEingereiht: boolean };
+				expect(body.mailEingereiht, slug).toBe(false);
+				expect(await mails(body.id), slug).toEqual([]);
+			}
+		});
+
+		it('Verein anlegen mit perMail ohne Adresse ist 400 und legt nichts an', async () => {
+			const r = await post('/vereine', {
+				...NEUER_VEREIN,
+				slug: 'mail-keine-adresse',
+				leitung: { ...NEUER_VEREIN.leitung, email: '' },
+				perMail: true,
+			});
+			expect(r.status).toBe(400);
+			expect(await r.json()).toEqual({ fehler: 'Keine gültige E-Mail-Adresse', feld: 'email' });
+			expect(await prisma.verein.count({ where: { slug: 'mail-keine-adresse' } })).toBe(0);
+		});
+
+		it('Einladung erneuern per Mail; ohne Adresse 400 ohne Wirkung', async () => {
+			const { id, leitungId } = await legeAn('mail-erneuern');
+			const r = await post(`/vereine/${id}/einladung-erneuern`, { perMail: true });
+			expect(r.status).toBe(200);
+			const body = (await r.json()) as { einladung: Einladung; mailEingereiht: boolean };
+			expect(body.mailEingereiht).toBe(true);
+			const zeilen = await mails(id);
+			expect(zeilen).toHaveLength(1);
+			expect(zeilen[0]).toMatchObject({
+				empfaenger: 'thomas.beispiel@example.org',
+				text: einladungsMail({
+					vorname: 'Thomas',
+					anzeigename: 'Jungfischer Aktionen',
+					link: body.einladung.link,
+					art: 'einladung',
+				}).text,
+				bezug: `einladung:${(await einladungZu(body.einladung.link)).id}`,
+			});
+
+			// Ohne perMail wie bisher, mit mailEingereiht: false.
+			const ohne = await post(`/vereine/${id}/einladung-erneuern`);
+			expect(((await ohne.json()) as { mailEingereiht: boolean }).mailEingereiht).toBe(false);
+			expect(await mails(id)).toHaveLength(1);
+
+			await prisma.person.update({ where: { id: leitungId }, data: { email: null } });
+			const einladungenVorher = await prisma.einladung.findMany({ where: { vereinId: id } });
+			const protokollVorher = await protokoll(id);
+			const keine = await post(`/vereine/${id}/einladung-erneuern`, { perMail: true });
+			expect(keine.status).toBe(400);
+			expect(await keine.json()).toEqual(KEINE_ADRESSE);
+			expect(await prisma.einladung.findMany({ where: { vereinId: id } })).toEqual(einladungenVorher);
+			expect(await protokoll(id)).toEqual(protokollVorher);
+			expect(await mails(id)).toHaveLength(1);
+		});
+
+		it('Notfall-Link per Mail enthaelt den Notfall-Text; ohne Adresse 400 ohne Wirkung', async () => {
+			const { id, leitungId } = await legeAn('mail-notfall');
+			await nimmAn(id, leitungId);
+
+			const r = await post(`/vereine/${id}/notfall-link`, { personId: leitungId, perMail: true });
+			expect(r.status).toBe(200);
+			const body = (await r.json()) as { einladung: Einladung; mailEingereiht: boolean };
+			expect(body.mailEingereiht).toBe(true);
+			const [zeile] = await mails(id);
+			const erwartet = einladungsMail({
+				vorname: 'Thomas',
+				anzeigename: 'Jungfischer Aktionen',
+				link: body.einladung.link,
+				art: 'notfall',
+			});
+			expect(zeile).toMatchObject({
+				empfaenger: 'thomas.beispiel@example.org',
+				betreff: erwartet.betreff,
+				text: erwartet.text,
+				bezug: `einladung:${(await einladungZu(body.einladung.link)).id}`,
+			});
+			expect(zeile?.text).toContain('angemeldeten Geräte');
+
+			const ohneAdresse = await prisma.person.create({
+				data: {
+					vereinId: id,
+					art: 'ERWACHSENER',
+					vorname: 'Petra',
+					nachname: 'Probe',
+					rechte: ['JUGENDLEITER_RECHTE'],
+				},
+			});
+			const protokollVorher = await protokoll(id);
+			const keine = await post(`/vereine/${id}/notfall-link`, { personId: ohneAdresse.id, perMail: true });
+			expect(keine.status).toBe(400);
+			expect(await keine.json()).toEqual(KEINE_ADRESSE);
+			expect(await prisma.einladung.count({ where: { personId: ohneAdresse.id } })).toBe(0);
+			expect(await protokoll(id)).toEqual(protokollVorher);
+			expect(await mails(id)).toHaveLength(1);
+
+			// Ohne perMail bekommt dieselbe Person ihren Link zum Kopieren.
+			const kopieren = await post(`/vereine/${id}/notfall-link`, { personId: ohneAdresse.id });
+			expect(kopieren.status).toBe(200);
+			expect(((await kopieren.json()) as { mailEingereiht: boolean }).mailEingereiht).toBe(false);
+		});
+
+		it('gesperrter Verein: 409 auch mit perMail, keine Mail', async () => {
+			const { id, leitungId } = await legeAn('mail-gesperrt');
+			expect((await post(`/vereine/${id}/sperren`)).status).toBe(200);
+			expect((await post(`/vereine/${id}/einladung-erneuern`, { perMail: true })).status).toBe(409);
+			expect((await post(`/vereine/${id}/notfall-link`, { personId: leitungId, perMail: true })).status).toBe(409);
+			expect(await mails(id)).toEqual([]);
 		});
 	});
 });

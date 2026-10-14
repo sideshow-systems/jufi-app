@@ -6,7 +6,8 @@ import {
 	type PrismaClient,
 	type VereinStatus,
 } from '@jufi/db';
-import { erzeugeEinladung } from '../einladung.js';
+import { erzeugeEinladung, erzeugeEinladungMitId } from '../einladung.js';
+import { legeMailAn } from '../mail/warteschlange.js';
 
 /**
  * Die einzige Stelle, an der der Admin Vereinstabellen liest (Spec 7.4): Zahlen
@@ -120,6 +121,39 @@ export interface NeueEinladung {
 }
 
 /**
+ * Baut Betreff und Text der Mail zu einer neuen Einladung. Kommt von der Route,
+ * weil dort Link-Basis und Art des Textes (Einladung oder Notfall) bekannt sind;
+ * hier wird nur eingereiht. Fehlt er, geht keine Mail (Link zum Kopieren).
+ */
+export type EinladungsMailBauer = (e: NeueEinladung) => { betreff: string; text: string };
+
+/**
+ * Reiht die Mail in derselben Transaktion ein wie die Einladung: Eine Einladung,
+ * deren Mail verloren ging, oder eine Mail mit einem Link, den es nicht gibt,
+ * waere ein Fehler, den niemand bemerkt. Mit vereinId, weil der Admin den
+ * schlichten Client hat; bezug fuer den Hinweis "nicht zustellbar" (Spec 5.3).
+ */
+async function reiheMailEin(
+	tx: Prisma.TransactionClient,
+	e: {
+		vereinId: string;
+		empfaenger: string;
+		einladungId: string;
+		mail: { betreff: string; text: string };
+		jetzt: Date;
+	},
+): Promise<void> {
+	await legeMailAn(tx, {
+		vereinId: e.vereinId,
+		empfaenger: e.empfaenger,
+		betreff: e.mail.betreff,
+		text: e.mail.text,
+		bezug: `einladung:${e.einladungId}`,
+		jetzt: e.jetzt,
+	});
+}
+
+/**
  * Die Person der ersten Leitung: wen der Admin zuletzt eingeladen hat
  * (erstelltVonPersonId null = vom Admin). Verworfen: ein eigenes Feld am Verein
  * -- es liefe auseinander, sobald die Einladung erneuert wird.
@@ -132,7 +166,7 @@ function ersteLeitung(db: Prisma.TransactionClient, vereinId: string) {
 	return db.einladung.findFirst({
 		where: { vereinId, art: 'EINLADUNG', erstelltVonPersonId: null },
 		orderBy: [{ angelegtAm: 'desc' }, { id: 'desc' }],
-		select: { person: { select: { id: true, vorname: true, nachname: true } } },
+		select: { person: { select: { id: true, vorname: true, nachname: true, email: true } } },
 	});
 }
 
@@ -311,8 +345,17 @@ export function adminDaten(prisma: PrismaClient) {
 			eingabe: NeuerVerein,
 			adminId: string,
 			jetzt: Date,
+			mail?: EinladungsMailBauer,
 		): Promise<
-			{ id: string; slug: string; leitung: { vorname: string }; anzeigename: string; token: string } | 'vergeben'
+			| {
+					id: string;
+					slug: string;
+					leitung: { vorname: string };
+					anzeigename: string;
+					token: string;
+					mailEingereiht: boolean;
+			  }
+			| 'vergeben'
 		> {
 			try {
 				return await prisma.$transaction(async (tx) => {
@@ -338,13 +381,23 @@ export function adminDaten(prisma: PrismaClient) {
 						},
 						select: { id: true, vorname: true },
 					});
-					const token = await erzeugeEinladung(tx, {
+					const { id: einladungId, token } = await erzeugeEinladungMitId(tx, {
 						vereinId: verein.id,
 						personId: leitung.id,
 						art: 'EINLADUNG',
 						erstelltVonPersonId: null,
 						jetzt,
 					});
+					// Die Adresse ist beim Anlegen Pflicht (vereine.ts), es gibt also immer eine.
+					if (mail) {
+						await reiheMailEin(tx, {
+							vereinId: verein.id,
+							empfaenger: eingabe.leitung.email,
+							einladungId,
+							mail: mail({ token, vorname: leitung.vorname, anzeigename: verein.anzeigename, slug: verein.slug }),
+							jetzt,
+						});
+					}
 					await tx.adminProtokoll.create({
 						data: {
 							adminId,
@@ -361,6 +414,7 @@ export function adminDaten(prisma: PrismaClient) {
 						leitung: { vorname: leitung.vorname },
 						anzeigename: verein.anzeigename,
 						token,
+						mailEingereiht: mail !== undefined,
 					};
 				});
 			} catch (error) {
@@ -474,7 +528,8 @@ export function adminDaten(prisma: PrismaClient) {
 			id: string,
 			adminId: string,
 			jetzt: Date,
-		): Promise<NeueEinladung | 'angenommen' | 'gesperrt' | null> {
+			mail?: EinladungsMailBauer,
+		): Promise<(NeueEinladung & { mailEingereiht: boolean }) | 'angenommen' | 'gesperrt' | 'ohneAdresse' | null> {
 			return prisma.$transaction(async (tx) => {
 				if (!(await sperreWennVorhanden(tx, id))) return null;
 				const verein = await tx.verein.findUnique({
@@ -489,14 +544,21 @@ export function adminDaten(prisma: PrismaClient) {
 				const einladung = await ersteLeitung(tx, id);
 				if (!einladung) return null;
 				const { person } = einladung;
+				// Vor dem ersten Schreiben: ohne Adresse soll der Klick nichts veraendern,
+				// auch die offene Einladung nicht ersetzen.
+				if (mail && !person.email) return 'ohneAdresse';
 
-				const token = await erzeugeEinladung(tx, {
+				const { id: einladungId, token } = await erzeugeEinladungMitId(tx, {
 					vereinId: id,
 					personId: person.id,
 					art: 'EINLADUNG',
 					erstelltVonPersonId: null,
 					jetzt,
 				});
+				const neu = { token, vorname: person.vorname, anzeigename: verein.anzeigename, slug: verein.slug };
+				if (mail && person.email) {
+					await reiheMailEin(tx, { vereinId: id, empfaenger: person.email, einladungId, mail: mail(neu), jetzt });
+				}
 				await tx.adminProtokoll.create({
 					data: {
 						adminId,
@@ -507,7 +569,7 @@ export function adminDaten(prisma: PrismaClient) {
 						betroffenePersonId: person.id,
 					},
 				});
-				return { token, vorname: person.vorname, anzeigename: verein.anzeigename, slug: verein.slug };
+				return { ...neu, mailEingereiht: mail !== undefined };
 			});
 		},
 
@@ -528,25 +590,42 @@ export function adminDaten(prisma: PrismaClient) {
 			personId: string,
 			adminId: string,
 			jetzt: Date,
-		): Promise<NeueEinladung | 'gesperrt' | null> {
+			mail?: EinladungsMailBauer,
+		): Promise<(NeueEinladung & { mailEingereiht: boolean }) | 'gesperrt' | 'ohneAdresse' | null> {
 			return prisma.$transaction(async (tx) => {
 				if (!(await sperreWennVorhanden(tx, id))) return null;
 				const person = await tx.person.findFirst({
 					where: { id: personId, vereinId: id, entferntAm: null, rechte: { has: 'JUGENDLEITER_RECHTE' } },
-					select: { id: true, vorname: true, verein: { select: { slug: true, anzeigename: true, status: true } } },
+					select: {
+						id: true,
+						vorname: true,
+						email: true,
+						verein: { select: { slug: true, anzeigename: true, status: true } },
+					},
 				});
 				if (!person) return null;
 				// Nach dem Personenpruefen: Fuer eine fremde Person bleibt es 404, auch im
 				// gesperrten Verein; "gesperrt" sagt nur, was der Admin ohnehin sieht.
 				if (person.verein.status === 'GESPERRT') return 'gesperrt';
+				// Nach "gesperrt" und vor dem ersten Schreiben, wie beim Erneuern.
+				if (mail && !person.email) return 'ohneAdresse';
 
-				const token = await erzeugeEinladung(tx, {
+				const { id: einladungId, token } = await erzeugeEinladungMitId(tx, {
 					vereinId: id,
 					personId: person.id,
 					art: 'EINLADUNG',
 					erstelltVonPersonId: null,
 					jetzt,
 				});
+				const neu = {
+					token,
+					vorname: person.vorname,
+					anzeigename: person.verein.anzeigename,
+					slug: person.verein.slug,
+				};
+				if (mail && person.email) {
+					await reiheMailEin(tx, { vereinId: id, empfaenger: person.email, einladungId, mail: mail(neu), jetzt });
+				}
 				await tx.adminProtokoll.create({
 					data: {
 						adminId,
@@ -557,7 +636,7 @@ export function adminDaten(prisma: PrismaClient) {
 						betroffenePersonId: person.id,
 					},
 				});
-				return { token, vorname: person.vorname, anzeigename: person.verein.anzeigename, slug: person.verein.slug };
+				return { ...neu, mailEingereiht: mail !== undefined };
 			});
 		},
 	};

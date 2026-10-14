@@ -1,5 +1,6 @@
 import { AttemptTracker, verifyAuthentication, verifyRegistration } from '@jufi/auth';
 import type { PrismaClient } from '@jufi/db';
+import { Nachlauf } from './nachlauf.js';
 import type { Umgebung } from './umgebung.js';
 
 // Eigene Datei statt in app.ts: admin/ braucht mitStandardwerten, und app.ts
@@ -22,6 +23,11 @@ export interface AppDeps {
 	/** Backoff der Anmeldung; ein Test bekommt so einen frischen Zaehler. */
 	anmeldeVersuche?: AttemptTracker;
 	webauthn?: WebauthnPruefer;
+	/**
+	 * Arbeit nach der Antwort ("Passwort vergessen?"). Von aussen, damit server.ts
+	 * beim Beenden auf denselben warten kann und Tests auf das Ergebnis.
+	 */
+	nachlauf?: Nachlauf;
 }
 
 /** AppDeps ohne Luecken, wie die Routen sie brauchen. */
@@ -39,5 +45,6 @@ export function mitStandardwerten(deps: AppDeps): VolleAppDeps {
 		jetzt: deps.jetzt ?? (() => new Date()),
 		anmeldeVersuche: deps.anmeldeVersuche ?? new AttemptTracker(),
 		webauthn: deps.webauthn ?? { verifyRegistration, verifyAuthentication },
+		nachlauf: deps.nachlauf ?? new Nachlauf(),
 	};
 }

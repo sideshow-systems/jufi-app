@@ -5,6 +5,7 @@ import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
 import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
+import { Nachlauf } from './nachlauf.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
 import { vereinsApi, vereinsRouten } from './verein.js';
@@ -21,6 +22,8 @@ interface Kontext {
 	/** Kennung und Passwort einer Person mit TOTP im Verein eigen. */
 	totpPerson: { kennung: string; passwort: string };
 	prisma: PrismaClient;
+	/** Der Nachlauf der App, damit ein Fall auf die Arbeit nach der Antwort warten kann. */
+	nachlauf: Nachlauf;
 }
 
 /**
@@ -121,6 +124,25 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Die Challenge bleibt in eigen liegen: fremd hat sie weder gesehen noch verbraucht.
 		expect(await k.prisma.webauthnChallenge.count({ where: { challenge: optionen.challenge } })).toBe(1);
 	},
+	'POST /zugang-verloren': async (k) => {
+		const r = await sende(k.url, `/${k.gesperrt.slug}/api/v1/zugang-verloren`, {
+			methode: 'POST',
+			body: { email: k.totpPerson.kennung },
+		});
+		expect(r.status).toBe(404);
+		// Die Adresse aus eigen bei fremd: dieselbe Antwort wie immer, aber in eigen entsteht nichts.
+		const fremd = await sende(k.url, `/${k.fremd.slug}/api/v1/zugang-verloren`, {
+			methode: 'POST',
+			body: { email: k.totpPerson.kennung },
+		});
+		expect(fremd.status).toBe(200);
+		expect(await fremd.json()).toEqual({ ok: true });
+		await k.nachlauf.warteAufAlle();
+		expect(await k.prisma.einladung.count({ where: { art: 'RESET', person: { email: k.totpPerson.kennung } } })).toBe(
+			0,
+		);
+		expect(await k.prisma.mailWarteschlange.count({ where: { empfaenger: k.totpPerson.kennung } })).toBe(0);
+	},
 	'GET /ich': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/ich`)).status).toBe(404);
 		// Das Cookie aus eigen gilt in fremd nicht: angemeldet ist nur, wer dort eine Sitzung hat.
@@ -161,7 +183,8 @@ describe('Mandanten-Test', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
 	let kontext: Kontext;
-	const app = createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG });
+	const nachlauf = new Nachlauf();
+	const app = createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, nachlauf });
 
 	beforeAll(async () => {
 		const [eigen, fremd, gesperrt] = await Promise.all([
@@ -190,6 +213,7 @@ describe('Mandanten-Test', () => {
 			einladungsToken: await einladungsToken(prisma, eigen),
 			totpPerson,
 			prisma,
+			nachlauf,
 		};
 	});
 

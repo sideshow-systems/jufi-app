@@ -5,6 +5,7 @@ import type { VolleAppDeps } from './abhaengigkeiten.js';
 import { anmeldeRouten } from './mitglieder/anmeldung.js';
 import { einladungsRouten } from './mitglieder/einladung.js';
 import { profilRouten } from './mitglieder/profil.js';
+import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
 import { routenAus } from './routen.js';
 
 /** Was vereinAusSlug in res.locals ablegt; die Endpunkte lesen es ueber vereinsKontext. */
@@ -86,6 +87,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	einladungsRouten(router, deps);
 	anmeldeRouten(router, deps);
 	profilRouten(router, deps);
+	zugangVerlorenRouten(router, deps);
 
 	return router;
 }

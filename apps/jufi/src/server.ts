@@ -12,6 +12,7 @@ import { createApp } from './server/app.js';
 import { fehlerbehandlung } from './server/fehler.js';
 import { starteMailArbeiter } from './server/mail/arbeiter.js';
 import { nodemailerVersand } from './server/mail/versand.js';
+import { Nachlauf } from './server/nachlauf.js';
 import { umgebungAusEnv, type Umgebung } from './server/umgebung.js';
 import { VERSION } from './version.generated.js';
 
@@ -35,7 +36,9 @@ try {
 	process.exit(1);
 }
 
-const app = createApp({ prisma, version: VERSION, umgebung });
+// Hier statt in createApp, damit das Beenden unten auf genau diesen warten kann.
+const nachlauf = new Nachlauf();
+const app = createApp({ prisma, version: VERSION, umgebung, nachlauf });
 
 /**
  * Der Arbeiter startet erst, wenn die Datenbank antwortet: Sein erster Durchlauf
@@ -52,14 +55,15 @@ prisma.$queryRaw`SELECT 1`
 			versand: nodemailerVersand(umgebung),
 			jetzt: () => new Date(),
 		});
-		// Ein laufender Versand soll nicht mitten im SMTP-Gespraech abbrechen; ohne
-		// diese Handler beendete SIGTERM den Prozess sofort. Danach ausdruecklich
-		// beenden, weil ein Handler das Standardverhalten ersetzt.
+		// Ein laufender Versand soll nicht mitten im SMTP-Gespraech abbrechen und
+		// ein Nachlauf ("Passwort vergessen?") nicht mitten in seiner Transaktion;
+		// ohne diese Handler beendete SIGTERM den Prozess sofort. Danach
+		// ausdruecklich beenden, weil ein Handler das Standardverhalten ersetzt.
 		let beendet = false;
 		const beende = () => {
 			if (beendet) return;
 			beendet = true;
-			arbeiter.stoppe().finally(() => process.exit(0));
+			Promise.allSettled([arbeiter.stoppe(), nachlauf.warteAufAlle()]).finally(() => process.exit(0));
 		};
 		process.once('SIGTERM', beende);
 		process.once('SIGINT', beende);
