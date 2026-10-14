@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { MeldungComponent } from '../gestaltung/meldung';
-import { AdminApi, alsAdminFehler, fehlertext } from './admin-api';
+import { AdminApi } from './admin-api';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 
 /** Kopfzeile und Platz fuer die Seiten der Verwaltung; Desktop-Breite (1280 x 800). */
 @Component({
@@ -89,7 +90,7 @@ export class AdminRahmenComponent {
 		try {
 			await firstValueFrom(this.api.abmelden());
 		} catch (ursache) {
-			const f = alsAdminFehler(ursache);
+			const f = alsApiFehler(ursache);
 			// 401 heisst eindeutig: keine Sitzung (nach 12 Stunden abgelaufen). Abgemeldet ist
 			// dann erreicht, die Person gehoert zur Anmeldung statt vor eine Fehlermeldung.
 			if (f.status !== 401) {

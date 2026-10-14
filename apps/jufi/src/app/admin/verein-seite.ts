@@ -4,18 +4,11 @@ import { pruefeNeuenSlug, SLUG_HINWEIS } from '@jufi/domain';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { datumDeutsch, zeitpunktBerlin } from '../gestaltung/format';
 import { AbschnittComponent, KarteComponent, PilleComponent } from '../gestaltung/ui';
-import {
-	AdminApi,
-	alsAdminFehler,
-	fehlertext,
-	type AdminAktion,
-	type AdminFehler,
-	type Einladung,
-	type VereinDetails,
-} from './admin-api';
+import { AdminApi, type AdminAktion, type Einladung, type VereinDetails } from './admin-api';
+import { alsApiFehler, fehlertext, type ApiFehler } from '../gemeinsam/api-fehler';
 import { BestaetigungComponent } from './bestaetigung';
 import { EinladungAnzeigeComponent } from './einladung-anzeige';
-import { wertVon } from './formular';
+import { wertVon } from '../gemeinsam/formular';
 
 const AKTION_TEXT: Record<AdminAktion, string> = {
 	VEREIN_ANGELEGT: 'Verein angelegt',
@@ -415,8 +408,8 @@ export class AdminVereinSeiteComponent {
 	}
 
 	/** 401 heisst: Sitzung abgelaufen (siehe Konto). Dann zur Anmeldung; sonst kommt der Fehler zurueck. */
-	private async pruefeSitzung(ursache: unknown): Promise<AdminFehler | null> {
-		const fehler = alsAdminFehler(ursache);
+	private async pruefeSitzung(ursache: unknown): Promise<ApiFehler | null> {
+		const fehler = alsApiFehler(ursache);
 		if (fehler.status !== 401) return fehler;
 		await this.router.navigateByUrl('/admin/anmelden');
 		return null;

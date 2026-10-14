@@ -1,7 +1,7 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { PasskeyBrowser } from './passkey-browser';
+import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
 import { adminTestAnbieter, knopf, tippe } from './test-hilfen';
 
 // jsdom hat kein canvas; der QR-Code ist hier nicht der Gegenstand.

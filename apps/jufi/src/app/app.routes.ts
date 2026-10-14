@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { NichtGefundenComponent } from './seiten/nicht-gefunden';
 import { PlattformStartComponent } from './seiten/plattform-start';
 import { VereinStartComponent } from './seiten/verein-start';
+import { mitgliedAngemeldet } from './verein/mitglied-waechter';
 
 /**
  * Der erste Pfadteil ist der Verein. '' gehoert der Plattform; reservierte Namen
@@ -13,6 +14,32 @@ export const routes: Routes = [
 	// Vor ':slug', sonst waere "admin" ein Vereinsname. Nachgeladen, damit Admin-Seiten
 	// und qrcode nicht im Startbuendel der Mitglieder liegen.
 	{ path: 'admin', loadChildren: () => import('./admin/admin.routes').then((m) => m.ADMIN_ROUTES) },
-	{ path: ':slug', component: VereinStartComponent },
+	// Ohne component, damit die Kinder den Slug erben (der Waechter liest ihn aus den
+	// Parametern). Die Seiten der Mitglieder werden einzeln nachgeladen.
+	{
+		path: ':slug',
+		children: [
+			{ path: '', component: VereinStartComponent, pathMatch: 'full', canActivate: [mitgliedAngemeldet] },
+			{
+				path: 'anmelden',
+				loadComponent: () => import('./verein/platzhalter').then((m) => m.PlatzhalterAnmeldenComponent),
+			},
+			{
+				path: 'einladung',
+				loadComponent: () => import('./verein/platzhalter').then((m) => m.PlatzhalterEinladungComponent),
+			},
+			{
+				path: 'zugang-verloren',
+				loadComponent: () => import('./verein/platzhalter').then((m) => m.PlatzhalterZugangVerlorenComponent),
+			},
+			{
+				path: 'profil',
+				loadComponent: () => import('./verein/platzhalter').then((m) => m.PlatzhalterProfilComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			// Ziel des Waechters bei 404; unter dem Slug statt als eigener Pfad, sonst waere der Pfadname ein reservierter Verein.
+			{ path: 'nicht-gefunden', component: NichtGefundenComponent },
+		],
+	},
 	{ path: '**', component: NichtGefundenComponent },
 ];

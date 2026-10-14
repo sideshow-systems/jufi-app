@@ -3,7 +3,8 @@ import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { datumDeutsch } from '../gestaltung/format';
 import { KarteComponent, PilleComponent } from '../gestaltung/ui';
-import { AdminApi, alsAdminFehler, fehlertext, type VereinZeile } from './admin-api';
+import { AdminApi, type VereinZeile } from './admin-api';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 
 /** Alle Vereine der Plattform mit ihren Kennzahlen (Spec 7.3). */
 @Component({
@@ -138,7 +139,7 @@ export class AdminVereineComponent implements OnInit {
 		try {
 			this.vereine.set((await firstValueFrom(this.api.vereine())).vereine);
 		} catch (ursache) {
-			const fehler = alsAdminFehler(ursache);
+			const fehler = alsApiFehler(ursache);
 			// Die Sitzung laeuft nach 12 Stunden ab, auch bei offener Seite (siehe Konto).
 			if (fehler.status === 401) await this.router.navigateByUrl('/admin/anmelden');
 			else

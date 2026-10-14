@@ -11,9 +11,10 @@ import {
 } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { KarteComponent } from '../gestaltung/ui';
-import { AdminApi, alsAdminFehler, fehlertext, type Einladung } from './admin-api';
+import { AdminApi, type Einladung } from './admin-api';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { EinladungAnzeigeComponent } from './einladung-anzeige';
-import { wertVon } from './formular';
+import { wertVon } from '../gemeinsam/formular';
 
 type Feld = 'name' | 'anzeigename' | 'slug' | 'farbe' | 'vorname' | 'nachname' | 'email';
 type Fehler = Partial<Record<Feld, string>>;
@@ -326,7 +327,7 @@ export class AdminVereinNeuComponent {
 		try {
 			this.angelegt.set(await firstValueFrom(this.api.legeVereinAn(eingabe)));
 		} catch (ursache) {
-			const f = alsAdminFehler(ursache);
+			const f = alsApiFehler(ursache);
 			if (f.status === 401) await this.router.navigateByUrl('/admin/anmelden');
 			else if (f.feld && FELDER.includes(f.feld as Feld)) this.fehler.set({ [f.feld]: f.fehler });
 			else this.allgemeinerFehler.set(fehlertext(f));

@@ -2,7 +2,8 @@ import { inject } from '@angular/core';
 import type { CanActivateFn } from '@angular/router';
 import { Router } from '@angular/router';
 import { catchError, map, of, throwError } from 'rxjs';
-import { AdminApi, alsAdminFehler } from './admin-api';
+import { AdminApi } from './admin-api';
+import { alsApiFehler } from '../gemeinsam/api-fehler';
 
 /**
  * Laesst nur durch, wen der Server als angemeldeten Admin kennt. Das Cookie ist
@@ -20,7 +21,7 @@ export const adminAngemeldet: CanActivateFn = () => {
 		.pipe(
 			map(() => true),
 			catchError((fehler: unknown) =>
-				alsAdminFehler(fehler).status === 401 ? of(router.parseUrl('/admin/anmelden')) : throwError(() => fehler),
+				alsApiFehler(fehler).status === 401 ? of(router.parseUrl('/admin/anmelden')) : throwError(() => fehler),
 			),
 		);
 };

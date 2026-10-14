@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, map, type Observable } from 'rxjs';
 import { KarteComponent, PilleComponent } from '../gestaltung/ui';
-import { AdminApi, alsAdminFehler, fehlertext } from './admin-api';
-import { wertVon } from './formular';
-import { PasskeyBrowser } from './passkey-browser';
-import { TotpEinrichtungComponent } from './totp-einrichtung';
+import { AdminApi } from './admin-api';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
+import { wertVon } from '../gemeinsam/formular';
+import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
+import { TotpEinrichtungComponent, type TotpStart as TotpStartBauteil } from '../gemeinsam/totp-einrichtung';
 
 type Schritt = 'laedt' | 'ungueltig' | 'netzfehler' | 'passwort' | 'totp' | 'passkey' | 'fertig';
 
@@ -75,7 +76,12 @@ type Schritt = 'laedt' | 'ungueltig' | 'netzfehler' | 'passwort' | 'totp' | 'pas
 						<p class="gedaempft">
 							Mit einer Authenticator-App schützt du das Konto auch dann, wenn jemand dein Passwort kennt.
 						</p>
-						<jf-totp-einrichtung #totp (eingerichtet)="zumPasskey()" />
+						<jf-totp-einrichtung
+							#totp
+							[starten]="totpStarten"
+							[bestaetigen]="totpBestaetigen"
+							(eingerichtet)="zumPasskey()"
+						/>
 						<!-- Nach dem Bestaetigen weg: Ueberspringen fuehrte an den nur einmal sichtbaren Codes vorbei. -->
 						@if (!totp.bestaetigt()) {
 							<button type="button" class="knopf" (click)="zumPasskey()">Überspringen</button>
@@ -151,6 +157,12 @@ type Schritt = 'laedt' | 'ungueltig' | 'netzfehler' | 'passwort' | 'totp' | 'pas
 })
 export class AdminEinrichtenComponent implements OnInit {
 	private readonly api = inject(AdminApi);
+
+	/** Die Aufrufe der Admin-API fuer das gemeinsame TOTP-Bauteil; Admin nennt die Marke Zwischenmarke. */
+	protected readonly totpStarten = (): Observable<TotpStartBauteil> =>
+		this.api.totpStart().pipe(map((s) => ({ ...s, marke: s.zwischenmarke })));
+	protected readonly totpBestaetigen = (marke: string, code: string): Observable<unknown> =>
+		this.api.totpBestaetigen(marke, code);
 	private readonly route = inject(ActivatedRoute);
 	private readonly passkeys = inject(PasskeyBrowser);
 
@@ -197,7 +209,7 @@ export class AdminEinrichtenComponent implements OnInit {
 			this.benutzername.set((await firstValueFrom(this.api.pruefeEinrichtung(this.token))).benutzername);
 			this.schritt.set('passwort');
 		} catch (ursache) {
-			this.schritt.set(alsAdminFehler(ursache).status === 404 ? 'ungueltig' : 'netzfehler');
+			this.schritt.set(alsApiFehler(ursache).status === 404 ? 'ungueltig' : 'netzfehler');
 		}
 	}
 
@@ -214,7 +226,7 @@ export class AdminEinrichtenComponent implements OnInit {
 			this.token = '';
 			this.schritt.set('totp');
 		} catch (ursache) {
-			const f = alsAdminFehler(ursache);
+			const f = alsApiFehler(ursache);
 			if (f.status === 404) this.schritt.set('ungueltig');
 			else this.fehler.set(fehlertext(f));
 		} finally {
@@ -231,13 +243,17 @@ export class AdminEinrichtenComponent implements OnInit {
 		this.laeuft.set(true);
 		this.fehler.set(null);
 		try {
-			const ausgang = await this.passkeys.hinzufuegen();
+			const ausgang = await this.passkeys.hinzufuegen({
+				optionen: () => this.api.passkeyHinzufuegenOptionen(),
+				senden: (antwort) => this.api.passkeyHinzufuegen(antwort),
+				schonVorhanden: 'Dieses Gerät hat schon einen Passkey für den Admin-Bereich.',
+			});
 			if (ausgang === 'fertig') this.schritt.set('fertig');
 			else if (ausgang === 'abgelehnt') {
 				this.fehler.set('Der Browser hat sofort abgelehnt. Du kannst den Passkey später im Konto hinzufügen.');
 			}
 		} catch (ursache) {
-			this.fehler.set(fehlertext(alsAdminFehler(ursache)));
+			this.fehler.set(fehlertext(alsApiFehler(ursache)));
 		} finally {
 			this.laeuft.set(false);
 		}
