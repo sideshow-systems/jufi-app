@@ -65,6 +65,28 @@ describe('einsichtIn', () => {
 		expect(einsichtIn(kindA, geschwister, mitGeschwister)).toBeNull();
 	});
 
+	it('zeigt Erwachsenen die Mitfamilie eines gemeinsamen Kindes mit Namen, fremde nicht', () => {
+		const vater = person('vater');
+		const z2 = [...zuordnungen, z('vater', 'kindA'), z('fremder', 'kindB')];
+		expect(einsichtIn(mutter, vater, z2)).toBe('NAME');
+		expect(einsichtIn(mutter, oma, z2)).toBe('NAME');
+		expect(einsichtIn(mutter, person('fremder'), z2)).toBeNull();
+		expect(einsichtIn(kindA, vater, z2)).toBe('VOLL');
+		expect(einsichtIn(kindA, kind('kindA2'), [...z2, z('mutter', 'kindA2')])).toBeNull();
+	});
+
+	it('zaehlt ein entferntes gemeinsames Kind nicht', () => {
+		const vater = person('vater');
+		const z2 = [...zuordnungen, z('vater', 'kindA')];
+		const weg = new Map([['kindA', { ...kindA, entferntAm: new Date('2026-01-01') }]]);
+		expect(einsichtIn(mutter, vater, z2, weg)).toBeNull();
+	});
+
+	it('zeigt dem entfernten Betrachter nichts', () => {
+		const weg = person('weg', { entferntAm: new Date('2026-01-01'), rechte: ['MITGLIEDER'] });
+		expect(einsichtIn(weg, kindA, zuordnungen)).toBeNull();
+	});
+
 	it('macht Entfernte fuer jeden unsichtbar, auch fuer sie selbst', () => {
 		const weg = person('weg', { entferntAm: new Date('2026-01-01') });
 		for (const b of [verwalter, betreuer, mutter, weg]) {
@@ -163,6 +185,12 @@ describe('warnhinweise', () => {
 		expect(warnhinweise({ ...basis, person: mutter, zuordnungen: [] }, JETZT)).toEqual([]);
 	});
 
+	it('warnt Volljaehrige nicht wegen fehlender Familie', () => {
+		const alt = kind('alt', new Date('2008-03-10'));
+		const e = { ...basis, person: alt, zuordnungen: [], volljaehrigGeprueftAm: new Date('2026-04-01') };
+		expect(warnhinweise(e, JETZT)).toEqual([]);
+	});
+
 	it('warnt bei fehlender Einwilligung nur Minderjaehrige', () => {
 		expect(warnhinweise({ ...basis, hatGueltigeEinwilligung: false }, JETZT)).toEqual([{ art: 'EINWILLIGUNG_FEHLT' }]);
 		expect(warnhinweise({ ...basis, person: mutter, hatGueltigeEinwilligung: false }, JETZT)).toEqual([]);
@@ -185,8 +213,6 @@ describe('warnhinweise', () => {
 			{ art: 'OHNE_FAMILIE' },
 			{ art: 'VOLLJAEHRIG', seit: new Date('2026-03-10') },
 		]);
-		expect(warnhinweise({ ...e, volljaehrigGeprueftAm: new Date('2026-04-01') }, JETZT)).toEqual([
-			{ art: 'OHNE_FAMILIE' },
-		]);
+		expect(warnhinweise({ ...e, volljaehrigGeprueftAm: new Date('2026-04-01') }, JETZT)).toEqual([]);
 	});
 });

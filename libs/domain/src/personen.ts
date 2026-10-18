@@ -26,15 +26,36 @@ function sindFamilie(a: PersonSicht, b: PersonSicht, zuordnungen: readonly Zuord
 // Geschwister sind nicht verbunden (keine Zuordnung untereinander) und sehen sich nicht.
 // Entfernte sind fuer alle null, auch fuer sich selbst: eine entfernte Person
 // kann sich nicht mehr anmelden, und niemand soll sie weiter in Listen finden.
+// Mitfamilie (Spec 5.2): Wer mit einem anderen Erwachsenen ein gemeinsames, nicht
+// entferntes Kind hat, sieht ihn mit NAME. VOLL wurde verworfen, weil fremde
+// Erwachsene keine Adressen voneinander brauchen. kinder (optional) liefert den
+// Entfernt-Stand der Kinder; fehlt ein Kind darin, zaehlt es als nicht entfernt.
+function teilenKind(
+	a: PersonSicht,
+	b: PersonSicht,
+	zuordnungen: readonly Zuordnung[],
+	kinder?: ReadonlyMap<string, PersonSicht>,
+): boolean {
+	if (a.art !== 'ERWACHSENER' || b.art !== 'ERWACHSENER') return false;
+	return zuordnungen.some(
+		(z) =>
+			z.erwachsenerId === a.id &&
+			!kinder?.get(z.jungfischerId)?.entferntAm &&
+			zuordnungen.some((y) => y.erwachsenerId === b.id && y.jungfischerId === z.jungfischerId),
+	);
+}
+
 export function einsichtIn(
 	betrachter: PersonSicht,
 	person: PersonSicht,
 	zuordnungen: readonly Zuordnung[],
+	kinder?: ReadonlyMap<string, PersonSicht>,
 ): Einsicht | null {
-	if (person.entferntAm) return null;
+	if (person.entferntAm || betrachter.entferntAm) return null;
 	if (hatRecht(betrachter, 'MITGLIEDER')) return 'VOLL';
 	if (betrachter.id === person.id || sindFamilie(betrachter, person, zuordnungen)) return 'VOLL';
 	if (istJugendleiter(betrachter)) return 'LESEN';
+	if (teilenKind(betrachter, person, zuordnungen, kinder)) return 'NAME';
 	if (istJugendleiter(person)) return 'NAME';
 	return null;
 }
@@ -43,8 +64,9 @@ export function darfPersonSehen(
 	betrachter: PersonSicht,
 	person: PersonSicht,
 	zuordnungen: readonly Zuordnung[],
+	kinder?: ReadonlyMap<string, PersonSicht>,
 ): boolean {
-	return einsichtIn(betrachter, person, zuordnungen) !== null;
+	return einsichtIn(betrachter, person, zuordnungen, kinder) !== null;
 }
 
 export function sichtbarePersonen<T extends PersonSicht>(
@@ -53,8 +75,9 @@ export function sichtbarePersonen<T extends PersonSicht>(
 	zuordnungen: readonly Zuordnung[],
 ): { person: T; einsicht: Einsicht }[] {
 	const ergebnis: { person: T; einsicht: Einsicht }[] = [];
+	const kinder = new Map(personen.map((p) => [p.id, p]));
 	for (const person of personen) {
-		const einsicht = einsichtIn(betrachter, person, zuordnungen);
+		const einsicht = einsichtIn(betrachter, person, zuordnungen, kinder);
 		if (einsicht) ergebnis.push({ person, einsicht });
 	}
 	return ergebnis;
@@ -123,8 +146,11 @@ export function warnhinweise(
 	const jungfischer = person.art === 'JUNGFISCHER';
 	const volljaehrig = istVolljaehrig(person, jetzt);
 
+	// Volljaehrige ohne Familie sind nach dem Pruefen der Volljaehrigkeit in Ordnung;
+	// der Hinweis bliebe sonst dauerhaft, auch nach "Belassen".
 	if (
 		jungfischer &&
+		!volljaehrig &&
 		!e.zuordnungen.some((z) => z.jungfischerId === person.id && istErziehungsberechtigt(z, person, jetzt))
 	) {
 		hinweise.push({ art: 'OHNE_FAMILIE' });
