@@ -19,15 +19,16 @@ export class MitgliedSitzung {
  * Laesst nur durch, wen der Server in diesem Verein als angemeldet kennt. Das Cookie
  * ist HttpOnly, die Seite sieht es nicht -- sie fragt also nach (GET /ich).
  *
- * 401 heisst "nicht angemeldet": Umleitung auf die Anmeldung des Vereins. 404 heisst
- * unbekannter oder fuer die Person unsichtbarer Verein: Umleitung auf eine
- * Nicht-gefunden-Seite unter dem Slug (Rahmen-Spec 8, kein 403). Verworfen: eine
- * Seite unter einem festen Pfad ausserhalb des Slugs -- sie waere ein weiterer
- * reservierter Vereinsname. Alle anderen Fehler (Netz, Server) schicken nicht zur
- * Anmeldung, sondern lassen die Navigation sichtbar scheitern wie bei adminAngemeldet:
- * Das Formular taete sonst so, als sei die Sitzung weg, obwohl nur die Leitung fehlt.
+ * 401 heisst "nicht angemeldet": Umleitung auf die Anmeldung des Vereins, mit der
+ * aufgerufenen Seite als weiter. 404 heisst unbekannter oder fuer die Person
+ * unsichtbarer Verein: Umleitung auf eine Nicht-gefunden-Seite unter dem Slug
+ * (Rahmen-Spec 8, kein 403). Verworfen: eine Seite unter einem festen Pfad
+ * ausserhalb des Slugs -- sie waere ein weiterer reservierter Vereinsname. Alle
+ * anderen Fehler (Netz, Server) schicken nicht zur Anmeldung, sondern lassen die
+ * Navigation sichtbar scheitern wie bei adminAngemeldet: Das Formular taete sonst
+ * so, als sei die Sitzung weg, obwohl nur die Leitung fehlt.
  */
-export const mitgliedAngemeldet: CanActivateFn = (route) => {
+export const mitgliedAngemeldet: CanActivateFn = (route, state) => {
 	const router = inject(Router);
 	const slug = route.paramMap.get('slug') ?? '';
 	const sitzung = inject(MitgliedSitzung);
@@ -42,7 +43,12 @@ export const mitgliedAngemeldet: CanActivateFn = (route) => {
 				sitzung.ich.set(null);
 				const status = alsApiFehler(fehler).status;
 				const pfad = `/${encodeURIComponent(slug)}`;
-				if (status === 401) return of(router.parseUrl(`${pfad}/anmelden`));
+				// Die Anmeldung fuehrt ueber weiter zur aufgerufenen Seite zurueck (Spec 2.4). Mitgegeben
+				// wird die ganze Adresse samt Suchteil; ob sie sicher ist, prueft erst die Anmeldeseite
+				// (sichererWeiterPfad), denn dort kommt der Wert aus der Adresszeile.
+				if (status === 401) {
+					return of(router.createUrlTree(['/', slug, 'anmelden'], { queryParams: { weiter: state.url } }));
+				}
 				if (status === 404) return of(router.parseUrl(`${pfad}/nicht-gefunden`));
 				return throwError(() => fehler);
 			}),

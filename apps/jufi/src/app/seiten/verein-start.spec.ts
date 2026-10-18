@@ -198,8 +198,22 @@ describe('Vereinsseite', () => {
 		);
 		await navigation;
 
-		expect(TestBed.inject(Router).url).toBe('/demo/anmelden');
+		expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo');
 		// Die Anmeldeseite laedt ihren Vereinskopf; hier zaehlt nur das Ziel der Umleitung.
+		http.match('/demo/api/v1/verein');
+	});
+
+	it('merkt sich die aufgerufene Seite: /demo/profil ohne Sitzung fuehrt zu anmelden?weiter', async () => {
+		const harness = await RouterTestingHarness.create();
+		const navigation = harness.navigateByUrl('/demo/profil');
+		await vi.waitFor(() =>
+			http
+				.expectOne('/demo/api/v1/ich')
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' }),
+		);
+		await navigation;
+
+		expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo%2Fprofil');
 		http.match('/demo/api/v1/verein');
 	});
 
