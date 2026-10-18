@@ -8,13 +8,66 @@ import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 
 const iso = (zeitpunkt: Date | null): string | null => zeitpunkt?.toISOString() ?? null;
 
-/** Vor- und Nachname in einem Stueck; ein Grabstein hat beide geleert und bleibt leer. */
-const vollerName = (p: { vorname: string; nachname: string }): string => `${p.vorname} ${p.nachname}`.trim();
+const ENTFERNTE_PERSON = '(entfernte Person)';
 
 /**
- * "Meine Daten herunterladen" (Plan-Entscheidung 9): alles, was die App ueber die
- * angemeldete Person gespeichert hat, als JSON-Datei. Spaeter ergaenzen weitere
- * Teilprojekte ihre Felder.
+ * Vor- und Nachname in einem Stueck. Ein Grabstein hat beide geleert (Spec 5.8); ein leerer
+ * String las sich wie ein Fehler im Auszug, darum steht dort ein Platzhalter. Verworfen:
+ * die Einwilligung weglassen, denn sie bleibt als Nachweis stehen und gehoert zu den Daten.
+ */
+const vollerName = (p: { vorname: string; nachname: string; entferntAm: Date | null }): string =>
+	p.entferntAm ? ENTFERNTE_PERSON : `${p.vorname} ${p.nachname}`.trim();
+
+/**
+ * Form des Auszugs. Das Objekt unten wird dagegen geprueft (satisfies), damit eine spaetere
+ * Ergaenzung oder ein umbenanntes Feld dem Compiler auffaellt und nicht erst dem Nutzer.
+ */
+export interface Datenauszug {
+	erstelltAm: string;
+	verein: { name: string; anzeigename: string };
+	person: {
+		vorname: string;
+		nachname: string;
+		art: 'JUNGFISCHER' | 'ERWACHSENER';
+		geburtsdatum: string | null;
+		email: string | null;
+		jugendsprecher: boolean | null;
+		rechte: string[];
+		angelegtAm: string;
+	};
+	zugang: {
+		anmeldename: string | null;
+		passwortGesetzt: boolean;
+		totpAktiv: boolean;
+		angelegtAm: string;
+		letzteAnmeldungAm: string | null;
+	} | null;
+	passkeys: { name: string; angelegtAm: string; zuletztGenutztAm: string | null }[];
+	sitzungen: { zuletztGesehen: string; ablauf: string; geraet: string | null }[];
+	familie: {
+		vorname: string;
+		nachname: string;
+		beziehung: string;
+		beziehungFreitext: string | null;
+		erziehungsberechtigt: boolean;
+		rolle: 'kind' | 'bezugsperson';
+	}[];
+	untergruppen: string[];
+	einwilligungen: {
+		kind: string;
+		art: string;
+		textVersion: string;
+		erteiltAm: string;
+		widerrufenAm: string | null;
+		erteiltVon: string;
+	}[];
+}
+
+/**
+ * "Meine Daten herunterladen" (Plan-Entscheidung 9): die Angaben zur angemeldeten
+ * Person als JSON-Datei, und zwar die Felder, die der Plan fuer Etappe 5 festlegt. Nicht
+ * darin stehen etwa zugangErlaubt, volljaehrigGeprueftAm, Wiederherstellungscodes und offene
+ * Einladungen; weitere Felder ergaenzen spaetere Teilprojekte.
  *
  * Die Felder werden aufgebaut statt gestrichen (Muster aus Etappe 4, siehe /ich): Jede
  * Abfrage nennt ihre Spalten ueber select, und das Ergebnis wird Feld fuer Feld
@@ -82,8 +135,8 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 						erteiltAm: true,
 						widerrufenAm: true,
 						erteiltVon: true,
-						jungfischer: { select: { vorname: true, nachname: true } },
-						erteiltVonPerson: { select: { vorname: true, nachname: true } },
+						jungfischer: { select: { vorname: true, nachname: true, entferntAm: true } },
+						erteiltVonPerson: { select: { vorname: true, nachname: true, entferntAm: true } },
 					},
 					orderBy: { erteiltAm: 'asc' },
 				}),
@@ -147,7 +200,7 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 					widerrufenAm: iso(e.widerrufenAm),
 					erteiltVon: e.erteiltVon === person.id ? 'ich' : vollerName(e.erteiltVonPerson),
 				})),
-			};
+			} satisfies Datenauszug;
 
 			// Berliner Tag statt UTC: Eine Datei, die um 00:30 Ortszeit entsteht, soll das Datum von
 			// heute tragen, nicht von gestern. Wie die uebrigen Tagesangaben der App (admin/daten.ts).

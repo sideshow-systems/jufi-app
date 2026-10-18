@@ -251,6 +251,18 @@ describe('Meine Daten herunterladen', () => {
 		expect(auszug.familie.map((m: { vorname: string }) => m.vorname)).toEqual(['Kai']);
 	});
 
+	it('die Einwilligung einer entfernten Person erscheint mit Platzhalter statt leerem Namen', async () => {
+		const f = await neueFamilie();
+		await prisma.person.update({
+			where: { id: f.mutter.personId },
+			data: { vorname: '', nachname: '', email: null, rechte: [], entferntAm: jetzt },
+		});
+		const auszug = await (await f.hole(f.kind.cookie)).json();
+		expect(auszug.einwilligungen).toEqual([
+			expect.objectContaining({ kind: 'Kai Muster', erteiltVon: '(entfernte Person)' }),
+		]);
+	});
+
 	it('Familie anderer Personen zeigt nur Name und Beziehung, keine Adresse und keine Rechte', async () => {
 		const f = await neueFamilie();
 		const text = await (await f.hole(f.kind.cookie)).text();
