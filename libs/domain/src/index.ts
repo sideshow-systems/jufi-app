@@ -6,3 +6,4 @@ export * from './einladung.js';
 export * from './rechte.js';
 export * from './personen.js';
 export * from './einwilligung.js';
+export * from './weiter.js';
