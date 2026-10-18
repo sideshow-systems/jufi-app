@@ -297,19 +297,50 @@ apps/jufi-e2e/                                     Playwright: Aufbau, Ablauf, L
 **Interfaces:**
 
 - Produces: `GET /ich/daten` (angemeldet) → 200 `application/json; charset=utf-8` mit `Content-Disposition: attachment; filename="jufi-meine-daten-<slug>-<JJJJ-MM-TT>.json"` und `Cache-Control: no-store`:
+
   ```ts
   interface Datenauszug {
   	erstelltAm: string;
   	verein: { name: string; anzeigename: string };
-  	person: { vorname; nachname; art; geburtsdatum: string | null; email: string | null; jugendsprecher: boolean | null; rechte: string[]; angelegtAm: string };
-  	zugang: { anmeldename: string | null; passwortGesetzt: boolean; totpAktiv: boolean; angelegtAm: string; letzteAnmeldungAm: string | null } | null;
+  	person: {
+  		vorname;
+  		nachname;
+  		art;
+  		geburtsdatum: string | null;
+  		email: string | null;
+  		jugendsprecher: boolean | null;
+  		rechte: string[];
+  		angelegtAm: string;
+  	};
+  	zugang: {
+  		anmeldename: string | null;
+  		passwortGesetzt: boolean;
+  		totpAktiv: boolean;
+  		angelegtAm: string;
+  		letzteAnmeldungAm: string | null;
+  	} | null;
   	passkeys: { name: string; angelegtAm: string; zuletztGenutztAm: string | null }[];
   	sitzungen: { zuletztGesehen: string; ablauf: string; geraet: string | null }[];
-  	familie: { vorname: string; nachname: string; beziehung: string; beziehungFreitext: string | null; erziehungsberechtigt: boolean; rolle: 'kind' | 'bezugsperson' }[];
+  	familie: {
+  		vorname: string;
+  		nachname: string;
+  		beziehung: string;
+  		beziehungFreitext: string | null;
+  		erziehungsberechtigt: boolean;
+  		rolle: 'kind' | 'bezugsperson';
+  	}[];
   	untergruppen: string[];
-  	einwilligungen: { kind: string; art: string; textVersion: string; erteiltAm: string; widerrufenAm: string | null; erteiltVon: string }[];
+  	einwilligungen: {
+  		kind: string;
+  		art: string;
+  		textVersion: string;
+  		erteiltAm: string;
+  		widerrufenAm: string | null;
+  		erteiltVon: string;
+  	}[];
   }
   ```
+
   `einwilligungen` umfasst die von dieser Person erteilten und, bei Jungfischern, die für sie erteilten. `erteiltVon` ist `'ich'` oder Vor- und Nachname, `kind` ist Vor- und Nachname. Später ergänzen weitere Teilprojekte ihre Felder.
 
 - [ ] **Step 1: Tests schreiben.**
@@ -338,6 +369,7 @@ apps/jufi-e2e/                                     Playwright: Aufbau, Ablauf, L
 
 - Consumes: `VereinKontext` (Task 3), `MitgliedSitzung`, `IconComponent`.
 - Produces: Routen unter `:slug`:
+
   ```
   { path: '', component: MitgliederHuelle, canActivate: [mitgliedAngemeldet], children: [
   	{ path: '', pathMatch: 'full', loadComponent: StartComponent },
@@ -346,6 +378,7 @@ apps/jufi-e2e/                                     Playwright: Aufbau, Ablauf, L
   	{ path: 'meine-jungfischer', loadComponent: JungfischerComponent },
   ] }
   ```
+
   Die Hüllen-Route steht unter `:slug` **nach** `anmelden`, `einladung`, `zugang-verloren` und `nicht-gefunden`. Diese bleiben ohne Hülle und ohne Wächter, und eine leere Eltern-Route vor ihnen ließe den Router erst dort suchen. Die Route `verwaltung` folgt in Task 12. Die Hülle zeigt einen Kopf (Logo 32 px aus `logoUrl` oder ein Initialen-Abzeichen in der Akzentfarbe, dazu den Anzeigenamen), `<main>` mit `<router-outlet />` und `<nav class="leiste" aria-label="Hauptnavigation">` mit genau zwei Einträgen, „Start“ (Icon `start`) und „Mehr“ (Icon `mehr`, aktiv auch auf `profil` und `meine-jungfischer`).
 
 - [ ] **Step 1: Tests schreiben.**
@@ -426,6 +459,7 @@ apps/jufi-e2e/                                     Playwright: Aufbau, Ablauf, L
 
 - Consumes: `GET /verwaltung/hinweise` (Task 7), `VereinKontext`, `MitgliedSitzung.ich().person.rechte`.
 - Produces: Routen:
+
   ```
   { path: 'verwaltung', component: VerwaltungsHuelle, canActivate: [mitgliedAngemeldet], children: [
   	{ path: '', pathMatch: 'full', loadComponent: MitgliederComponent },
@@ -433,6 +467,7 @@ apps/jufi-e2e/                                     Playwright: Aufbau, Ablauf, L
   	{ path: 'rechte', … }, { path: 'einstellungen', loadComponent: EinstellungenComponent }, // Task 13
   ] }
   ```
+
   `withComponentInputBinding` reicht `slug` nicht an Kinder einer Eltern-Route mit Komponente weiter. Deshalb kommt `paramsInheritanceStrategy: 'always'` über `withRouterConfig` in `app.config.ts` dazu (Kommentar: sonst bräuchte jede Seite den Slug über `ActivatedRoute.parent`).
 
   Die Seitenleiste enthält, jeweils nur mit dem passenden Recht: „Mitglieder“ (jedes Recht), „Untergruppen“ (`MITGLIEDER`), „Jugendleiter & Rechte“ (`JUGENDLEITER_RECHTE`), „Vereinseinstellungen“ (`EINSTELLUNGEN`), danach „Zur App“ (`/<slug>`). Darüber stehen Logo und Anzeigename mit dem Zusatz „Verwaltung“. Unter 768 px klappt die Leiste in ein Menü (Knopf mit `aria-expanded`, `aria-controls`), Vorlage `apps/entwurf/src/app/verwaltung/huelle.ts` ohne Band. Für `JUGENDLEITER_RECHTE` steht über dem Inhalt je Notfall-Link ein Hinweis mit `role="status"`: „Der Plattform-Admin hat am <TT.MM.JJJJ> einen neuen Link für <Vorname> erzeugt.“, bei `null`-Namen „… für ein ehemaliges Mitglied …“. Wer kein Recht hat, sieht `jf-nicht-gefunden` ohne Leiste.
@@ -529,6 +564,7 @@ apps/jufi-e2e/                                     Playwright: Aufbau, Ablauf, L
   5. Der Teardown beendet den Server.
 
   Die Umgebung der Kindprozesse hat Vorrang vor der `.env`, denn dotenv überschreibt nichts. Das prüft der Aufbau mit einer Abfrage von `/healthz`, die die neue Datenbank meldet, oder mit der Ausgabe des CLI.
+
 - Produces: `hilfen.ts` mit `passkeyGeraet(context: BrowserContext): Promise<void>`. Es richtet über CDP `WebAuthn.enable` und `WebAuthn.addVirtualAuthenticator({ options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } })` ein, je Person ein eigener Kontext. Außerdem `TESTPASSWORT` (im Aufbau zufällig erzeugt, nie ein echtes Passwort) und `ZUSTAND = 'apps/jufi-e2e/.zustand'`.
 
 - [ ] **Step 1: Ablauf schreiben** (`test.describe.serial`), nur erfundene Personen:
@@ -572,6 +608,7 @@ apps/jufi-e2e/                                     Playwright: Aufbau, Ablauf, L
   - bei 375 und auf Mitgliederseiten keine zu kleinen Tippflächen und `leisteVerdecktNichts`;
   - auf Verwaltungsseiten bei 1280 eine sichtbare Seitenleiste mit `getBoundingClientRect().width === 248`, bei 375 ein sichtbarer Menüknopf und eine verborgene Navigation;
   - im dunklen Modus ein anderer `body`-Hintergrund als im hellen (verglichen über die beiden Läufe derselben Seite).
+
 - [ ] **Step 2:** `pnpm run e2e` — Expected: Befunde, wo die Gestaltung noch nicht passt.
 - [ ] **Step 3: Gestaltung nachziehen**, bis alles grün ist, nur über Tokens und die betroffenen Bauteile. Bleibt eine Stiländerung ohne Wirkung, zuerst das Bau-Log prüfen (CLAUDE.md).
 - [ ] **Step 4:** `pnpm run e2e` — Expected: PASS.
