@@ -1,5 +1,6 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
+import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
@@ -15,7 +16,7 @@ type Passkey = Awaited<ReturnType<PrismaClient['passkey']['findUniqueOrThrow']>>
 
 interface Kontext {
 	url: string;
-	eigen: { slug: string };
+	eigen: { id: string; slug: string };
 	fremd: { id: string; slug: string };
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
@@ -525,6 +526,40 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	'DELETE /profil/passkeys/:id': (k) => fremderPasskeyBleibt(k, 'DELETE'),
 	'POST /profil/totp/start': (k) => profilOhneId(k, 'POST', '/profil/totp/start'),
 	'POST /profil/totp/bestaetigen': (k) => profilOhneId(k, 'POST', '/profil/totp/bestaetigen'),
+	'GET /ansprechpartner': async (k) => {
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ansprechpartner`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		// Die Sitzung gilt nur im eigenen Verein.
+		expect((await hole(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+		// Gegenprobe: In eigen geht es, und die Liste enthaelt dort niemanden aus fremd.
+		const r = await hole(k.eigen.slug, k.eigenesCookie);
+		expect(r.status).toBe(200);
+		const { ansprechpartner } = (await r.json()) as { ansprechpartner: { id: string }[] };
+		expect(ansprechpartner.length).toBeGreaterThan(0);
+		expect(ansprechpartner.map((a) => a.id)).not.toContain(k.fremdePersonId);
+	},
+	// Der Hinweis liest AdminProtokoll mit dem schlichten PrismaClient (Plan-Entscheidung 2); gerade
+	// deshalb darf der Eintrag eines anderen Vereins nie durchkommen, auch nicht mit Namen.
+	'GET /verwaltung/hinweise': async (k) => {
+		const admin = await k.prisma.plattformAdmin.create({
+			data: { benutzername: `mandant-${randomUUID().slice(0, 8)}` },
+		});
+		const protokolliere = (vereinId: string, vereinSlug: string, betroffenePersonId: string | null) =>
+			k.prisma.adminProtokoll.create({
+				data: { adminId: admin.id, aktion: 'NOTFALL_LINK', vereinId, vereinSlug, betroffenePersonId },
+			});
+		await protokolliere(k.fremd.id, k.fremd.slug, k.fremdePersonId);
+		await protokolliere(k.eigen.id, k.eigen.slug, null);
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/verwaltung/hinweise`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Gegenprobe: In eigen geht es und zeigt genau den eigenen Eintrag, ohne den Namen der fremden Person.
+		const r = await hole(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(200);
+		expect(((await r.json()) as { notfallLinks: unknown[] }).notfallLinks).toEqual([
+			{ am: expect.any(String), vorname: null, nachname: null },
+		]);
+	},
 	'POST /abmelden/alle': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden/alle`, { methode: 'POST' })).status).toBe(404);
 		expect(

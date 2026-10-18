@@ -9,6 +9,7 @@ import { jungfischerRouten } from './mitglieder/jungfischer.js';
 import { personenRouten } from './mitglieder/personen.js';
 import { rechteRouten } from './mitglieder/rechte.js';
 import { profilRouten } from './mitglieder/profil.js';
+import { startRouten } from './mitglieder/start.js';
 import { untergruppenRouten } from './mitglieder/untergruppen.js';
 import { einladenRouten, zugangRouten } from './mitglieder/zugang.js';
 import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
@@ -134,6 +135,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	jungfischerRouten(router, deps);
 	zugangVerlorenRouten(router, deps);
 	einstellungenRouten(router, deps);
+	startRouten(router, deps);
 
 	return router;
 }
