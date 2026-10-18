@@ -8,8 +8,11 @@ import { VereinApi, type OeffentlicherVerein } from '../daten/verein-api';
 import { vereinsfarben } from '../gestaltung/farben';
 import { ThemaService } from '../gestaltung/thema';
 
-/** Gleich dem title in index.html; dorthin faellt der Titel zurueck, sobald kein Verein mehr gezeigt wird. */
-const STANDARDTITEL = 'JuFi App';
+/**
+ * Gleich dem title in index.html; dorthin faellt der Titel zurueck, sobald kein Verein mehr gezeigt wird.
+ * Auch die Plattformseiten (Impressum, Datenschutz) haengen ihren Titel daran.
+ */
+export const STANDARDTITEL = 'JuFi App';
 
 /** Markiert jedes Element im head, das dieser Kontext angelegt hat, damit es sich gezielt entfernen laesst. */
 const MARKE = 'data-jufi-verein';
@@ -85,7 +88,11 @@ export class VereinKontext {
 			// und beim Zerstoeren des Kontexts.
 			onCleanup(() => {
 				this.thema.entferneVereinsfarbe();
-				this.dokument.title = STANDARDTITEL;
+				// Nur zurueck, wenn der Titel noch der des Vereins ist. Wechselt die Person auf eine Seite, die
+				// einen eigenen Titel setzt (Impressum), laeuft dieses Aufraeumen je nach Reihenfolge der Effekte
+				// erst danach und schriebe sonst den Standardtitel ueber den neuen. Verworfen: die Reihenfolge der
+				// Effekte festzulegen, das waere eine Annahme ueber Angulars Planung.
+				if (this.dokument.title === v.anzeigename) this.dokument.title = STANDARDTITEL;
 				for (const e of elemente) e.remove();
 			});
 		});
