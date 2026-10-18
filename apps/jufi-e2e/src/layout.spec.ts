@@ -2,7 +2,14 @@ import { expect, type Page, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ZUSTAND } from './hilfen';
-import { keinWaagrechtesScrollen, leisteVerdecktNichts, lesbar, seitenGrund, tippflaechen } from './messen';
+import {
+	abstandUnterKopf,
+	keinWaagrechtesScrollen,
+	leisteVerdecktNichts,
+	lesbar,
+	seitenGrund,
+	tippflaechen,
+} from './messen';
 
 /**
  * Layouts gemessen: jede Seite bei 375 x 812 (Handy) und 1280 x 800 (Verwaltung am Desktop), hell und
@@ -25,7 +32,7 @@ type Art = 'oeffentlich' | 'mitglied' | 'verwaltung';
 interface Seite {
 	rolle: Rolle;
 	art: Art;
-	/** Ohne fuehrenden Schraegstrich unterhalb der Wurzel; mia steht fuer Mias ID aus dem Ablauf. */
+	/** Ohne fuehrenden Schraegstrich unterhalb der Wurzel; der Platzhalter :mia steht fuer Mias ID aus dem Ablauf. */
 	pfad: string;
 }
 
@@ -38,7 +45,7 @@ const SEITEN: Seite[] = [
 	{ rolle: 'leitung', art: 'mitglied', pfad: `${SLUG}/mehr` },
 	{ rolle: 'leitung', art: 'mitglied', pfad: `${SLUG}/profil` },
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung` },
-	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/personen/mia` },
+	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/personen/:mia` },
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/untergruppen` },
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/rechte` },
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/einstellungen` },
@@ -64,9 +71,11 @@ function sitzung(rolle: Rolle): string | { cookies: []; origins: [] } {
  * ersten Projekt, und dann hat der Ablauf ids.json noch nicht geschrieben.
  */
 function adresse(pfad: string): string {
-	if (!pfad.includes('/mia')) return `/${pfad}`;
+	// Ein Platzhalter mit Doppelpunkt wie in den Routen: Er kann in keinem echten Pfadteil vorkommen,
+	// anders als ein Teilstring wie /mia, der auch in /miami traefe.
+	if (!pfad.includes(':mia')) return `/${pfad}`;
 	const ids = JSON.parse(readFileSync(join(ZUSTAND, 'ids.json'), 'utf8')) as { mia: string };
-	return `/${pfad.replace('/mia', `/${ids.mia}`)}`;
+	return `/${pfad.replace(':mia', ids.mia)}`;
 }
 
 /**
@@ -107,7 +116,12 @@ for (const groesse of GROESSEN) {
 							const navigation = page.getByRole('navigation', { name: 'Verwaltung', includeHidden: true });
 							if (handy) {
 								await expect(menueKnopf).toBeVisible();
+								// toBeHidden bestuende auch ohne Navigation; erst muss es sie geben.
+								await expect(navigation).toHaveCount(1);
 								await expect(navigation).toBeHidden();
+								const abstand = await abstandUnterKopf(page);
+								expect(abstand, `main beginnt ${abstand} px unter der Menuezeile`).toBeGreaterThanOrEqual(0);
+								expect(abstand, `main beginnt ${abstand} px unter der Menuezeile`).toBeLessThanOrEqual(32);
 							} else {
 								await expect(seitenleiste).toBeVisible();
 								expect((await seitenleiste.boundingBox())?.width).toBe(248);
@@ -134,7 +148,8 @@ for (const groesse of GROESSEN) {
 /**
  * Die Bruchstelle der Verwaltungs-Huelle bei 768 px. In Task 12 verteilte das Grid unter 768 px den
  * Freiraum seiner min-height auf beide Zeilen, und zwischen Menuezeile und Inhalt klaffte eine Luecke
- * von gut 300 px. Gemessen wird deshalb der Abstand, nicht nur die Sichtbarkeit.
+ * von gut 300 px. Den Abstand misst der Seitentest bei 375 auf jeder Verwaltungsseite (abstandUnterKopf),
+ * hier stehen das Umschalten an der Grenze und das offene Menue.
  */
 test.describe('Verwaltungs-Huelle an der Bruchstelle', () => {
 	test.use({ storageState: sitzung('leitung') });
@@ -142,17 +157,18 @@ test.describe('Verwaltungs-Huelle an der Bruchstelle', () => {
 	test.describe('375x812', () => {
 		test.use({ viewport: { width: 375, height: 812 } });
 
-		test('Inhalt beginnt direkt unter der Menuezeile', async ({ page }) => {
-			await oeffne(page, `/${SLUG}/verwaltung`);
-			const { zeileUnten, inhaltOben } = await page.evaluate(() => {
-				const aside = document.querySelector('aside');
-				const main = document.querySelector('main');
-				if (!aside || !main) throw new Error('aside oder main fehlt');
-				return { zeileUnten: aside.getBoundingClientRect().bottom, inhaltOben: main.getBoundingClientRect().top };
-			});
-			const abstand = inhaltOben - zeileUnten;
-			expect(abstand, `main beginnt ${abstand} px unter der Menuezeile`).toBeGreaterThanOrEqual(0);
-			expect(abstand, `main beginnt ${abstand} px unter der Menuezeile`).toBeLessThanOrEqual(32);
+		// Der Abstand unter der Menuezeile steht im Seitentest, gemessen auf jeder Verwaltungsseite.
+		// Hier das aufgeklappte Menue: Am Handy ist es der einzige Weg durch die Verwaltung, und
+		// geschlossen ueberspringt tippflaechen seine Links.
+		test('aufgeklapptes Menue', async ({ page }) => {
+			await oeffne(page, `/${SLUG}/verwaltung/untergruppen`);
+			await page.getByRole('button', { name: 'Menü öffnen' }).click();
+			const navigation = page.getByRole('navigation', { name: 'Verwaltung' });
+			await expect(navigation).toBeVisible();
+			await expect(navigation.getByRole('link')).toHaveCount(5);
+			await expect(page.getByRole('button', { name: 'Menü schließen' })).toBeVisible();
+			expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
+			await keinWaagrechtesScrollen(page);
 		});
 	});
 
@@ -162,7 +178,9 @@ test.describe('Verwaltungs-Huelle an der Bruchstelle', () => {
 		test('Menueknopf statt Seitenleiste', async ({ page }) => {
 			await oeffne(page, `/${SLUG}/verwaltung`);
 			await expect(page.getByRole('button', { name: 'Menü öffnen' })).toBeVisible();
-			await expect(page.getByRole('navigation', { name: 'Verwaltung', includeHidden: true })).toBeHidden();
+			const navigation = page.getByRole('navigation', { name: 'Verwaltung', includeHidden: true });
+			await expect(navigation).toHaveCount(1);
+			await expect(navigation).toBeHidden();
 			// Die Leiste wird zur Kopfzeile ueber die ganze Breite, nicht zur 248 px breiten Spalte.
 			expect((await page.locator('aside').boundingBox())?.width).toBe(767);
 		});

@@ -300,10 +300,13 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 		   weiter, und bei 375 px ragte die ganze Seite 34 px nach rechts hinaus. Eine Breite in Prozent
 		   nimmt dem Feld die Mindestbreite (CSS Sizing, compressible replaced elements); der Text darin
 		   wird dann abgeschnitten, der Knopf bleibt ganz. Verworfen: ein verstecktes Feld hinter einem
-		   eigenen Knopf -- mehr Code, und der native Waehler sagt nach der Wahl, welche Datei es ist. */
+		   eigenen Knopf -- mehr Code, und der native Waehler sagt nach der Wahl, welche Datei es ist.
+		   Die Obergrenze, weil das Feld am Desktop sonst ueber die ganze Karte liefe (606 px) und Knopf und
+		   Dateiname weit auseinander stuenden; 24rem fasst beide ungekuerzt. */
 		input[type='file'] {
 			width: 100%;
 			min-width: 0;
+			max-width: 24rem;
 		}
 		input[type='color'] {
 			width: 56px;

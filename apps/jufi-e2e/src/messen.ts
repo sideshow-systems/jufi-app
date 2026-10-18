@@ -76,6 +76,21 @@ export async function leisteVerdecktNichts(page: Page): Promise<void> {
 	expect(unten, `letzter Inhalt endet bei ${unten}, die Leiste beginnt bei ${oben}`).toBeLessThanOrEqual(oben);
 }
 
+/**
+ * Abstand von der Unterkante der Menuezeile (aside) zur Oberkante des Inhalts in der Verwaltungs-Huelle.
+ * Die Luecke aus Task 12 entstand nur, wenn der Inhalt kuerzer als der Bildschirm ist: Dann verteilte das
+ * Grid den Freiraum seiner min-height auf beide Zeilen. Gemessen wird deshalb auf jeder Verwaltungsseite,
+ * gerade auch auf den kurzen (Untergruppen, Rechte); auf einer hohen Seite bliebe die Luecke unsichtbar.
+ */
+export async function abstandUnterKopf(page: Page): Promise<number> {
+	return page.evaluate(() => {
+		const aside = document.querySelector('jf-verwaltung-huelle .huelle > aside');
+		const main = document.querySelector('jf-verwaltung-huelle .huelle > main');
+		if (!aside || !main) throw new Error('Verwaltungs-Huelle ohne aside oder main');
+		return main.getBoundingClientRect().top - aside.getBoundingClientRect().bottom;
+	});
+}
+
 /** Kontrast der h1-Schrift zum Hintergrund von body nach WCAG 2. */
 export async function lesbar(page: Page): Promise<number> {
 	const { schrift, grund } = await page.evaluate(() => {
