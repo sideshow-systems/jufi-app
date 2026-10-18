@@ -3,9 +3,11 @@
 Plattform für Jugendgruppen von Vereinen, zuerst für die Jungfischer eines Fischereivereins: Termine, Umfragen,
 Helferlisten, Fahrgemeinschaften, Kosten und Dokumente an einem Ort statt verstreut in WhatsApp-Gruppen.
 
-Das Repo enthält bisher **Teilprojekt 1: den klickbaren Entwurf** (`apps/entwurf`). Er läuft nur im Browser, ohne
-Server und ohne Anmeldung, mit erfundenen Beispieldaten. Testpersonen spielen ihn per Link durch, lösen Aufgaben im
-Testmodus und schicken eine Rückmeldung per WhatsApp.
+Das Repo enthält zwei Teile. **Teilprojekt 1** ist der klickbare Entwurf (`apps/entwurf`): Er läuft nur im Browser,
+ohne Server und ohne Anmeldung, mit erfundenen Beispieldaten. Testpersonen spielen ihn per Link durch, lösen Aufgaben
+im Testmodus und schicken eine Rückmeldung per WhatsApp. **Teilprojekt 2** ist die echte App (`apps/jufi`, Kommandozeile
+in `apps/cli`) bis Etappe 5: Vereine anlegen, einladen, anmelden, Mitglieder pflegen und die Oberflächen dazu. Threads und
+weitere Module folgen in späteren Teilprojekten.
 
 - Rahmen: [`docs/superpowers/specs/2026-10-11-jufi-rahmen-design.md`](docs/superpowers/specs/2026-10-11-jufi-rahmen-design.md)
 - Entwurf: [`docs/superpowers/specs/2026-10-11-jufi-tp1-entwurf-design.md`](docs/superpowers/specs/2026-10-11-jufi-tp1-entwurf-design.md)
@@ -41,7 +43,7 @@ Die App läuft dann unter <http://localhost:4200/>, der Demo-Verein unter <http:
 fängt Mailpit unter <http://127.0.0.1:8025> ab. Nach jeder Schemaänderung ist `pnpm run db:generate` erneut nötig. `pnpm run demo` spielt den Demo-Verein jedes Mal frisch ein; andere
 Vereine bleiben unberührt.
 
-Der Demo-Verein enthält zwei Untergruppen, drei Jungfischer (einer ohne Einwilligung, einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.test`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
+Der Demo-Verein enthält zwei Untergruppen, drei Jungfischer (einer ohne Einwilligung, einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
 
 Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<projekt>` und brauchen deshalb das
 laufende `pnpm run db:up`. Sie legen ihre Datenbanken selbst an und setzen sie zurück, die Entwicklungsdatenbank
@@ -86,8 +88,8 @@ Das Admin-Protokoll bleibt dabei erhalten.
 
 Playwright spielt den Ablauf aus der Spezifikation (Abschnitt 9) im Browser durch, von der Vereinsanlage bis zum Kind mit
 eigenem Passkey (virtueller Authenticator von Chromium), und misst die Layouts bei 375 × 812 und 1280 × 800, hell und
-dunkel. Er liegt in `apps/jufi-e2e` und ist **nicht** Teil von `pnpm test`: Er baut App und CLI im Produktionsmodus und
-dauert Minuten.
+dunkel. Er liegt in `apps/jufi-e2e` und ist **nicht** Teil von `pnpm test`: Er baut App und CLI im Produktionsmodus (der
+erste Lauf nach einer Änderung braucht dafür länger), die Tests selbst laufen gut eine Minute.
 
 ```bash
 pnpm exec playwright install chromium   # einmalig

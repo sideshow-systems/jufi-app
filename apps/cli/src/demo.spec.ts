@@ -97,8 +97,8 @@ describe('demoEinspielen', () => {
 		await demoEinspielen(prisma, BEZUGSTAG);
 
 		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug: 'demo' } });
-		// Der Text erscheint unter "Ansprechpartner" auf dem Start; die Adresse liegt unter test (RFC 2606).
-		expect(verein.kontakt).toBe('Fragen an die Jugendleitung: jugend@example.test');
+		// Der Text steht in den Vereinseinstellungen im Feld Kontakt; die Adresse liegt unter example.org (RFC 2606).
+		expect(verein.kontakt).toBe('Fragen an die Jugendleitung: jugend@example.org');
 		// Ohne Logo zeigt das Icon die Initialen, das die Demo vorfuehren soll.
 		expect(await prisma.vereinLogo.count({ where: { vereinId: verein.id } })).toBe(0);
 	});

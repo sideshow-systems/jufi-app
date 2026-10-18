@@ -91,9 +91,10 @@ export async function demoEinspielen(
 				name: 'Jungfischer Demo e.V.',
 				anzeigename: 'Jungfischer Demo',
 				farbe: '#0f766e',
-				// Erfunden, unter .test (RFC 2606, nie zustellbar): Die Startseite zeigt den Text unter
-				// "Ansprechpartner". Bewusst kein Logo, damit die Demo das Initialen-Icon vorfuehrt.
-				kontakt: 'Fragen an die Jugendleitung: jugend@example.test',
+				// Erfunden, unter example.org wie die Adressen der Personen (reserviert, nie zustellbar). Der
+				// Text steht in den Vereinseinstellungen im Feld Kontakt; Mitgliedern zeigt ihn noch keine
+				// Seite. Bewusst kein Logo, damit die Demo das Initialen-Icon vorfuehrt.
+				kontakt: 'Fragen an die Jugendleitung: jugend@example.org',
 			},
 		});
 		const vereinId = verein.id;

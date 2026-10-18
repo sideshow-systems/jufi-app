@@ -119,9 +119,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 									(input)="kontakt.set(wert($event))"
 								></textarea>
 							</label>
-							<p id="kontakt-hinweis" class="hinweis gedaempft klein">
-								Steht bei „Ansprechpartner“ auf der Startseite.
-							</p>
+							<p id="kontakt-hinweis" class="hinweis gedaempft klein">Wird Mitgliedern noch nicht angezeigt.</p>
 							@if (fehlerBei('kontakt'); as text) {
 								<p id="kontakt-fehler" class="fehler" role="alert">{{ text }}</p>
 							}

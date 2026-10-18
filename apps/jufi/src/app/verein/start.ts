@@ -280,8 +280,8 @@ export class StartComponent {
 	});
 
 	/**
-	 * Nur MITGLIEDER: Betreuer lesen die Liste, sehen darin aber keine Warnhinweise und koennten
-	 * nichts davon erledigen (Plan-Entscheidung 7). Ohne das Recht geht die Anfrage gar nicht erst
+	 * Nur MITGLIEDER: Betreuer lesen die Liste und sehen darin einen Teil der Warnhinweise (Familie,
+	 * Volljaehrigkeit), koennten aber nichts davon erledigen (Plan-Entscheidung 7). Ohne das Recht geht die Anfrage gar nicht erst
 	 * raus; der Server wuerde sie zwar beantworten, aber der Abschnitt waere leer.
 	 */
 	protected readonly zeigeVerwaltung = computed(
