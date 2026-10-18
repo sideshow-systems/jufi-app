@@ -87,6 +87,7 @@ type Bereich = 'anlegen' | 'umbenennen' | 'liste';
 												<input
 													type="text"
 													name="umbenennen"
+													maxlength="40"
 													autocomplete="off"
 													[value]="bearbeiteName()"
 													[attr.aria-invalid]="fehler()?.bereich === 'umbenennen' ? 'true' : null"
@@ -116,7 +117,7 @@ type Bereich = 'anlegen' | 'umbenennen' | 'liste';
 												>
 													Umbenennen
 												</button>
-												<button type="button" class="knopf loeschen" [disabled]="laeuft()" (click)="frage.set(u)">
+												<button type="button" class="knopf loeschen" [disabled]="laeuft()" (click)="fragLoeschen(u)">
 													Löschen
 												</button>
 											</span>
@@ -136,6 +137,7 @@ type Bereich = 'anlegen' | 'umbenennen' | 'liste';
 									<input
 										type="text"
 										name="neuerName"
+										maxlength="40"
 										autocomplete="off"
 										[value]="neuerName()"
 										[attr.aria-invalid]="fehler()?.bereich === 'anlegen' ? 'true' : null"
@@ -260,6 +262,11 @@ export class UntergruppenComponent implements OnInit {
 		return u.mitglieder === 1 ? '1 Mitglied' : `${u.mitglieder} Mitglieder`;
 	}
 
+	protected fragLoeschen(u: Untergruppe): void {
+		this.fehler.set(null);
+		this.frage.set(u);
+	}
+
 	protected beginneUmbenennen(u: Untergruppe): void {
 		this.fehler.set(null);
 		this.bearbeiteName.set(u.name);
@@ -312,7 +319,8 @@ export class UntergruppenComponent implements OnInit {
 		} catch (ursache) {
 			this.frage.set(null);
 			const f = alsApiFehler(ursache);
-			this.fehler.set({ bereich, text: untergruppenfehler(f) });
+			// Bei 404 ist die Zeile weg, in der das Feld stand: Die Meldung gehoert dann zur Liste, sonst waere sie unsichtbar.
+			this.fehler.set({ bereich: f.status === 404 ? 'liste' : bereich, text: untergruppenfehler(f) });
 			if (f.status === 404) {
 				this.bearbeiteId.set(null);
 				await this.lade();

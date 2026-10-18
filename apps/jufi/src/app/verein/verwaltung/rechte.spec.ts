@@ -113,6 +113,48 @@ describe('Rechte', () => {
 		await stabil(harness);
 	});
 
+	it('nach dem Speichern steht die Auswahl wieder leer und der Knopf ist gesperrt', async () => {
+		const { harness, seite, http } = await oeffne();
+		waehle(seite, 'select[name="weitere"]', 'e3');
+		await stabil(harness);
+		knopf(seite, 'Rechte geben').click();
+		await stabil(harness);
+		knopf(seite, 'Betreuer').click();
+		await stabil(harness);
+		knopf(seite, 'Rechte speichern').click();
+		http.expectOne(`${API}/personen/e3/rechte`).flush({ rechte: ['ANTWORTEN_DETAIL'] });
+		await vi.waitFor(() => http.expectOne(`${API}/personen`).flush(PERSONEN));
+		await stabil(harness);
+		expect(seite.querySelector<HTMLSelectElement>('select[name="weitere"]')?.value).toBe('');
+		expect(knopf(seite, 'Rechte geben').disabled).toBe(true);
+	});
+
+	it('ohne gewähltes Recht lässt sich einer Person ohne Rechte nichts speichern', async () => {
+		const { harness, seite, http } = await oeffne();
+		waehle(seite, 'select[name="weitere"]', 'e3');
+		await stabil(harness);
+		knopf(seite, 'Rechte geben').click();
+		await stabil(harness);
+		expect(knopf(seite, 'Rechte speichern').disabled).toBe(true);
+		expect(seite.textContent).toContain('Bitte mindestens ein Recht wählen');
+		http.expectNone(`${API}/personen/e3/rechte`);
+	});
+
+	it('Selbstentzug von JUGENDLEITER_RECHTE zieht die Sitzung nach und zeigt "Nicht gefunden"', async () => {
+		const { harness, seite, http } = await oeffne();
+		await bearbeite(harness, seite, 'ich-1');
+		hake(seite, 'input[name="recht-JUGENDLEITER_RECHTE"]', false);
+		knopf(seite, 'Rechte speichern').click();
+		await stabil(harness);
+		knopf(seite, 'Ja, Rechte ändern').click();
+		const anfrage = http.expectOne(`${API}/personen/ich-1/rechte`);
+		anfrage.flush({ rechte: anfrage.request.body.rechte });
+		await stabil(harness);
+		expect(seite.textContent).toContain('Nicht gefunden');
+		expect(seite.querySelector('input')).toBeNull();
+		http.expectNone(`${API}/personen`);
+	});
+
 	it('Rechte entziehen fragt nach', async () => {
 		const { harness, seite, http } = await oeffne();
 		await bearbeite(harness, seite, 'e2');

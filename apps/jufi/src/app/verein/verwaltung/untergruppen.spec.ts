@@ -107,6 +107,24 @@ describe('Untergruppen', () => {
 		http.expectNone(`${API}/untergruppen/u1`);
 	});
 
+	it('404 beim Umbenennen zeigt die Meldung oben bei der Liste und lädt neu', async () => {
+		const { harness, seite, http } = await oeffne();
+		seite.querySelector<HTMLButtonElement>('[data-gruppe="u1"] button.umbenennen')?.click();
+		await stabil(harness);
+		tippe(seite, 'input[name="umbenennen"]', 'Hechte');
+		knopf(seite, 'Speichern').click();
+		http
+			.expectOne(`${API}/untergruppen/u1`)
+			.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+		await neuGeladen(http, harness, { untergruppen: [GRUPPEN.untergruppen[1]] });
+		expect(seite.querySelector('[role="alert"]')?.textContent).toContain('nicht mehr');
+	});
+
+	it('begrenzt die Namensfelder auf 40 Zeichen', async () => {
+		const { seite } = await oeffne();
+		expect(seite.querySelector('input[name="neuerName"]')?.getAttribute('maxlength')).toBe('40');
+	});
+
 	it('Betreuer sieht die Liste ohne Knöpfe', async () => {
 		const { seite } = await oeffne(['ANTWORTEN_DETAIL']);
 		expect(seite.textContent).toContain('Gruppe A');

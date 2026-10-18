@@ -33,6 +33,8 @@ const VORLAGEN: { schluessel: Vorlage; name: string }[] = [
 interface Bearbeitung {
 	id: string;
 	name: string;
+	/** Hatte die Person vorher keine Rechte? Dann ist ein leerer Entwurf kein Entzug, sondern nichts zu speichern. */
+	neu: boolean;
 }
 
 /**
@@ -122,11 +124,20 @@ interface Bearbeitung {
 										</label>
 									}
 								</fieldset>
+								@if (b.neu && entwurf().length === 0) {
+									<p class="gedaempft klein" role="status">Bitte mindestens ein Recht wählen.</p>
+								}
 								@if (fehler(); as text) {
 									<p id="rechte-fehler" class="fehler" role="alert">{{ text }}</p>
 								}
 								<div class="reihe">
-									<button type="submit" class="knopf primaer" [disabled]="laeuft()">Rechte speichern</button>
+									<button
+										type="submit"
+										class="knopf primaer"
+										[disabled]="laeuft() || (b.neu && entwurf().length === 0)"
+									>
+										Rechte speichern
+									</button>
 									<button type="button" class="knopf" [disabled]="laeuft()" (click)="schliesse()">Abbrechen</button>
 								</div>
 							</form>
@@ -245,13 +256,6 @@ interface Bearbeitung {
 			padding: 0;
 			border: 0;
 		}
-		.unsichtbar {
-			position: absolute;
-			width: 1px;
-			height: 1px;
-			overflow: hidden;
-			clip-path: inset(50%);
-		}
 		.haken .hinweis {
 			display: block;
 		}
@@ -347,7 +351,8 @@ export class RechteComponent implements OnInit {
 		this.fehler.set(null);
 		this.frage.set(false);
 		this.entwurf.set((p.rechte ?? []) as RechtName[]);
-		this.bearbeitung.set({ id: p.id, name: `${p.vorname} ${p.nachname}` });
+		this.bearbeitung.set({ id: p.id, name: `${p.vorname} ${p.nachname}`, neu: (p.rechte?.length ?? 0) === 0 });
+		this.weitereId.set('');
 	}
 
 	protected beginneNeu(ereignis: Event): void {
@@ -360,6 +365,7 @@ export class RechteComponent implements OnInit {
 		this.bearbeitung.set(null);
 		this.frage.set(false);
 		this.fehler.set(null);
+		this.weitereId.set('');
 	}
 
 	protected nimmVorlage(v: Vorlage): void {
@@ -395,6 +401,7 @@ export class RechteComponent implements OnInit {
 			await firstValueFrom(this.api.setzeRechte(this.slug(), b.id, rechte));
 			this.frage.set(false);
 			this.bearbeitung.set(null);
+			this.weitereId.set('');
 			const ich = this.sitzung.ich();
 			// Die Rechte der Sitzung nachziehen, sonst zeigte die Seite nach dem Selbstentzug weiter an, was der Server verweigert.
 			if (ich && ich.person.id === b.id) this.sitzung.ich.set({ ...ich, person: { ...ich.person, rechte } });
