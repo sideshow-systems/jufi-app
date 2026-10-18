@@ -68,7 +68,7 @@ describe('fuehreAus', () => {
 	it('demo einspielen liefert 0 und meldet den Verein', async () => {
 		ausgabe.length = 0;
 		expect(await fuehreAus(['demo', 'einspielen'], deps)).toBe(0);
-		expect(ausgabe).toEqual(['Demo-Verein angelegt: /demo/ (7 Personen)']);
+		expect(ausgabe).toEqual(['Demo-Verein angelegt: /demo/ (10 Personen)']);
 	});
 
 	it('die Hilfe nennt alle Befehle', async () => {

@@ -1,5 +1,6 @@
 import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { EINWILLIGUNG_TEXT_VERSION } from '@jufi/domain';
 import { DemoGeschuetztFehler, demoEinspielen } from './demo.js';
 
 const BEZUGSTAG = new Date('2026-10-12T12:00:00Z');
@@ -37,10 +38,10 @@ describe('demoEinspielen', () => {
 		};
 	}
 
-	it('legt 7 Personen, 3 Familienzuordnungen und eine Untergruppe an', async () => {
+	it('legt 10 Personen, 7 Familienzuordnungen, 2 Untergruppen und 2 Einwilligungen an', async () => {
 		const ergebnis = await demoEinspielen(prisma, BEZUGSTAG);
 
-		expect(ergebnis.personen).toBe(7);
+		expect(ergebnis.personen).toBe(10);
 		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug: 'demo' } });
 		expect(ergebnis.vereinId).toBe(verein.id);
 		expect(verein).toMatchObject({
@@ -48,14 +49,17 @@ describe('demoEinspielen', () => {
 			anzeigename: 'Jungfischer Demo',
 			farbe: '#0f766e',
 		});
-		expect(await prisma.person.count({ where: { vereinId: verein.id } })).toBe(7);
-		expect(await prisma.bezugsperson.count({ where: { vereinId: verein.id } })).toBe(3);
+		expect(await prisma.person.count({ where: { vereinId: verein.id } })).toBe(10);
+		expect(await prisma.bezugsperson.count({ where: { vereinId: verein.id } })).toBe(7);
 		const gruppen = await prisma.untergruppe.findMany({
 			where: { vereinId: verein.id },
 			include: { mitglieder: { include: { person: true } } },
 		});
-		expect(gruppen.map((g) => g.name)).toEqual(['Ältere']);
-		expect(gruppen[0].mitglieder.map((m) => m.person.vorname).sort()).toEqual(['Jonas', 'Lena']);
+		const mitglieder = Object.fromEntries(
+			gruppen.map((g) => [g.name, g.mitglieder.map((m) => m.person.vorname).sort()]),
+		);
+		expect(mitglieder).toEqual({ Ältere: ['Jonas', 'Lena'], Jüngere: ['Max'] });
+		expect(await prisma.einwilligung.count({ where: { vereinId: verein.id } })).toBe(2);
 		// Das Werkzeug legt selbst keine Zugaenge an; die entstehen erst durch Einladung.
 		expect(await prisma.zugang.count({ where: { vereinId: verein.id } })).toBe(0);
 	});
@@ -72,9 +76,14 @@ describe('demoEinspielen', () => {
 		expect(katrin).not.toContain('EINSTELLUNGEN');
 		expect(await rechte('Sandra')).toEqual([]);
 		expect(await rechte('Hans')).toEqual([]);
+		expect(await rechte('Bernd')).toEqual(['THREADS_ERSTELLEN']);
 
-		const hans = await prisma.bezugsperson.findFirstOrThrow({ where: { erwachsener: { vorname: 'Hans' } } });
-		expect(hans).toMatchObject({ beziehung: 'GROSSVATER', erziehungsberechtigt: false, beziehungFreitext: null });
+		const hans = await prisma.bezugsperson.findMany({ where: { erwachsener: { vorname: 'Hans' } } });
+		expect(hans).toHaveLength(2);
+		expect(hans.every((b) => b.beziehung === 'VATER' && b.erziehungsberechtigt)).toBe(true);
+		const gerda = await prisma.bezugsperson.findMany({ where: { erwachsener: { vorname: 'Gerda' } } });
+		expect(gerda).toHaveLength(2);
+		expect(gerda.every((b) => b.beziehung === 'GROSSMUTTER' && !b.erziehungsberechtigt)).toBe(true);
 		const sandra = await prisma.bezugsperson.findMany({
 			where: { erwachsener: { vorname: 'Sandra' } },
 			include: { jungfischer: true },
@@ -87,7 +96,7 @@ describe('demoEinspielen', () => {
 		await demoEinspielen(prisma, BEZUGSTAG);
 
 		const erwachsene = await prisma.person.findMany({ where: { art: 'ERWACHSENER' } });
-		expect(erwachsene).toHaveLength(4);
+		expect(erwachsene).toHaveLength(7);
 		for (const e of erwachsene) {
 			expect(e.email).toBe(`${e.vorname}.${e.nachname}@example.org`.toLowerCase());
 		}
@@ -102,7 +111,7 @@ describe('demoEinspielen', () => {
 
 		expect(await zaehlung()).toEqual(erster);
 		expect(erster.vereine).toBe(1);
-		expect(erster.personen).toBe(7);
+		expect(erster.personen).toBe(10);
 	});
 
 	it('andere Vereine bleiben unberuehrt', async () => {
@@ -123,13 +132,29 @@ describe('demoEinspielen', () => {
 		expect(await prisma.person.count({ where: { vereinId: fremd.id } })).toBe(1);
 	});
 
-	it('Jonas ist Jugendsprecher und am Bezugstag 17', async () => {
+	it('Jonas ist Jugendsprecher und wird morgen 18, Lena und Max sind 14 und 12', async () => {
 		await demoEinspielen(prisma, BEZUGSTAG);
 
 		const jungfischer = await prisma.person.findMany({ where: { art: 'JUNGFISCHER' } });
 		const alter = Object.fromEntries(jungfischer.map((p) => [p.vorname, alterAn(p.geburtsdatum as Date, BEZUGSTAG)]));
 		expect(alter).toEqual({ Lena: 14, Max: 12, Jonas: 17 });
 		expect(jungfischer.filter((p) => p.jugendsprecher).map((p) => p.vorname)).toEqual(['Jonas']);
+		const jonas = jungfischer.find((p) => p.vorname === 'Jonas')!;
+		expect(alterAn(jonas.geburtsdatum as Date, new Date('2026-10-13T12:00:00Z'))).toBe(18);
+	});
+
+	it('Einwilligungen: Lena durch ihre Mutter, Jonas durch seine, Max keine', async () => {
+		await demoEinspielen(prisma, BEZUGSTAG);
+
+		const einwilligungen = await prisma.einwilligung.findMany({
+			include: { jungfischer: true, erteiltVonPerson: true },
+		});
+		expect(einwilligungen.map((e) => [e.jungfischer.vorname, e.erteiltVonPerson.vorname]).sort()).toEqual([
+			['Jonas', 'Petra'],
+			['Lena', 'Sandra'],
+		]);
+		expect(einwilligungen.every((e) => e.art === 'DSGVO_ART8' && e.widerrufenAm === null)).toBe(true);
+		expect(einwilligungen.every((e) => e.textVersion === EINWILLIGUNG_TEXT_VERSION)).toBe(true);
 	});
 
 	describe('Schutz eines echten Vereins mit dem Slug demo', () => {
@@ -159,7 +184,7 @@ describe('demoEinspielen', () => {
 
 			const ergebnis = await demoEinspielen(prisma, BEZUGSTAG);
 
-			expect(ergebnis.personen).toBe(7);
+			expect(ergebnis.personen).toBe(10);
 			expect(await prisma.zugang.count()).toBe(0);
 			expect(await prisma.session.count()).toBe(0);
 			expect(await prisma.verein.count({ where: { id: verein.id } })).toBe(0);
