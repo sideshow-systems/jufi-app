@@ -1,5 +1,6 @@
 import {
 	ChangeDetectionStrategy,
+	ElementRef,
 	Component,
 	computed,
 	DestroyRef,
@@ -7,6 +8,7 @@ import {
 	inject,
 	input,
 	signal,
+	viewChild,
 	untracked,
 } from '@angular/core';
 import { rxResource, takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -78,6 +80,7 @@ const SCHMAL = '(max-width: 767px)';
 	selector: 'jf-verwaltung-huelle',
 	imports: [IconComponent, KarteComponent, NichtGefundenComponent, RouterLink, RouterOutlet, VereinsLogoComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
+	host: { '(document:keydown.escape)': 'schliesseMitEscape()' },
 	template: `
 		@if (kontext.ladefehler()) {
 			<main>
@@ -99,6 +102,7 @@ const SCHMAL = '(max-width: 767px)';
 						</span>
 						@if (schmal()) {
 							<button
+								#menueKnopf
 								type="button"
 								class="knopf leise nur-icon menue-knopf"
 								[attr.aria-expanded]="menueOffen()"
@@ -123,7 +127,7 @@ const SCHMAL = '(max-width: 767px)';
 						<a class="zurueck" [routerLink]="['/', slug()]"><jf-icon name="handy" /> Zur App</a>
 					</nav>
 				</aside>
-				<main>
+				<main #haupt tabindex="-1">
 					@if (schmal()) {
 						<p class="desktop-hinweis"><jf-icon name="info" /> Am Desktop bequemer</p>
 					}
@@ -216,6 +220,10 @@ const SCHMAL = '(max-width: 767px)';
 			min-width: 0;
 			padding: var(--a5) var(--a6);
 		}
+		/* Programmatischer Fokus nach dem Menue (tabindex minus eins): Der Rahmen ginge um den ganzen Inhalt und sagt nichts. */
+		main:focus {
+			outline: none;
+		}
 		/* Nur im Fehlerfall steht main allein im Host, ohne Leiste daneben. */
 		:host > main {
 			max-width: 32rem;
@@ -247,8 +255,13 @@ const SCHMAL = '(max-width: 767px)';
 			font-weight: 600;
 		}
 		@media (max-width: 767px) {
+			/* Eine Spalte, zwei Zeilen. Ohne explizite Zeilen verteilt das Grid den Freiraum der min-height
+			   zu gleichen Teilen auf beide auto-Zeilen: Bei kurzem Inhalt endete die Leiste weit oben und der
+			   Inhalt finge erst weit darunter an, mit einer Luecke dazwischen. Die erste Zeile ist so hoch wie die
+			   Leiste, die zweite nimmt den Rest. */
 			.huelle {
 				grid-template-columns: minmax(0, 1fr);
+				grid-template-rows: auto 1fr;
 			}
 			aside {
 				z-index: 10;
@@ -278,6 +291,8 @@ export class VerwaltungHuelle {
 	/** Kommt aus dem Pfad (withComponentInputBinding), wie bei der Mitglieder-Huelle. */
 	readonly slug = input.required<string>();
 
+	private readonly haupt = viewChild<ElementRef<HTMLElement>>('haupt');
+	private readonly menueKnopf = viewChild<ElementRef<HTMLElement>>('menueKnopf');
 	protected readonly menueOffen = signal(false);
 	protected readonly schmal = signal(false);
 
@@ -324,13 +339,19 @@ export class VerwaltungHuelle {
 	});
 
 	constructor() {
-		// Nach jedem Seitenwechsel klappt das Menue wieder zu.
+		// Nach jedem Seitenwechsel klappt das Menue wieder zu. Der Fokus ging mit dem Link unter, den die Person
+		// angeklickt hat; ohne Ziel fiele er auf body. Er geht auf den Inhalt, nicht auf den Menueknopf: Die Person
+		// hat gewaehlt, wohin sie wollte, und das Menue ist erledigt.
 		this.router.events
 			.pipe(
 				filter((e) => e instanceof NavigationEnd),
 				takeUntilDestroyed(),
 			)
-			.subscribe(() => this.menueOffen.set(false));
+			.subscribe(() => {
+				const warOffen = this.menueOffen();
+				this.menueOffen.set(false);
+				if (warOffen) this.haupt()?.nativeElement.focus();
+			});
 
 		// Wie die Seiten: Der Waechter prueft die Sitzung nur beim Betreten der Verwaltung.
 		effect(() => {
@@ -345,6 +366,13 @@ export class VerwaltungHuelle {
 			mq.addEventListener?.('change', aenderung);
 			inject(DestroyRef).onDestroy(() => mq.removeEventListener?.('change', aenderung));
 		}
+	}
+
+	/** Escape schliesst das offene Menue und gibt den Fokus dem Knopf, der es geoeffnet hat. */
+	protected schliesseMitEscape(): void {
+		if (!this.menueOffen()) return;
+		this.menueOffen.set(false);
+		this.menueKnopf()?.nativeElement.focus();
 	}
 
 	protected hinweisText(h: NotfallLinkHinweis): string {

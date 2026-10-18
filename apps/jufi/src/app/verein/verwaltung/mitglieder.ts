@@ -6,7 +6,6 @@ import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
 import { MitgliedSitzung } from '../mitglied-waechter';
 import { MitgliederApi, type PersonListe, type Untergruppe } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
 import { warnhinweisText } from './texte';
 
 type ArtFilter = 'alle' | 'JUNGFISCHER' | 'ERWACHSENER';
@@ -22,10 +21,10 @@ type ArtFilter = 'alle' | 'JUNGFISCHER' | 'ERWACHSENER';
  */
 @Component({
 	selector: 'jf-mitglieder',
-	imports: [KarteComponent, PilleComponent, RouterLink, VereinKopfComponent],
+	imports: [KarteComponent, PilleComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<jf-verein-kopf [slug]="slug()" untertitel="Mitglieder" />
+		<h1>Mitglieder</h1>
 		@if (darfVerwalten()) {
 			<div class="leiste">
 				<a class="knopf primaer" [routerLink]="['/', slug(), 'verwaltung', 'neu']">Person anlegen</a>
@@ -114,6 +113,10 @@ type ArtFilter = 'alle' | 'JUNGFISCHER' | 'ERWACHSENER';
 		:host {
 			display: block;
 			max-width: 64rem;
+		}
+		h1 {
+			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
 		}
 		.leiste {
 			display: flex;

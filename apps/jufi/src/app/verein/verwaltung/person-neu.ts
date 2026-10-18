@@ -5,7 +5,6 @@ import { alsApiFehler, type ApiFehler } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent } from '../../gestaltung/ui';
 import { MitgliederApi, type NeuePerson, type Untergruppe } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
 import { verwaltungsfehler } from './texte';
 
 type Art = 'JUNGFISCHER' | 'ERWACHSENER';
@@ -18,10 +17,10 @@ type Art = 'JUNGFISCHER' | 'ERWACHSENER';
  */
 @Component({
 	selector: 'jf-person-neu',
-	imports: [KarteComponent, RouterLink, VereinKopfComponent],
+	imports: [KarteComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<jf-verein-kopf [slug]="slug()" untertitel="Person anlegen" />
+		<h1>Person anlegen</h1>
 		<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
 		<form (submit)="sende($event)" novalidate>
 			<jf-karte>
@@ -141,6 +140,10 @@ type Art = 'JUNGFISCHER' | 'ERWACHSENER';
 		:host {
 			display: block;
 			max-width: 32rem;
+		}
+		h1 {
+			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
 		}
 		.zurueck {
 			display: inline-flex;

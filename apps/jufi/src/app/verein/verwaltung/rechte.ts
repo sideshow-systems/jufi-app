@@ -10,7 +10,6 @@ import {
 	signal,
 	viewChild,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { ALLE_RECHTE, RECHTE_VORLAGEN, type RechtName } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
@@ -18,7 +17,6 @@ import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
 import { MitgliedSitzung } from '../mitglied-waechter';
 import { MitgliederApi, type PersonListe } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
 import { RECHT_TEXT } from './texte';
 
 type Vorlage = keyof typeof RECHTE_VORLAGEN;
@@ -47,10 +45,10 @@ interface Bearbeitung {
  */
 @Component({
 	selector: 'jf-rechte',
-	imports: [KarteComponent, PilleComponent, RouterLink, VereinKopfComponent],
+	imports: [KarteComponent, PilleComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<jf-verein-kopf [slug]="slug()" untertitel="Rechte" />
+		<h1>Jugendleiter &amp; Rechte</h1>
 		@if (!sichtbar()) {
 			<jf-karte>
 				<h2>Nicht gefunden oder keine Berechtigung</h2>
@@ -188,6 +186,10 @@ interface Bearbeitung {
 		:host {
 			display: block;
 			max-width: 40rem;
+		}
+		h1 {
+			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
 		}
 		.stapel {
 			display: grid;

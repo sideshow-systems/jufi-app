@@ -10,14 +10,12 @@ import {
 	signal,
 	viewChild,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent } from '../../gestaltung/ui';
 import { MitgliedSitzung } from '../mitglied-waechter';
 import { MitgliederApi, type Untergruppe } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
 
 /** Wo ein Fehler steht: beim Anlegen, beim Umbenennen oder oben bei der Liste (Laden, Loeschen). */
 type Bereich = 'anlegen' | 'umbenennen' | 'liste';
@@ -32,10 +30,10 @@ type Bereich = 'anlegen' | 'umbenennen' | 'liste';
  */
 @Component({
 	selector: 'jf-untergruppen',
-	imports: [KarteComponent, RouterLink, VereinKopfComponent],
+	imports: [KarteComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<jf-verein-kopf [slug]="slug()" untertitel="Untergruppen" />
+		<h1>Untergruppen</h1>
 		@if (!sichtbar()) {
 			<jf-karte>
 				<h2>Nicht gefunden oder keine Berechtigung</h2>
@@ -158,6 +156,10 @@ type Bereich = 'anlegen' | 'umbenennen' | 'liste';
 		:host {
 			display: block;
 			max-width: 40rem;
+		}
+		h1 {
+			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
 		}
 		.stapel {
 			display: grid;

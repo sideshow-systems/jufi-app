@@ -27,7 +27,6 @@ import {
 	type PersonListe,
 	type Untergruppe,
 } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
 import { BEZIEHUNG_TEXT, BEZIEHUNGEN, beziehungText, tagBerlin, verwaltungsfehler, warnhinweisText } from './texte';
 
 type Bereich = 'stamm' | 'gruppen' | 'familie' | 'zugang' | 'entfernen' | 'volljaehrig';
@@ -57,19 +56,19 @@ interface Entfernt {
  */
 @Component({
 	selector: 'jf-personenseite',
-	imports: [EinladungAnzeigeComponent, KarteComponent, PilleComponent, RouterLink, VereinKopfComponent],
+	imports: [EinladungAnzeigeComponent, KarteComponent, PilleComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<jf-verein-kopf [slug]="slug()" untertitel="Person" />
 		<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
 		@if (ladefehler(); as text) {
+			<h1>Person</h1>
 			<jf-karte>
 				<p class="fehler" role="alert">{{ text }}</p>
 				<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
 			</jf-karte>
 		} @else if (entfernt(); as e) {
 			<jf-karte>
-				<h2>{{ e.name }} wurde entfernt</h2>
+				<h1>{{ e.name }} wurde entfernt</h1>
 				@for (a of e.angebot; track a.id) {
 					<div class="angebot" [attr.data-angebot]="a.id">
 						<p>{{ a.vorname }} {{ a.nachname }} hat keine Jungfischer mehr in der Gruppe – auch entfernen?</p>
@@ -110,7 +109,7 @@ interface Entfernt {
 				}
 
 				<jf-karte>
-					<h2>{{ p.vorname }} {{ p.nachname }}</h2>
+					<h1>{{ p.vorname }} {{ p.nachname }}</h1>
 					<p class="gedaempft">{{ p.art === 'JUNGFISCHER' ? 'Jungfischer' : 'Erwachsene' }}</p>
 					@if ((p.warnhinweise ?? []).length > 0) {
 						<ul class="pillen" aria-label="Warnhinweise">
@@ -543,6 +542,7 @@ interface Entfernt {
 			display: grid;
 			gap: var(--a4);
 		}
+		h1,
 		h2 {
 			margin: 0 0 var(--a3);
 			font-size: var(--schrift-gross);

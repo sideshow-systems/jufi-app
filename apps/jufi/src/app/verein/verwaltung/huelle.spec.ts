@@ -144,6 +144,51 @@ describe('Verwaltungs-Huelle', () => {
 			expect(seite.querySelector<HTMLElement>('nav[aria-label="Verwaltung"]')?.hidden).toBe(true);
 		});
 
+		it('setzt den Fokus nach einem Klick auf einen Punkt auf den Inhalt', async () => {
+			schmalesFenster();
+			const { harness, seite, http } = await oeffneSeite('/demo/verwaltung', ichMit(LEITUNG), LISTE);
+			seite.querySelector<HTMLButtonElement>('aside button[aria-controls]')?.click();
+			await stabil(harness);
+
+			[...seite.querySelectorAll<HTMLAnchorElement>('nav a')]
+				.find((a) => a.textContent?.includes('Untergruppen'))
+				?.click();
+			await vi.waitFor(() => http.expectOne(`${API}/untergruppen`).flush({ untergruppen: [] }));
+			await stabil(harness);
+
+			const haupt = seite.querySelector('main');
+			expect(haupt?.getAttribute('tabindex')).toBe('-1');
+			expect(document.activeElement).toBe(haupt);
+		});
+
+		it('schliesst das offene Menue mit Escape und gibt dem Menueknopf den Fokus', async () => {
+			schmalesFenster();
+			const { harness, seite } = await oeffneSeite('/demo/verwaltung', ichMit(LEITUNG), LISTE);
+			const knopf = seite.querySelector<HTMLButtonElement>('aside button[aria-controls]');
+			knopf?.click();
+			await stabil(harness);
+			expect(knopf?.getAttribute('aria-expanded')).toBe('true');
+
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			await stabil(harness);
+
+			expect(knopf?.getAttribute('aria-expanded')).toBe('false');
+			expect(seite.querySelector<HTMLElement>('nav[aria-label="Verwaltung"]')?.hidden).toBe(true);
+			expect(document.activeElement).toBe(knopf);
+		});
+
+		it('laesst bei geschlossenem Menue den Fokus bei Escape in Ruhe', async () => {
+			schmalesFenster();
+			const { harness, seite } = await oeffneSeite('/demo/verwaltung', ichMit(LEITUNG), LISTE);
+			const feld = seite.querySelector<HTMLElement>('input[name="suche"]');
+			feld?.focus();
+
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			await stabil(harness);
+
+			expect(document.activeElement).toBe(feld);
+		});
+
 		it('zeigt den Hinweis Am Desktop bequemer nur hier', async () => {
 			schmalesFenster();
 			const { seite } = await oeffneSeite('/demo/verwaltung', ichMit(LEITUNG), LISTE);
@@ -220,6 +265,8 @@ describe('Verwaltungs-Huelle', () => {
 		]);
 
 		expect(seite.querySelector('main jf-personenseite')).not.toBeNull();
+		// Der Name der Person ist die Seitenueberschrift; der Vereinsname steht schon in der Leiste.
+		expect([...seite.querySelectorAll('h1')].map((h) => h.textContent?.trim())).toEqual(['Anna Muster']);
 		expect(seite.querySelectorAll('main').length).toBe(1);
 		const aktiv = [...seite.querySelectorAll('nav a[aria-current="page"]')].map((a) => a.textContent?.trim());
 		expect(aktiv).toEqual(['Mitglieder']);
@@ -238,5 +285,18 @@ describe('Verwaltungs-Huelle', () => {
 		expect(aktiv).toEqual([text]);
 		expect(seite.querySelectorAll('main').length).toBe(1);
 		expect(seite.textContent).not.toContain('Zur Mitgliederliste');
+	});
+
+	// Die Leiste nennt den Verein schon; jede Seite hat darum eine eigene Ueberschrift mit ihrem Namen (Ruling R8).
+	it.each([
+		['/demo/verwaltung', 'Mitglieder', LISTE],
+		['/demo/verwaltung/neu', 'Person anlegen', [['/untergruppen', { untergruppen: [] }]]],
+		['/demo/verwaltung/untergruppen', 'Untergruppen', [['/untergruppen', { untergruppen: [] }]]],
+		['/demo/verwaltung/rechte', 'Jugendleiter & Rechte', [['/personen', { personen: [] }]]],
+	] as [string, string, [string, object][]][])('hat auf %s genau die Ueberschrift %s', async (url, titel, daten) => {
+		const { seite } = await oeffneSeite(url, ichMit(LEITUNG), daten);
+
+		expect([...seite.querySelectorAll('h1')].map((h) => h.textContent?.trim())).toEqual([titel]);
+		expect(seite.querySelector('jf-verein-kopf')).toBeNull();
 	});
 });
