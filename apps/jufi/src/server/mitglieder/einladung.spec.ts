@@ -1,6 +1,6 @@
 import { generateLinkToken, hashToken } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
-import { EINLADUNG_GUELTIG_MS } from '@jufi/domain';
+import { EINLADUNG_GUELTIG_MS, EINWILLIGUNG_TEXT, EINWILLIGUNG_TEXT_VERSION } from '@jufi/domain';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { erzeugeEinladung } from '../einladung.js';
@@ -92,6 +92,15 @@ describe('Einladung pruefen und Passkey-Optionen', () => {
 					textVersion: '1',
 				},
 			});
+			await prisma.bezugsperson.create({
+				data: {
+					vereinId: v.id,
+					erwachsenerId: eltern.id,
+					jungfischerId: person.id,
+					beziehung: 'MUTTER',
+					erziehungsberechtigt: true,
+				},
+			});
 		}
 		const token = await prisma.$transaction((tx) =>
 			erzeugeEinladung(tx, {
@@ -118,7 +127,80 @@ describe('Einladung pruefen und Passkey-Optionen', () => {
 			kennung: { fest: false, wert: 'thomas@example.org' },
 			hatZugang: false,
 			einwilligungFehlt: false,
+			kinder: [],
+			einwilligungsText: { version: EINWILLIGUNG_TEXT_VERSION, text: EINWILLIGUNG_TEXT },
 		});
+	});
+
+	/** Kind zu einem Erwachsenen; erziehungsberechtigt steuert, ob er fuer es einwilligen darf. */
+	async function legeKind(
+		v: { id: string },
+		erwachsenerId: string,
+		k: { vorname: string; erziehungsberechtigt: boolean; geburtsdatum?: string; entfernt?: boolean; erlaubt?: boolean },
+	) {
+		const kind = await prisma.person.create({
+			data: {
+				vereinId: v.id,
+				art: 'JUNGFISCHER',
+				vorname: k.vorname,
+				nachname: 'Huber',
+				geburtsdatum: new Date(k.geburtsdatum ?? '2015-05-05'),
+				zugangErlaubt: k.erlaubt ?? false,
+				entferntAm: k.entfernt ? t0 : undefined,
+			},
+		});
+		await prisma.bezugsperson.create({
+			data: {
+				vereinId: v.id,
+				erwachsenerId,
+				jungfischerId: kind.id,
+				beziehung: k.erziehungsberechtigt ? 'MUTTER' : 'GROSSMUTTER',
+				erziehungsberechtigt: k.erziehungsberechtigt,
+			},
+		});
+		return kind;
+	}
+
+	it('pruefen nennt die Kinder und den Text', async () => {
+		uhr = t0;
+		const { token, personId } = await lege(verein, { art: 'ERWACHSENER', vorname: 'Mutter', email: 'm@example.org' });
+		const lena = await legeKind(verein, personId, { vorname: 'Lena', erziehungsberechtigt: true });
+		const ben = await legeKind(verein, personId, { vorname: 'Ben', erziehungsberechtigt: true, erlaubt: true });
+		// Ben hat schon eine Einwilligung (vom anderen Elternteil).
+		const vater = await prisma.person.create({
+			data: { vereinId: verein.id, art: 'ERWACHSENER', vorname: 'Vater', nachname: 'Huber' },
+		});
+		await prisma.bezugsperson.create({
+			data: {
+				vereinId: verein.id,
+				erwachsenerId: vater.id,
+				jungfischerId: ben.id,
+				beziehung: 'VATER',
+				erziehungsberechtigt: true,
+			},
+		});
+		await prisma.einwilligung.create({
+			data: { vereinId: verein.id, jungfischerId: ben.id, erteiltVon: vater.id, art: 'DSGVO_ART8', textVersion: '1' },
+		});
+		const j = await (await pruefen(verein, { token })).json();
+		expect(j.einwilligungsText).toEqual({ version: EINWILLIGUNG_TEXT_VERSION, text: EINWILLIGUNG_TEXT });
+		expect(j.kinder).toHaveLength(2);
+		expect(j.kinder).toEqual(
+			expect.arrayContaining([
+				{ id: lena.id, vorname: 'Lena', zugangErlaubt: false, einwilligungVorhanden: false },
+				{ id: ben.id, vorname: 'Ben', zugangErlaubt: true, einwilligungVorhanden: true },
+			]),
+		);
+	});
+
+	it('pruefen: Kind einer Grossmutter (nicht erziehungsberechtigt) fehlt in kinder', async () => {
+		uhr = t0;
+		const { token, personId } = await lege(verein, { art: 'ERWACHSENER', vorname: 'Oma', email: 'o@example.org' });
+		await legeKind(verein, personId, { vorname: 'Enkel', erziehungsberechtigt: false });
+		await legeKind(verein, personId, { vorname: 'Gross', erziehungsberechtigt: true, geburtsdatum: '2000-01-01' });
+		await legeKind(verein, personId, { vorname: 'Weg', erziehungsberechtigt: true, entfernt: true });
+		const j = await (await pruefen(verein, { token })).json();
+		expect(j.kinder).toEqual([]);
 	});
 
 	it('pruefen: Erwachsener ohne hinterlegte Adresse hat keinen Wert', async () => {

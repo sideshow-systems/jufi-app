@@ -1,6 +1,6 @@
 import { generateLinkToken, hashToken, MITGLIEDER_COOKIE, WEBAUTHN_CHALLENGE_TTL_MS } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
-import { PASSWORT_HINWEIS } from '@jufi/domain';
+import { EINWILLIGUNG_TEXT_VERSION, PASSWORT_HINWEIS } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebauthnPruefer } from '../abhaengigkeiten.js';
@@ -96,6 +96,7 @@ describe('Einladung einloesen', () => {
 			email?: string;
 			zugang?: { anmeldename?: string; passwortHash?: string };
 			einwilligung?: boolean;
+			geburtsdatum?: string;
 			einladung?: 'EINLADUNG' | 'RESET';
 		},
 	): Promise<{ personId: string; token: string; zugangId?: string }> {
@@ -106,7 +107,7 @@ describe('Einladung einloesen', () => {
 				vorname: p.vorname ?? 'Erika',
 				nachname: 'Huber',
 				email: p.email,
-				geburtsdatum: p.art === 'JUNGFISCHER' ? new Date('2015-05-05') : undefined,
+				geburtsdatum: p.art === 'JUNGFISCHER' ? new Date(p.geburtsdatum ?? '2015-05-05') : undefined,
 			},
 		});
 		let zugangId: string | undefined;
@@ -119,6 +120,16 @@ describe('Einladung einloesen', () => {
 			});
 			await prisma.einwilligung.create({
 				data: { vereinId: v.id, jungfischerId: person.id, erteiltVon: eltern.id, art: 'DSGVO_ART8', textVersion: '1' },
+			});
+			// Ohne Zuordnung gaelte die Einwilligung nicht (Entscheidung 6).
+			await prisma.bezugsperson.create({
+				data: {
+					vereinId: v.id,
+					erwachsenerId: eltern.id,
+					jungfischerId: person.id,
+					beziehung: 'MUTTER',
+					erziehungsberechtigt: true,
+				},
 			});
 		}
 		const token = await prisma.$transaction((tx) =>
@@ -228,6 +239,39 @@ describe('Einladung einloesen', () => {
 			expect(await eingeloestAm(token)).toBeNull();
 		});
 
+		it('volljaehriger Jungfischer braucht keine Einwilligung', async () => {
+			const { token, personId } = await lege(verein, {
+				art: 'JUNGFISCHER',
+				vorname: 'Gross',
+				geburtsdatum: '2000-01-01',
+			});
+			const r = await einloesen(verein, { token, kennung: `gross-${randomUUID().slice(0, 6)}`, passwort: PASSWORT });
+			expect(r.status).toBe(200);
+			expect(await zugangVon(personId)).not.toBeNull();
+		});
+
+		it('Kindeinladung: Erteilerin entfernt, 409 EINWILLIGUNG_FEHLT, Einladung offen', async () => {
+			const { token, personId } = await lege(verein, { art: 'JUNGFISCHER', vorname: 'Waise', einwilligung: true });
+			const z = await prisma.bezugsperson.findFirstOrThrow({ where: { jungfischerId: personId } });
+			await prisma.bezugsperson.delete({ where: { id: z.id } });
+			const r = await einloesen(verein, { token, kennung: `waise-${randomUUID().slice(0, 6)}`, passwort: PASSWORT });
+			expect(r.status).toBe(409);
+			expect(await r.json()).toEqual(EINWILLIGUNG_FEHLT);
+			expect(await zugangVon(personId)).toBeNull();
+			expect(await eingeloestAm(token)).toBeNull();
+		});
+
+		it('Doppelklick auf eine Kindeinladung: genau ein 200', async () => {
+			const { token, personId } = await lege(verein, { art: 'JUNGFISCHER', vorname: 'Zwei', einwilligung: true });
+			const kennung = `zwei-${randomUUID().slice(0, 6)}`;
+			const [a, b] = await Promise.all([
+				einloesen(verein, { token, kennung, passwort: PASSWORT }),
+				einloesen(verein, { token, kennung, passwort: PASSWORT }),
+			]);
+			expect([a.status, b.status].sort()).toEqual([200, 404]);
+			expect(await prisma.zugang.count({ where: { personId } })).toBe(1);
+		});
+
 		it('Anmeldename vergeben: 409, Einladung offen', async () => {
 			const name = `belegt-${randomUUID().slice(0, 6)}`;
 			await lege(verein, { art: 'JUNGFISCHER', zugang: { anmeldename: name } });
@@ -244,6 +288,157 @@ describe('Einladung einloesen', () => {
 			const r = await einloesen(verein, { token, kennung: 'lena@example.org', passwort: PASSWORT });
 			expect(r.status).toBe(400);
 			expect((await r.json()).feld).toBe('kennung');
+		});
+	});
+
+	describe('Einwilligungen der Eltern', () => {
+		async function elternMitKind(
+			k: { erziehungsberechtigt?: boolean; geburtsdatum?: string; entfernt?: boolean; erlaubt?: boolean } = {},
+		) {
+			const eltern = await lege(verein, { art: 'ERWACHSENER', vorname: 'Mutter' });
+			const kind = await prisma.person.create({
+				data: {
+					vereinId: verein.id,
+					art: 'JUNGFISCHER',
+					vorname: 'Kind',
+					nachname: 'Huber',
+					geburtsdatum: new Date(k.geburtsdatum ?? '2015-05-05'),
+					zugangErlaubt: k.erlaubt ?? false,
+					entferntAm: k.entfernt ? t0 : undefined,
+				},
+			});
+			await prisma.bezugsperson.create({
+				data: {
+					vereinId: verein.id,
+					erwachsenerId: eltern.personId,
+					jungfischerId: kind.id,
+					beziehung: 'MUTTER',
+					erziehungsberechtigt: k.erziehungsberechtigt ?? true,
+				},
+			});
+			return { ...eltern, kindId: kind.id };
+		}
+		const kindZeile = (id: string) => prisma.person.findUniqueOrThrow({ where: { id } });
+		const einwilligungenVon = (id: string) => prisma.einwilligung.findMany({ where: { jungfischerId: id } });
+
+		it('einwilligen: true legt die Einwilligung an und setzt zugangErlaubt', async () => {
+			const { token, personId, kindId } = await elternMitKind();
+			const r = await einloesen(verein, {
+				token,
+				kennung: adresse(),
+				passwort: PASSWORT,
+				einwilligungen: [{ kindId, einwilligen: true, zugang: true }],
+			});
+			expect(r.status).toBe(200);
+			expect(await einwilligungenVon(kindId)).toMatchObject([
+				{
+					art: 'DSGVO_ART8',
+					erteiltVon: personId,
+					textVersion: EINWILLIGUNG_TEXT_VERSION,
+					erteiltAm: t0,
+					widerrufenAm: null,
+				},
+			]);
+			expect((await kindZeile(kindId)).zugangErlaubt).toBe(true);
+		});
+
+		it('zugang: false behaelt die Einwilligung, zugangErlaubt bleibt false', async () => {
+			const { token, kindId } = await elternMitKind({ erlaubt: true });
+			const r = await einloesen(verein, {
+				token,
+				kennung: adresse(),
+				passwort: PASSWORT,
+				einwilligungen: [{ kindId, einwilligen: true, zugang: false }],
+			});
+			expect(r.status).toBe(200);
+			expect(await einwilligungenVon(kindId)).toHaveLength(1);
+			expect((await kindZeile(kindId)).zugangErlaubt).toBe(false);
+		});
+
+		it('einwilligen: false legt nichts an und aendert nichts', async () => {
+			const { token, kindId } = await elternMitKind();
+			const r = await einloesen(verein, {
+				token,
+				kennung: adresse(),
+				passwort: PASSWORT,
+				einwilligungen: [{ kindId, einwilligen: false, zugang: true }],
+			});
+			expect(r.status).toBe(200);
+			expect(await einwilligungenVon(kindId)).toHaveLength(0);
+			expect((await kindZeile(kindId)).zugangErlaubt).toBe(false);
+		});
+
+		it('fremdes Kind: 404, nichts eingeloest, nichts angelegt', async () => {
+			const { token, personId } = await elternMitKind();
+			const fremdesKind = await elternMitKind();
+			const r = await einloesen(verein, {
+				token,
+				kennung: adresse(),
+				passwort: PASSWORT,
+				einwilligungen: [{ kindId: fremdesKind.kindId, einwilligen: true, zugang: true }],
+			});
+			expect(r.status).toBe(404);
+			expect(await r.json()).toEqual(UNGUELTIG);
+			expect(await eingeloestAm(token)).toBeNull();
+			expect(await zugangVon(personId)).toBeNull();
+			expect(await einwilligungenVon(fremdesKind.kindId)).toHaveLength(0);
+			expect((await kindZeile(fremdesKind.kindId)).zugangErlaubt).toBe(false);
+		});
+
+		it.each([
+			['nicht erziehungsberechtigt', { erziehungsberechtigt: false }],
+			['volljaehrig', { geburtsdatum: '2000-01-01' }],
+			['entfernt', { entfernt: true }],
+		])('Kind %s: 404 fuer den ganzen Vorgang', async (_name, k) => {
+			const { token, kindId } = await elternMitKind(k);
+			const r = await einloesen(verein, {
+				token,
+				kennung: adresse(),
+				passwort: PASSWORT,
+				einwilligungen: [{ kindId, einwilligen: true, zugang: true }],
+			});
+			expect(r.status).toBe(404);
+			expect(await eingeloestAm(token)).toBeNull();
+			expect(await einwilligungenVon(kindId)).toHaveLength(0);
+		});
+
+		it('Kind aus fremdem Verein: 404', async () => {
+			const { token } = await elternMitKind();
+			const kind = await prisma.person.create({
+				data: {
+					vereinId: fremd.id,
+					art: 'JUNGFISCHER',
+					vorname: 'Fremd',
+					nachname: 'X',
+					geburtsdatum: new Date('2015-05-05'),
+				},
+			});
+			const r = await einloesen(verein, {
+				token,
+				kennung: adresse(),
+				passwort: PASSWORT,
+				einwilligungen: [{ kindId: kind.id, einwilligen: true, zugang: true }],
+			});
+			expect(r.status).toBe(404);
+			expect(await prisma.einwilligung.count({ where: { jungfischerId: kind.id } })).toBe(0);
+		});
+
+		it('ungueltige Form: 400, Einladung offen', async () => {
+			const { token, kindId } = await elternMitKind();
+			for (const einwilligungen of [
+				'ja',
+				[{ kindId, einwilligen: 'ja', zugang: true }],
+				[{ kindId, einwilligen: true }],
+				[{ einwilligen: true, zugang: true }],
+				[
+					{ kindId, einwilligen: true, zugang: true },
+					{ kindId, einwilligen: true, zugang: true },
+				],
+			]) {
+				const r = await einloesen(verein, { token, kennung: adresse(), passwort: PASSWORT, einwilligungen });
+				expect(r.status).toBe(400);
+			}
+			expect(await eingeloestAm(token)).toBeNull();
 		});
 	});
 
