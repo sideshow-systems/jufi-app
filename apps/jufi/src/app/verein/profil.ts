@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, type OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
-import { firstValueFrom, map, type Observable } from 'rxjs';
+import { firstValueFrom, map } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { wertVon } from '../gemeinsam/formular';
 import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
@@ -468,10 +468,7 @@ export class ProfilComponent implements OnInit {
 		this.laeuft.set(true);
 		this.abmeldefehler.set(null);
 		try {
-			const aufruf: Observable<void> = ueberall ? this.api.abmeldenAlle(this.slug()) : this.api.abmelden(this.slug());
-			await firstValueFrom(aufruf);
-			this.sitzung.ich.set(null);
-			await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
+			await this.sitzung.abmelden(this.slug(), ueberall);
 		} catch (ursache) {
 			// Die Sitzung steht dann vielleicht noch: Die Person soll es erfahren, statt auf einer toten Seite zu glauben, sie sei draussen.
 			this.abmeldefehler.set(fehlertext(alsApiFehler(ursache)));

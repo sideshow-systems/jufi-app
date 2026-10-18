@@ -310,6 +310,19 @@ describe('Profil', () => {
 			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
 		});
 
+		// Die Sitzung ist dann ohnehin weg; ein Fehlertext waere falsch (gleiche Regel wie auf Mehr).
+		it('Abmelden bei 401 nicht angemeldet fuehrt zur Anmeldung und zeigt keinen Fehler', async () => {
+			await oeffne();
+			knopf(seite, 'Abmelden').click();
+			http
+				.expectOne(`${API}/abmelden`)
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+			await stabil();
+
+			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+			expect(seite.querySelector('[role="alert"]')).toBeNull();
+		});
+
 		it('Ueberall abmelden ruft die API fuer alle Geraete und geht zur Anmeldung', async () => {
 			await oeffne();
 			knopf(seite, 'Überall abmelden').click();

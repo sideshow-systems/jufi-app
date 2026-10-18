@@ -1,9 +1,10 @@
 import { inject, Injectable, signal } from '@angular/core';
 import type { CanActivateFn } from '@angular/router';
 import { Router } from '@angular/router';
-import { catchError, map, of, throwError } from 'rxjs';
+import { catchError, firstValueFrom, map, of, throwError } from 'rxjs';
 import { alsApiFehler } from '../gemeinsam/api-fehler';
 import { type MitgliedIch, MitgliederApi } from './mitglieder-api';
+import { istNichtAngemeldet } from './sitzung-abgelaufen';
 
 /**
  * Was der Waechter zuletzt ueber die Person erfahren hat. Die Startseite braucht daraus
@@ -13,6 +14,30 @@ import { type MitgliedIch, MitgliederApi } from './mitglieder-api';
 @Injectable({ providedIn: 'root' })
 export class MitgliedSitzung {
 	readonly ich = signal<MitgliedIch | null>(null);
+
+	private readonly api = inject(MitgliederApi);
+	private readonly router = inject(Router);
+
+	/**
+	 * Meldet ab (nur hier, Mehr und Profil rufen es) und geht zur Anmeldung des Vereins. 401
+	 * "nicht angemeldet" gilt als gelungen: Die Sitzung ist schon weg, das Ziel erreicht, und
+	 * ein Fehlertext liesse die Person glauben, sie sei noch drin. Andere Fehler werfen weiter,
+	 * damit die Seite sie zeigt. Erst navigieren, dann ich leeren: Sonst verlore die Seite
+	 * ihre Zeilen (Verwaltung, Meine Jungfischer), bevor sie weg ist. Verworfen: die Logik je
+	 * Seite, sie lief schon einmal auseinander (nur Mehr kannte den 401-Fall).
+	 */
+	async abmelden(slug: string, ueberall = false): Promise<void> {
+		try {
+			await firstValueFrom(ueberall ? this.api.abmeldenAlle(slug) : this.api.abmelden(slug));
+		} catch (ursache) {
+			if (!istNichtAngemeldet(alsApiFehler(ursache))) throw ursache;
+		}
+		try {
+			await this.router.navigateByUrl(`/${encodeURIComponent(slug)}/anmelden`);
+		} finally {
+			this.ich.set(null);
+		}
+	}
 }
 
 /**

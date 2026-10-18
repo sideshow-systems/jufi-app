@@ -1,13 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { RouterLink } from '@angular/router';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { IconComponent } from '../gestaltung/icon';
 import { ThemaWahlComponent } from '../gestaltung/thema-wahl';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
 import { MitgliedSitzung } from './mitglied-waechter';
-import { MitgliederApi } from './mitglieder-api';
-import { istNichtAngemeldet } from './sitzung-abgelaufen';
 
 /**
  * Mehr: alles, was nicht auf die Startseite gehoert. Profil, Meine Jungfischer und die
@@ -129,8 +126,6 @@ export class MehrComponent {
 	readonly slug = input.required<string>();
 
 	protected readonly sitzung = inject(MitgliedSitzung);
-	private readonly mitglieder = inject(MitgliederApi);
-	private readonly router = inject(Router);
 
 	/** Jugendleiter ist, wer mindestens ein Recht hat; die Verwaltung entscheidet danach selbst, was sie zeigt. */
 	protected readonly hatRecht = computed(() => (this.sitzung.ich()?.person.rechte.length ?? 0) > 0);
@@ -143,25 +138,12 @@ export class MehrComponent {
 		this.laeuft.set(true);
 		this.abmeldefehler.set(null);
 		try {
-			await firstValueFrom(this.mitglieder.abmelden(this.slug()));
-			await this.zurAnmeldung();
+			await this.sitzung.abmelden(this.slug());
 		} catch (ursache) {
-			const fehler = alsApiFehler(ursache);
-			// Die Sitzung ist schon weg: Das Ziel des Abmeldens ist erreicht, ein Fehler waere falsch.
-			// Ohne weiter, weil die Person gehen wollte und nicht zu dieser Seite zurueck.
-			if (istNichtAngemeldet(fehler)) {
-				await this.zurAnmeldung();
-				return;
-			}
 			// Bleibt die Person auf der Seite, weiss sie, dass die Sitzung noch steht: kein stilles Scheitern.
-			this.abmeldefehler.set(fehlertext(fehler));
+			this.abmeldefehler.set(fehlertext(alsApiFehler(ursache)));
 		} finally {
 			this.laeuft.set(false);
 		}
-	}
-
-	private async zurAnmeldung(): Promise<void> {
-		this.sitzung.ich.set(null);
-		await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
 	}
 }

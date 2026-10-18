@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { adminTestAnbieter } from '../admin/test-hilfen';
+import { MitgliedSitzung } from './mitglied-waechter';
 import type { MitgliedIch } from './mitglieder-api';
 
 const API = '/demo/api/v1';
@@ -95,6 +96,12 @@ describe('Mehr', () => {
 		expect(zeile('Verwaltung').getAttribute('href')).toBe('/demo/verwaltung');
 	});
 
+	it('zeigt einer Person mit Kindern ohne Recht Meine Jungfischer, aber nicht Verwaltung', async () => {
+		await oeffne({ ...ICH, person: { ...ICH.person, art: 'ERWACHSENER' }, hatKinder: true });
+
+		expect(zeilen()).toEqual(['Profil', 'Meine Jungfischer', 'Impressum', 'Datenschutz', 'Abmelden']);
+	});
+
 	it('zeigt Verwaltung auch mit einem anderen Recht als MITGLIEDER', async () => {
 		await oeffne({ ...ICH, person: { ...ICH.person, rechte: ['DOKUMENTE'] } });
 
@@ -112,7 +119,12 @@ describe('Mehr', () => {
 	describe('Abmelden', () => {
 		it('ruft abmelden und geht zur Anmeldung des Vereins', async () => {
 			await oeffne();
-			const navigiert = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+			// Erst navigieren, dann ich leeren: Sonst verlore Mehr kurz seine Zeilen.
+			let ichBeimNavigieren: unknown = null;
+			const navigiert = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockImplementation(async () => {
+				ichBeimNavigieren = TestBed.inject(MitgliedSitzung).ich();
+				return true;
+			});
 
 			abmeldeKnopf().click();
 			const anfrage = http.expectOne(`${API}/abmelden`);
@@ -121,6 +133,8 @@ describe('Mehr', () => {
 			await stabil();
 
 			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+			expect(ichBeimNavigieren).not.toBeNull();
+			expect(TestBed.inject(MitgliedSitzung).ich()).toBeNull();
 		});
 
 		it('bleibt bei einem Netzfehler stehen und sagt es', async () => {
