@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -37,6 +37,9 @@ const STANDARDTITEL = 'JuFi App';
 						<h1>{{ v.anzeigename }}</h1>
 						<!-- Schlicht, bis die Huelle mit Navigation kommt (Etappe 5): Profil und Abmelden muessen schon jetzt erreichbar sein. -->
 						<div class="reihe">
+							@if (zeigeVerwaltung()) {
+								<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Verwaltung</a>
+							}
 							@if (sitzung.ich()?.hatKinder) {
 								<a class="knopf" [routerLink]="['/', slug(), 'jungfischer']">Meine Jungfischer</a>
 							}
@@ -91,6 +94,12 @@ export class VereinStartComponent {
 	private readonly router = inject(Router);
 	protected readonly sitzung = inject(MitgliedSitzung);
 	private readonly thema = inject(ThemaService);
+
+	/**
+	 * Jedes Recht macht die Liste lesbar (Jugendleiter sind, wer irgendein Recht hat); wer keines hat,
+	 * bekaeme vom Server nur die eigene Familie und die Ansprechpartner. Der Server entscheidet trotzdem.
+	 */
+	protected readonly zeigeVerwaltung = computed(() => (this.sitzung.ich()?.person.rechte?.length ?? 0) > 0);
 
 	protected readonly laeuft = signal(false);
 	protected readonly abmeldefehler = signal<string | null>(null);

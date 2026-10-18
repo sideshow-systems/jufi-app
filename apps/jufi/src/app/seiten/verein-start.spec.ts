@@ -78,6 +78,34 @@ describe('Vereinsseite', () => {
 		expect(harness.routeNativeElement?.querySelector('a[href="/demo/jungfischer"]')).toBeNull();
 	});
 
+	async function verwaltungsLink(rechte: string[]): Promise<HTMLAnchorElement | null | undefined> {
+		const harness = await RouterTestingHarness.create();
+		const navigation = harness.navigateByUrl('/demo');
+		await vi.waitFor(() =>
+			http.expectOne('/demo/api/v1/ich').flush({ person: { vorname: 'Flo', rechte }, passkeys: [], totp: {} }),
+		);
+		await navigation;
+		http
+			.expectOne('/demo/api/v1/verein')
+			.flush({ slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false });
+		await harness.fixture.whenStable();
+		harness.detectChanges();
+		return harness.routeNativeElement?.querySelector<HTMLAnchorElement>('a[href="/demo/verwaltung"]');
+	}
+
+	it('zeigt die Verwaltung mit dem Recht MITGLIEDER', async () => {
+		expect((await verwaltungsLink(['MITGLIEDER']))?.textContent).toContain('Verwaltung');
+	});
+
+	// Betreuer lesen die Liste (Einsicht LESEN); wer kein Recht hat, bekaeme vom Server nur die eigene Familie: Der Link waere leer.
+	it('zeigt die Verwaltung auch Betreuern', async () => {
+		expect(await verwaltungsLink(['ANTWORTEN_DETAIL'])).toBeTruthy();
+	});
+
+	it('zeigt die Verwaltung nicht ohne Rechte', async () => {
+		expect(await verwaltungsLink([])).toBeNull();
+	});
+
 	it('zeigt "Willkommen" und den Vereinsnamen, wenn der Server die Sitzung kennt', async () => {
 		const harness = await oeffne('/demo');
 		http

@@ -1,24 +1,12 @@
 import { ChangeDetectionStrategy, Component, inject, input, type OnInit, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import type { Beziehung } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { EinladungAnzeigeComponent } from '../admin/einladung-anzeige';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { KarteComponent } from '../gestaltung/ui';
 import { type EinladungsLink, type KindAnsicht, MitgliederApi } from './mitglieder-api';
 import { VereinKopfComponent } from './verein-kopf';
-
-const BEZIEHUNG_TEXT: Record<Beziehung, string> = {
-	MUTTER: 'Mutter',
-	VATER: 'Vater',
-	GROSSMUTTER: 'Großmutter',
-	GROSSVATER: 'Großvater',
-	TANTE: 'Tante',
-	ONKEL: 'Onkel',
-	GESCHWISTER: 'Geschwister',
-	PFLEGEPERSON: 'Pflegeperson',
-	ANDERE: 'Andere',
-};
+import { beziehungText } from './verwaltung/texte';
 
 /**
  * Die Kinder der angemeldeten Person: wer sie sind, wer zur Familie gehoert, wie es um
@@ -223,7 +211,7 @@ export class JungfischerComponent implements OnInit {
 	}
 
 	protected beziehung(f: KindAnsicht['familie'][number]): string {
-		return f.beziehung === 'ANDERE' && f.beziehungFreitext ? f.beziehungFreitext : BEZIEHUNG_TEXT[f.beziehung];
+		return beziehungText(f.beziehung, f.beziehungFreitext);
 	}
 
 	protected zugangstext(k: KindAnsicht): string {
