@@ -123,7 +123,7 @@ export async function entferne(tx: Transaktion, personId: string, jetzt: Date): 
 }
 
 /** Ende einer Entscheidung unter der Sperre; innerhalb der Transaktion geworfen, damit nichts halb bleibt. */
-class Abbruch extends Error {
+export class Abbruch extends Error {
 	constructor(
 		readonly status: number,
 		readonly antwort: object,
@@ -132,14 +132,61 @@ class Abbruch extends Error {
 	}
 }
 
-const ZUGANG_NICHT_ERLAUBT = {
+export const ZUGANG_NICHT_ERLAUBT = {
 	fehler: 'Für dieses Kind ist der Zugang nicht erlaubt. Die Familie muss ihn erst erlauben.',
 	code: 'ZUGANG_NICHT_ERLAUBT',
 };
-const EINWILLIGUNG_FEHLT = {
+export const EINWILLIGUNG_FEHLT = {
 	fehler: 'Die Einwilligung einer erziehungsberechtigten Person fehlt noch',
 	code: 'EINWILLIGUNG_FEHLT',
 };
+
+interface EinladungsAuftrag {
+	ich: Person;
+	ziel: Person & { zugang: { id: string } | null };
+	stand: { slug: string; anzeigename: string };
+	mail: boolean;
+	zeit: Date;
+	basisUrl: string;
+}
+
+/**
+ * Einladen eines Kindes mit seinen Voraussetzungen (Zugang erlaubt, Einwilligung gueltig),
+ * gemeinsam fuer die Verwaltung (POST /personen/:id/einladung) und die Familie
+ * (POST /meine-jungfischer/:kindId/einladung). Nur die Berechtigung unterscheidet die Wege
+ * und bleibt darum bei der Route. Verworfen: die Voraussetzungen je Route zu wiederholen --
+ * ein Weg liesse sie beim naechsten Umbau leicht aus.
+ *
+ * Der Aufrufer haelt die Vereinssperre und hat alles frisch gelesen.
+ */
+export async function erzeugeEinladungFuerKind(tx: Transaktion, a: EinladungsAuftrag) {
+	if (!a.ziel.zugangErlaubt) throw new Abbruch(409, ZUGANG_NICHT_ERLAUBT);
+	if (!(await hatEinwilligung(tx, a.ziel, a.zeit))) throw new Abbruch(409, EINWILLIGUNG_FEHLT);
+	return legeEinladungAn(tx, a);
+}
+
+async function legeEinladungAn(tx: Transaktion, a: EinladungsAuftrag) {
+	const { ich, ziel, stand, zeit } = a;
+	if (a.mail && !ziel.email) {
+		throw new Abbruch(400, { fehler: 'Für diese Person ist keine E-Mail-Adresse hinterlegt', feld: 'mail' });
+	}
+	const art: EinladungArt = ziel.zugang ? 'RESET' : 'EINLADUNG';
+	// Die ungesendeten Mails der ersetzten Einladung gehen mit: sonst ginge noch ein Link
+	// hinaus, den es nicht mehr gibt. erzeugeVereinsEinladung loescht nur die Einladung.
+	await loescheEinladungen(tx, { personId: ziel.id, eingeloestAm: null, art });
+	const { id, token } = await erzeugeVereinsEinladung(tx, {
+		personId: ziel.id,
+		art,
+		erstelltVonPersonId: ich.id,
+		jetzt: zeit,
+	});
+	const link = einladungsLink(a.basisUrl, stand.slug, token);
+	const mail = mitgliedMail({ vorname: ziel.vorname, anzeigename: stand.anzeigename, link, art });
+	if (a.mail && ziel.email) {
+		await legeMailAn(tx, { empfaenger: ziel.email, ...mail, bezug: `einladung:${id}`, jetzt: zeit });
+	}
+	return { link, text: mail.text, ablauf: einladungsAblauf(art, zeit).toISOString() };
+}
 
 /**
  * Einladen und Zugangslink aus der Verwaltung (Spec 4.1). Die Art folgt dem Zugang der Person:
@@ -187,30 +234,10 @@ export function einladenRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' 
 					if (mailRoh !== undefined && typeof mailRoh !== 'boolean') {
 						throw new Abbruch(400, { fehler: 'mail erwartet ja oder nein', feld: 'mail' });
 					}
-					if (ziel.art === 'JUNGFISCHER') {
-						if (!ziel.zugangErlaubt) throw new Abbruch(409, ZUGANG_NICHT_ERLAUBT);
-						if (!(await hatEinwilligung(tx, ziel, zeit))) throw new Abbruch(409, EINWILLIGUNG_FEHLT);
-					}
-					if (mailRoh === true && !ziel.email) {
-						throw new Abbruch(400, { fehler: 'Für diese Person ist keine E-Mail-Adresse hinterlegt', feld: 'mail' });
-					}
-
-					const art: EinladungArt = ziel.zugang ? 'RESET' : 'EINLADUNG';
-					// Die ungesendeten Mails der ersetzten Einladung gehen mit: sonst ginge noch ein Link
-					// hinaus, den es nicht mehr gibt. erzeugeVereinsEinladung loescht nur die Einladung.
-					await loescheEinladungen(tx, { personId: ziel.id, eingeloestAm: null, art });
-					const { id, token } = await erzeugeVereinsEinladung(tx, {
-						personId: ziel.id,
-						art,
-						erstelltVonPersonId: ich.id,
-						jetzt: zeit,
-					});
-					const link = einladungsLink(umgebung.basisUrl, stand.slug, token);
-					const mail = mitgliedMail({ vorname: ziel.vorname, anzeigename: stand.anzeigename, link, art });
-					if (mailRoh === true && ziel.email) {
-						await legeMailAn(tx, { empfaenger: ziel.email, ...mail, bezug: `einladung:${id}`, jetzt: zeit });
-					}
-					return { link, text: mail.text, ablauf: einladungsAblauf(art, zeit).toISOString() };
+					const auftrag = { ich, ziel, stand, mail: mailRoh === true, zeit, basisUrl: umgebung.basisUrl };
+					return ziel.art === 'JUNGFISCHER'
+						? await erzeugeEinladungFuerKind(tx, auftrag)
+						: await legeEinladungAn(tx, auftrag);
 				});
 				res.status(201).json(ergebnis);
 			} catch (error) {

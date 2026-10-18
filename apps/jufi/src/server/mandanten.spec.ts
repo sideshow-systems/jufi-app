@@ -61,6 +61,17 @@ async function fremderPasskeyBleibt(k: Kontext, methode: string): Promise<void> 
 	expect(await k.prisma.passkey.findUnique({ where: { id: k.fremderPasskey.id } })).toEqual(k.fremderPasskey);
 }
 
+/** Schreib-Route unter /meine-jungfischer mit der Id eines Kindes aus fremd: gesperrt 404, fremd 401, eigen 404. */
+async function meineJungfischerSchreibfall(k: Kontext, was: string, body: object): Promise<void> {
+	const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });
+	const sendeAn = (slug: string, cookie?: string) =>
+		sende(k.url, `/${slug}/api/v1/meine-jungfischer/${k.fremdesKindId}/${was}`, { methode: 'POST', body, cookie });
+	expect((await sendeAn(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+	expect((await sendeAn(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+	expect((await sendeAn(k.eigen.slug, k.eigenesCookie)).status).toBe(404);
+	expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
+}
+
 /**
  * Jede Vereins-Route braucht hier einen Fall (Spec 9). Kommt eine Route
  * hinzu, scheitert der erste Test, bis der Fall eingetragen ist.
@@ -289,6 +300,26 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Die Person gehoert zu fremd: in eigen unbekannt, auch fuer die Leitung.
 		expect((await lade(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
 		expect(await k.prisma.einladung.count({ where: { personId: k.fremdePersonId } })).toBe(vorher);
+	},
+	// Die vier Routen unter /meine-jungfischer: das Kind gehoert zu fremd, die Id ist in eigen unbekannt.
+	'GET /meine-jungfischer': async (k) => {
+		const liste = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/meine-jungfischer`, { cookie });
+		expect((await liste(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		expect((await liste(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+		const r = await liste(k.eigen.slug, k.eigenesCookie);
+		expect(r.status).toBe(200);
+		expect(JSON.stringify(await r.json())).not.toContain(k.fremdesKindId);
+	},
+	'POST /meine-jungfischer/:kindId/zugang': async (k) => {
+		await meineJungfischerSchreibfall(k, 'zugang', { erlaubt: false });
+	},
+	'POST /meine-jungfischer/:kindId/einladung': async (k) => {
+		await meineJungfischerSchreibfall(k, 'einladung', {});
+		expect(await k.prisma.einladung.count({ where: { personId: k.fremdesKindId } })).toBe(0);
+	},
+	'POST /meine-jungfischer/:kindId/einwilligung': async (k) => {
+		await meineJungfischerSchreibfall(k, 'einwilligung', { erteilen: true });
+		expect(await k.prisma.einwilligung.count({ where: { jungfischerId: k.fremdesKindId } })).toBe(0);
 	},
 	'GET /untergruppen': async (k) => {
 		const liste = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/untergruppen`, { cookie });
