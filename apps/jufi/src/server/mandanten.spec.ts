@@ -279,6 +279,17 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
 		expect(await k.prisma.untergruppeMitglied.count({ where: { personId: k.fremdesKindId } })).toBe(1);
 	},
+	'POST /personen/:id/einladung': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdePersonId}/einladung`;
+		const vorher = await k.prisma.einladung.count({ where: { personId: k.fremdePersonId } });
+		const lade = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}${pfad}`, { methode: 'POST', body: { mail: true }, cookie });
+		expect((await lade(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await lade(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Die Person gehoert zu fremd: in eigen unbekannt, auch fuer die Leitung.
+		expect((await lade(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.einladung.count({ where: { personId: k.fremdePersonId } })).toBe(vorher);
+	},
 	'GET /untergruppen': async (k) => {
 		const liste = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/untergruppen`, { cookie });
 		expect((await liste(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);

@@ -1,5 +1,14 @@
-import type { Person, VereinDb } from '@jufi/db';
-import { hatGueltigeEinwilligung, istVolljaehrig } from '@jufi/domain';
+import { sperreVereinszeile, type EinladungArt, type Person, type VereinDb } from '@jufi/db';
+import { darfEinladen, einladungsAblauf, hatGueltigeEinwilligung, istVolljaehrig } from '@jufi/domain';
+import type { Router } from 'express';
+import type { VolleAppDeps } from '../abhaengigkeiten.js';
+import { asynchron } from '../admin/asynchron.js';
+import { einladungsLink, erzeugeVereinsEinladung } from '../einladung.js';
+import { mitgliedMail } from '../mail/texte.js';
+import { legeMailAn } from '../mail/warteschlange.js';
+import { vereinsKontext } from '../verein.js';
+import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
+import { alsSicht } from './verwaltung.js';
 
 /** Der Transaktions-Client, den db.$transaction der Vereins-Routen reicht. */
 export type Transaktion = Parameters<Parameters<VereinDb['$transaction']>[0]>[0];
@@ -25,7 +34,10 @@ export async function entzieheZugang(tx: Transaktion, kindId: string): Promise<v
  * Hoechstzahl der Versuche. Bezug heisst "einladung:<id>" bzw. "reset:<id>"; gesendete Mails
  * bleiben (Nachweis, und der Arbeiter raeumt sie selbst auf).
  */
-async function loescheEinladungen(tx: Transaktion, where: { personId: string; eingeloestAm?: null }): Promise<void> {
+async function loescheEinladungen(
+	tx: Transaktion,
+	where: { personId: string; eingeloestAm?: null; art?: EinladungArt },
+): Promise<void> {
 	const einladungen = await tx.einladung.findMany({ where, select: { id: true } });
 	if (einladungen.length === 0) return;
 	const bezuege = einladungen.flatMap((e) => [`einladung:${e.id}`, `reset:${e.id}`]);
@@ -45,11 +57,20 @@ async function loescheEinladungen(tx: Transaktion, where: { personId: string; ei
  * Regel stuende dann an jeder Aufrufstelle noch einmal.
  */
 export async function entzieheZugangWennUngueltig(tx: Transaktion, kind: Person, jetzt: Date): Promise<void> {
-	// Die Einwilligung nach Art. 8 DSGVO braucht nur das minderjaehrige Kind (Spec 5.6); ein
-	// volljaehriges willigt selbst ein, und "Familie loesen" ist fuer es ausdruecklich erlaubt.
-	// Dagegen bleibt ein minderjaehriges Kind, das nie eine Einwilligung hatte, ohne Zugang:
-	// im Zweifel die sichere Seite.
-	if (istVolljaehrig(kind, jetzt)) return;
+	if (!(await hatEinwilligung(tx, kind, jetzt))) await entzieheZugang(tx, kind.id);
+}
+
+/**
+ * Ob das Kind heute die Einwilligung hat, die sein Zugang braucht. Die Einwilligung nach
+ * Art. 8 DSGVO braucht nur das minderjaehrige Kind (Spec 5.6); ein volljaehriges willigt
+ * selbst ein, und "Familie loesen" ist fuer es ausdruecklich erlaubt. Dagegen hat ein
+ * minderjaehriges Kind, das nie eine Einwilligung hatte, keine: im Zweifel die sichere Seite.
+ *
+ * Gemeinsam fuer den Entzug (oben) und das Einladen: beide fragen dasselbe und sollen nicht
+ * auseinanderlaufen.
+ */
+export async function hatEinwilligung(tx: Transaktion, kind: Person, jetzt: Date): Promise<boolean> {
+	if (istVolljaehrig(kind, jetzt)) return true;
 	const [einwilligungen, zuordnungen] = await Promise.all([
 		tx.einwilligung.findMany({ where: { jungfischerId: kind.id } }),
 		tx.bezugsperson.findMany({ where: { jungfischerId: kind.id } }),
@@ -60,9 +81,7 @@ export async function entzieheZugangWennUngueltig(tx: Transaktion, kind: Person,
 	const erteiler = new Map<string, Person>(
 		(await tx.person.findMany({ where: { id: { in: erteilerIds } } })).map((p) => [p.id, p]),
 	);
-	if (!hatGueltigeEinwilligung(kind, einwilligungen, erteiler, zuordnungen, jetzt)) {
-		await entzieheZugang(tx, kind.id);
-	}
+	return hatGueltigeEinwilligung(kind, einwilligungen, erteiler, zuordnungen, jetzt);
 }
 
 /**
@@ -101,4 +120,103 @@ export async function entferne(tx: Transaktion, personId: string, jetzt: Date): 
 		where: { id: { in: alsErwachsener.map((z) => z.jungfischerId) }, entferntAm: null },
 	});
 	for (const kind of kinder) await entzieheZugangWennUngueltig(tx, kind, jetzt);
+}
+
+/** Ende einer Entscheidung unter der Sperre; innerhalb der Transaktion geworfen, damit nichts halb bleibt. */
+class Abbruch extends Error {
+	constructor(
+		readonly status: number,
+		readonly antwort: object,
+	) {
+		super('Einladen abgebrochen');
+	}
+}
+
+const ZUGANG_NICHT_ERLAUBT = {
+	fehler: 'Für dieses Kind ist der Zugang nicht erlaubt. Die Familie muss ihn erst erlauben.',
+	code: 'ZUGANG_NICHT_ERLAUBT',
+};
+const EINWILLIGUNG_FEHLT = {
+	fehler: 'Die Einwilligung einer erziehungsberechtigten Person fehlt noch',
+	code: 'EINWILLIGUNG_FEHLT',
+};
+
+/**
+ * Einladen und Zugangslink aus der Verwaltung (Spec 4.1). Die Art folgt dem Zugang der Person:
+ * ohne Zugang eine Einladung, mit Zugang ein Reset -- derselbe Knopf, damit die Verwaltung nicht
+ * wissen muss, wo die Person steht. Das Token geht nur in der Antwort (und in der Mail) hinaus.
+ *
+ * Alles unter sperreVereinszeile, Handelnder und Ziel frisch gelesen: ob die Einladung
+ * angenommen wird, haengt an Rechten, Familie und Einwilligung, und jedes davon kann eine
+ * gleichzeitige Anfrage aendern (wie in rechte.ts).
+ */
+export function einladenRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' | 'umgebung'>): void {
+	const { jetzt, umgebung } = deps;
+
+	router.post(
+		'/personen/:id/einladung',
+		brauchtMitglied,
+		asynchron(async (req, res) => {
+			const { person: handelnder } = mitgliedKontext(res);
+			const { verein, db } = vereinsKontext(res);
+			const zielId = req.params['id'] ?? '';
+			const mailRoh = ((req.body ?? {}) as Record<string, unknown>)['mail'];
+			const zeit = jetzt();
+			try {
+				const ergebnis = await db.$transaction(async (tx) => {
+					await sperreVereinszeile(tx, verein.id);
+					// Erneut gelesen: der Slug steht im Link, und der Admin kann ihn zwischen vereinAusSlug
+					// und der Sperre korrigiert oder den Verein gesperrt haben.
+					const stand = await tx.verein.findFirst({ select: { slug: true, anzeigename: true, status: true } });
+					const ich = await tx.person.findFirst({ where: { id: handelnder.id, entferntAm: null } });
+					const ziel = await tx.person.findFirst({
+						where: { id: zielId, entferntAm: null },
+						include: { zugang: { select: { id: true } } },
+					});
+					const zuordnungen = ziel ? await tx.bezugsperson.findMany({ where: { jungfischerId: ziel.id } }) : [];
+					// Eine Antwort fuer alles, was die Person nicht sehen oder einladen darf (404, Rahmen-Spec 8).
+					if (
+						!stand ||
+						stand.status !== 'AKTIV' ||
+						!ich ||
+						!ziel ||
+						!darfEinladen(alsSicht(ich), alsSicht(ziel), zuordnungen, zeit)
+					) {
+						throw new Abbruch(404, { fehler: 'nicht gefunden' });
+					}
+					if (mailRoh !== undefined && typeof mailRoh !== 'boolean') {
+						throw new Abbruch(400, { fehler: 'mail erwartet ja oder nein', feld: 'mail' });
+					}
+					if (ziel.art === 'JUNGFISCHER') {
+						if (!ziel.zugangErlaubt) throw new Abbruch(409, ZUGANG_NICHT_ERLAUBT);
+						if (!(await hatEinwilligung(tx, ziel, zeit))) throw new Abbruch(409, EINWILLIGUNG_FEHLT);
+					}
+					if (mailRoh === true && !ziel.email) {
+						throw new Abbruch(400, { fehler: 'Für diese Person ist keine E-Mail-Adresse hinterlegt', feld: 'mail' });
+					}
+
+					const art: EinladungArt = ziel.zugang ? 'RESET' : 'EINLADUNG';
+					// Die ungesendeten Mails der ersetzten Einladung gehen mit: sonst ginge noch ein Link
+					// hinaus, den es nicht mehr gibt. erzeugeVereinsEinladung loescht nur die Einladung.
+					await loescheEinladungen(tx, { personId: ziel.id, eingeloestAm: null, art });
+					const { id, token } = await erzeugeVereinsEinladung(tx, {
+						personId: ziel.id,
+						art,
+						erstelltVonPersonId: ich.id,
+						jetzt: zeit,
+					});
+					const link = einladungsLink(umgebung.basisUrl, stand.slug, token);
+					const mail = mitgliedMail({ vorname: ziel.vorname, anzeigename: stand.anzeigename, link, art });
+					if (mailRoh === true && ziel.email) {
+						await legeMailAn(tx, { empfaenger: ziel.email, ...mail, bezug: `einladung:${id}`, jetzt: zeit });
+					}
+					return { link, text: mail.text, ablauf: einladungsAblauf(art, zeit).toISOString() };
+				});
+				res.status(201).json(ergebnis);
+			} catch (error) {
+				if (error instanceof Abbruch) return void res.status(error.status).json(error.antwort);
+				throw error;
+			}
+		}),
+	);
 }

@@ -1,4 +1,5 @@
-import { createPrismaClientFromEnv, sperreVereinszeile } from '@jufi/db';
+import { hashToken } from '@jufi/auth';
+import { createPrismaClientFromEnv, sperreVereinszeile, type Recht } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
@@ -343,6 +344,281 @@ describe('Entfernen und Zugang entziehen', () => {
 	it('ohne Anmeldung: 401', async () => {
 		const v = await neuerVerein();
 		const r = await sende(server.url, v.api(`/personen/${v.verwalter.personId}`), { methode: 'DELETE' });
+		expect(r.status).toBe(401);
+	});
+});
+
+describe('Einladen aus der Verwaltung', () => {
+	const prisma = createPrismaClientFromEnv();
+	let server: TestServer;
+
+	beforeAll(async () => {
+		server = await starteTestServer(
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+		);
+	});
+
+	afterAll(async () => {
+		await server.schliessen();
+		await prisma.$disconnect();
+	});
+
+	async function neuerVerein() {
+		const verein = await legeVereinAn(prisma, { slug: `einladen-${randomUUID().slice(0, 8)}` });
+		const verwalter = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', rechte: ['MITGLIEDER'] });
+		const leitung = await legeMitgliedAn(prisma, verein, {
+			art: 'ERWACHSENER',
+			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE'],
+		});
+		const api = (pfad: string) => `/${verein.slug}/api/v1${pfad}`;
+		const lade = (id: string, body: unknown = {}, cookie = verwalter.cookie) =>
+			sende(server.url, api(`/personen/${id}/einladung`), { methode: 'POST', body, cookie });
+		/** Person ohne Zugang, so wie die Verwaltung sie anlegt. */
+		const legePersonAn = (e: {
+			art: 'ERWACHSENER' | 'JUNGFISCHER';
+			email?: string;
+			geburtsdatum?: string;
+			zugangErlaubt?: boolean;
+			rechte?: Recht[];
+		}) =>
+			prisma.person.create({
+				data: {
+					vereinId: verein.id,
+					art: e.art,
+					vorname: 'Neu',
+					nachname: 'Person',
+					email: e.email ?? null,
+					geburtsdatum: e.art === 'JUNGFISCHER' ? new Date(e.geburtsdatum ?? '2015-05-05') : null,
+					zugangErlaubt: e.zugangErlaubt ?? true,
+					rechte: e.rechte ?? [],
+				},
+			});
+		const verknuepfe = (erwachsenerId: string, jungfischerId: string, erziehungsberechtigt = true) =>
+			prisma.bezugsperson.create({
+				data: {
+					vereinId: verein.id,
+					erwachsenerId,
+					jungfischerId,
+					beziehung: 'ANDERE',
+					beziehungFreitext: 'x',
+					erziehungsberechtigt,
+				},
+			});
+		const willigtEin = (jungfischerId: string, erteiltVon: string) =>
+			prisma.einwilligung.create({
+				data: { vereinId: verein.id, jungfischerId, erteiltVon, art: 'DSGVO_ART8', textVersion: '1' },
+			});
+		const einladungen = (personId: string) => prisma.einladung.findMany({ where: { personId } });
+		return { verein, verwalter, leitung, api, lade, legePersonAn, verknuepfe, willigtEin, einladungen };
+	}
+
+	type Antwort = { link: string; text: string; ablauf: string };
+
+	it('Verwalter laedt Erwachsenen ein: Link mit Token hinter #, Einladung gespeichert', async () => {
+		const v = await neuerVerein();
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER' });
+
+		const r = await v.lade(ziel.id);
+		expect(r.status).toBe(201);
+		const antwort = (await r.json()) as Antwort;
+		const [vorHash, token] = antwort.link.split('#');
+		expect(vorHash).toBe(`${TEST_UMGEBUNG.basisUrl}/${v.verein.slug}/einladung`);
+		expect(token).toBeTruthy();
+		expect(antwort.text).toContain(antwort.link);
+		const [zeile] = await v.einladungen(ziel.id);
+		expect(zeile).toMatchObject({
+			art: 'EINLADUNG',
+			tokenHash: hashToken(token ?? ''),
+			erstelltVonPersonId: v.verwalter.personId,
+			eingeloestAm: null,
+		});
+		expect(antwort.ablauf).toBe(zeile?.ablauf.toISOString());
+		// Ohne mail: true geht keine Mail hinaus.
+		expect(await prisma.mailWarteschlange.count({ where: { vereinId: v.verein.id } })).toBe(0);
+	});
+
+	it('zweiter Aufruf entwertet den ersten Link und seine ungesendete Mail', async () => {
+		const v = await neuerVerein();
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER', email: 'zwei@example.test' });
+
+		const erste = (await (await v.lade(ziel.id, { mail: true })).json()) as Antwort;
+		const zweite = (await (await v.lade(ziel.id, { mail: true })).json()) as Antwort;
+		expect(zweite.link).not.toBe(erste.link);
+		const zeilen = await v.einladungen(ziel.id);
+		expect(zeilen).toHaveLength(1);
+		expect(zeilen[0]?.tokenHash).toBe(hashToken(zweite.link.split('#')[1] ?? ''));
+		// Die Mail mit dem toten Link darf nicht mehr hinausgehen.
+		const mails = await prisma.mailWarteschlange.findMany({ where: { vereinId: v.verein.id } });
+		expect(mails).toHaveLength(1);
+		expect(mails[0]?.bezug).toBe(`einladung:${zeilen[0]?.id}`);
+	});
+
+	it('mail: true ohne E-Mail: 400, nichts angelegt', async () => {
+		const v = await neuerVerein();
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER' });
+		const r = await v.lade(ziel.id, { mail: true });
+		expect(r.status).toBe(400);
+		expect(await v.einladungen(ziel.id)).toHaveLength(0);
+	});
+
+	it('mail: kein Wahrheitswert: 400', async () => {
+		const v = await neuerVerein();
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER', email: 'x@example.test' });
+		expect((await v.lade(ziel.id, { mail: 'ja' })).status).toBe(400);
+		expect(await v.einladungen(ziel.id)).toHaveLength(0);
+	});
+
+	it('mail: true legt eine Warteschlangenzeile mit bezug einladung:<id> an', async () => {
+		const v = await neuerVerein();
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER', email: 'mail@example.test' });
+		const r = await v.lade(ziel.id, { mail: true });
+		expect(r.status).toBe(201);
+		const antwort = (await r.json()) as Antwort;
+		const [einladung] = await v.einladungen(ziel.id);
+		const mails = await prisma.mailWarteschlange.findMany({ where: { vereinId: v.verein.id } });
+		expect(mails).toHaveLength(1);
+		expect(mails[0]).toMatchObject({
+			empfaenger: 'mail@example.test',
+			bezug: `einladung:${einladung?.id}`,
+			gesendetAm: null,
+		});
+		expect(mails[0]?.text).toContain(antwort.link);
+	});
+
+	it('Jungfischer ohne Einwilligung: 409 EINWILLIGUNG_FEHLT, nichts angelegt', async () => {
+		const v = await neuerVerein();
+		const kind = await v.legePersonAn({ art: 'JUNGFISCHER' });
+		const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await v.verknuepfe(mutter.personId, kind.id);
+		const r = await v.lade(kind.id);
+		expect(r.status).toBe(409);
+		expect(await r.json()).toMatchObject({ code: 'EINWILLIGUNG_FEHLT', fehler: expect.any(String) });
+		expect(await v.einladungen(kind.id)).toHaveLength(0);
+	});
+
+	it('Einwilligung eines Nicht-Erziehungsberechtigten gilt nicht: 409 EINWILLIGUNG_FEHLT', async () => {
+		const v = await neuerVerein();
+		const kind = await v.legePersonAn({ art: 'JUNGFISCHER' });
+		const oma = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await v.verknuepfe(oma.personId, kind.id, false);
+		await v.willigtEin(kind.id, oma.personId);
+		expect((await v.lade(kind.id)).status).toBe(409);
+	});
+
+	it('Jungfischer mit gueltiger Einwilligung: 201', async () => {
+		const v = await neuerVerein();
+		const kind = await v.legePersonAn({ art: 'JUNGFISCHER' });
+		const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await v.verknuepfe(mutter.personId, kind.id);
+		await v.willigtEin(kind.id, mutter.personId);
+		expect((await v.lade(kind.id)).status).toBe(201);
+	});
+
+	it('volljaehriger Jungfischer braucht keine Einwilligung (Spec 5.6): 201', async () => {
+		const v = await neuerVerein();
+		const kind = await v.legePersonAn({ art: 'JUNGFISCHER', geburtsdatum: '2000-01-01' });
+		expect((await v.lade(kind.id)).status).toBe(201);
+	});
+
+	it('Jungfischer mit zugangErlaubt=false: 409 ZUGANG_NICHT_ERLAUBT, auch mit Einwilligung', async () => {
+		const v = await neuerVerein();
+		const kind = await v.legePersonAn({ art: 'JUNGFISCHER', zugangErlaubt: false });
+		const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await v.verknuepfe(mutter.personId, kind.id);
+		await v.willigtEin(kind.id, mutter.personId);
+		const r = await v.lade(kind.id);
+		expect(r.status).toBe(409);
+		expect(await r.json()).toMatchObject({ code: 'ZUGANG_NICHT_ERLAUBT', fehler: expect.any(String) });
+		expect(await v.einladungen(kind.id)).toHaveLength(0);
+	});
+
+	it('Erziehungsberechtigte laedt eigenes Kind ein, fremdes Kind: 404', async () => {
+		const v = await neuerVerein();
+		const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		const eigenes = await v.legePersonAn({ art: 'JUNGFISCHER' });
+		const fremdes = await v.legePersonAn({ art: 'JUNGFISCHER' });
+		await v.verknuepfe(mutter.personId, eigenes.id);
+		await v.willigtEin(eigenes.id, mutter.personId);
+		const fremde = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await v.verknuepfe(fremde.personId, fremdes.id);
+		await v.willigtEin(fremdes.id, fremde.personId);
+
+		expect((await v.lade(eigenes.id, {}, mutter.cookie)).status).toBe(201);
+		expect((await v.lade(fremdes.id, {}, mutter.cookie)).status).toBe(404);
+		expect(await v.einladungen(fremdes.id)).toHaveLength(0);
+	});
+
+	it('Verwalter ohne JUGENDLEITER_RECHTE laedt Jugendleiter ein: 404; mit dem Recht: 201', async () => {
+		const v = await neuerVerein();
+		const leiter = await v.legePersonAn({ art: 'ERWACHSENER', rechte: ['DOKUMENTE'] });
+		expect((await v.lade(leiter.id)).status).toBe(404);
+		expect(await v.einladungen(leiter.id)).toHaveLength(0);
+		expect((await v.lade(leiter.id, {}, v.leitung.cookie)).status).toBe(201);
+	});
+
+	it('Betreuer (nur Einsicht) darf nicht einladen: 404', async () => {
+		const v = await neuerVerein();
+		const betreuer = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', rechte: ['ANTWORTEN_DETAIL'] });
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER' });
+		expect((await v.lade(ziel.id, {}, betreuer.cookie)).status).toBe(404);
+		expect(await v.einladungen(ziel.id)).toHaveLength(0);
+	});
+
+	it('Grabstein und unbekannte ID: 404', async () => {
+		const v = await neuerVerein();
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER' });
+		await prisma.person.update({ where: { id: ziel.id }, data: { entferntAm: new Date() } });
+		expect((await v.lade(ziel.id)).status).toBe(404);
+		expect((await v.lade('gibt-es-nicht')).status).toBe(404);
+		expect(await v.einladungen(ziel.id)).toHaveLength(0);
+	});
+
+	it('Person mit Zugang bekommt einen Reset-Link statt einer Einladung', async () => {
+		const v = await neuerVerein();
+		const ziel = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', email: 'reset@example.test' });
+		const alteEinladung = await prisma.einladung.create({
+			data: {
+				vereinId: v.verein.id,
+				personId: ziel.personId,
+				art: 'EINLADUNG',
+				tokenHash: randomUUID(),
+				ablauf: new Date(Date.now() + 86_400_000),
+			},
+		});
+		const r = await v.lade(ziel.personId, { mail: true });
+		expect(r.status).toBe(201);
+		const antwort = (await r.json()) as Antwort;
+		const zeilen = await v.einladungen(ziel.personId);
+		const reset = zeilen.find((z) => z.art === 'RESET');
+		expect(reset?.tokenHash).toBe(hashToken(antwort.link.split('#')[1] ?? ''));
+		// Ein Reset laesst eine offene Einladung der anderen Art stehen (erzeugeVereinsEinladung).
+		expect(zeilen.some((z) => z.id === alteEinladung.id)).toBe(true);
+		// Der Text sagt, was der Link bewirkt und wie lange er gilt.
+		expect(antwort.text).toContain('1 Stunde');
+		expect(antwort.text).toContain('gelöscht');
+		expect(await prisma.mailWarteschlange.count({ where: { bezug: `einladung:${reset?.id}` } })).toBe(1);
+	});
+
+	it('Handelnder verliert MITGLIEDER, waehrend sein Einladen an der Sperre wartet: 404, nichts angelegt', async () => {
+		const v = await neuerVerein();
+		const ziel = await v.legePersonAn({ art: 'ERWACHSENER' });
+		let anfrage!: Promise<Response>;
+		await prisma.$transaction(async (tx) => {
+			await sperreVereinszeile(tx, v.verein.id);
+			anfrage = v.lade(ziel.id);
+			await new Promise((r) => setTimeout(r, 300));
+			await tx.person.update({ where: { id: v.verwalter.personId }, data: { rechte: [] } });
+		});
+		expect((await anfrage).status).toBe(404);
+		expect(await v.einladungen(ziel.id)).toHaveLength(0);
+	});
+
+	it('ohne Anmeldung: 401', async () => {
+		const v = await neuerVerein();
+		const r = await sende(server.url, v.api(`/personen/${v.verwalter.personId}/einladung`), {
+			methode: 'POST',
+			body: {},
+		});
 		expect(r.status).toBe(401);
 	});
 });

@@ -121,3 +121,29 @@ export function notfallLinkText(t: { vorname: string; anzeigename: string; link:
 		`Richte hier deinen Zugang neu ein – der Link gilt 14 Tage und nur für dich:\n${t.link}`
 	);
 }
+
+/**
+ * Text einer Einladung aus der Verwaltung an eine Person des Vereins. Eigener Text statt
+ * leitungsEinladungsText, weil der von "Leitung" spricht, eingeladen werden aber auch
+ * Eltern und Kinder. Die 14 Tage stehen wortgleich wie dort.
+ */
+export function mitgliedEinladungsText(t: { vorname: string; anzeigename: string; link: string }): string {
+	return (
+		`Hallo ${t.vorname}, du bist zu „${t.anzeigename}“ in die JuFi App eingeladen. ` +
+		`Richte hier deinen Zugang ein – der Link gilt 14 Tage und nur für dich:\n${t.link}`
+	);
+}
+
+/**
+ * Text eines Zugangslinks aus der Verwaltung fuer jemanden, der schon einen Zugang hat.
+ * Eigener Text statt notfallLinkText, weil der Reset-Link nur eine Stunde gilt (RESET_GUELTIG_MS
+ * in libs/domain, der Satz steht wortgleich wie in resetMail); wer die Dauer aendert, zieht
+ * beide Texte mit.
+ */
+export function mitgliedResetText(t: { vorname: string; anzeigename: string; link: string }): string {
+	return (
+		`Hallo ${t.vorname}, für „${t.anzeigename}“ in der JuFi App gibt es einen neuen Zugangslink für dich. ` +
+		`Altes Passwort, Passkeys und alle angemeldeten Geräte werden dabei gelöscht. ` +
+		`Richte hier deinen Zugang neu ein – der Link gilt 1 Stunde und nur für dich:\n${t.link}`
+	);
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { einladungsMail, resetMail } from './texte.js';
+import { einladungsMail, mitgliedMail, resetMail } from './texte.js';
 
 const T = { vorname: 'Mia', anzeigename: 'Jungfischer Test', link: 'https://jufi.test/einladung/abc' };
 
@@ -27,5 +27,21 @@ describe('einladungsMail', () => {
 		expect(text).toContain('angemeldeten Geräte');
 		expect(text).toContain(T.link);
 		expect(betreff).not.toBe(einladungsMail({ ...T, art: 'einladung' }).betreff);
+	});
+});
+
+describe('mitgliedMail', () => {
+	it('Einladung: 14 Tage, ohne "Leitung"', () => {
+		const { text } = mitgliedMail({ ...T, art: 'EINLADUNG' });
+		expect(text).toContain('14 Tage');
+		expect(text).not.toContain('Leitung');
+		expect(text).toContain(T.link);
+	});
+
+	it('Reset: eine Stunde und Warnung vor dem Loeschen der alten Wege', () => {
+		const { text, betreff } = mitgliedMail({ ...T, art: 'RESET' });
+		expect(text).toContain('1 Stunde');
+		expect(text).toContain('angemeldeten Geräte');
+		expect(betreff).not.toBe(mitgliedMail({ ...T, art: 'EINLADUNG' }).betreff);
 	});
 });

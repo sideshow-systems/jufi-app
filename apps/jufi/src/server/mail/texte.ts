@@ -1,4 +1,4 @@
-import { leitungsEinladungsText, notfallLinkText } from '../einladung.js';
+import { leitungsEinladungsText, mitgliedEinladungsText, mitgliedResetText, notfallLinkText } from '../einladung.js';
 
 /**
  * Text und Betreff einer Einladung. Die Texte selbst stehen bei der Einladung,
@@ -35,4 +35,15 @@ export function resetMail(t: { vorname: string; anzeigename: string; link: strin
 			`Der Link gilt 1 Stunde und nur für dich:\n${t.link}\n\n` +
 			`Falls du das nicht warst, ignoriere diese Mail.`,
 	};
+}
+
+/** Betreff und Text der Mail zu einem Link aus der Verwaltung (Einladung oder Reset, je nach Art). */
+export function mitgliedMail(t: { vorname: string; anzeigename: string; link: string; art: 'EINLADUNG' | 'RESET' }): {
+	betreff: string;
+	text: string;
+} {
+	if (t.art === 'RESET') {
+		return { betreff: `Neuer Zugangslink für ${t.anzeigename}`, text: mitgliedResetText(t) };
+	}
+	return { betreff: `Einladung zur JuFi App: ${t.anzeigename}`, text: mitgliedEinladungsText(t) };
 }
