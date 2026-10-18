@@ -167,7 +167,16 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await seite.getByRole('button', { name: 'Zur App' }).click();
 
 		await expect(seite.getByRole('heading', { name: 'Hallo Mara' })).toBeVisible();
-		await expect(seite.getByRole('link', { name: /Mia Muster/ })).toBeVisible();
+		// Die Karte im Abschnitt Deine Jungfischer, nicht irgendein Link dieses Namens: Die ganze
+		// Karte ist der Link zu Meine Jungfischer und nennt den Zugangsstand, den die Mutter
+		// gerade erlaubt hat.
+		const jungfischer = seite
+			.locator('jf-abschnitt')
+			.filter({ has: seite.getByRole('heading', { name: 'Deine Jungfischer' }) });
+		const miaKarte = jungfischer.getByRole('link', { name: /Mia Muster/ });
+		await expect(miaKarte).toBeVisible();
+		await expect(miaKarte).toHaveAttribute('href', `/${SLUG}/meine-jungfischer`);
+		await expect(miaKarte).toContainText('Zugang erlaubt, noch nicht eingerichtet');
 
 		await hauptnavigation(seite).getByRole('link', { name: 'Mehr' }).click();
 		await seite.getByRole('link', { name: 'Meine Jungfischer' }).click();
@@ -215,6 +224,11 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await seite.getByLabel('Passwort', { exact: true }).fill(TESTPASSWORT);
 		await seite.getByRole('button', { name: 'Anmelden', exact: true }).click();
 		await expect(seite).toHaveURL(new RegExp(`/${SLUG}/profil$`));
+		// Nicht nur die Adresse: Die Seite muss mit den Daten der angemeldeten Person geladen sein.
+		await expect(seite.getByRole('heading', { name: 'Profil', level: 1 })).toBeVisible();
+		await expect(seite.getByRole('heading', { name: 'Du', exact: true })).toBeVisible();
+		await expect(seite.getByRole('definition').filter({ hasText: 'Mara Muster' })).toBeVisible();
+		await expect(seite.getByRole('definition').filter({ hasText: MUTTER_MAIL })).toBeVisible();
 		await kontext.close();
 	});
 });

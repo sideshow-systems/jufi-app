@@ -22,7 +22,9 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Die Angular-Apps haben bewusst keine eigene package.json -- sie werden ueber
 # project.json konfiguriert und ziehen ihre Abhaengigkeiten aus der Wurzel. Die
-# Workspace-Pakete dagegen muessen hier stehen, sonst passt die Sperrdatei nicht.
+# Workspace-Pakete dagegen muessen hier stehen, sonst passt die Sperrdatei nicht --
+# ausser apps/jufi-e2e, das nur Playwright im Paket haelt und nicht ins Image gehoert;
+# ein fehlender Importer stoert frozen-lockfile nicht.
 COPY apps/cli/package.json apps/cli/
 COPY libs/auth/package.json libs/auth/
 COPY libs/db/package.json libs/db/

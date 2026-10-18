@@ -13,6 +13,14 @@ const CLI = 'apps/cli/dist/main.js';
 const ADMIN = 'e2e-admin';
 const HEALTHZ_FRIST_MS = 30_000;
 const BEENDEN_FRIST_MS = 10_000;
+/**
+ * Je Anfrage an den Server. Ohne Grenze hinge ein fetch an einem Server, der die
+ * Verbindung annimmt und nie antwortet (etwa bei haengender Datenbank), und die
+ * Frist der Healthz-Schleife wuerde nie mehr geprueft.
+ */
+const ANFRAGE_FRIST_MS = 2_000;
+/** Das CLI legt nur einen Datensatz an; haengt es laenger, haengt seine Datenbankverbindung. */
+const CLI_FRIST_MS = 30_000;
 
 const execFileAsync = promisify(execFile);
 
@@ -38,16 +46,24 @@ export default async function aufbau(): Promise<() => Promise<void>> {
 	const umgebung = serverUmgebung(datenbankUrl);
 	const log = join(ZUSTAND, 'server.log');
 	const server = starteServer(umgebung, log);
+	// Bricht der Lauf mitten im Aufbau ab (Strg+C, Absturz), ruft Playwright weder den
+	// catch unten noch den Teardown auf, und der eigene Server bliebe als Waise auf PORT
+	// zurueck; der naechste Lauf scheiterte dann an der Portpruefung. Ein exit-Handler
+	// darf nur synchron arbeiten, kill ist synchron. beende meldet ihn wieder ab.
+	process.once('exit', serverBeenden);
+	function serverBeenden(): void {
+		server.kill('SIGTERM');
+	}
 	try {
 		await warteAufHealthz(server, log);
 		const link = await legeAdminAn(umgebung);
 		await pruefeServerDatenbank(link);
 		process.env['E2E_ADMIN_LINK'] = link;
 	} catch (fehler) {
-		await beende(server);
+		await beende(server, serverBeenden);
 		throw fehler;
 	}
-	return () => beende(server);
+	return () => beende(server, serverBeenden);
 }
 
 /**
@@ -122,10 +138,12 @@ async function warteAufHealthz(server: ChildProcess, log: string): Promise<void>
 			throw new Error(`E2E: Server beendet mit Code ${server.exitCode}, bevor /healthz antwortete. Log: ${log}`);
 		}
 		try {
-			const antwort = await fetch(`${BASIS_URL}/healthz`);
+			// Nie ueber das Ende der Frist hinaus: Sie soll wirklich die Obergrenze sein.
+			const rest = Math.max(1, Math.min(ANFRAGE_FRIST_MS, ende - Date.now()));
+			const antwort = await fetch(`${BASIS_URL}/healthz`, { signal: AbortSignal.timeout(rest) });
 			if (antwort.status === 200) return;
 		} catch {
-			// Noch nicht erreichbar.
+			// Noch nicht erreichbar oder Zeitueberschreitung dieser einen Anfrage.
 		}
 		await new Promise((r) => setTimeout(r, 250));
 	}
@@ -137,7 +155,10 @@ async function warteAufHealthz(server: ChildProcess, log: string): Promise<void>
  * auf den Port der .env, belegt, dass die Umgebung hier Vorrang hat.
  */
 async function legeAdminAn(umgebung: NodeJS.ProcessEnv): Promise<string> {
-	const { stdout } = await execFileAsync(process.execPath, [CLI, 'admin', 'anlegen', ADMIN], { env: umgebung });
+	const { stdout } = await execFileAsync(process.execPath, [CLI, 'admin', 'anlegen', ADMIN], {
+		env: umgebung,
+		timeout: CLI_FRIST_MS,
+	});
 	const link = stdout.match(/^(\S+\/admin\/einrichten#\S+)$/m)?.[1];
 	if (!link) throw new Error(`E2E: kein Einrichtungslink in der Ausgabe des CLI:\n${stdout}`);
 	if (!link.startsWith(`${BASIS_URL}/`)) {
@@ -161,6 +182,7 @@ async function pruefeServerDatenbank(link: string): Promise<void> {
 		method: 'POST',
 		headers: { 'content-type': 'application/json', origin: BASIS_URL },
 		body: JSON.stringify({ token }),
+		signal: AbortSignal.timeout(ANFRAGE_FRIST_MS),
 	});
 	const daten = (await antwort.json().catch(() => null)) as { benutzername?: string } | null;
 	if (antwort.status !== 200 || daten?.benutzername !== ADMIN) {
@@ -170,7 +192,8 @@ async function pruefeServerDatenbank(link: string): Promise<void> {
 	}
 }
 
-async function beende(server: ChildProcess): Promise<void> {
+async function beende(server: ChildProcess, notfall: () => void): Promise<void> {
+	process.off('exit', notfall);
 	if (server.exitCode !== null || server.signalCode !== null) return;
 	const beendet = new Promise<void>((resolve) => server.once('exit', () => resolve()));
 	// SIGTERM laesst server.ts Mail-Arbeiter und Nachlauf zu Ende bringen.

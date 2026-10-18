@@ -43,6 +43,15 @@
 # WhatsApp-Nummer, die nicht ins Repo gehoert -- und erst recht nicht in ein Image.
 apps/entwurf/
 
+# Die Ende-zu-Ende-Tests laufen nie im Image. Ihr Ordner traegt nach jedem Lauf
+# Sitzungscookies, Server-Log und Traces (.zustand/, test-results/), die sich bei
+# jedem Lauf aendern und sonst die Schicht COPY . . ungueltig machten. Die
+# Sperrdatei bleibt trotzdem gueltig: frozen-lockfile prueft nur die Importer,
+# deren package.json im Bau liegt.
+apps/jufi-e2e/
+**/test-results/
+**/playwright-report/
+
 # Erzeugte Dateien, die der Bau selbst neu schreibt. Der lokale Stand waere im
 # besten Fall ueberfluessig, im schlechtesten ein veralteter Prisma-Client.
 libs/db/src/generated/
