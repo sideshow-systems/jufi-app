@@ -357,7 +357,74 @@ describe('Start', () => {
 		});
 	});
 
+	describe('Ladezustand und leere Listen', () => {
+		it('zeigt in jedem Abschnitt Wird geladen, solange die Antwort fehlt', async () => {
+			const harness = await RouterTestingHarness.create();
+			const navigation = harness.navigateByUrl('/demo');
+			await vi.waitFor(() =>
+				http.expectOne('/demo/api/v1/ich').flush(ichMit({ hatKinder: true, person: { rechte: ['MITGLIEDER'] } })),
+			);
+			await navigation;
+			harness.detectChanges();
+			const seite = harness.routeNativeElement as HTMLElement;
+
+			for (const titel of ['Deine Jungfischer', 'In der Verwaltung warten', 'Ansprechpartner']) {
+				expect(text(abschnitt(seite, titel) as HTMLElement)).toContain('Wird geladen …');
+			}
+
+			await vi.waitFor(() => antworte('/demo/api/v1/ansprechpartner', { ansprechpartner: [] }));
+			await vi.waitFor(() => antworte('/demo/api/v1/meine-jungfischer', { kinder: [] }));
+			await vi.waitFor(() => antworte('/demo/api/v1/personen', { personen: [] }));
+			antworte('/demo/api/v1/verein', VEREIN);
+			await harness.fixture.whenStable();
+			harness.detectChanges();
+
+			expect(text(seite)).not.toContain('Wird geladen');
+		});
+
+		it('sagt bei leeren Listen, dass niemand eingetragen ist', async () => {
+			const { seite } = await oeffneStart({ ich: { hatKinder: true }, kinder: [], ansprechpartner: [] });
+
+			expect(text(abschnitt(seite, 'Ansprechpartner') as HTMLElement)).toContain('Noch niemand eingetragen.');
+			expect(text(abschnitt(seite, 'Deine Jungfischer') as HTMLElement)).toContain(
+				'Es sind keine Jungfischer mit dir verbunden.',
+			);
+		});
+	});
+
 	describe('abgelaufene Sitzung', () => {
+		it('navigiert bei zwei 401, die sich ueberschneiden, genau einmal und zeigt keinen Fehlerblock', async () => {
+			const harness = await RouterTestingHarness.create();
+			const navigation = harness.navigateByUrl('/demo');
+			await vi.waitFor(() => http.expectOne('/demo/api/v1/ich').flush(ichMit({ hatKinder: true })));
+			await navigation;
+			// Die Navigation bleibt offen, bis der zweite Abschnitt gescheitert ist: genau die Ueberschneidung.
+			let beende: (ok: boolean) => void = () => undefined;
+			const navigiert = vi
+				.spyOn(TestBed.inject(Router), 'navigateByUrl')
+				.mockReturnValue(new Promise<boolean>((r) => (beende = r)));
+			const abgelaufen = { status: 401, statusText: 'Unauthorized' };
+			await vi.waitFor(() =>
+				http.expectOne('/demo/api/v1/ansprechpartner').flush({ fehler: 'nicht angemeldet' }, abgelaufen),
+			);
+			harness.detectChanges();
+			await vi.waitFor(() => expect(navigiert).toHaveBeenCalledTimes(1));
+			await vi.waitFor(() =>
+				http.expectOne('/demo/api/v1/meine-jungfischer').flush({ fehler: 'nicht angemeldet' }, abgelaufen),
+			);
+			harness.detectChanges();
+			beende(true);
+			antworte('/demo/api/v1/verein', VEREIN);
+			await harness.fixture.whenStable();
+			harness.detectChanges();
+
+			expect(navigiert).toHaveBeenCalledTimes(1);
+			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden?weiter=%2Fdemo');
+			const seite = harness.routeNativeElement as HTMLElement;
+			expect(seite.querySelector('[role="alert"]')).toBeNull();
+			expect(text(seite)).not.toContain('Nochmal versuchen');
+		});
+
 		it('fuehrt ein 401 eines Abschnitts zur Anmeldung statt zu einem Fehler', async () => {
 			const harness = await RouterTestingHarness.create();
 			const navigation = harness.navigateByUrl('/demo');

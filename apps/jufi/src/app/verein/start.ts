@@ -10,6 +10,7 @@ import {
 	untracked,
 } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
+import { NgTemplateOutlet } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { initialen } from '@jufi/domain';
 import { firstValueFrom, map } from 'rxjs';
@@ -17,7 +18,7 @@ import { type ApiFehler, alsApiFehler, fehlertext } from '../gemeinsam/api-fehle
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
 import { type Ansprechpartner, type KindAnsicht, MitgliederApi, type PersonListe } from './mitglieder-api';
 import { MitgliedSitzung } from './mitglied-waechter';
-import { beiAbgelaufenerSitzung } from './sitzung-abgelaufen';
+import { beiAbgelaufenerSitzung, istNichtAngemeldet } from './sitzung-abgelaufen';
 import { warnhinweisText } from './verwaltung/texte';
 import { VereinKontext } from './verein-kontext';
 
@@ -80,7 +81,7 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
  */
 @Component({
 	selector: 'jf-start',
-	imports: [AbschnittComponent, KarteComponent, RouterLink],
+	imports: [AbschnittComponent, KarteComponent, NgTemplateOutlet, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@if (sitzung.ich(); as ich) {
@@ -103,13 +104,23 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 			</jf-karte>
 		}
 
+		<!-- Ein Block fuer alle drei Abschnitte; verworfen: dreimal dasselbe Markup, das beim naechsten Abschnitt auseinanderliefe. -->
+		<ng-template #fehlerblock let-f let-neu="neu">
+			<p class="fehler" role="alert">{{ fehlertext(f) }}</p>
+			<button type="button" class="knopf" (click)="neu()">Nochmal versuchen</button>
+		</ng-template>
+
 		@if (sitzung.ich()?.hatKinder) {
 			<jf-abschnitt titel="Deine Jungfischer">
 				@if (kinderFehler(); as f) {
 					<jf-karte>
-						<p class="fehler" role="alert">{{ text(f) }}</p>
-						<button type="button" class="knopf" (click)="kinderRessource.reload()">Nochmal versuchen</button>
+						<ng-container
+							[ngTemplateOutlet]="fehlerblock"
+							[ngTemplateOutletContext]="{ $implicit: f, neu: neuKinder }"
+						/>
 					</jf-karte>
+				} @else if (!kinderRessource.hasValue()) {
+					<jf-karte><p class="gedaempft">Wird geladen …</p></jf-karte>
 				} @else {
 					@for (k of kinder(); track k.id) {
 						<jf-karte>
@@ -125,6 +136,8 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 								<span class="zeile">{{ zugangsstand(k.zugang) }}</span>
 							</a>
 						</jf-karte>
+					} @empty {
+						<jf-karte><p class="gedaempft">Es sind keine Jungfischer mit dir verbunden.</p></jf-karte>
 					}
 				}
 			</jf-abschnitt>
@@ -134,8 +147,10 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 			<jf-abschnitt titel="In der Verwaltung warten">
 				<jf-karte>
 					@if (verwaltungFehler(); as f) {
-						<p class="fehler" role="alert">{{ text(f) }}</p>
-						<button type="button" class="knopf" (click)="personenRessource.reload()">Nochmal versuchen</button>
+						<ng-container
+							[ngTemplateOutlet]="fehlerblock"
+							[ngTemplateOutletContext]="{ $implicit: f, neu: neuPersonen }"
+						/>
 					} @else if (warten(); as w) {
 						@if (w.offeneEinladungen === 0 && w.mitHinweis.length === 0) {
 							<p>Gerade wartet nichts.</p>
@@ -162,6 +177,8 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 							}
 						}
 						<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Zur Verwaltung</a>
+					} @else {
+						<p class="gedaempft">Wird geladen …</p>
 					}
 				</jf-karte>
 			</jf-abschnitt>
@@ -170,12 +187,18 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 		<jf-abschnitt titel="Ansprechpartner">
 			<jf-karte>
 				@if (ansprechpartnerFehler(); as f) {
-					<p class="fehler" role="alert">{{ text(f) }}</p>
-					<button type="button" class="knopf" (click)="ansprechpartnerRessource.reload()">Nochmal versuchen</button>
+					<ng-container
+						[ngTemplateOutlet]="fehlerblock"
+						[ngTemplateOutletContext]="{ $implicit: f, neu: neuAnsprechpartner }"
+					/>
+				} @else if (!ansprechpartnerRessource.hasValue()) {
+					<p class="gedaempft">Wird geladen …</p>
 				} @else {
 					<ul>
 						@for (a of ansprechpartner(); track a.id) {
 							<li>{{ a.vorname }} {{ a.nachname }}</li>
+						} @empty {
+							<li class="gedaempft">Noch niemand eingetragen.</li>
 						}
 					</ul>
 				}
@@ -269,6 +292,9 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 		.fehler {
 			color: var(--fehler);
 		}
+		.gedaempft {
+			color: var(--text-gedaempft);
+		}
 	`,
 })
 export class StartComponent {
@@ -312,9 +338,23 @@ export class StartComponent {
 		stream: ({ params }) => this.mitglieder.ansprechpartner(params).pipe(map((a) => a.ansprechpartner)),
 	});
 
-	protected readonly kinderFehler = fehlerVon(this.kinderRessource);
-	protected readonly verwaltungFehler = fehlerVon(this.personenRessource);
-	protected readonly ansprechpartnerFehler = fehlerVon(this.ansprechpartnerRessource);
+	private readonly kinderFehlerRoh = fehlerVon(this.kinderRessource);
+	private readonly verwaltungFehlerRoh = fehlerVon(this.personenRessource);
+	private readonly ansprechpartnerFehlerRoh = fehlerVon(this.ansprechpartnerRessource);
+
+	/** Gesetzt, sobald ein Abschnitt zur Anmeldung schickt; dann zeigt kein Abschnitt mehr einen Fehlerblock. */
+	private readonly abgelaufen = signal(false);
+
+	// Nach einem 401 bleibt die Seite noch kurz stehen; ein Fehlerblock mit Knopf waere dann falsch.
+	protected readonly kinderFehler = computed(() => (this.abgelaufen() ? null : this.kinderFehlerRoh()));
+	protected readonly verwaltungFehler = computed(() => (this.abgelaufen() ? null : this.verwaltungFehlerRoh()));
+	protected readonly ansprechpartnerFehler = computed(() =>
+		this.abgelaufen() ? null : this.ansprechpartnerFehlerRoh(),
+	);
+	protected readonly fehlertext = fehlertext;
+	protected readonly neuKinder = () => this.kinderRessource.reload();
+	protected readonly neuPersonen = () => this.personenRessource.reload();
+	protected readonly neuAnsprechpartner = () => this.ansprechpartnerRessource.reload();
 
 	protected readonly kinder = computed<KindAnsicht[]>(() => wertVon(this.kinderRessource) ?? []);
 	protected readonly ansprechpartner = computed<Ansprechpartner[]>(() => wertVon(this.ansprechpartnerRessource) ?? []);
@@ -327,20 +367,13 @@ export class StartComponent {
 	protected readonly laeuft = signal(false);
 	protected readonly abmeldefehler = signal<string | null>(null);
 
-	/** Gesetzt, sobald ein Abschnitt zur Anmeldung geschickt hat; dann soll kein Abschnitt mehr einen Fehler zeigen. */
-	private readonly abgelaufen = signal(false);
-
 	constructor() {
 		// Der Waechter prueft die Sitzung nur beim Betreten; ein Abschnitt, der danach 401 bekommt,
 		// schickt zur Anmeldung statt einen Fehler zu zeigen (wie die Seite Meine Jungfischer).
 		effect(() => {
-			const fehler = [this.kinderFehler(), this.verwaltungFehler(), this.ansprechpartnerFehler()];
+			const fehler = [this.kinderFehlerRoh(), this.verwaltungFehlerRoh(), this.ansprechpartnerFehlerRoh()];
 			untracked(() => void this.pruefeAbgelaufen(fehler));
 		});
-	}
-
-	protected text(f: ApiFehler): string {
-		return this.abgelaufen() ? '' : fehlertext(f);
 	}
 
 	protected untergruppen(k: KindAnsicht): string {
@@ -352,13 +385,11 @@ export class StartComponent {
 	}
 
 	private async pruefeAbgelaufen(fehler: (ApiFehler | null)[]): Promise<void> {
-		if (this.abgelaufen()) return;
-		for (const f of fehler) {
-			if (f && (await beiAbgelaufenerSitzung(this.router, this.slug(), f))) {
-				this.abgelaufen.set(true);
-				return;
-			}
-		}
+		const abgelaufen = fehler.find((f) => f !== null && istNichtAngemeldet(f));
+		if (!abgelaufen || this.abgelaufen()) return;
+		// Vor dem await gesetzt: Zwei Abschnitte, die gleichzeitig 401 bekommen, navigierten sonst beide.
+		this.abgelaufen.set(true);
+		await beiAbgelaufenerSitzung(this.router, this.slug(), abgelaufen);
 	}
 
 	protected async abmelden(): Promise<void> {
