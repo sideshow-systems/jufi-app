@@ -226,6 +226,12 @@ describe('Personenseite', () => {
 		expect(seite.textContent).not.toContain('auch entfernen?');
 	});
 
+	it('verlinkt Erwachsene mit Rechten nur mit JUGENDLEITER_RECHTE zur Rechteseite', async () => {
+		const leitung: PersonDetail = { ...kind(), id: 'e2', art: 'ERWACHSENER', rechte: ['MITGLIEDER'], familie: [] };
+		const mit = await oeffneVerwaltung(leitung, ['MITGLIEDER', 'JUGENDLEITER_RECHTE']);
+		expect(mit.seite.querySelector('a[href="/demo/verwaltung/rechte"]')).not.toBeNull();
+	});
+
 	it('die eigene Person lässt sich nicht entfernen', async () => {
 		const ich: PersonDetail = { ...kind(), id: 'ich-1', art: 'ERWACHSENER', familie: [], untergruppen: [] };
 		const { seite } = await oeffneVerwaltung(ich);

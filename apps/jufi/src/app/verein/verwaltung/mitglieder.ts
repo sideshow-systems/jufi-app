@@ -29,9 +29,15 @@ type ArtFilter = 'alle' | 'JUNGFISCHER' | 'ERWACHSENER';
 			<jf-verein-kopf [slug]="slug()" untertitel="Mitglieder" />
 			<div class="leiste">
 				<a class="zurueck" [routerLink]="['/', slug()]">← Zur Startseite</a>
-				@if (darfVerwalten()) {
-					<a class="knopf primaer" [routerLink]="['/', slug(), 'verwaltung', 'neu']">Person anlegen</a>
-				}
+				<span class="aktionen">
+					<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'untergruppen']">Untergruppen</a>
+					@if (darfRechte()) {
+						<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'rechte']">Rechte</a>
+					}
+					@if (darfVerwalten()) {
+						<a class="knopf primaer" [routerLink]="['/', slug(), 'verwaltung', 'neu']">Person anlegen</a>
+					}
+				</span>
 			</div>
 			@if (ladefehler(); as text) {
 				<jf-karte>
@@ -135,6 +141,11 @@ type ArtFilter = 'alle' | 'JUNGFISCHER' | 'ERWACHSENER';
 			justify-content: space-between;
 			gap: var(--a3);
 			margin: 0 0 var(--a3);
+		}
+		.aktionen {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--a3);
 		}
 		.zurueck {
 			display: inline-flex;
@@ -254,6 +265,11 @@ export class MitgliederComponent implements OnInit {
 	protected readonly nurHinweise = signal(false);
 
 	protected readonly darfVerwalten = computed(() => this.sitzung.ich()?.person.rechte.includes('MITGLIEDER') ?? false);
+
+	/** Die Rechteseite gibt es nur mit JUGENDLEITER_RECHTE (sonst 404 vom Server); der Link erscheint gleich nur dort. */
+	protected readonly darfRechte = computed(
+		() => this.sitzung.ich()?.person.rechte.includes('JUGENDLEITER_RECHTE') ?? false,
+	);
 
 	protected readonly gefiltert = computed(() => {
 		const teile = this.suche().toLowerCase().split(/\s+/).filter(Boolean);

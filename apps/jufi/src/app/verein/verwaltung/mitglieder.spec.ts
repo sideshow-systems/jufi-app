@@ -103,6 +103,22 @@ describe('Mitgliederliste', () => {
 		expect(seite.querySelector('a[href="/demo/verwaltung/neu"]')).toBeTruthy();
 	});
 
+	it('verlinkt Untergruppen für Jugendleiter und Rechte nur mit JUGENDLEITER_RECHTE', async () => {
+		const mit = await oeffne(['MITGLIEDER', 'JUGENDLEITER_RECHTE']);
+		const ziele = (seite: HTMLElement) => [...seite.querySelectorAll('.aktionen a')].map((a) => a.getAttribute('href'));
+		expect(ziele(mit.seite)).toEqual([
+			'/demo/verwaltung/untergruppen',
+			'/demo/verwaltung/rechte',
+			'/demo/verwaltung/neu',
+		]);
+	});
+
+	it('Verwaltung ohne JUGENDLEITER_RECHTE sieht den Rechte-Link nicht', async () => {
+		const { seite } = await oeffne(['MITGLIEDER']);
+		expect(seite.querySelector('a[href="/demo/verwaltung/rechte"]')).toBeNull();
+		expect(seite.querySelector('a[href="/demo/verwaltung/untergruppen"]')).not.toBeNull();
+	});
+
 	it('Betreuer sieht keine E-Mail-Spalte und keine Bearbeiten-Knöpfe', async () => {
 		const ohneMail = PERSONEN.map(({ email: _e, ...rest }) => rest);
 		const { seite } = await oeffne(['ANTWORTEN_DETAIL'], ohneMail);

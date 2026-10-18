@@ -493,6 +493,14 @@ interface Entfernt {
 						</jf-karte>
 					}
 
+					@if (rechteLink()) {
+						<jf-karte>
+							<h2>Rechte</h2>
+							<p class="gedaempft">Welche Rechte {{ p.vorname }} im Verein hat, ändert sich auf der Seite Rechte.</p>
+							<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'rechte']">Zu den Rechten</a>
+						</jf-karte>
+					}
+
 					@if (darfEntfernen()) {
 						<jf-karte>
 							<h2>Entfernen</h2>
@@ -675,6 +683,14 @@ export class PersonenseiteComponent {
 		const p = this.person();
 		if (!p || !this.verwalter()) return false;
 		return (p.rechte?.length ?? 0) === 0 || this.rechte().includes('JUGENDLEITER_RECHTE');
+	});
+
+	/** Erwachsene mit Rechten verweisen auf die Rechteseite, die nur JUGENDLEITER_RECHTE oeffnet. */
+	protected readonly rechteLink = computed(() => {
+		const p = this.person();
+		return (
+			!!p && p.art === 'ERWACHSENER' && (p.rechte?.length ?? 0) > 0 && this.rechte().includes('JUGENDLEITER_RECHTE')
+		);
 	});
 
 	/** Sich selbst entfernen weist der Server ab (SELBST); die Seite bietet es gar nicht erst an. */

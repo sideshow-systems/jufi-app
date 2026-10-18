@@ -1,4 +1,4 @@
-import type { Beziehung } from '@jufi/domain';
+import type { Beziehung, RechtName } from '@jufi/domain';
 import type { ApiFehler } from '../../gemeinsam/api-fehler';
 import { datumDeutsch, zeitpunktBerlin } from '../../gestaltung/format';
 import type { Warnhinweis } from '../mitglieder-api';
@@ -73,3 +73,14 @@ export function verwaltungsfehler(f: ApiFehler): string {
 	}
 	return f.fehler;
 }
+
+/** Die Rechte in der Sprache der Oberflaeche; Kurzbeschreibung dazu, damit die Haekchen ohne Spec verstaendlich sind. */
+export const RECHT_TEXT: Record<RechtName, { name: string; beschreibung: string }> = {
+	MITGLIEDER: { name: 'Mitglieder verwalten', beschreibung: 'Personen anlegen, ändern, entfernen und einladen' },
+	THREADS_ERSTELLEN: { name: 'Threads erstellen', beschreibung: 'Neue Threads für die Gruppe anlegen' },
+	ALLE_THREADS: { name: 'Alle Threads sehen', beschreibung: 'Auch Threads, die an andere gerichtet sind' },
+	DOKUMENTE: { name: 'Dokumente', beschreibung: 'Dokumente des Vereins verwalten' },
+	ANTWORTEN_DETAIL: { name: 'Antworten im Detail', beschreibung: 'Sehen, wer wie geantwortet hat' },
+	JUGENDLEITER_RECHTE: { name: 'Jugendleiter & Rechte verwalten', beschreibung: 'Rechte an andere Personen vergeben' },
+	EINSTELLUNGEN: { name: 'Einstellungen', beschreibung: 'Den Verein einstellen' },
+};

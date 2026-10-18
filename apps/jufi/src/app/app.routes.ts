@@ -54,6 +54,16 @@ export const routes: Routes = [
 				canActivate: [mitgliedAngemeldet],
 			},
 			{
+				path: 'verwaltung/untergruppen',
+				loadComponent: () => import('./verein/verwaltung/untergruppen').then((m) => m.UntergruppenComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			{
+				path: 'verwaltung/rechte',
+				loadComponent: () => import('./verein/verwaltung/rechte').then((m) => m.RechteComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			{
 				path: 'verwaltung/personen/:id',
 				loadComponent: () => import('./verein/verwaltung/personenseite').then((m) => m.PersonenseiteComponent),
 				canActivate: [mitgliedAngemeldet],
