@@ -76,6 +76,9 @@ const VEREIN_OPERATIONEN = [...LESEN, 'update'] as const;
 /** Felder, die nie im data stehen duerfen: Den Verein setzt vereinDb. */
 const VEREIN_FELDER = ['vereinId', 'verein'];
 
+/** Felder des Vereins, die vereinDb nie aendert; auch der Typ von update laesst sie weg. */
+const VEREIN_GESPERRTE_FELDER = ['id', 'slug', 'status'] as const;
+
 /**
  * Relationsoperationen, die eine bestehende Zeile per eindeutigem Schluessel
  * holen — ohne Verein, denn vereinDb sieht diese Ebene nicht. `connect` auf einen
@@ -166,8 +169,16 @@ function vereinsArgs(
 		}
 		if (operation === 'update') {
 			// Die id eines Vereins zu aendern, zoege per Kaskade alle seine Zeilen mit.
-			if (istEinfachesObjekt(a['data']) && 'id' in a['data']) {
-				throw new VereinDbFehler('Verein.update ueber vereinDb: die id ist unveraenderlich');
+			// Der Slug ist die Adresse und wirkt auf Cookie-Pfade und Links; der Status
+			// sperrt oder oeffnet den Verein. Beides aendert nur der Plattform-Admin
+			// (Etappe 2, eigener Client). Verworfen: eine Positivliste erlaubter Felder —
+			// sie muesste mit jedem Feld der Etappe 5 (Vereinsdaten) mitwachsen.
+			if (istEinfachesObjekt(a['data'])) {
+				for (const feld of VEREIN_GESPERRTE_FELDER) {
+					if (feld in a['data']) {
+						throw new VereinDbFehler(`Verein.update ueber vereinDb: ${feld} ist unveraenderlich`);
+					}
+				}
 			}
 			pruefeDaten(a['data'], model);
 		}
@@ -238,7 +249,7 @@ type VereinsOperationen<O> = {
 type VereinOperationen = {
 	[P in (typeof VEREIN_OPERATIONEN)[number]]: P extends 'update'
 		? {
-				args: DatenOhne<Modelle['Verein']['operations'][P]['args'], 'id'>;
+				args: DatenOhne<Modelle['Verein']['operations'][P]['args'], (typeof VEREIN_GESPERRTE_FELDER)[number]>;
 				result: Modelle['Verein']['operations'][P]['result'];
 			}
 		: Modelle['Verein']['operations'][P];

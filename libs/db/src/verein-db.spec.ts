@@ -254,6 +254,48 @@ describe('vereinDb: gesperrte Modelle und Wege', () => {
 		expect((await prisma.verein.findUniqueOrThrow({ where: { id: b.id } })).kontakt).toBeNull();
 	});
 
+	it('Verein.update verbietet slug', async () => {
+		const { a } = await zweiVereine();
+		const db = vereinDb(prisma, a.id);
+
+		// @ts-expect-error der Slug ist die Adresse des Vereins, ihn aendert nur der Plattform-Admin
+		await expect(db.verein.update({ where: { id: a.id }, data: { slug: 'anderer-slug' } })).rejects.toThrow(
+			VereinDbFehler,
+		);
+		// @ts-expect-error auch als set-Objekt
+		await expect(db.verein.update({ where: { id: a.id }, data: { slug: { set: 'anderer-slug' } } })).rejects.toThrow(
+			VereinDbFehler,
+		);
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: a.id } })).slug).toBe(a.slug);
+	});
+
+	it('Verein.update verbietet status', async () => {
+		const { a } = await zweiVereine();
+		const db = vereinDb(prisma, a.id);
+
+		// @ts-expect-error der Status sperrt oder oeffnet den Verein, das tut nur der Plattform-Admin
+		await expect(db.verein.update({ where: { id: a.id }, data: { status: 'GESPERRT' } })).rejects.toThrow(
+			VereinDbFehler,
+		);
+		// @ts-expect-error auch als set-Objekt
+		await expect(db.verein.update({ where: { id: a.id }, data: { status: { set: 'GESPERRT' } } })).rejects.toThrow(
+			VereinDbFehler,
+		);
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: a.id } })).status).toBe(a.status);
+	});
+
+	it('Verein.update erlaubt anzeigename', async () => {
+		const { a } = await zweiVereine();
+
+		const geaendert = await vereinDb(prisma, a.id).verein.update({
+			where: { id: a.id },
+			data: { anzeigename: 'Neuer Anzeigename' },
+		});
+
+		expect(geaendert.anzeigename).toBe('Neuer Anzeigename');
+		expect(geaendert.slug).toBe(a.slug);
+	});
+
 	it('vereinDb ohne vereinId wirft sofort', () => {
 		// Prisma ignoriert where-Felder mit undefined; ohne die Pruefung saehe ein
 		// solcher Client alle Vereine.
