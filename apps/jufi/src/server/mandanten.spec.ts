@@ -83,14 +83,19 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await fetch(`${k.url}/${k.gesperrt.slug}/api/v1/verein`)).status).toBe(404);
 	},
 	'GET /verein/logo': async (k) => {
-		// Das Logo gehoert dem Verein im Pfad: der gesperrte fremde Verein gibt es auch dann nicht
-		// heraus, wenn er eins hat, und der eigene Verein bekommt es nicht unter seinem Slug.
-		const verein = await k.prisma.verein.findUniqueOrThrow({ where: { slug: k.gesperrt.slug } });
-		await vereinDb(k.prisma, verein.id).vereinLogo.create({
-			data: { bild: Buffer.from([1]), mimeType: 'image/png', icon192: Buffer.from([1]), icon512: Buffer.from([1]) },
-		});
+		// Beide fremden Vereine haben ein Logo: der gesperrte gibt es nicht heraus (404), und der
+		// eigene Verein, der selbst keins hat, bekommt das fremde nicht unter seinem Slug.
+		const gesperrt = await k.prisma.verein.findUniqueOrThrow({ where: { slug: k.gesperrt.slug } });
+		for (const vereinId of [gesperrt.id, k.fremd.id]) {
+			await vereinDb(k.prisma, vereinId).vereinLogo.create({
+				data: { bild: Buffer.from([1]), mimeType: 'image/png', icon192: Buffer.from([1]), icon512: Buffer.from([1]) },
+			});
+		}
 		expect((await fetch(`${k.url}/${k.gesperrt.slug}/api/v1/verein/logo`)).status).toBe(404);
 		expect((await fetch(`${k.url}/${k.eigen.slug}/api/v1/verein/logo`)).status).toBe(404);
+		// Gegenprobe: das Logo des fremden Vereins ist unter dessen eigenem Slug erreichbar, das 404
+		// oben kommt also von der Trennung und nicht davon, dass die Route nichts ausliefert.
+		expect((await fetch(`${k.url}/${k.fremd.slug}/api/v1/verein/logo`)).status).toBe(200);
 	},
 	'POST /einladung/pruefen': async (k) => {
 		for (const verein of [k.fremd, k.gesperrt]) {

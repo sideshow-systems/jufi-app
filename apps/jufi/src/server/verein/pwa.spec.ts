@@ -157,6 +157,11 @@ describe('PWA-Manifest und Icons', () => {
 	it('reicht alle anderen Pfade weiter, ohne die Datenbank zu fragen', async () => {
 		const abfrage = vi.spyOn(prisma.verein, 'findUnique');
 		try {
+			// Gegenprobe: ein beanspruchter Pfad ruft den Spy auf. Sonst bewiese das
+			// not.toHaveBeenCalled() unten nichts, falls der Spy nicht greift.
+			expect((await fetch(`${server.url}/pwa-demo/manifest.webmanifest`)).status).toBe(200);
+			expect(abfrage).toHaveBeenCalled();
+			abfrage.mockClear();
 			for (const pfad of ['/pwa-demo/icon-64.png', '/chunk-abc.js', '/pwa-demo/', '/pwa-demo/profil']) {
 				const r = await fetch(`${server.url}${pfad}`);
 				expect(r.status, pfad).toBe(200);
