@@ -129,7 +129,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 						<div class="gruppe">
 							<label class="feld">
 								Adresse
-								<input type="text" name="slug" readonly aria-describedby="slug-hinweis" [value]="g.slug" />
+								<input type="text" name="slug" class="fest" readonly aria-describedby="slug-hinweis" [value]="g.slug" />
 							</label>
 							<p id="slug-hinweis" class="hinweis gedaempft klein">Die Adresse lässt sich nicht ändern.</p>
 						</div>
@@ -283,6 +283,27 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 			flex-wrap: wrap;
 			align-items: center;
 			gap: var(--a3);
+		}
+		/* Die Adresse ist nur zum Lesen da. Mit Rahmen und Kartenweiss saehe sie aus wie die Felder darueber,
+		   und man tippte vergeblich hinein. Abgesetzt auf der Seitenflaeche ohne Rahmen liest sie sich als
+		   Angabe. Verworfen: reiner Text statt input -- das Feld bleibt per Tab erreichbar und zum Kopieren
+		   markierbar, und die Beschriftung haengt wie bei den anderen Feldern daran. Die Klasse statt
+		   input[readonly]: Waehrend des Speicherns sind auch die bearbeitbaren Felder readonly und sollen
+		   dabei nicht ihr Aussehen wechseln. */
+		.feld input.fest {
+			background: var(--seite);
+			border-color: transparent;
+			cursor: default;
+		}
+		/* Chromium misst das Datei-Feld nach seinem Text, auf Deutsch Datei auswaehlen und Keine Datei
+		   ausgewaehlt, samt Polster rund 360 px. Diese Breite gab das Feld als Mindestbreite an Karte und Spalte
+		   weiter, und bei 375 px ragte die ganze Seite 34 px nach rechts hinaus. Eine Breite in Prozent
+		   nimmt dem Feld die Mindestbreite (CSS Sizing, compressible replaced elements); der Text darin
+		   wird dann abgeschnitten, der Knopf bleibt ganz. Verworfen: ein verstecktes Feld hinter einem
+		   eigenen Knopf -- mehr Code, und der native Waehler sagt nach der Wahl, welche Datei es ist. */
+		input[type='file'] {
+			width: 100%;
+			min-width: 0;
 		}
 		input[type='color'] {
 			width: 56px;
