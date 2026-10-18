@@ -13,6 +13,7 @@ import { untergruppenRouten } from './mitglieder/untergruppen.js';
 import { einladenRouten, zugangRouten } from './mitglieder/zugang.js';
 import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
 import { routenAus } from './routen.js';
+import { einstellungenRouten } from './verein/einstellungen.js';
 
 /** Was vereinAusSlug in res.locals ablegt; die Endpunkte lesen es ueber vereinsKontext. */
 export interface VereinsLocals {
@@ -132,6 +133,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	einladenRouten(router, deps);
 	jungfischerRouten(router, deps);
 	zugangVerlorenRouten(router, deps);
+	einstellungenRouten(router, deps);
 
 	return router;
 }

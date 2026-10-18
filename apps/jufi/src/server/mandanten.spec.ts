@@ -1,5 +1,6 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
@@ -19,7 +20,7 @@ interface Kontext {
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
-	/** Cookie einer Person aus eigen mit Verwaltungs- und Rechterecht: sieht in eigen alles, in fremd nichts. */
+	/** Cookie einer Person aus eigen mit Verwaltungs-, Rechte- und Einstellungsrecht: sieht in eigen alles, in fremd nichts. */
 	eigenerLeiter: string;
 	/** Eine Person im Verein fremd. */
 	fremdePersonId: string;
@@ -70,6 +71,22 @@ async function meineJungfischerSchreibfall(k: Kontext, was: string, body: object
 	expect((await sendeAn(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
 	expect((await sendeAn(k.eigen.slug, k.eigenesCookie)).status).toBe(404);
 	expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
+}
+
+/** Das Logo des Vereins fremd; legt eines an, falls noch keins da ist, damit Loeschen und Ersetzen etwas zu verlieren haben. */
+async function fremdesLogo(k: Kontext) {
+	const daten = {
+		bild: Buffer.from([1, 2, 3]),
+		mimeType: 'image/png',
+		icon192: Buffer.from([1]),
+		icon512: Buffer.from([1]),
+	};
+	await k.prisma.vereinLogo.upsert({
+		where: { vereinId: k.fremd.id },
+		create: { vereinId: k.fremd.id, ...daten },
+		update: {},
+	});
+	return k.prisma.vereinLogo.findUnique({ where: { vereinId: k.fremd.id } });
 }
 
 /**
@@ -432,6 +449,54 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await setze(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
 		expect((await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } })).rechte).toEqual(vorher);
 	},
+	// Die vier Einstellungs-Routen: Die Leitung aus eigen hat das Recht, aber nur dort. In fremd hat
+	// sie keine Sitzung (401), im gesperrten Verein ist alles 404, und fremd bleibt wie es war.
+	'GET /einstellungen': async (k) => {
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/einstellungen`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Gegenprobe: In eigen geht es, die 401 oben kommt also von der Trennung und nicht vom Recht.
+		const r = await hole(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(200);
+		expect(((await r.json()) as { slug: string }).slug).toBe(k.eigen.slug);
+	},
+	'PATCH /einstellungen': async (k) => {
+		const vorher = await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } });
+		const aendere = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/einstellungen`, {
+				methode: 'PATCH',
+				body: { anzeigename: 'Uebernommen', kontakt: 'Uebernommen', farbe: '#000000' },
+				cookie,
+			});
+		expect((await aendere(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await aendere(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect(await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).toEqual(vorher);
+	},
+	'PUT /einstellungen/logo': async (k) => {
+		const vorher = await fremdesLogo(k);
+		const lade = async (slug: string) =>
+			fetch(`${k.url}/${slug}/api/v1/einstellungen/logo`, {
+				method: 'PUT',
+				headers: { Origin: TEST_UMGEBUNG.basisUrl, 'Content-Type': 'image/png', Cookie: k.eigenerLeiter },
+				body: new Uint8Array(
+					await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } })
+						.png()
+						.toBuffer(),
+				),
+			});
+		expect((await lade(k.gesperrt.slug)).status).toBe(404);
+		expect((await lade(k.fremd.slug)).status).toBe(401);
+		expect(await fremdesLogo(k)).toEqual(vorher);
+	},
+	'DELETE /einstellungen/logo': async (k) => {
+		const vorher = await fremdesLogo(k);
+		const loesche = (slug: string) =>
+			sende(k.url, `/${slug}/api/v1/einstellungen/logo`, { methode: 'DELETE', cookie: k.eigenerLeiter });
+		expect((await loesche(k.gesperrt.slug)).status).toBe(404);
+		expect((await loesche(k.fremd.slug)).status).toBe(401);
+		expect(await fremdesLogo(k)).toEqual(vorher);
+		expect(vorher).not.toBeNull();
+	},
 	'POST /abmelden': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -491,7 +556,7 @@ describe('Mandanten-Test', () => {
 		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
 		const leiter = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
-			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE'],
+			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE', 'EINSTELLUNGEN'],
 		});
 		const fremderPasskey = await prisma.passkey.create({
 			data: {
