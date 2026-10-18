@@ -68,3 +68,8 @@ export function zeitpunktBerlin(iso: string): string {
 	const t = Object.fromEntries(BERLINER_ZEIT.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
 	return `${t['day']}.${t['month']}.${t['year']} ${t['hour']}:${t['minute']}`;
 }
+
+/** Nur der Berliner Kalendertag eines UTC-Zeitpunkts, "13.10.2026"; um 23:30 UTC ist in Berlin schon der naechste Tag. */
+export function datumBerlin(iso: string): string {
+	return zeitpunktBerlin(iso).slice(0, 10);
+}

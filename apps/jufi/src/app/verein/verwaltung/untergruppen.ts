@@ -35,142 +35,129 @@ type Bereich = 'anlegen' | 'umbenennen' | 'liste';
 	imports: [KarteComponent, RouterLink, VereinKopfComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<main>
-			<jf-verein-kopf [slug]="slug()" untertitel="Untergruppen" />
-			<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
-			@if (!sichtbar()) {
-				<jf-karte>
-					<h2>Nicht gefunden oder keine Berechtigung</h2>
-				</jf-karte>
-			} @else if (ladefehler(); as text) {
-				<jf-karte>
-					<p class="fehler" role="alert">{{ text }}</p>
-					<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
-				</jf-karte>
-			} @else if (gruppen(); as alle) {
-				<div class="stapel">
-					@if (frage(); as u) {
-						<jf-karte>
-							<div
-								#dialog
-								tabindex="-1"
-								class="frage"
-								role="alertdialog"
-								aria-label="Rückfrage"
-								aria-describedby="frage-text"
-							>
-								<p id="frage-text">
-									Untergruppe „{{ u.name }}“ wirklich löschen? Das Löschen entfernt keine Personen, sie verlieren nur
-									diese Zuordnung.
-								</p>
-								<div class="reihe">
-									<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="loesche(u)">
-										Ja, löschen
-									</button>
-									<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(null)">Abbrechen</button>
-								</div>
-							</div>
-						</jf-karte>
-					}
+		<jf-verein-kopf [slug]="slug()" untertitel="Untergruppen" />
+		@if (!sichtbar()) {
+			<jf-karte>
+				<h2>Nicht gefunden oder keine Berechtigung</h2>
+			</jf-karte>
+		} @else if (ladefehler(); as text) {
+			<jf-karte>
+				<p class="fehler" role="alert">{{ text }}</p>
+				<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
+			</jf-karte>
+		} @else if (gruppen(); as alle) {
+			<div class="stapel">
+				@if (frage(); as u) {
 					<jf-karte>
-						<h2>Untergruppen</h2>
-						@if (fehler()?.bereich === 'liste') {
-							<p class="fehler" role="alert">{{ fehler()?.text }}</p>
-						}
-						<ul class="liste">
-							@for (u of alle; track u.id) {
-								<li [attr.data-gruppe]="u.id">
-									@if (bearbeiteId() === u.id) {
-										<form (submit)="benenneUm($event, u)">
-											<label class="feld">
-												Neuer Name
-												<input
-													type="text"
-													name="umbenennen"
-													maxlength="40"
-													autocomplete="off"
-													[value]="bearbeiteName()"
-													[attr.aria-invalid]="fehler()?.bereich === 'umbenennen' ? 'true' : null"
-													(input)="bearbeiteName.set(wert($event))"
-												/>
-											</label>
-											@if (fehler()?.bereich === 'umbenennen') {
-												<p class="fehler" role="alert">{{ fehler()?.text }}</p>
-											}
-											<div class="reihe">
-												<button type="submit" class="knopf primaer" [disabled]="laeuft()">Speichern</button>
-												<button type="button" class="knopf" [disabled]="laeuft()" (click)="bearbeiteId.set(null)">
-													Abbrechen
-												</button>
-											</div>
-										</form>
-									} @else {
-										<span class="name">{{ u.name }}</span>
-										<span class="gedaempft">{{ anzahl(u) }}</span>
-										@if (darfAendern()) {
-											<span class="reihe">
-												<button
-													type="button"
-													class="knopf umbenennen"
-													[disabled]="laeuft()"
-													(click)="beginneUmbenennen(u)"
-												>
-													Umbenennen
-												</button>
-												<button type="button" class="knopf loeschen" [disabled]="laeuft()" (click)="fragLoeschen(u)">
-													Löschen
-												</button>
-											</span>
-										}
-									}
-								</li>
-							} @empty {
-								<li class="gedaempft">Es gibt noch keine Untergruppen.</li>
-							}
-						</ul>
+						<div
+							#dialog
+							tabindex="-1"
+							class="frage"
+							role="alertdialog"
+							aria-label="Rückfrage"
+							aria-describedby="frage-text"
+						>
+							<p id="frage-text">
+								Untergruppe „{{ u.name }}“ wirklich löschen? Das Löschen entfernt keine Personen, sie verlieren nur
+								diese Zuordnung.
+							</p>
+							<div class="reihe">
+								<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="loesche(u)">
+									Ja, löschen
+								</button>
+								<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(null)">Abbrechen</button>
+							</div>
+						</div>
 					</jf-karte>
-					@if (darfAendern()) {
-						<jf-karte>
-							<form (submit)="lege($event)">
-								<label class="feld">
-									Neue Untergruppe
-									<input
-										type="text"
-										name="neuerName"
-										maxlength="40"
-										autocomplete="off"
-										[value]="neuerName()"
-										[attr.aria-invalid]="fehler()?.bereich === 'anlegen' ? 'true' : null"
-										(input)="neuerName.set(wert($event))"
-									/>
-								</label>
-								@if (fehler()?.bereich === 'anlegen') {
-									<p class="fehler" role="alert">{{ fehler()?.text }}</p>
-								}
-								<div class="reihe">
-									<button type="submit" class="knopf primaer" [disabled]="laeuft()">Anlegen</button>
-								</div>
-							</form>
-						</jf-karte>
+				}
+				<jf-karte>
+					<h2>Untergruppen</h2>
+					@if (fehler()?.bereich === 'liste') {
+						<p class="fehler" role="alert">{{ fehler()?.text }}</p>
 					}
-				</div>
-			}
-		</main>
+					<ul class="liste">
+						@for (u of alle; track u.id) {
+							<li [attr.data-gruppe]="u.id">
+								@if (bearbeiteId() === u.id) {
+									<form (submit)="benenneUm($event, u)">
+										<label class="feld">
+											Neuer Name
+											<input
+												type="text"
+												name="umbenennen"
+												maxlength="40"
+												autocomplete="off"
+												[value]="bearbeiteName()"
+												[attr.aria-invalid]="fehler()?.bereich === 'umbenennen' ? 'true' : null"
+												(input)="bearbeiteName.set(wert($event))"
+											/>
+										</label>
+										@if (fehler()?.bereich === 'umbenennen') {
+											<p class="fehler" role="alert">{{ fehler()?.text }}</p>
+										}
+										<div class="reihe">
+											<button type="submit" class="knopf primaer" [disabled]="laeuft()">Speichern</button>
+											<button type="button" class="knopf" [disabled]="laeuft()" (click)="bearbeiteId.set(null)">
+												Abbrechen
+											</button>
+										</div>
+									</form>
+								} @else {
+									<span class="name">{{ u.name }}</span>
+									<span class="gedaempft">{{ anzahl(u) }}</span>
+									@if (darfAendern()) {
+										<span class="reihe">
+											<button
+												type="button"
+												class="knopf umbenennen"
+												[disabled]="laeuft()"
+												(click)="beginneUmbenennen(u)"
+											>
+												Umbenennen
+											</button>
+											<button type="button" class="knopf loeschen" [disabled]="laeuft()" (click)="fragLoeschen(u)">
+												Löschen
+											</button>
+										</span>
+									}
+								}
+							</li>
+						} @empty {
+							<li class="gedaempft">Es gibt noch keine Untergruppen.</li>
+						}
+					</ul>
+				</jf-karte>
+				@if (darfAendern()) {
+					<jf-karte>
+						<form (submit)="lege($event)">
+							<label class="feld">
+								Neue Untergruppe
+								<input
+									type="text"
+									name="neuerName"
+									maxlength="40"
+									autocomplete="off"
+									[value]="neuerName()"
+									[attr.aria-invalid]="fehler()?.bereich === 'anlegen' ? 'true' : null"
+									(input)="neuerName.set(wert($event))"
+								/>
+							</label>
+							@if (fehler()?.bereich === 'anlegen') {
+								<p class="fehler" role="alert">{{ fehler()?.text }}</p>
+							}
+							<div class="reihe">
+								<button type="submit" class="knopf primaer" [disabled]="laeuft()">Anlegen</button>
+							</div>
+						</form>
+					</jf-karte>
+				}
+			</div>
+		}
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
 			max-width: 40rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
-		}
-		.zurueck {
-			display: inline-flex;
-			align-items: center;
-			min-height: var(--tippflaeche);
-			margin: 0 0 var(--a3);
 		}
 		.stapel {
 			display: grid;

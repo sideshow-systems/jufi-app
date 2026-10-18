@@ -1,20 +1,10 @@
-import {
-	ChangeDetectionStrategy,
-	Component,
-	computed,
-	effect,
-	inject,
-	input,
-	signal,
-	type Signal,
-	untracked,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { initialen } from '@jufi/domain';
 import { map } from 'rxjs';
-import { type ApiFehler, alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
+import { type ApiFehler, fehlerVon, fehlertext } from '../gemeinsam/api-fehler';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
 import { type Ansprechpartner, type KindAnsicht, MitgliederApi, type PersonListe } from './mitglieder-api';
 import { MitgliedSitzung } from './mitglied-waechter';
@@ -54,18 +44,6 @@ export function zugangsstand(zugang: KindAnsicht['zugang']): string {
 function ersterHinweis(p: PersonListe): string {
 	const h = (p.warnhinweise ?? []).find((w) => w.art !== 'EINLADUNG_OFFEN');
 	return h ? warnhinweisText(h) : '';
-}
-
-/**
- * Was eine Ressource im Fehlerfall geworfen hat, als ApiFehler. Angular verpackt alles, was
- * kein Error ist, in einen Error mit dem Original als cause; der ApiFehler steckt dort.
- */
-function fehlerVon(ressource: { error: Signal<Error | undefined> }): Signal<ApiFehler | null> {
-	return computed(() => {
-		const e = ressource.error();
-		if (e === undefined) return null;
-		return alsApiFehler(e.cause !== undefined ? e.cause : e);
-	});
 }
 
 /** value() wirft im Fehlerzustand; hasValue() fragt gefahrlos. */

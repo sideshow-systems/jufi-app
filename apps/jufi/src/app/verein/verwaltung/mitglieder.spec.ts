@@ -103,14 +103,12 @@ describe('Mitgliederliste', () => {
 		expect(seite.querySelector('a[href="/demo/verwaltung/neu"]')).toBeTruthy();
 	});
 
-	it('verlinkt Untergruppen für Jugendleiter und Rechte nur mit JUGENDLEITER_RECHTE', async () => {
-		const mit = await oeffne(['MITGLIEDER', 'JUGENDLEITER_RECHTE']);
-		const ziele = (seite: HTMLElement) => [...seite.querySelectorAll('.aktionen a')].map((a) => a.getAttribute('href'));
-		expect(ziele(mit.seite)).toEqual([
-			'/demo/verwaltung/untergruppen',
-			'/demo/verwaltung/rechte',
-			'/demo/verwaltung/neu',
-		]);
+	// Untergruppen und Rechte stehen jetzt in der Seitenleiste der Huelle (huelle.spec.ts), die Seite hat nur noch den Knopf zum Anlegen.
+	it('hat in der Seite nur den Knopf zum Anlegen, keine Links zu Startseite, Untergruppen und Rechten', async () => {
+		const { seite } = await oeffne(['MITGLIEDER', 'JUGENDLEITER_RECHTE']);
+		const ziele = [...seite.querySelectorAll('jf-mitglieder .leiste a')].map((a) => a.getAttribute('href'));
+		expect(ziele).toEqual(['/demo/verwaltung/neu']);
+		expect(seite.querySelector('jf-mitglieder')?.textContent).not.toContain('Zur Startseite');
 	});
 
 	it('Verwaltung ohne JUGENDLEITER_RECHTE sieht den Rechte-Link nicht', async () => {

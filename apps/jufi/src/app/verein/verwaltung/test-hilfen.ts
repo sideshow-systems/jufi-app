@@ -19,12 +19,14 @@ export function ichMit(rechte: string[], id = 'ich-1'): MitgliedIch {
 /**
  * Oeffnet eine Verwaltungsseite: Der Waechter fragt GET /ich, danach laedt die Seite ihre
  * Daten (antworten: Pfad, Koerper), der Kopf den Verein. Welche Anfrage zuerst kommt,
- * ist gleich; jede wird einzeln abgewartet.
+ * ist gleich; jede wird einzeln abgewartet. Die Huelle fragt die Hinweise nur mit dem Recht
+ * JUGENDLEITER_RECHTE; dann beantwortet die Hilfe sie mit hinweise (Vorgabe: keine).
  */
 export async function oeffneSeite(
 	url: string,
 	ich: MitgliedIch,
 	antworten: [pfad: string, koerper: object][],
+	hinweise: { notfallLinks: object[] } = { notfallLinks: [] },
 ): Promise<{ harness: RouterTestingHarness; seite: HTMLElement; http: HttpTestingController }> {
 	const http = TestBed.inject(HttpTestingController);
 	const harness = await RouterTestingHarness.create();
@@ -33,6 +35,9 @@ export async function oeffneSeite(
 	await navigation;
 	for (const [pfad, koerper] of antworten) {
 		await vi.waitFor(() => http.expectOne(`${API}${pfad}`).flush(koerper));
+	}
+	if (ich.person.rechte.includes('JUGENDLEITER_RECHTE')) {
+		await vi.waitFor(() => http.expectOne(`${API}/verwaltung/hinweise`).flush(hinweise));
 	}
 	await vi.waitFor(() =>
 		http

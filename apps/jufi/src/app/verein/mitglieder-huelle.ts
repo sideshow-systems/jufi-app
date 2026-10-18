@@ -1,12 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
-import { initialen } from '@jufi/domain';
 import { filter, map } from 'rxjs';
 import { NichtGefundenComponent } from '../seiten/nicht-gefunden';
 import { IconComponent, type IconName } from '../gestaltung/icon';
 import { KarteComponent } from '../gestaltung/ui';
 import { VereinKontext } from './verein-kontext';
+import { VereinsLogoComponent } from './vereins-logo';
 
 interface Eintrag {
 	/** Pfad unterhalb des Vereins, leer fuer die Startseite. */
@@ -40,7 +40,7 @@ const EINTRAEGE: Eintrag[] = [
  */
 @Component({
 	selector: 'jf-mitglieder-huelle',
-	imports: [IconComponent, KarteComponent, NichtGefundenComponent, RouterLink, RouterOutlet],
+	imports: [IconComponent, KarteComponent, NichtGefundenComponent, RouterLink, RouterOutlet, VereinsLogoComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@if (kontext.ladefehler()) {
@@ -56,11 +56,7 @@ const EINTRAEGE: Eintrag[] = [
 			<header class="kopf">
 				@if (kontext.verein(); as v) {
 					@if (v !== 'nicht-gefunden') {
-						@if (kontext.logoUrl(); as logo) {
-							<img [src]="logo" alt="" width="32" height="32" />
-						} @else {
-							<span class="abzeichen" aria-hidden="true">{{ initialen(v.anzeigename) }}</span>
-						}
+						<jf-vereins-logo />
 						<span class="name">{{ v.anzeigename }}</span>
 					}
 				}
@@ -100,21 +96,6 @@ const EINTRAEGE: Eintrag[] = [
 			padding: var(--a2) var(--a4);
 			background: var(--seite);
 			min-height: 56px;
-		}
-		.kopf img {
-			border-radius: 8px;
-		}
-		.abzeichen {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			width: 32px;
-			height: 32px;
-			border-radius: 8px;
-			background: var(--akzent);
-			color: var(--auf-akzent);
-			font-size: 0.8125rem;
-			font-weight: 700;
 		}
 		.name {
 			font-weight: 700;
@@ -167,7 +148,6 @@ const EINTRAEGE: Eintrag[] = [
 export class MitgliederHuelle {
 	protected readonly kontext = inject(VereinKontext);
 	private readonly router = inject(Router);
-	protected readonly initialen = initialen;
 	protected readonly eintraege = EINTRAEGE;
 
 	/**

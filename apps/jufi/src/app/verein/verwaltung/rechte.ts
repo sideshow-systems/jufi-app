@@ -50,165 +50,144 @@ interface Bearbeitung {
 	imports: [KarteComponent, PilleComponent, RouterLink, VereinKopfComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<main>
-			<jf-verein-kopf [slug]="slug()" untertitel="Rechte" />
-			<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
-			@if (!sichtbar()) {
-				<jf-karte>
-					<h2>Nicht gefunden oder keine Berechtigung</h2>
-				</jf-karte>
-			} @else if (ladefehler(); as text) {
-				<jf-karte>
-					<p class="fehler" role="alert">{{ text }}</p>
-					<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
-				</jf-karte>
-			} @else if (personen()) {
-				<div class="stapel">
-					@if (frage() && bearbeitung(); as b) {
-						<jf-karte>
-							<div
-								#dialog
-								tabindex="-1"
-								class="frage"
-								role="alertdialog"
-								aria-label="Rückfrage"
-								aria-describedby="frage-text"
-							>
-								<p id="frage-text">{{ frageText() }}</p>
-								<div class="reihe">
-									<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="sende(b)">
-										Ja, Rechte ändern
-									</button>
-									<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(false)">
-										Abbrechen
-									</button>
-								</div>
+		<jf-verein-kopf [slug]="slug()" untertitel="Rechte" />
+		@if (!sichtbar()) {
+			<jf-karte>
+				<h2>Nicht gefunden oder keine Berechtigung</h2>
+			</jf-karte>
+		} @else if (ladefehler(); as text) {
+			<jf-karte>
+				<p class="fehler" role="alert">{{ text }}</p>
+				<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
+			</jf-karte>
+		} @else if (personen()) {
+			<div class="stapel">
+				@if (frage() && bearbeitung(); as b) {
+					<jf-karte>
+						<div
+							#dialog
+							tabindex="-1"
+							class="frage"
+							role="alertdialog"
+							aria-label="Rückfrage"
+							aria-describedby="frage-text"
+						>
+							<p id="frage-text">{{ frageText() }}</p>
+							<div class="reihe">
+								<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="sende(b)">
+									Ja, Rechte ändern
+								</button>
+								<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(false)">Abbrechen</button>
 							</div>
-						</jf-karte>
-					}
+						</div>
+					</jf-karte>
+				}
 
-					@if (bearbeitung(); as b) {
-						<jf-karte>
-							<form
-								#editor
-								tabindex="-1"
-								class="editor"
-								[attr.aria-label]="'Rechte von ' + b.name"
-								(submit)="speichere($event, b)"
-							>
-								<h2>Rechte von {{ b.name }}</h2>
-								<div class="reihe" role="group" aria-label="Vorlage">
-									@for (v of vorlagen; track v.schluessel) {
-										<button type="button" class="knopf" [disabled]="laeuft()" (click)="nimmVorlage(v.schluessel)">
-											{{ v.name }}
-										</button>
-									}
-								</div>
-								<p class="gedaempft klein">
-									Die Vorlagen füllen nur die Häkchen vor. Gespeichert werden die einzelnen Rechte.
-								</p>
-								<fieldset [attr.aria-describedby]="fehler() ? 'rechte-fehler' : null">
-									<legend class="unsichtbar">Einzelne Rechte</legend>
-									@for (r of alleRechte; track r) {
-										<label class="haken">
-											<input
-												type="checkbox"
-												[name]="'recht-' + r"
-												[checked]="entwurf().includes(r)"
-												(change)="schalte(r)"
-											/>
-											<span>
-												{{ rechtText[r].name }}
-												<span class="gedaempft klein hinweis">{{ rechtText[r].beschreibung }}</span>
-											</span>
-										</label>
-									}
-								</fieldset>
-								@if (b.neu && entwurf().length === 0) {
-									<p class="gedaempft klein" role="status">Bitte mindestens ein Recht wählen.</p>
-								}
-								@if (fehler(); as text) {
-									<p id="rechte-fehler" class="fehler" role="alert">{{ text }}</p>
-								}
-								<div class="reihe">
-									<button
-										type="submit"
-										class="knopf primaer"
-										[disabled]="laeuft() || (b.neu && entwurf().length === 0)"
-									>
-										Rechte speichern
-									</button>
-									<button type="button" class="knopf" [disabled]="laeuft()" (click)="schliesse()">Abbrechen</button>
-								</div>
-							</form>
-						</jf-karte>
-					}
-
+				@if (bearbeitung(); as b) {
 					<jf-karte>
-						<h2>Personen mit Rechten</h2>
-						@if (fehler() && !bearbeitung()) {
-							<p class="fehler" role="alert">{{ fehler() }}</p>
-						}
-						<ul class="liste mit-rechten">
-							@for (p of mitRechten(); track p.id) {
-								<li [attr.data-person]="p.id">
-									<span class="name">{{ p.vorname }} {{ p.nachname }}</span>
-									<span class="pillen">
-										@for (r of p.rechte ?? []; track r) {
-											<jf-pille art="neutral">{{ rechtText[asRecht(r)].name }}</jf-pille>
-										}
-									</span>
-									<span class="reihe">
-										<button type="button" class="knopf bearbeiten" [disabled]="laeuft()" (click)="beginne(p)">
-											Rechte ändern
-										</button>
-									</span>
-								</li>
+						<form
+							#editor
+							tabindex="-1"
+							class="editor"
+							[attr.aria-label]="'Rechte von ' + b.name"
+							(submit)="speichere($event, b)"
+						>
+							<h2>Rechte von {{ b.name }}</h2>
+							<div class="reihe" role="group" aria-label="Vorlage">
+								@for (v of vorlagen; track v.schluessel) {
+									<button type="button" class="knopf" [disabled]="laeuft()" (click)="nimmVorlage(v.schluessel)">
+										{{ v.name }}
+									</button>
+								}
+							</div>
+							<p class="gedaempft klein">
+								Die Vorlagen füllen nur die Häkchen vor. Gespeichert werden die einzelnen Rechte.
+							</p>
+							<fieldset [attr.aria-describedby]="fehler() ? 'rechte-fehler' : null">
+								<legend class="unsichtbar">Einzelne Rechte</legend>
+								@for (r of alleRechte; track r) {
+									<label class="haken">
+										<input
+											type="checkbox"
+											[name]="'recht-' + r"
+											[checked]="entwurf().includes(r)"
+											(change)="schalte(r)"
+										/>
+										<span>
+											{{ rechtText[r].name }}
+											<span class="gedaempft klein hinweis">{{ rechtText[r].beschreibung }}</span>
+										</span>
+									</label>
+								}
+							</fieldset>
+							@if (b.neu && entwurf().length === 0) {
+								<p class="gedaempft klein" role="status">Bitte mindestens ein Recht wählen.</p>
 							}
-						</ul>
+							@if (fehler(); as text) {
+								<p id="rechte-fehler" class="fehler" role="alert">{{ text }}</p>
+							}
+							<div class="reihe">
+								<button type="submit" class="knopf primaer" [disabled]="laeuft() || (b.neu && entwurf().length === 0)">
+									Rechte speichern
+								</button>
+								<button type="button" class="knopf" [disabled]="laeuft()" (click)="schliesse()">Abbrechen</button>
+							</div>
+						</form>
 					</jf-karte>
+				}
 
-					<jf-karte>
-						<h2>Weiteren Person Rechte geben</h2>
-						@if (ohneRechte().length > 0) {
-							<form class="weitere" (submit)="beginneNeu($event)">
-								<label class="feld">
-									Erwachsene ohne Rechte
-									<select name="weitere" [value]="weitereId()" (change)="weitereId.set(wert($event))">
-										<option value="">Person wählen</option>
-										@for (p of ohneRechte(); track p.id) {
-											<option [value]="p.id">{{ p.vorname }} {{ p.nachname }}</option>
-										}
-									</select>
-								</label>
-								<div class="reihe">
-									<button type="submit" class="knopf primaer" [disabled]="laeuft() || !weitereId()">
-										Rechte geben
+				<jf-karte>
+					<h2>Personen mit Rechten</h2>
+					@if (fehler() && !bearbeitung()) {
+						<p class="fehler" role="alert">{{ fehler() }}</p>
+					}
+					<ul class="liste mit-rechten">
+						@for (p of mitRechten(); track p.id) {
+							<li [attr.data-person]="p.id">
+								<span class="name">{{ p.vorname }} {{ p.nachname }}</span>
+								<span class="pillen">
+									@for (r of p.rechte ?? []; track r) {
+										<jf-pille art="neutral">{{ rechtText[asRecht(r)].name }}</jf-pille>
+									}
+								</span>
+								<span class="reihe">
+									<button type="button" class="knopf bearbeiten" [disabled]="laeuft()" (click)="beginne(p)">
+										Rechte ändern
 									</button>
-								</div>
-							</form>
-						} @else {
-							<p class="gedaempft">Alle Erwachsenen haben schon Rechte.</p>
+								</span>
+							</li>
 						}
-					</jf-karte>
-				</div>
-			}
-		</main>
+					</ul>
+				</jf-karte>
+
+				<jf-karte>
+					<h2>Weiteren Person Rechte geben</h2>
+					@if (ohneRechte().length > 0) {
+						<form class="weitere" (submit)="beginneNeu($event)">
+							<label class="feld">
+								Erwachsene ohne Rechte
+								<select name="weitere" [value]="weitereId()" (change)="weitereId.set(wert($event))">
+									<option value="">Person wählen</option>
+									@for (p of ohneRechte(); track p.id) {
+										<option [value]="p.id">{{ p.vorname }} {{ p.nachname }}</option>
+									}
+								</select>
+							</label>
+							<div class="reihe">
+								<button type="submit" class="knopf primaer" [disabled]="laeuft() || !weitereId()">Rechte geben</button>
+							</div>
+						</form>
+					} @else {
+						<p class="gedaempft">Alle Erwachsenen haben schon Rechte.</p>
+					}
+				</jf-karte>
+			</div>
+		}
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
 			max-width: 40rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
-		}
-		.zurueck {
-			display: inline-flex;
-			align-items: center;
-			min-height: var(--tippflaeche);
-			margin: 0 0 var(--a3);
 		}
 		.stapel {
 			display: grid;

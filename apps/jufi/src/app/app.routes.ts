@@ -1,8 +1,18 @@
-import { Routes } from '@angular/router';
+import { type Routes, withComponentInputBinding, withRouterConfig } from '@angular/router';
 import { NichtGefundenComponent } from './seiten/nicht-gefunden';
 import { PlattformStartComponent } from './seiten/plattform-start';
 import { mitgliedAngemeldet } from './verein/mitglied-waechter';
 import { MitgliederHuelle } from './verein/mitglieder-huelle';
+import { VerwaltungHuelle } from './verein/verwaltung/huelle';
+
+/**
+ * Die Router-Einstellungen gehoeren zu den Routen und stehen deshalb hier; die Tests
+ * stellen mit denselben Funktionen bereit, sonst pruefen sie einen anderen Router als den echten.
+ * paramsInheritanceStrategy always: withComponentInputBinding reicht slug sonst nicht an die Kinder
+ * der Verwaltungs-Huelle weiter, denn eine Eltern-Route mit Komponente vererbt ihre Parameter nicht.
+ * Verworfen: der Slug ueber ActivatedRoute.parent, das braeuchte jede Seite der Verwaltung.
+ */
+export const routerFeatures = [withComponentInputBinding(), withRouterConfig({ paramsInheritanceStrategy: 'always' })];
 
 /**
  * Der erste Pfadteil ist der Verein. '' gehoert der Plattform; reservierte Namen
@@ -31,37 +41,42 @@ export const routes: Routes = [
 				path: 'zugang-verloren',
 				loadComponent: () => import('./verein/zugang-verloren').then((m) => m.ZugangVerlorenComponent),
 			},
-			// Die Verwaltung zeigt Rechte nur an; entschieden wird auf dem Server. Der Waechter fragt nur nach der Sitzung.
+			// Die Verwaltung hat eine eigene Huelle (Seitenleiste) und liegt deshalb neben der Mitglieder-Huelle,
+			// vor deren leerem Pfad. Sie zeigt Rechte nur an; entschieden wird auf dem Server. Der Waechter fragt nur
+			// nach der Sitzung, die Huelle zeigt ohne jedes Recht Nicht gefunden.
 			{
 				path: 'verwaltung',
-				loadComponent: () => import('./verein/verwaltung/mitglieder').then((m) => m.MitgliederComponent),
+				component: VerwaltungHuelle,
 				canActivate: [mitgliedAngemeldet],
-			},
-			{
-				path: 'verwaltung/neu',
-				loadComponent: () => import('./verein/verwaltung/person-neu').then((m) => m.PersonNeuComponent),
-				canActivate: [mitgliedAngemeldet],
-			},
-			{
-				path: 'verwaltung/untergruppen',
-				loadComponent: () => import('./verein/verwaltung/untergruppen').then((m) => m.UntergruppenComponent),
-				canActivate: [mitgliedAngemeldet],
-			},
-			{
-				path: 'verwaltung/rechte',
-				loadComponent: () => import('./verein/verwaltung/rechte').then((m) => m.RechteComponent),
-				canActivate: [mitgliedAngemeldet],
-			},
-			{
-				path: 'verwaltung/personen/:id',
-				loadComponent: () => import('./verein/verwaltung/personenseite').then((m) => m.PersonenseiteComponent),
-				canActivate: [mitgliedAngemeldet],
+				children: [
+					{
+						path: '',
+						pathMatch: 'full',
+						loadComponent: () => import('./verein/verwaltung/mitglieder').then((m) => m.MitgliederComponent),
+					},
+					{
+						path: 'neu',
+						loadComponent: () => import('./verein/verwaltung/person-neu').then((m) => m.PersonNeuComponent),
+					},
+					{
+						path: 'personen/:id',
+						loadComponent: () => import('./verein/verwaltung/personenseite').then((m) => m.PersonenseiteComponent),
+					},
+					{
+						path: 'untergruppen',
+						loadComponent: () => import('./verein/verwaltung/untergruppen').then((m) => m.UntergruppenComponent),
+					},
+					{
+						path: 'rechte',
+						loadComponent: () => import('./verein/verwaltung/rechte').then((m) => m.RechteComponent),
+					},
+					// Task 13 ergaenzt die Route einstellungen mit ihrer Seite; bis dahin fuehrt der Punkt in der Leiste ins Leere.
+				],
 			},
 			// Ziel des Waechters bei 404; unter dem Slug statt als eigener Pfad, sonst waere der Pfadname ein reservierter Verein.
 			{ path: 'nicht-gefunden', component: NichtGefundenComponent },
 			// Nach anmelden, einladung, zugang-verloren und nicht-gefunden: Eine leere Eltern-Route davor liesse
 			// den Router erst in der Huelle suchen, und diese Seiten haben weder Huelle noch Waechter.
-			// Die Verwaltung hat noch ihre eigenen Routen und bekommt eine eigene Huelle.
 			{
 				path: '',
 				component: MitgliederHuelle,
