@@ -490,12 +490,27 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	},
 	'DELETE /einstellungen/logo': async (k) => {
 		const vorher = await fremdesLogo(k);
+		expect(vorher).not.toBeNull();
 		const loesche = (slug: string) =>
 			sende(k.url, `/${slug}/api/v1/einstellungen/logo`, { methode: 'DELETE', cookie: k.eigenerLeiter });
 		expect((await loesche(k.gesperrt.slug)).status).toBe(404);
 		expect((await loesche(k.fremd.slug)).status).toBe(401);
 		expect(await fremdesLogo(k)).toEqual(vorher);
-		expect(vorher).not.toBeNull();
+		// Gegenprobe: Im eigenen Verein geht das Loeschen, und es trifft nur dessen Logo. Ein
+		// Fehler in der Begrenzung auf den Verein liesse hier das fremde Logo mitfallen.
+		const eigenerVerein = await k.prisma.verein.findUniqueOrThrow({ where: { slug: k.eigen.slug } });
+		await k.prisma.vereinLogo.create({
+			data: {
+				vereinId: eigenerVerein.id,
+				bild: Buffer.from([9]),
+				mimeType: 'image/png',
+				icon192: Buffer.from([9]),
+				icon512: Buffer.from([9]),
+			},
+		});
+		expect((await loesche(k.eigen.slug)).status).toBe(200);
+		expect(await k.prisma.vereinLogo.count({ where: { vereinId: eigenerVerein.id } })).toBe(0);
+		expect(await k.prisma.vereinLogo.findUnique({ where: { vereinId: k.fremd.id } })).toEqual(vorher);
 	},
 	'POST /abmelden': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden`, { methode: 'POST' })).status).toBe(404);

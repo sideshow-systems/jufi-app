@@ -214,9 +214,15 @@ export function einstellungenRouten(router: Router, _deps: VolleAppDeps): void {
 			const { verein, db } = vereinsKontext(res);
 			// deleteMany statt delete: ohne Logo ist das count 0 und die Antwort dieselbe, ohne
 			// Prisma-Fehler (P2025). Ein Aufruf, der nichts zu tun hat, ist kein Fehler.
+			// Das where nennt den Verein ausdruecklich, obwohl vereinDb ihn ohnehin einsetzt: Fiele
+			// diese Einschraenkung je weg, loeschte ein leeres where die Logos aller Vereine.
+			// Unter derselben Sperre wie der Upload, damit ein gleichzeitiges PUT und DELETE
+			// hintereinander laufen: Der Upload liest die Zeile und ersetzt sie dann, ein Loeschen
+			// dazwischen liesse sein Ersetzen als P2025 mit 500 scheitern. Verworfen: ohne Sperre,
+			// weil die Reihenfolge dann vom Zufall abhinge.
 			await db.$transaction(async (tx) => {
 				await sperreVereinszeile(tx, verein.id);
-				await tx.vereinLogo.deleteMany({});
+				await tx.vereinLogo.deleteMany({ where: { vereinId: verein.id } });
 			});
 			res.json({ logoStand: null });
 		}),
