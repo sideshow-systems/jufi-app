@@ -1,5 +1,5 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
-import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
+import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
@@ -81,6 +81,16 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Ohne Objekt-ID: der Verein kommt allein aus dem Slug. Geprueft wird,
 		// dass ein gesperrter fremder Verein nichts preisgibt.
 		expect((await fetch(`${k.url}/${k.gesperrt.slug}/api/v1/verein`)).status).toBe(404);
+	},
+	'GET /verein/logo': async (k) => {
+		// Das Logo gehoert dem Verein im Pfad: der gesperrte fremde Verein gibt es auch dann nicht
+		// heraus, wenn er eins hat, und der eigene Verein bekommt es nicht unter seinem Slug.
+		const verein = await k.prisma.verein.findUniqueOrThrow({ where: { slug: k.gesperrt.slug } });
+		await vereinDb(k.prisma, verein.id).vereinLogo.create({
+			data: { bild: Buffer.from([1]), mimeType: 'image/png', icon192: Buffer.from([1]), icon512: Buffer.from([1]) },
+		});
+		expect((await fetch(`${k.url}/${k.gesperrt.slug}/api/v1/verein/logo`)).status).toBe(404);
+		expect((await fetch(`${k.url}/${k.eigen.slug}/api/v1/verein/logo`)).status).toBe(404);
 	},
 	'POST /einladung/pruefen': async (k) => {
 		for (const verein of [k.fremd, k.gesperrt]) {

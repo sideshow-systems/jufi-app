@@ -101,6 +101,26 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 		}
 	});
 
+	router.get('/verein/logo', async (_req, res, next) => {
+		try {
+			const { verein, db } = vereinsKontext(res);
+			const logo = await db.vereinLogo.findUnique({
+				where: { vereinId: verein.id },
+				select: { bild: true, mimeType: true },
+			});
+			if (!logo) {
+				res.status(404).json(NICHT_GEFUNDEN);
+				return;
+			}
+			// Ohne Anmeldung, weil die Anmeldeseite das Logo zeigt. no-cache mit ETag: Der
+			// Browser fragt nach und bekommt bei unveraendertem Logo ein 304; die Adresse
+			// traegt zusaetzlich ?v=, sodass ein neues Logo gar nicht erst aus dem Cache kommt.
+			res.type(logo.mimeType).set('Cache-Control', 'no-cache').send(Buffer.from(logo.bild));
+		} catch (error) {
+			next(error);
+		}
+	});
+
 	einladungsRouten(router, deps);
 	anmeldeRouten(router, deps);
 	profilRouten(router, deps);
