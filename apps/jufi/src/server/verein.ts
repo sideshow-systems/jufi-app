@@ -82,9 +82,20 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	router.get('/verein', async (_req, res, next) => {
 		try {
 			const { verein, db } = vereinsKontext(res);
-			// count statt Logo laden: das Bild bleibt in der Datenbank.
-			const hatLogo = (await db.vereinLogo.count()) > 0;
-			res.json({ slug: verein.slug, anzeigename: verein.anzeigename, farbe: verein.farbe, hatLogo });
+			// Nur die Aenderungszeit, nie die Bytes: das Bild bleibt in der Datenbank. Sie dient
+			// dem Browser als ?v= an der Logo-Adresse; ein Zaehler oder Hash waere ein weiteres
+			// Feld, das mit jeder Aenderung mitwandern muesste (verworfen).
+			const logo = await db.vereinLogo.findUnique({
+				where: { vereinId: verein.id },
+				select: { geaendertAm: true },
+			});
+			res.json({
+				slug: verein.slug,
+				anzeigename: verein.anzeigename,
+				farbe: verein.farbe,
+				hatLogo: logo !== null,
+				logoStand: logo?.geaendertAm.toISOString() ?? null,
+			});
 		} catch (error) {
 			next(error);
 		}
