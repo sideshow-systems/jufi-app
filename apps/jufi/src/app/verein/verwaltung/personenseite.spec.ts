@@ -312,6 +312,61 @@ describe('Personenseite', () => {
 		await vi.waitFor(() => http.expectOne(`${API}/personen/k1`).flush(kind()));
 	});
 
+	it('Zugang entziehen fragt nach, schickt erlaubt:false und räumt den angezeigten Link weg', async () => {
+		const { harness, seite, http } = await oeffneVerwaltung(kind());
+		knopf(seite, 'Einladung erzeugen').click();
+		http
+			.expectOne(`${API}/personen/k1/einladung`)
+			.flush(
+				{ link: 'l', text: 'Hallo Lena, dein Link', ablauf: '2026-11-01T00:00:00.000Z' },
+				{ status: 201, statusText: 'Created' },
+			);
+		await neuGeladen(http, harness, kind());
+		expect(seite.textContent).toContain('dein Link');
+		knopf(seite, 'Zugang entziehen').click();
+		await stabil(harness);
+		http.expectNone(`${API}/personen/k1/zugang`);
+		expect(seite.querySelector('[role="alertdialog"]')?.textContent).toContain('Lena');
+		knopf(seite, 'Ja, Zugang entziehen').click();
+		const anfrage = http.expectOne(`${API}/personen/k1/zugang`);
+		expect(anfrage.request.method).toBe('POST');
+		expect(anfrage.request.body).toEqual({ erlaubt: false });
+		anfrage.flush({ ok: true });
+		await neuGeladen(http, harness, kind({ zugang: { vorhanden: false, letzteAnmeldungAm: null, erlaubt: false } }));
+		expect(seite.textContent).not.toContain('dein Link');
+		expect(() => knopf(seite, 'Zugang entziehen')).toThrow();
+		expect(knopf(seite, 'Zugang erlauben')).toBeTruthy();
+	});
+
+	it('Zugang erlauben schickt erlaubt:true ohne Rückfrage; ohne Einwilligung steht die Ablehnung im Zugangsbereich', async () => {
+		const gesperrt = kind({ zugang: { vorhanden: false, letzteAnmeldungAm: null, erlaubt: false } });
+		const { harness, seite, http } = await oeffneVerwaltung(gesperrt);
+		knopf(seite, 'Zugang erlauben').click();
+		const abgelehnt = http.expectOne(`${API}/personen/k1/zugang`);
+		expect(abgelehnt.request.body).toEqual({ erlaubt: true });
+		abgelehnt.flush({ fehler: 'x', code: 'EINWILLIGUNG_FEHLT' }, { status: 409, statusText: 'Conflict' });
+		await stabil(harness);
+		expect(seite.querySelector('[role="alert"]')?.textContent).toContain('Einwilligung');
+		knopf(seite, 'Zugang erlauben').click();
+		http.expectOne(`${API}/personen/k1/zugang`).flush({ ok: true });
+		await neuGeladen(http, harness, kind());
+		expect(knopf(seite, 'Zugang entziehen')).toBeTruthy();
+	});
+
+	it('Erwachsene haben keine Knöpfe zum Zugang erlauben oder entziehen', async () => {
+		const erw: PersonDetail = {
+			...kind(),
+			id: 'e2',
+			art: 'ERWACHSENER',
+			familie: [],
+			untergruppen: [],
+			zugang: undefined,
+		};
+		const { seite } = await oeffneVerwaltung(erw);
+		expect(() => knopf(seite, 'Zugang entziehen')).toThrow();
+		expect(() => knopf(seite, 'Zugang erlauben')).toThrow();
+	});
+
 	it('Entfernen räumt den angezeigten Link weg', async () => {
 		const { harness, seite, http } = await oeffneVerwaltung(kind());
 		knopf(seite, 'Einladung erzeugen').click();

@@ -346,6 +346,127 @@ describe('Entfernen und Zugang entziehen', () => {
 		const r = await sende(server.url, v.api(`/personen/${v.verwalter.personId}`), { methode: 'DELETE' });
 		expect(r.status).toBe(401);
 	});
+
+	describe('Geburtsdatum korrigieren (PATCH)', () => {
+		/** Kind mit Zugang, das wegen eines falschen Geburtsjahres volljaehrig ist; mit Einwilligung der Mutter, wenn verlangt. */
+		async function volljaehrigesKind(v: Awaited<ReturnType<typeof neuerVerein>>, mitEinwilligung: boolean) {
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			await prisma.person.update({
+				where: { id: kind.personId },
+				data: { geburtsdatum: new Date('2000-01-01'), volljaehrigGeprueftAm: new Date('2026-01-01') },
+			});
+			if (mitEinwilligung) {
+				const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+				await v.verknuepfe(mutter.personId, kind.personId);
+				await v.willigtEin(kind.personId, mutter.personId);
+			}
+			return kind;
+		}
+		const patch = (v: Awaited<ReturnType<typeof neuerVerein>>, id: string, body: unknown) =>
+			sende(server.url, v.api(`/personen/${id}`), { methode: 'PATCH', body, cookie: v.verwalter.cookie });
+
+		it('Korrektur auf minderjaehrig ohne Einwilligung entzieht den Zugang, Sitzung gilt nicht mehr, Pruefvermerk faellt', async () => {
+			const v = await neuerVerein();
+			const kind = await volljaehrigesKind(v, false);
+			expect((await sende(server.url, v.api('/ich'), { cookie: kind.cookie })).status).toBe(200);
+			expect((await patch(v, kind.personId, { geburtsdatum: '2015-05-05' })).status).toBe(200);
+			const zeile = await v.person(kind.personId);
+			expect(zeile.zugangErlaubt).toBe(false);
+			expect(zeile.volljaehrigGeprueftAm).toBeNull();
+			expect((await sende(server.url, v.api('/ich'), { cookie: kind.cookie })).status).toBe(401);
+		});
+
+		it('Korrektur auf minderjaehrig mit Einwilligung laesst den Zugang', async () => {
+			const v = await neuerVerein();
+			const kind = await volljaehrigesKind(v, true);
+			expect((await patch(v, kind.personId, { geburtsdatum: '2015-05-05' })).status).toBe(200);
+			expect((await v.person(kind.personId)).zugangErlaubt).toBe(true);
+			expect((await sende(server.url, v.api('/ich'), { cookie: kind.cookie })).status).toBe(200);
+		});
+
+		it('Namensaenderung oder gleiches Datum aendern nichts am Zugang und am Pruefvermerk', async () => {
+			const v = await neuerVerein();
+			const kind = await volljaehrigesKind(v, false);
+			await prisma.person.update({ where: { id: kind.personId }, data: { geburtsdatum: new Date('2015-05-05') } });
+			expect((await patch(v, kind.personId, { vorname: 'Neu' })).status).toBe(200);
+			expect((await patch(v, kind.personId, { geburtsdatum: '2015-05-05' })).status).toBe(200);
+			const zeile = await v.person(kind.personId);
+			expect(zeile.zugangErlaubt).toBe(true);
+			expect(zeile.volljaehrigGeprueftAm).not.toBeNull();
+			expect(await prisma.zugang.count({ where: { personId: kind.personId } })).toBe(1);
+		});
+	});
+
+	describe('Zugang erlauben und entziehen (POST /personen/:id/zugang)', () => {
+		const setze = (
+			v: Awaited<ReturnType<typeof neuerVerein>>,
+			id: string,
+			erlaubt: unknown,
+			cookie = v.verwalter.cookie,
+		) => sende(server.url, v.api(`/personen/${id}/zugang`), { methode: 'POST', body: { erlaubt }, cookie });
+
+		it('Entziehen loescht Zugang und Sitzung, offene Einladungen fallen; Einwilligung bleibt', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			expect((await sende(server.url, v.api('/ich'), { cookie: kind.cookie })).status).toBe(200);
+			const r = await setze(v, kind.personId, false);
+			expect(r.status).toBe(200);
+			expect(await r.json()).toEqual({ ok: true });
+			expect((await v.person(kind.personId)).zugangErlaubt).toBe(false);
+			expect(await prisma.zugang.count({ where: { personId: kind.personId } })).toBe(0);
+			expect((await sende(server.url, v.api('/ich'), { cookie: kind.cookie })).status).toBe(401);
+		});
+
+		it('Erlauben ohne Einwilligung bei Minderjaehrigem: 409 EINWILLIGUNG_FEHLT, bleibt gesperrt', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			await setze(v, kind.personId, false);
+			const r = await setze(v, kind.personId, true);
+			expect(r.status).toBe(409);
+			expect(((await r.json()) as { code: string }).code).toBe('EINWILLIGUNG_FEHLT');
+			expect((await v.person(kind.personId)).zugangErlaubt).toBe(false);
+		});
+
+		it('Erlauben mit gueltiger Einwilligung setzt zugangErlaubt wieder', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+			await v.verknuepfe(mutter.personId, kind.personId);
+			await v.willigtEin(kind.personId, mutter.personId);
+			await setze(v, kind.personId, false);
+			expect((await setze(v, kind.personId, true)).status).toBe(200);
+			expect((await v.person(kind.personId)).zugangErlaubt).toBe(true);
+		});
+
+		it('Erlauben bei Volljaehrigem ohne Einwilligung: ok', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			await prisma.person.update({ where: { id: kind.personId }, data: { geburtsdatum: new Date('2000-01-01') } });
+			await setze(v, kind.personId, false);
+			expect((await setze(v, kind.personId, true)).status).toBe(200);
+			expect((await v.person(kind.personId)).zugangErlaubt).toBe(true);
+		});
+
+		it('Betreuer ohne MITGLIEDER, Erwachsener, Grabstein, unbekannte ID: 404', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			const erw = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+			const betreuer = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', rechte: ['ANTWORTEN_DETAIL'] });
+			expect((await setze(v, kind.personId, false, betreuer.cookie)).status).toBe(404);
+			expect(await prisma.zugang.count({ where: { personId: kind.personId } })).toBe(1);
+			expect((await setze(v, erw.personId, false)).status).toBe(404);
+			expect(await prisma.zugang.count({ where: { personId: erw.personId } })).toBe(1);
+			expect((await setze(v, 'gibt-es-nicht', false)).status).toBe(404);
+			await prisma.person.update({ where: { id: kind.personId }, data: { entferntAm: new Date() } });
+			expect((await setze(v, kind.personId, true)).status).toBe(404);
+		});
+
+		it('erlaubt kein Wahrheitswert: 400', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			expect((await setze(v, kind.personId, 'ja')).status).toBe(400);
+		});
+	});
 });
 
 describe('Einladen aus der Verwaltung', () => {

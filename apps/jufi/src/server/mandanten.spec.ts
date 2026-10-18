@@ -321,6 +321,19 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		await meineJungfischerSchreibfall(k, 'einwilligung', { erteilen: true });
 		expect(await k.prisma.einwilligung.count({ where: { jungfischerId: k.fremdesKindId } })).toBe(0);
 	},
+	'POST /personen/:id/zugang': async (k) => {
+		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });
+		const setze = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/personen/${k.fremdesKindId}/zugang`, {
+				methode: 'POST',
+				body: { erlaubt: false },
+				cookie,
+			});
+		expect((await setze(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await setze(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await setze(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
+	},
 	'GET /untergruppen': async (k) => {
 		const liste = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/untergruppen`, { cookie });
 		expect((await liste(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);

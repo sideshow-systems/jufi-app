@@ -1,5 +1,5 @@
 import { sperreVereinszeile, type EinladungArt, type Person, type VereinDb } from '@jufi/db';
-import { darfEinladen, einladungsAblauf, hatGueltigeEinwilligung, istVolljaehrig } from '@jufi/domain';
+import { darfEinladen, einladungsAblauf, hatGueltigeEinwilligung, hatRecht, istVolljaehrig } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
@@ -8,7 +8,7 @@ import { mitgliedMail } from '../mail/texte.js';
 import { legeMailAn } from '../mail/warteschlange.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
-import { alsSicht } from './verwaltung.js';
+import { alsSicht, statt404 } from './verwaltung.js';
 
 /** Der Transaktions-Client, den db.$transaction der Vereins-Routen reicht. */
 export type Transaktion = Parameters<Parameters<VereinDb['$transaction']>[0]>[0];
@@ -240,6 +240,50 @@ export function einladenRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' 
 						: await legeEinladungAn(tx, auftrag);
 				});
 				res.status(201).json(ergebnis);
+			} catch (error) {
+				if (error instanceof Abbruch) return void res.status(error.status).json(error.antwort);
+				throw error;
+			}
+		}),
+	);
+}
+
+/**
+ * Route der Verwaltung zum Erlauben und Entziehen des Zugangs eines Kindes (Spec 4.6).
+ * Entziehen darf immer; Erlauben setzt nur das Kennzeichen -- der Zugang selbst entsteht erst
+ * wieder ueber eine neue Einladung. Verworfen: Erlauben ohne Einwilligungspruefung, weil die
+ * Verwaltung dann Art. 8 aushebeln koennte.
+ */
+export function zugangRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt'>): void {
+	router.post(
+		'/personen/:id/zugang',
+		brauchtMitglied,
+		asynchron(async (req, res) => {
+			if (!hatRecht(mitgliedKontext(res).person, 'MITGLIEDER')) return statt404(res);
+			const erlaubt = ((req.body ?? {}) as Record<string, unknown>)['erlaubt'];
+			if (typeof erlaubt !== 'boolean') {
+				return void res.status(400).json({ fehler: 'Ja oder nein erwartet', feld: 'erlaubt' });
+			}
+			const { verein, db } = vereinsKontext(res);
+			const { person: handelnder } = mitgliedKontext(res);
+			const zielId = req.params['id'] ?? '';
+			const jetzt = deps.jetzt();
+			try {
+				await db.$transaction(async (tx) => {
+					await sperreVereinszeile(tx, verein.id);
+					// Auch der Handelnde frisch: hat eine andere Anfrage ihm MITGLIEDER entzogen, gilt der
+					// Sitzungsstand nicht mehr (wie in rechte.ts).
+					const ich = await tx.person.findFirst({ where: { id: handelnder.id, art: 'ERWACHSENER', entferntAm: null } });
+					const ziel = await tx.person.findFirst({ where: { id: zielId, art: 'JUNGFISCHER', entferntAm: null } });
+					if (!ich || !hatRecht(ich, 'MITGLIEDER') || !ziel) throw new Abbruch(404, { fehler: 'nicht gefunden' });
+					if (!erlaubt) {
+						await entzieheZugang(tx, ziel.id);
+						return;
+					}
+					if (!(await hatEinwilligung(tx, ziel, jetzt))) throw new Abbruch(409, EINWILLIGUNG_FEHLT);
+					await tx.person.update({ where: { id: ziel.id }, data: { zugangErlaubt: true } });
+				});
+				res.json({ ok: true });
 			} catch (error) {
 				if (error instanceof Abbruch) return void res.status(error.status).json(error.antwort);
 				throw error;

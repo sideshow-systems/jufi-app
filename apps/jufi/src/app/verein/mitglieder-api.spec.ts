@@ -85,6 +85,7 @@ describe('MitgliederApi', () => {
 			],
 			[() => api.aenderePerson('v', 'p1', { vorname: 'Lea' }), 'PATCH', '/v/api/v1/personen/p1', { vorname: 'Lea' }],
 			[() => api.entfernePerson('v', 'p1'), 'DELETE', '/v/api/v1/personen/p1'],
+			[() => api.setzePersonZugang('v', 'p1', false), 'POST', '/v/api/v1/personen/p1/zugang', { erlaubt: false }],
 			[() => api.volljaehrigBelassen('v', 'p1'), 'POST', '/v/api/v1/personen/p1/volljaehrig-belassen', {}],
 			[
 				() => api.setzeFamilie('v', 'k1', 'e1', { beziehung: 'MUTTER' }),

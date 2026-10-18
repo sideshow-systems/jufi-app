@@ -23,7 +23,7 @@ import { MAIL_MAX_VERSUCHE } from '../mail/arbeiter.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 import { alsSicht, ladeUmfeld, statt404 } from './verwaltung.js';
-import { entferne } from './zugang.js';
+import { entferne, entzieheZugangWennUngueltig } from './zugang.js';
 
 export interface PersonListe {
 	id: string;
@@ -379,6 +379,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 						vorname?: string;
 						nachname?: string;
 						geburtsdatum?: Date;
+						volljaehrigGeprueftAm?: null;
 						email?: string | null;
 						jugendsprecher?: boolean;
 					} = {};
@@ -410,7 +411,17 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 							throw ungueltig('Nur Jungfischer können Jugendsprecher sein', 'jugendsprecher');
 						aenderung.jugendsprecher = body['jugendsprecher'];
 					}
+					const datumGeaendert =
+						aenderung.geburtsdatum !== undefined && aenderung.geburtsdatum.getTime() !== ziel.geburtsdatum?.getTime();
+					// Ein neues Datum macht die Quittung "Belassen" hinfaellig: sie galt dem alten Datum, und ohne
+					// Zuruecksetzen erschiene der Hinweis "Volljaehrig seit" nie wieder.
+					if (datumGeaendert) aenderung.volljaehrigGeprueftAm = null;
 					if (Object.keys(aenderung).length > 0) await tx.person.update({ where: { id: ziel.id }, data: aenderung });
+					// Ein falsches Geburtsjahr kann ein Kind volljaehrig gemacht haben; die Korrektur macht es
+					// wieder minderjaehrig, und dann zaehlt die Einwilligung. Fehlt sie, verliert es den Zugang.
+					if (datumGeaendert && aenderung.geburtsdatum) {
+						await entzieheZugangWennUngueltig(tx, { ...ziel, geburtsdatum: aenderung.geburtsdatum }, jetzt());
+					}
 				});
 				res.json({ ok: true });
 			} catch (error) {

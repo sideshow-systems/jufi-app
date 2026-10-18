@@ -298,6 +298,11 @@ export class MitgliederApi {
 		return this.senden('DELETE', slug, `/personen/${encodeURIComponent(id)}`);
 	}
 
+	/** Die Verwaltung erlaubt oder entzieht den Zugang eines Kindes; Erlauben ohne Einwilligung antwortet 409 EINWILLIGUNG_FEHLT. */
+	setzePersonZugang(slug: string, id: string, erlaubt: boolean): Observable<{ ok: true }> {
+		return this.senden('POST', slug, `/personen/${encodeURIComponent(id)}/zugang`, { erlaubt });
+	}
+
 	volljaehrigBelassen(slug: string, id: string): Observable<{ ok: true }> {
 		return this.senden('POST', slug, `/personen/${encodeURIComponent(id)}/volljaehrig-belassen`, {});
 	}

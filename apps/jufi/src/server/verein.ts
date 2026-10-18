@@ -10,7 +10,7 @@ import { personenRouten } from './mitglieder/personen.js';
 import { rechteRouten } from './mitglieder/rechte.js';
 import { profilRouten } from './mitglieder/profil.js';
 import { untergruppenRouten } from './mitglieder/untergruppen.js';
-import { einladenRouten } from './mitglieder/zugang.js';
+import { einladenRouten, zugangRouten } from './mitglieder/zugang.js';
 import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
 import { routenAus } from './routen.js';
 
@@ -97,6 +97,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	familieRouten(router, deps);
 	untergruppenRouten(router, deps);
 	rechteRouten(router, deps);
+	zugangRouten(router, deps);
 	einladenRouten(router, deps);
 	jungfischerRouten(router, deps);
 	zugangVerlorenRouten(router, deps);

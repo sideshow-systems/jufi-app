@@ -33,7 +33,11 @@ import { BEZIEHUNG_TEXT, BEZIEHUNGEN, beziehungText, tagBerlin, verwaltungsfehle
 type Bereich = 'stamm' | 'gruppen' | 'familie' | 'zugang' | 'entfernen' | 'volljaehrig';
 
 /** Eine offene Rueckfrage; immer nur eine, der Dialog steht oben auf der Seite. */
-type Frage = { art: 'entfernen' } | { art: 'loesen'; eintrag: FamilienEintrag } | { art: 'familie-loesen' };
+type Frage =
+	| { art: 'entfernen' }
+	| { art: 'zugang-entziehen' }
+	| { art: 'loesen'; eintrag: FamilienEintrag }
+	| { art: 'familie-loesen' };
 
 interface Entfernt {
 	name: string;
@@ -480,6 +484,22 @@ interface Entfernt {
 										Per Mail senden
 									</button>
 								}
+								@if (p.art === 'JUNGFISCHER') {
+									@if (p.zugang?.erlaubt) {
+										<button
+											type="button"
+											class="knopf"
+											[disabled]="laeuft()"
+											(click)="frage.set({ art: 'zugang-entziehen' })"
+										>
+											Zugang entziehen
+										</button>
+									} @else {
+										<button type="button" class="knopf" [disabled]="laeuft()" (click)="setzeZugang(true)">
+											Zugang erlauben
+										</button>
+									}
+								}
 							</div>
 							@if (fehler().zugang; as text) {
 								<p class="fehler" role="alert">{{ text }}</p>
@@ -818,6 +838,8 @@ export class PersonenseiteComponent {
 		switch (f.art) {
 			case 'entfernen':
 				return `Willst du ${p.vorname} ${p.nachname} wirklich aus der Gruppe entfernen? Der Zugang endet, und die Person erscheint in keiner Liste mehr.`;
+			case 'zugang-entziehen':
+				return `Willst du ${p.vorname} den Zugang entziehen? Anmeldung, Passkeys und offene Einladungen werden gelöscht. Erlaubst du ihn später wieder, braucht ${p.vorname} eine neue Einladung.`;
 			case 'loesen':
 				return `Willst du die Zuordnung von ${f.eintrag.vorname} ${f.eintrag.nachname} lösen? Gilt dadurch keine Einwilligung mehr, endet der Zugang des Kindes.`;
 			case 'familie-loesen':
@@ -826,13 +848,24 @@ export class PersonenseiteComponent {
 	}
 
 	protected frageKnopf(f: Frage): string {
-		return f.art === 'entfernen' ? 'Ja, entfernen' : f.art === 'loesen' ? 'Ja, lösen' : 'Ja, alle lösen';
+		switch (f.art) {
+			case 'entfernen':
+				return 'Ja, entfernen';
+			case 'zugang-entziehen':
+				return 'Ja, Zugang entziehen';
+			case 'loesen':
+				return 'Ja, lösen';
+			case 'familie-loesen':
+				return 'Ja, alle lösen';
+		}
 	}
 
 	protected bestaetige(f: Frage, p: PersonDetail): Promise<void> {
 		switch (f.art) {
 			case 'entfernen':
 				return this.entferne(p);
+			case 'zugang-entziehen':
+				return this.setzeZugang(false);
 			case 'loesen':
 				return this.loese(f.eintrag);
 			case 'familie-loesen':
@@ -1030,6 +1063,29 @@ export class PersonenseiteComponent {
 		if (!p) return;
 		await this.fuehreAus('zugang', async () => {
 			this.link.set(await firstValueFrom(this.api.ladePersonEin(this.slug(), p.id, mail)));
+		});
+	}
+
+	/**
+	 * Zugang eines Kindes erlauben oder entziehen. Der Server loescht beim Entziehen die offenen
+	 * Einladungen: der angezeigte Link waere tot und wird verworfen. Die Ablehnung beim Erlauben
+	 * hat hier einen eigenen Text, denn der allgemeine spricht vom Einladen.
+	 */
+	protected async setzeZugang(erlaubt: boolean): Promise<void> {
+		const p = this.person();
+		if (!p) return;
+		await this.fuehreAus('zugang', async () => {
+			try {
+				await firstValueFrom(this.api.setzePersonZugang(this.slug(), p.id, erlaubt));
+			} catch (ursache) {
+				if (alsApiFehler(ursache).code === 'EINWILLIGUNG_FEHLT') {
+					throw new Error(
+						'Der Zugang lässt sich noch nicht erlauben: Es fehlt die Einwilligung einer erziehungsberechtigten Person.',
+					);
+				}
+				throw ursache;
+			}
+			if (!erlaubt) this.verwirfLink();
 		});
 	}
 

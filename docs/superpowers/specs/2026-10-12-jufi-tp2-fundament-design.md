@@ -281,6 +281,8 @@ Unter `/<slug>/anmelden`:
 
 Erziehungsberechtigte des Kindes oder wer „Mitglieder verwalten" hat: `zugangErlaubt` wird nein; `Zugang`, Passkeys, Sitzungen und offene Einladungen werden gelöscht. Die Person bleibt, ihre Familie handelt weiter für sie. Ein Widerruf der Einwilligung, wenn danach keine gültige Einwilligung eines Erziehungsberechtigten mehr besteht, entzieht den Zugang ebenso.
 
+Die Verwaltung tut das mit `POST /personen/:id/zugang` (`{ erlaubt }`, Recht „Mitglieder verwalten“); Erlauben verlangt bei Minderjährigen eine gültige Einwilligung (409 `EINWILLIGUNG_FEHLT`), und eine Korrektur des Geburtsdatums auf „minderjährig“ ohne Einwilligung entzieht den Zugang ebenso (5.6).
+
 ### 4.7 TOTP
 
 Freiwillig für Erwachsene mit mindestens einem Recht, im Profil. Dem Plattform-Admin wird es bei der Einrichtung gleich angeboten und dringend empfohlen. Zehn Wiederherstellungscodes. Bezugspersonen ohne Rechte und Jungfischer bekommen es nicht angeboten.
