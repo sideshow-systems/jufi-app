@@ -114,6 +114,8 @@ export function darfRechteAendern(h: PersonSicht, ziel: PersonSicht, _neueRechte
 
 // Ein Verein ohne Leitung kann niemanden mehr einladen oder Rechte vergeben.
 // Entfernte zaehlen nicht: sie koennen sich nicht mehr anmelden.
+// Die Invariante zaehlt Personen mit dem Recht, nicht Personen mit Zugang: rettet ein vergebenes
+// Recht ohne Zugang den Verein nicht, hilft nur der Notfall-Link des Plattform-Admins.
 export function wuerdeLetzteLeitungVerlieren(
 	erwachsene: readonly Pick<PersonSicht, 'id' | 'rechte' | 'entferntAm'>[],
 	zielId: string,

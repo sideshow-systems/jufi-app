@@ -96,6 +96,17 @@ describe('Rechte vergeben', () => {
 		}
 	});
 
+	it('Handelnder, dem das Recht in der Datenbank fehlt, obwohl die Sitzung besteht: 404', async () => {
+		// Die Middleware liest die Person ohnehin frisch; der Test haelt dieses Verhalten fest. Die
+		// Neubewertung unter der Sperre selbst ist ohne Eingriff in die Anfrage nicht deterministisch ausloesbar.
+		const v = await neuerVerein();
+		const zweiter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', rechte: ['JUGENDLEITER_RECHTE'] });
+		const ziel = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await prisma.person.update({ where: { id: zweiter.personId }, data: { rechte: [] } });
+		expect((await v.setze(ziel.personId, ['DOKUMENTE'], zweiter.cookie)).status).toBe(404);
+		expect(await v.rechteVon(ziel.personId)).toEqual([]);
+	});
+
 	it('Jungfischer als Ziel: 404', async () => {
 		const v = await neuerVerein();
 		const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });

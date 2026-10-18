@@ -1,5 +1,5 @@
 import { sperreVereinszeile, type Recht } from '@jufi/db';
-import { ALLE_RECHTE, darfRechteAendern, wuerdeLetzteLeitungVerlieren, type RechtName } from '@jufi/domain';
+import { ALLE_RECHTE, darfRechteAendern, hatRecht, wuerdeLetzteLeitungVerlieren, type RechtName } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
@@ -30,7 +30,7 @@ export function rechteRouten(router: Router, _deps: VolleAppDeps): void {
 			const { person: handelnder } = mitgliedKontext(res);
 			// Vor jeder Pruefung des Bodys: wer Rechte nicht vergeben darf, erfaehrt auch nicht, was gueltig waere.
 			// Gilt ebenso fuer den Selbstversuch -- wer JUGENDLEITER_RECHTE nicht hat, kann sie sich nicht geben.
-			if (!darfRechteAendern(alsSicht(handelnder), { ...alsSicht(handelnder), art: 'ERWACHSENER' }, [])) {
+			if (!hatRecht(handelnder, 'JUGENDLEITER_RECHTE')) {
 				return statt404(res);
 			}
 			const roh = ((req.body ?? {}) as Record<string, unknown>)['rechte'];
@@ -50,8 +50,13 @@ export function rechteRouten(router: Router, _deps: VolleAppDeps): void {
 					// veraltet, sobald eine andere Anfrage zwischen Lesen und Sperre Rechte entzogen hat --
 					// beide sahen dann den jeweils anderen noch als Leitung.
 					const erwachsene = await tx.person.findMany({ where: { art: 'ERWACHSENER', entferntAm: null } });
+					// Auch der Handelnde wird hier neu bewertet: der Stand aus der Sitzung stammt von vor der
+					// Sperre. Hat eine andere Anfrage ihm das Recht inzwischen entzogen (oder ihn entfernt),
+					// ergaebe sich sonst ein Ablauf, den keine serielle Reihenfolge erzeugt: sein Schreiben
+					// hebelte den Entzug aus. Die Vorpruefung oben bleibt, damit Unberechtigte nichts erfahren.
+					const ich = erwachsene.find((p) => p.id === handelnder.id);
 					const ziel = erwachsene.find((p) => p.id === zielId);
-					if (!ziel || !darfRechteAendern(alsSicht(handelnder), alsSicht(ziel), rechte)) {
+					if (!ich || !ziel || !darfRechteAendern(alsSicht(ich), alsSicht(ziel), rechte)) {
 						throw new Abbruch(404, { fehler: 'nicht gefunden' });
 					}
 					if (wuerdeLetzteLeitungVerlieren(erwachsene.map(alsSicht), zielId, rechte)) {
