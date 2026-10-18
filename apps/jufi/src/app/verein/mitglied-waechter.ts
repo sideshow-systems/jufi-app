@@ -1,9 +1,19 @@
-import { inject } from '@angular/core';
+import { inject, Injectable, signal } from '@angular/core';
 import type { CanActivateFn } from '@angular/router';
 import { Router } from '@angular/router';
 import { catchError, map, of, throwError } from 'rxjs';
 import { alsApiFehler } from '../gemeinsam/api-fehler';
-import { MitgliederApi } from './mitglieder-api';
+import { type MitgliedIch, MitgliederApi } from './mitglieder-api';
+
+/**
+ * Was der Waechter zuletzt ueber die Person erfahren hat. Die Startseite braucht daraus
+ * nur hatKinder; verworfen: ein zweites GET /ich dort -- die Antwort liegt schon vor,
+ * und eine offene Zweitanfrage haelt jede Seite instabil, bis sie beantwortet ist.
+ */
+@Injectable({ providedIn: 'root' })
+export class MitgliedSitzung {
+	readonly ich = signal<MitgliedIch | null>(null);
+}
 
 /**
  * Laesst nur durch, wen der Server in diesem Verein als angemeldet kennt. Das Cookie
@@ -20,11 +30,16 @@ import { MitgliederApi } from './mitglieder-api';
 export const mitgliedAngemeldet: CanActivateFn = (route) => {
 	const router = inject(Router);
 	const slug = route.paramMap.get('slug') ?? '';
+	const sitzung = inject(MitgliedSitzung);
 	return inject(MitgliederApi)
 		.ich(slug)
 		.pipe(
-			map(() => true),
+			map((ich) => {
+				sitzung.ich.set(ich);
+				return true;
+			}),
 			catchError((fehler: unknown) => {
+				sitzung.ich.set(null);
 				const status = alsApiFehler(fehler).status;
 				const pfad = `/${encodeURIComponent(slug)}`;
 				if (status === 401) return of(router.parseUrl(`${pfad}/anmelden`));

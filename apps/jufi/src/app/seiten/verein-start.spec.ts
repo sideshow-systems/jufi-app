@@ -52,6 +52,32 @@ describe('Vereinsseite', () => {
 		expect(document.title).toBe('Jungfischer Demo');
 	});
 
+	it('zeigt Meine Jungfischer nur, wenn die Person Kinder hat', async () => {
+		const harness = await RouterTestingHarness.create();
+		const navigation = harness.navigateByUrl('/demo');
+		await vi.waitFor(() =>
+			http.expectOne('/demo/api/v1/ich').flush({ person: { vorname: 'Flo' }, passkeys: [], totp: {}, hatKinder: true }),
+		);
+		await navigation;
+		http
+			.expectOne('/demo/api/v1/verein')
+			.flush({ slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false });
+		await harness.fixture.whenStable();
+		harness.detectChanges();
+		const link = harness.routeNativeElement?.querySelector<HTMLAnchorElement>('a[href="/demo/jungfischer"]');
+		expect(link?.textContent).toContain('Meine Jungfischer');
+	});
+
+	it('zeigt Meine Jungfischer nicht ohne Kinder', async () => {
+		const harness = await oeffne('/demo');
+		http
+			.expectOne('/demo/api/v1/verein')
+			.flush({ slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false });
+		await harness.fixture.whenStable();
+		harness.detectChanges();
+		expect(harness.routeNativeElement?.querySelector('a[href="/demo/jungfischer"]')).toBeNull();
+	});
+
 	it('zeigt "Willkommen" und den Vereinsnamen, wenn der Server die Sitzung kennt', async () => {
 		const harness = await oeffne('/demo');
 		http

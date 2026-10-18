@@ -7,6 +7,7 @@ import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { ThemaService } from '../gestaltung/thema';
 import { KarteComponent } from '../gestaltung/ui';
 import { MitgliederApi } from '../verein/mitglieder-api';
+import { MitgliedSitzung } from '../verein/mitglied-waechter';
 import { NichtGefundenComponent } from './nicht-gefunden';
 
 /** Gleich dem title in index.html; dorthin faellt der Titel zurueck, sobald kein Verein mehr gezeigt wird. */
@@ -36,6 +37,9 @@ const STANDARDTITEL = 'JuFi App';
 						<h1>{{ v.anzeigename }}</h1>
 						<!-- Schlicht, bis die Huelle mit Navigation kommt (Etappe 5): Profil und Abmelden muessen schon jetzt erreichbar sein. -->
 						<div class="reihe">
+							@if (sitzung.ich()?.hatKinder) {
+								<a class="knopf" [routerLink]="['/', slug(), 'jungfischer']">Meine Jungfischer</a>
+							}
 							<a class="knopf" [routerLink]="['/', slug(), 'profil']">Profil</a>
 							<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden()">Abmelden</button>
 						</div>
@@ -85,6 +89,7 @@ export class VereinStartComponent {
 	private readonly api = inject(VereinApi);
 	private readonly mitglieder = inject(MitgliederApi);
 	private readonly router = inject(Router);
+	protected readonly sitzung = inject(MitgliedSitzung);
 	private readonly thema = inject(ThemaService);
 
 	protected readonly laeuft = signal(false);

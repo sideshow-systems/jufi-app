@@ -37,6 +37,11 @@ export const routes: Routes = [
 				loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
 				canActivate: [mitgliedAngemeldet],
 			},
+			{
+				path: 'jungfischer',
+				loadComponent: () => import('./verein/jungfischer').then((m) => m.JungfischerComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
 			// Ziel des Waechters bei 404; unter dem Slug statt als eigener Pfad, sonst waere der Pfadname ein reservierter Verein.
 			{ path: 'nicht-gefunden', component: NichtGefundenComponent },
 		],
