@@ -164,6 +164,23 @@ export interface KindAnsicht {
 	volljaehrig: boolean;
 }
 
+/** Eine Person, die der Verein als Ansprechpartner fuehrt (hat mindestens ein Recht); nur Name, keine Rechte oder Adresse. */
+export interface Ansprechpartner {
+	id: string;
+	vorname: string;
+	nachname: string;
+}
+
+/**
+ * Ein Notfall-Link, den die Plattform fuer den Verein ausgestellt hat. Name und Zeitpunkt
+ * genuegen der Verwaltung; die Person kann inzwischen entfernt sein, dann fehlt der Name.
+ */
+export interface NotfallLinkHinweis {
+	am: string;
+	vorname: string | null;
+	nachname: string | null;
+}
+
 /**
  * Alle Aufrufe der Mitglieder-API, einer je Endpunkt, der Slug stets als erster
  * Parameter. Der Slug ist Teil des Pfads und nicht im Dienst gemerkt: Ein
@@ -373,5 +390,15 @@ export class MitgliederApi {
 
 	kindEinwilligung(slug: string, kindId: string, erteilen: boolean): Observable<{ erteilt: boolean }> {
 		return this.senden('POST', slug, `/meine-jungfischer/${encodeURIComponent(kindId)}/einwilligung`, { erteilen });
+	}
+
+	/** Fuer jede angemeldete Person lesbar, auch fuer Kinder: Sie sollen wissen, wen sie fragen koennen. */
+	ansprechpartner(slug: string): Observable<{ ansprechpartner: Ansprechpartner[] }> {
+		return this.holen(slug, '/ansprechpartner');
+	}
+
+	/** Nur fuer Personen mit dem Recht JUGENDLEITER_RECHTE; sonst antwortet der Server mit 404. */
+	verwaltungsHinweise(slug: string): Observable<{ notfallLinks: NotfallLinkHinweis[] }> {
+		return this.holen(slug, '/verwaltung/hinweise');
 	}
 }

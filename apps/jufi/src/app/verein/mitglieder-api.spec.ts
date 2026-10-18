@@ -126,6 +126,8 @@ describe('MitgliederApi', () => {
 				'/v/api/v1/meine-jungfischer/k1/einwilligung',
 				{ erteilen: false },
 			],
+			[() => api.ansprechpartner('v'), 'GET', '/v/api/v1/ansprechpartner'],
+			[() => api.verwaltungsHinweise('v'), 'GET', '/v/api/v1/verwaltung/hinweise'],
 		];
 		for (const [aufruf, methode, url, body] of faelle) {
 			(aufruf() as { subscribe: (o: object) => void }).subscribe({});

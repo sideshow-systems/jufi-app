@@ -1,54 +1,265 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+	ChangeDetectionStrategy,
+	Component,
+	computed,
+	effect,
+	inject,
+	input,
+	signal,
+	type Signal,
+	untracked,
+} from '@angular/core';
+import { rxResource } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
-import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
-import { KarteComponent } from '../gestaltung/ui';
-import { MitgliederApi } from './mitglieder-api';
+import { initialen } from '@jufi/domain';
+import { firstValueFrom, map } from 'rxjs';
+import { type ApiFehler, alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
+import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
+import { type Ansprechpartner, type KindAnsicht, MitgliederApi, type PersonListe } from './mitglieder-api';
 import { MitgliedSitzung } from './mitglied-waechter';
+import { beiAbgelaufenerSitzung } from './sitzung-abgelaufen';
+import { warnhinweisText } from './verwaltung/texte';
 import { VereinKontext } from './verein-kontext';
 
-/** Platzhalter der Vereinsseite: zeigt, dass Slug, API und Vereinsfarbe zusammenspielen. */
+/** So viele Namen nennt der Abschnitt der Verwaltung; der Rest steht hinter dem Link. */
+const MAX_NAMEN = 5;
+
+/**
+ * Was in der Verwaltung wartet: offene Einladungen und Personen mit einem Hinweis. Eine
+ * offene Einladung zaehlt nicht als Hinweis, sie hat ihre eigene Zeile; sonst stuende jede
+ * eingeladene Person doppelt da. Rein, ohne Datum: Ob eine Einladung noch offen ist,
+ * entscheidet der Server, wenn er den Hinweis ausgibt.
+ */
+export function wartet(personen: PersonListe[]): { offeneEinladungen: number; mitHinweis: PersonListe[] } {
+	const hatArt = (p: PersonListe, art: string) => (p.warnhinweise ?? []).some((h) => h.art === art);
+	return {
+		offeneEinladungen: personen.filter((p) => hatArt(p, 'EINLADUNG_OFFEN')).length,
+		mitHinweis: personen.filter((p) => (p.warnhinweise ?? []).some((h) => h.art !== 'EINLADUNG_OFFEN')),
+	};
+}
+
+/**
+ * Der Zugangsstand eines Kindes in drei Saetzen. Entscheidend ist erlaubt: Nach einem Entzug
+ * kann ein Zugang noch bestehen, gilt aber nicht und soll nicht als eingerichtet erscheinen.
+ * Eine fehlende Einwilligung ist kein eigener Satz, weil die Familie sie unter Meine
+ * Jungfischer sieht und behebt; die Startseite soll nur den Stand zeigen.
+ */
+export function zugangsstand(zugang: KindAnsicht['zugang']): string {
+	if (!zugang.erlaubt) return 'Ohne eigenen Zugang';
+	return zugang.vorhanden ? 'Eigener Zugang eingerichtet' : 'Zugang erlaubt, noch nicht eingerichtet';
+}
+
+/** Der erste Hinweis, der keine offene Einladung ist (nach dem sich auch wartet richtet). */
+function ersterHinweis(p: PersonListe): string {
+	const h = (p.warnhinweise ?? []).find((w) => w.art !== 'EINLADUNG_OFFEN');
+	return h ? warnhinweisText(h) : '';
+}
+
+/**
+ * Was eine Ressource im Fehlerfall geworfen hat, als ApiFehler. Angular verpackt alles, was
+ * kein Error ist, in einen Error mit dem Original als cause; der ApiFehler steckt dort.
+ */
+function fehlerVon(ressource: { error: Signal<Error | undefined> }): Signal<ApiFehler | null> {
+	return computed(() => {
+		const e = ressource.error();
+		if (e === undefined) return null;
+		return alsApiFehler(e.cause !== undefined ? e.cause : e);
+	});
+}
+
+/** value() wirft im Fehlerzustand; hasValue() fragt gefahrlos. */
+function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T | undefined {
+	return ressource.hasValue() ? ressource.value() : undefined;
+}
+
+/**
+ * Startseite der Mitglieder: Begruessung, die eigenen Jungfischer, was in der Verwaltung
+ * wartet und die Ansprechpartner. Jeder Abschnitt holt seine Daten selbst und scheitert
+ * allein; verworfen: ein gemeinsamer Aufruf (forkJoin), bei dem ein Netzfehler im
+ * Abschnitt Ansprechpartner auch die Begruessung und die Kinder mitnaehme.
+ */
 @Component({
 	selector: 'jf-start',
-	imports: [KarteComponent, RouterLink],
+	imports: [AbschnittComponent, KarteComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		@if (name(); as n) {
+		@if (sitzung.ich(); as ich) {
 			<jf-karte>
-				<!-- Name allein statt im Satz: "bei den" passt zu Jungfischer Demo, nicht zu Glonntal Fischereiverein. -->
-				<p class="gruss">Willkommen</p>
-				<h1>{{ n }}</h1>
-				<!-- Schlicht, bis Start und Mehr ihre endgueltige Form haben: Profil und Abmelden muessen schon jetzt erreichbar sein. -->
-				<div class="reihe">
-					@if (zeigeVerwaltung()) {
-						<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Verwaltung</a>
+				<div class="gruss">
+					@if (verein(); as v) {
+						@if (kontext.logoUrl(); as logo) {
+							<img [src]="logo" alt="" width="64" height="64" />
+						} @else {
+							<span class="abzeichen" aria-hidden="true">{{ initialen(v.anzeigename) }}</span>
+						}
 					}
-					@if (sitzung.ich()?.hatKinder) {
-						<a class="knopf" [routerLink]="['/', slug(), 'meine-jungfischer']">Meine Jungfischer</a>
-					}
-					<a class="knopf" [routerLink]="['/', slug(), 'profil']">Profil</a>
-					<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden()">Abmelden</button>
+					<div class="namen">
+						<h1>Hallo {{ ich.person.vorname }}</h1>
+						@if (verein(); as v) {
+							<p>{{ v.anzeigename }}</p>
+						}
+					</div>
 				</div>
-				@if (abmeldefehler(); as text) {
-					<p class="fehler" role="alert">{{ text }}</p>
+			</jf-karte>
+		}
+
+		@if (sitzung.ich()?.hatKinder) {
+			<jf-abschnitt titel="Deine Jungfischer">
+				@if (kinderFehler(); as f) {
+					<jf-karte>
+						<p class="fehler" role="alert">{{ text(f) }}</p>
+						<button type="button" class="knopf" (click)="kinderRessource.reload()">Nochmal versuchen</button>
+					</jf-karte>
+				} @else {
+					@for (k of kinder(); track k.id) {
+						<jf-karte>
+							<!-- Die ganze Karte ist der Link: Eine kleine Schaltflaeche darin waere am Handy schwerer zu treffen. -->
+							<a class="verweis" [routerLink]="['/', slug(), 'meine-jungfischer']">
+								<strong>{{ k.vorname }} {{ k.nachname }}</strong>
+								@if (k.jugendsprecher) {
+									<span class="zeile">Jugendsprecher/in</span>
+								}
+								@if (k.untergruppen.length > 0) {
+									<span class="zeile">{{ untergruppen(k) }}</span>
+								}
+								<span class="zeile">{{ zugangsstand(k.zugang) }}</span>
+							</a>
+						</jf-karte>
+					}
+				}
+			</jf-abschnitt>
+		}
+
+		@if (zeigeVerwaltung()) {
+			<jf-abschnitt titel="In der Verwaltung warten">
+				<jf-karte>
+					@if (verwaltungFehler(); as f) {
+						<p class="fehler" role="alert">{{ text(f) }}</p>
+						<button type="button" class="knopf" (click)="personenRessource.reload()">Nochmal versuchen</button>
+					} @else if (warten(); as w) {
+						@if (w.offeneEinladungen === 0 && w.mitHinweis.length === 0) {
+							<p>Gerade wartet nichts.</p>
+						} @else {
+							@if (w.offeneEinladungen > 0) {
+								<p>
+									{{ w.offeneEinladungen === 1 ? '1 offene Einladung' : w.offeneEinladungen + ' offene Einladungen' }}
+								</p>
+							}
+							@if (w.mitHinweis.length > 0) {
+								<p>
+									{{
+										w.mitHinweis.length === 1 ? '1 Person mit Hinweis' : w.mitHinweis.length + ' Personen mit Hinweis'
+									}}
+								</p>
+								<ul>
+									@for (p of namen(w.mitHinweis); track p.id) {
+										<li>
+											<strong>{{ p.vorname }} {{ p.nachname }}</strong>
+											<span class="zeile">{{ hinweis(p) }}</span>
+										</li>
+									}
+								</ul>
+							}
+						}
+						<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Zur Verwaltung</a>
+					}
+				</jf-karte>
+			</jf-abschnitt>
+		}
+
+		<jf-abschnitt titel="Ansprechpartner">
+			<jf-karte>
+				@if (ansprechpartnerFehler(); as f) {
+					<p class="fehler" role="alert">{{ text(f) }}</p>
+					<button type="button" class="knopf" (click)="ansprechpartnerRessource.reload()">Nochmal versuchen</button>
+				} @else {
+					<ul>
+						@for (a of ansprechpartner(); track a.id) {
+							<li>{{ a.vorname }} {{ a.nachname }}</li>
+						}
+					</ul>
 				}
 			</jf-karte>
+		</jf-abschnitt>
+
+		<!-- Zwischenstand bis Mehr: Profil und Abmelden muessen erreichbar bleiben, solange es die Seite Mehr nicht gibt. -->
+		<div class="reihe">
+			<a class="knopf" [routerLink]="['/', slug(), 'profil']">Profil</a>
+			<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden()">Abmelden</button>
+		</div>
+		@if (abmeldefehler(); as meldung) {
+			<p class="fehler" role="alert">{{ meldung }}</p>
 		}
 	`,
 	styles: `
 		:host {
-			display: block;
+			display: grid;
+			gap: var(--a4);
 		}
 		h1,
-		p {
-			margin: 0 0 var(--a3);
+		p,
+		ul {
+			margin: 0;
 		}
 		h1 {
 			font-size: var(--schrift-gross);
 		}
 		.gruss {
-			margin-bottom: var(--a1);
+			display: flex;
+			align-items: center;
+			gap: var(--a4);
+		}
+		.gruss img,
+		.abzeichen {
+			flex: none;
+			width: 64px;
+			height: 64px;
+			border-radius: 14px;
+		}
+		.abzeichen {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			background: var(--akzent);
+			color: var(--auf-akzent);
+			font-size: var(--schrift-gross);
+			font-weight: 700;
+		}
+		.namen {
+			min-width: 0;
+		}
+		.namen p {
 			color: var(--text-gedaempft);
+			overflow-wrap: anywhere;
+		}
+		jf-karte p + p,
+		jf-karte p + ul,
+		jf-karte ul + a,
+		jf-karte p + a,
+		jf-karte p + button {
+			margin-top: var(--a3);
+		}
+		ul {
+			display: grid;
+			gap: var(--a3);
+			padding: 0;
+			list-style: none;
+		}
+		li {
+			display: grid;
+			overflow-wrap: anywhere;
+		}
+		.verweis {
+			display: grid;
+			gap: var(--a1);
+			min-height: var(--tippflaeche);
+			color: inherit;
+			text-decoration: none;
+			overflow-wrap: anywhere;
+		}
+		.zeile {
+			color: var(--text-gedaempft);
+			font-size: var(--schrift-klein);
 		}
 		.reihe {
 			display: flex;
@@ -56,7 +267,6 @@ import { VereinKontext } from './verein-kontext';
 			gap: var(--a3);
 		}
 		.fehler {
-			margin: var(--a3) 0 0;
 			color: var(--fehler);
 		}
 	`,
@@ -65,24 +275,91 @@ export class StartComponent {
 	/** Kommt aus dem Pfad (withComponentInputBinding). */
 	readonly slug = input.required<string>();
 
-	private readonly kontext = inject(VereinKontext);
-	/** Leer, solange der Verein laedt; Ladefehler und unbekannten Verein faengt die Huelle ab. */
-	protected readonly name = computed(() => {
-		const v = this.kontext.verein();
-		return v && v !== 'nicht-gefunden' ? v.anzeigename : null;
-	});
+	protected readonly kontext = inject(VereinKontext);
 	private readonly mitglieder = inject(MitgliederApi);
 	private readonly router = inject(Router);
 	protected readonly sitzung = inject(MitgliedSitzung);
+	protected readonly initialen = initialen;
+	protected readonly zugangsstand = zugangsstand;
+	protected readonly hinweis = ersterHinweis;
+
+	/** Leer, solange der Verein laedt; Ladefehler und unbekannten Verein faengt die Huelle ab. */
+	protected readonly verein = computed(() => {
+		const v = this.kontext.verein();
+		return v && v !== 'nicht-gefunden' ? v : null;
+	});
 
 	/**
-	 * Jedes Recht macht die Liste lesbar (Jugendleiter sind, wer irgendein Recht hat); wer keines hat,
-	 * bekaeme vom Server nur die eigene Familie und die Ansprechpartner. Der Server entscheidet trotzdem.
+	 * Nur MITGLIEDER: Betreuer lesen die Liste, sehen darin aber keine Warnhinweise und koennten
+	 * nichts davon erledigen (Plan-Entscheidung 7). Ohne das Recht geht die Anfrage gar nicht erst
+	 * raus; der Server wuerde sie zwar beantworten, aber der Abschnitt waere leer.
 	 */
-	protected readonly zeigeVerwaltung = computed(() => (this.sitzung.ich()?.person.rechte?.length ?? 0) > 0);
+	protected readonly zeigeVerwaltung = computed(
+		() => this.sitzung.ich()?.person.rechte.includes('MITGLIEDER') === true,
+	);
+
+	// Ohne Parameter ruht eine Ressource und schickt nichts: So entfaellt die Anfrage fuer Personen ohne Kinder.
+	protected readonly kinderRessource = rxResource({
+		params: () => (this.sitzung.ich()?.hatKinder ? this.slug() : undefined),
+		stream: ({ params }) => this.mitglieder.meineJungfischer(params).pipe(map((a) => a.kinder)),
+	});
+	protected readonly personenRessource = rxResource({
+		params: () => (this.zeigeVerwaltung() ? this.slug() : undefined),
+		stream: ({ params }) => this.mitglieder.personen(params).pipe(map((a) => a.personen)),
+	});
+	protected readonly ansprechpartnerRessource = rxResource({
+		params: () => this.slug(),
+		stream: ({ params }) => this.mitglieder.ansprechpartner(params).pipe(map((a) => a.ansprechpartner)),
+	});
+
+	protected readonly kinderFehler = fehlerVon(this.kinderRessource);
+	protected readonly verwaltungFehler = fehlerVon(this.personenRessource);
+	protected readonly ansprechpartnerFehler = fehlerVon(this.ansprechpartnerRessource);
+
+	protected readonly kinder = computed<KindAnsicht[]>(() => wertVon(this.kinderRessource) ?? []);
+	protected readonly ansprechpartner = computed<Ansprechpartner[]>(() => wertVon(this.ansprechpartnerRessource) ?? []);
+	/** Erst da, wenn die Liste geladen ist: Sonst stuende kurz "Gerade wartet nichts" da. */
+	protected readonly warten = computed(() => {
+		const personen = wertVon(this.personenRessource);
+		return personen ? wartet(personen) : null;
+	});
 
 	protected readonly laeuft = signal(false);
 	protected readonly abmeldefehler = signal<string | null>(null);
+
+	/** Gesetzt, sobald ein Abschnitt zur Anmeldung geschickt hat; dann soll kein Abschnitt mehr einen Fehler zeigen. */
+	private readonly abgelaufen = signal(false);
+
+	constructor() {
+		// Der Waechter prueft die Sitzung nur beim Betreten; ein Abschnitt, der danach 401 bekommt,
+		// schickt zur Anmeldung statt einen Fehler zu zeigen (wie die Seite Meine Jungfischer).
+		effect(() => {
+			const fehler = [this.kinderFehler(), this.verwaltungFehler(), this.ansprechpartnerFehler()];
+			untracked(() => void this.pruefeAbgelaufen(fehler));
+		});
+	}
+
+	protected text(f: ApiFehler): string {
+		return this.abgelaufen() ? '' : fehlertext(f);
+	}
+
+	protected untergruppen(k: KindAnsicht): string {
+		return k.untergruppen.map((u) => u.name).join(', ');
+	}
+
+	protected namen(personen: PersonListe[]): PersonListe[] {
+		return personen.slice(0, MAX_NAMEN);
+	}
+
+	private async pruefeAbgelaufen(fehler: (ApiFehler | null)[]): Promise<void> {
+		if (this.abgelaufen()) return;
+		for (const f of fehler) {
+			if (f && (await beiAbgelaufenerSitzung(this.router, this.slug(), f))) {
+				this.abgelaufen.set(true);
+				return;
+			}
+		}
+	}
 
 	protected async abmelden(): Promise<void> {
 		if (this.laeuft()) return;

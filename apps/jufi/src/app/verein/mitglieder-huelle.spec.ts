@@ -38,7 +38,11 @@ describe('Mitglieder-Huelle', () => {
 	 * Der Waechter fragt GET /ich, danach laedt der Kontext den Verein. Die Seiten unter
 	 * der Huelle holen eigene Daten; wer eine solche Seite oeffnet, beantwortet sie in kinder.
 	 */
-	async function oeffne(url: string, verein: object | Error = VEREIN, kinder?: () => Promise<void>): Promise<void> {
+	async function oeffne(
+		url: string,
+		verein: object | Error = VEREIN,
+		kinder: (() => Promise<void>) | undefined = url === '/demo' ? startDaten : undefined,
+	): Promise<void> {
 		harness = await RouterTestingHarness.create();
 		const navigation = harness.navigateByUrl(url);
 		await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
@@ -49,6 +53,12 @@ describe('Mitglieder-Huelle', () => {
 		else anfrage.flush(verein);
 		await stabil();
 		seite = harness.routeNativeElement as HTMLElement;
+	}
+
+	// Die Startseite holt ihre Abschnitte selbst; ICH hat Kinder und keine Rechte.
+	async function startDaten(): Promise<void> {
+		await vi.waitFor(() => http.expectOne(`${API}/ansprechpartner`).flush({ ansprechpartner: [] }));
+		await vi.waitFor(() => http.expectOne(`${API}/meine-jungfischer`).flush({ kinder: [] }));
 	}
 
 	const profilDaten = () => vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
@@ -78,7 +88,7 @@ describe('Mitglieder-Huelle', () => {
 		await oeffne('/demo');
 
 		expect(seite.querySelectorAll('main').length).toBe(1);
-		expect(seite.querySelector('main')?.textContent).toContain('Willkommen');
+		expect(seite.querySelector('main')?.textContent).toContain('Hallo Anna');
 	});
 
 	// Gewollt: Die Seiten holen ihre Daten selbst, ein leerer Bildschirm bis zur Antwort von /verein waere laenger.
@@ -94,6 +104,7 @@ describe('Mitglieder-Huelle', () => {
 		expect(leiste().length).toBe(2);
 		expect(seite.querySelector('header .name')).toBeNull();
 
+		await startDaten();
 		http.expectOne(`${API}/verein`).flush(VEREIN);
 		await stabil();
 		expect(seite.querySelector('header .name')?.textContent).toContain('Jungfischer Demo');
@@ -132,6 +143,8 @@ describe('Mitglieder-Huelle', () => {
 		const navigation = harness.navigateByUrl('/demo');
 		await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
 		await navigation;
+		// Die Startseite ist schon da und fragt; ein 404 baut sie erst danach ab.
+		await startDaten();
 		http.expectOne(`${API}/verein`).flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
 		await stabil();
 		seite = harness.routeNativeElement as HTMLElement;
@@ -154,6 +167,11 @@ describe('Mitglieder-Huelle', () => {
 		await vi.waitFor(() => {
 			harness.detectChanges();
 			http.expectOne(`${API}/verein`).flush(VEREIN);
+		});
+		// Mit dem Verein steht die Startseite wieder da und fragt ihre Abschnitte neu.
+		await vi.waitFor(() => {
+			harness.detectChanges();
+			return startDaten();
 		});
 		await stabil();
 
