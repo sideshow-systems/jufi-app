@@ -209,10 +209,7 @@ describe('warnhinweise', () => {
 	it('meldet Volljaehrigkeit mit dem 18. Geburtstag, bis sie geprueft ist', () => {
 		const alt = kind('alt', new Date('2008-03-10'));
 		const e = { ...basis, person: alt, zuordnungen: [z('mutter', 'alt')], hatGueltigeEinwilligung: false };
-		expect(warnhinweise(e, JETZT)).toEqual([
-			{ art: 'OHNE_FAMILIE' },
-			{ art: 'VOLLJAEHRIG', seit: new Date('2026-03-10') },
-		]);
+		expect(warnhinweise(e, JETZT)).toEqual([{ art: 'VOLLJAEHRIG', seit: new Date('2026-03-10') }]);
 		expect(warnhinweise({ ...e, volljaehrigGeprueftAm: new Date('2026-04-01') }, JETZT)).toEqual([]);
 	});
 });
