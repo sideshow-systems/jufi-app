@@ -126,6 +126,7 @@ export class VereinStartComponent {
 		this.abmeldefehler.set(null);
 		try {
 			await firstValueFrom(this.mitglieder.abmelden(this.slug()));
+			this.sitzung.ich.set(null);
 			await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
 		} catch (ursache) {
 			// Bleibt die Person auf der Seite, weiss sie, dass die Sitzung noch steht: kein stilles Scheitern.

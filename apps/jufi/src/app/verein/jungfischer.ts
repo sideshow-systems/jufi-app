@@ -233,7 +233,12 @@ export class JungfischerComponent implements OnInit {
 	}
 
 	protected setzeZugang(k: KindAnsicht, erlaubt: boolean): Promise<void> {
-		return this.fuehreAus(k, () => firstValueFrom(this.api.setzeKindZugang(this.slug(), k.id, erlaubt)));
+		return this.fuehreAus(
+			k,
+			() => firstValueFrom(this.api.setzeKindZugang(this.slug(), k.id, erlaubt)),
+			// Der Server loescht beim Entziehen die offenen Einladungen; der Link waere tot.
+			!erlaubt,
+		);
 	}
 
 	protected gibEinwilligung(k: KindAnsicht): Promise<void> {
@@ -241,7 +246,7 @@ export class JungfischerComponent implements OnInit {
 	}
 
 	protected widerrufe(k: KindAnsicht): Promise<void> {
-		return this.fuehreAus(k, () => firstValueFrom(this.api.kindEinwilligung(this.slug(), k.id, false)));
+		return this.fuehreAus(k, () => firstValueFrom(this.api.kindEinwilligung(this.slug(), k.id, false)), true);
 	}
 
 	protected async erzeugeLink(k: KindAnsicht): Promise<void> {
@@ -255,12 +260,19 @@ export class JungfischerComponent implements OnInit {
 	 * Aktion, danach Liste neu. Ein Fehler steht beim Kind, nicht oben: Bei mehreren
 	 * Kindern muss klar sein, welche Aktion gescheitert ist.
 	 */
-	private async fuehreAus(k: KindAnsicht, aktion: () => Promise<unknown>): Promise<void> {
+	private async fuehreAus(k: KindAnsicht, aktion: () => Promise<unknown>, loeschtLink = false): Promise<void> {
 		if (this.laeuft()) return;
 		this.laeuft.set(true);
 		this.fehler.update((alt) => ({ ...alt, [k.id]: '' }));
 		try {
 			await aktion();
+			if (loeschtLink) {
+				this.links.update((alt) => {
+					const neu = { ...alt };
+					delete neu[k.id];
+					return neu;
+				});
+			}
 			this.widerrufId.set(null);
 			await this.lade();
 		} catch (ursache) {

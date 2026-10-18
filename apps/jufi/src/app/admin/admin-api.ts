@@ -27,6 +27,8 @@ export interface TotpStart {
 export interface Einladung {
 	link: string;
 	text: string;
+	/** ISO-Zeitpunkt; die Verwaltungs-Endpunkte liefern ihn noch nicht. */
+	ablauf?: string;
 }
 
 export type VereinStatus = 'AKTIV' | 'GESPERRT';

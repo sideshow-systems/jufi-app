@@ -10,6 +10,7 @@ import { zeitpunktBerlin } from '../gestaltung/format';
 import { KarteComponent } from '../gestaltung/ui';
 import type { MitgliedIch } from './mitglieder-api';
 import { MitgliederApi } from './mitglieder-api';
+import { MitgliedSitzung } from './mitglied-waechter';
 import { VereinKopfComponent } from './verein-kopf';
 
 /** Dieselbe Grenze wie der Server (profil.ts), damit ein Tippfehler keinen Weg ueber das Netz braucht. */
@@ -317,6 +318,7 @@ export class ProfilComponent implements OnInit {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly router = inject(Router);
+	private readonly sitzung = inject(MitgliedSitzung);
 	protected readonly passkeys = inject(PasskeyBrowser);
 
 	protected readonly ich = signal<MitgliedIch | null>(null);
@@ -469,6 +471,7 @@ export class ProfilComponent implements OnInit {
 		try {
 			const aufruf: Observable<void> = ueberall ? this.api.abmeldenAlle(this.slug()) : this.api.abmelden(this.slug());
 			await firstValueFrom(aufruf);
+			this.sitzung.ich.set(null);
 			await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
 		} catch (ursache) {
 			// Die Sitzung steht dann vielleicht noch: Die Person soll es erfahren, statt auf einer toten Seite zu glauben, sie sei draussen.

@@ -99,8 +99,9 @@ describe('Meine Jungfischer', () => {
 		knopf(seite, 'Einwilligung widerrufen').click();
 		await stabil();
 		http.expectNone(`${API}/meine-jungfischer/k1/einwilligung`);
-		expect(seite.textContent).toContain('Zugang');
-		expect(seite.textContent).toContain('endet');
+		const frage = seite.querySelector('[role="alertdialog"]')?.textContent ?? '';
+		expect(frage).toContain('Der Zugang von Lena endet');
+		expect(frage).toContain('keine andere Einwilligung besteht');
 		knopf(seite, 'Ja, widerrufen').click();
 		const anfrage = http.expectOne(`${API}/meine-jungfischer/k1/einwilligung`);
 		expect(anfrage.request.body).toEqual({ erteilen: false });
@@ -143,6 +144,21 @@ describe('Meine Jungfischer', () => {
 		await neuGeladen([kind()]);
 		// Das Neuladen darf den Link nicht wegraeumen: Er ist nur dieses eine Mal zu sehen.
 		expect(seite.textContent).toContain('hier ist dein Link');
+		expect(seite.textContent).toContain('Der Link gilt bis 01.11.2026, 01:00 Uhr');
 		expect(knopf(seite, 'Link kopieren')).toBeTruthy();
+	});
+
+	it('Zugang entziehen räumt den angezeigten Link weg', async () => {
+		await oeffne([kind()]);
+		knopf(seite, 'Neuen Link erzeugen').click();
+		http
+			.expectOne(`${API}/meine-jungfischer/k1/einladung`)
+			.flush({ link: 'l', text: 'Hallo Lena, dein Link', ablauf: '2026-11-01T00:00:00.000Z' });
+		await neuGeladen([kind()]);
+		expect(seite.textContent).toContain('dein Link');
+		knopf(seite, 'Zugang entziehen').click();
+		http.expectOne(`${API}/meine-jungfischer/k1/zugang`).flush({ erlaubt: false });
+		await neuGeladen([kind({ zugang: { erlaubt: false, vorhanden: true, einwilligungGueltig: true } })]);
+		expect(seite.textContent).not.toContain('dein Link');
 	});
 });
