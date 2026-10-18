@@ -1,9 +1,6 @@
-import { initialen } from '@jufi/domain';
+import { initialen, LOGO_MAX_BYTES } from '@jufi/domain';
 import sharp from 'sharp';
 import { vereinsfarben } from '../../app/gestaltung/farben.js';
-
-/** Hoechste Groesse der Eingabe in Bytes (Spec 8.5). */
-export const LOGO_MAX_BYTES = 1024 * 1024;
 
 /**
  * Hoechste Pixelzahl der Eingabe. Ein PNG mit 10 000 x 10 000 Pixeln ist

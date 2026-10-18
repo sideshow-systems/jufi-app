@@ -1,7 +1,8 @@
+import { LOGO_MAX_BYTES } from '@jufi/domain';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { vereinsfarben } from '../../app/gestaltung/farben.js';
-import { initialenIcon, LOGO_MAX_BYTES, verarbeiteLogo } from './logo.js';
+import { initialenIcon, verarbeiteLogo } from './logo.js';
 
 // Testbilder entstehen hier mit sharp selbst: Binaerdateien im Repo wuerden
 // niemand pruefen, und die Eigenschaften (Alpha, EXIF, Masse) stehen so im Test.

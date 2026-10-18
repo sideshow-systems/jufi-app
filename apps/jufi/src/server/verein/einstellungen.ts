@@ -1,6 +1,8 @@
 import { sperreVereinszeile, type VereinDb } from '@jufi/db';
 import {
 	hatRecht,
+	LOGO_MAX_BYTES,
+	LOGO_ZU_GROSS,
 	normalisiereFarbe,
 	pruefeAnzeigename,
 	pruefeFarbe,
@@ -13,10 +15,10 @@ import { asynchron } from '../admin/asynchron.js';
 import { brauchtMitglied, mitgliedKontext } from '../mitglieder/sitzung.js';
 import { statt404 } from '../mitglieder/verwaltung.js';
 import { vereinsKontext } from '../verein.js';
-import { LOGO_MAX_BYTES, verarbeiteLogo } from './logo.js';
+import { verarbeiteLogo } from './logo.js';
 
 const FORMAT_FEHLER = { fehler: 'Bitte ein PNG- oder JPEG-Bild wählen' };
-const ZU_GROSS = { fehler: 'Das Bild ist zu groß (höchstens 1 MB)' };
+const ZU_GROSS = { fehler: LOGO_ZU_GROSS };
 
 /** Alles, was sich ueber die Oberflaeche aendern laesst. Slug und Status gehoeren dem Plattform-Admin. */
 const FELDER = ['name', 'anzeigename', 'kontakt', 'farbe'] as const;

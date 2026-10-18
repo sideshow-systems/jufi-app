@@ -11,7 +11,7 @@ import {
 	untracked,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { initialen } from '@jufi/domain';
+import { initialen, LOGO_MAX_BYTES, LOGO_ZU_GROSS } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
@@ -22,17 +22,6 @@ import { KarteComponent } from '../../gestaltung/ui';
 import { type Einstellungen, type EinstellungenAenderung, MitgliederApi } from '../mitglieder-api';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { logoAdresse, VereinKontext } from '../verein-kontext';
-
-/**
- * Hoechste Groesse des Logos in Bytes. Gleich LOGO_MAX_BYTES in server/verein/logo.ts: Der Client
- * darf Server-Code nicht importieren (er zoege sharp ins Bundle), also steht der Wert hier ein
- * zweites Mal. Aendert sich einer, muss sich der andere aendern. Die Seite prueft vorab, damit
- * ein zu grosses Bild gar nicht erst hochgeladen wird; der Server prueft trotzdem.
- */
-const LOGO_MAX_BYTES = 1024 * 1024;
-
-/** Gleicher Text wie die 413-Antwort des Servers (verein/einstellungen.ts), damit beide Wege dasselbe sagen. */
-const LOGO_ZU_GROSS = 'Das Bild ist zu groß (höchstens 1 MB)';
 
 type Bereich = 'verein' | 'farbe' | 'logo';
 
@@ -80,6 +69,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 									name="anzeigename"
 									maxlength="24"
 									autocomplete="off"
+									[readOnly]="aktiv() === 'verein'"
 									[value]="anzeigename()"
 									[attr.aria-invalid]="fehlerBei('anzeigename') ? 'true' : null"
 									[attr.aria-describedby]="
@@ -90,7 +80,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 							</label>
 							<p class="hinweis gedaempft klein">
 								<span>Steht oben in der App.</span>
-								<span id="anzeigename-zaehler">{{ anzeigename().length }}/24</span>
+								<span id="anzeigename-zaehler">{{ anzeigenameLaenge() }}/24</span>
 							</p>
 							@if (fehlerBei('anzeigename'); as text) {
 								<p id="anzeigename-fehler" class="fehler" role="alert">{{ text }}</p>
@@ -104,6 +94,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 									name="name"
 									maxlength="120"
 									autocomplete="off"
+									[readOnly]="aktiv() === 'verein'"
 									[value]="name()"
 									[attr.aria-invalid]="fehlerBei('name') ? 'true' : null"
 									[attr.aria-describedby]="fehlerBei('name') ? 'name-fehler' : null"
@@ -121,6 +112,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 									name="kontakt"
 									rows="3"
 									maxlength="500"
+									[readOnly]="aktiv() === 'verein'"
 									[value]="kontakt()"
 									[attr.aria-invalid]="fehlerBei('kontakt') ? 'true' : null"
 									[attr.aria-describedby]="fehlerBei('kontakt') ? 'kontakt-hinweis kontakt-fehler' : 'kontakt-hinweis'"
@@ -145,7 +137,14 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 							<p class="fehler" role="alert">{{ text }}</p>
 						}
 						<div class="reihe">
-							<button type="submit" class="knopf primaer" [disabled]="laeuft() || !vereinGeaendert()">Speichern</button>
+							<button
+								type="submit"
+								class="knopf primaer"
+								aria-label="Vereinsangaben speichern"
+								[disabled]="laeuft() || !vereinGeaendert()"
+							>
+								Speichern
+							</button>
 						</div>
 					</form>
 				</jf-karte>
@@ -158,6 +157,9 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 								type="color"
 								name="farbe"
 								aria-label="Vereinsfarbe"
+								[disabled]="aktiv() === 'farbe'"
+								[attr.aria-invalid]="allgemeinerFehler('farbe') ? 'true' : null"
+								[attr.aria-describedby]="farbeBeschreibung()"
 								[value]="farbe()"
 								(input)="waehleFarbe($event)"
 							/>
@@ -173,23 +175,30 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 							>
 						</div>
 						@if (angepasst().hell) {
-							<p class="gedaempft klein">
+							<p id="farbe-hinweis-hell" class="gedaempft klein">
 								Für gute Lesbarkeit verwendet die App im hellen Modus einen angepassten Ton.
 							</p>
 						}
 						@if (angepasst().dunkel) {
-							<p class="gedaempft klein">
+							<p id="farbe-hinweis-dunkel" class="gedaempft klein">
 								Für gute Lesbarkeit verwendet die App im dunklen Modus einen angepassten Ton.
 							</p>
 						}
-						<p class="gedaempft klein">
+						<p id="farbe-hinweis" class="gedaempft klein">
 							Die Vorschau gilt sofort in der ganzen App, bis du die Seite verlässt oder speicherst.
 						</p>
 						@if (allgemeinerFehler('farbe'); as text) {
-							<p class="fehler" role="alert">{{ text }}</p>
+							<p id="farbe-fehler" class="fehler" role="alert">{{ text }}</p>
 						}
 						<div class="reihe">
-							<button type="submit" class="knopf primaer" [disabled]="laeuft() || !farbeGeaendert()">Speichern</button>
+							<button
+								type="submit"
+								class="knopf primaer"
+								aria-label="Vereinsfarbe speichern"
+								[disabled]="laeuft() || !farbeGeaendert()"
+							>
+								Speichern
+							</button>
 						</div>
 					</form>
 				</jf-karte>
@@ -215,14 +224,15 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 								type="file"
 								name="logo"
 								accept="image/png,image/jpeg"
-								aria-describedby="logo-hinweis"
+								[attr.aria-describedby]="allgemeinerFehler('logo') ? 'logo-hinweis logo-fehler' : 'logo-hinweis'"
+								[attr.aria-invalid]="allgemeinerFehler('logo') ? 'true' : null"
 								[disabled]="laeuft()"
 								(change)="waehleLogo($event)"
 							/>
 						</label>
 						<p id="logo-hinweis" class="hinweis gedaempft klein">PNG oder JPEG, höchstens 1 MB.</p>
 						@if (allgemeinerFehler('logo'); as text) {
-							<p class="fehler" role="alert">{{ text }}</p>
+							<p id="logo-fehler" class="fehler" role="alert">{{ text }}</p>
 						}
 					</div>
 				</jf-karte>
@@ -324,8 +334,13 @@ export class EinstellungenComponent implements OnInit {
 	protected readonly gespeichert = signal<Einstellungen | null>(null);
 	protected readonly nichtGefunden = signal(false);
 	protected readonly ladefehler = signal<string | null>(null);
-	/** Eine Handlung zur Zeit: Zwei schnelle Klicks schickten sonst zwei Anfragen, deren Antworten sich ueberholen koennten. */
-	protected readonly laeuft = signal(false);
+	/**
+	 * Die Karte, die gerade speichert. Eine Handlung zur Zeit: Zwei schnelle Klicks schickten sonst zwei Anfragen,
+	 * deren Antworten sich ueberholen koennten. Die Felder der Karte sind in der Zeit gesperrt; sonst ginge
+	 * eine Eingabe nach dem Klick still verloren, wenn die Antwort die Felder mit dem Serverstand fuellt.
+	 */
+	protected readonly aktiv = signal<Bereich | null>(null);
+	protected readonly laeuft = computed(() => this.aktiv() !== null);
 	protected readonly fehler = signal<{ bereich: Bereich; feld: string | null; text: string } | null>(null);
 
 	protected readonly name = signal('');
@@ -333,6 +348,27 @@ export class EinstellungenComponent implements OnInit {
 	protected readonly kontakt = signal('');
 	protected readonly farbe = signal('');
 
+	/**
+	 * Gezaehlt wie die Pruefung des Servers (libs/domain, laengeImBereich): Codepoints des getrimmten
+	 * Texts. Das maxlength-Attribut zaehlt UTF-16-Einheiten und ist bei Emojis strenger; es bleibt,
+	 * weil es nur zu frueh warnt und nie etwas durchlaesst, was der Server ablehnt.
+	 */
+	protected readonly anzeigenameLaenge = computed(() => [...this.anzeigename().trim()].length);
+	/**
+	 * Was der Farbwaehler beschreibt: die Hinweise zum angepassten Ton, die Vorschau-Zeile und, solange er
+	 * steht, der Fehler. Ein Screenreader erfaehrt den angepassten Ton sonst nur, wenn er die Karte durchliest;
+	 * die Hinweise sind keine Live-Region, weil sie sich mit jedem Ziehen im Farbwaehler aendern koennen.
+	 */
+	protected readonly farbeBeschreibung = computed(() =>
+		[
+			this.angepasst().hell ? 'farbe-hinweis-hell' : null,
+			this.angepasst().dunkel ? 'farbe-hinweis-dunkel' : null,
+			'farbe-hinweis',
+			this.allgemeinerFehler('farbe') ? 'farbe-fehler' : null,
+		]
+			.filter((id) => id !== null)
+			.join(' '),
+	);
 	protected readonly satz = computed(() => vereinsfarben(this.farbe()));
 	protected readonly angepasst = computed(() => farbeAngepasst(this.farbe()));
 	protected readonly vereinGeaendert = computed(() => Object.keys(this.vereinAenderung()).length > 0);
@@ -356,6 +392,13 @@ export class EinstellungenComponent implements OnInit {
 		// Der Kontext setzt die Vereinsfarbe bei jedem Neuladen auf den gespeicherten Stand. Eine Vorschau,
 		// die beim Speichern des Namens noch laeuft, ginge damit verloren, obwohl das Feld sie noch zeigt.
 		// Der Effekt hat nur den Kontext als Abhaengigkeit und setzt die Farbe des Felds danach neu.
+		// Das traegt nur, weil Angular Root-Effekte (der des Kontexts, providedIn root) vor View-Effekten
+		// (dieser hier, am Bauteil) ausfuehrt: Meiner laeuft zuletzt und gewinnt. Wanderte der Effekt des
+		// Kontexts in ein Bauteil oder in afterRenderEffect, ueberschriebe er die Vorschau wieder; der Test
+		// "eine ungespeicherte Farbe bleibt ..." faellt dann auf. Verworfen: ein Vorschau-Signal im
+		// Kontext (vorschau() ?? v.farbe), dann gaebe es nur eine Stelle, die die Farbe setzt. Es haette
+		// aber den Kontext und den ThemaService um Zustand erweitert, den allein diese Seite braucht,
+		// und wuerde dieselbe Stelle anfassen wie der zurueckgestellte Fehler bei neuLaden().
 		effect(() => {
 			this.kontext.verein();
 			untracked(() => {
@@ -482,7 +525,7 @@ export class EinstellungenComponent implements OnInit {
 	 */
 	private async fuehreAus(bereich: Bereich, aktion: () => Promise<void>): Promise<void> {
 		if (this.laeuft()) return;
-		this.laeuft.set(true);
+		this.aktiv.set(bereich);
 		this.fehler.set(null);
 		try {
 			await aktion();
@@ -494,7 +537,7 @@ export class EinstellungenComponent implements OnInit {
 			const feld = bereich === 'verein' && f.feld && VEREIN_FELDER.includes(f.feld) ? f.feld : null;
 			this.fehler.set({ bereich, feld, text: fehlertext(f) });
 		} finally {
-			this.laeuft.set(false);
+			this.aktiv.set(null);
 		}
 	}
 }

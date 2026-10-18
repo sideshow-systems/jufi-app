@@ -80,6 +80,38 @@ describe('Vereinseinstellungen', () => {
 			expect(seite.textContent).toContain('7/24');
 		});
 
+		it('zählt den Anzeigenamen wie der Server: Codepoints des getrimmten Texts', async () => {
+			const { harness, seite } = await oeffne();
+			tippe(seite, 'input[name="anzeigename"]', '  Fischer  ');
+			await stabil(harness);
+			expect(seite.textContent).toContain('7/24');
+			// Ein Emoji ist ein Codepoint, aber zwei UTF-16-Einheiten.
+			tippe(seite, 'input[name="anzeigename"]', 'Fische 🐟');
+			await stabil(harness);
+			expect(seite.textContent).toContain('8/24');
+		});
+
+		it('sperrt die Felder des Vereins, solange gespeichert wird, und gibt sie danach frei', async () => {
+			const { harness, seite, http } = await oeffne();
+			tippe(seite, 'input[name="anzeigename"]', 'Fischer');
+			await stabil(harness);
+			speichern(seite, 'Verein').click();
+			harness.detectChanges();
+			for (const sel of ['input[name="anzeigename"]', 'input[name="name"]', 'textarea[name="kontakt"]']) {
+				expect(feld<HTMLInputElement>(seite, sel).readOnly).toBe(true);
+			}
+			http.expectOne(`${API}/einstellungen`).flush({ ...EINSTELLUNGEN, anzeigename: 'Fischer' });
+			await vereinNeu(http, harness, { ...VEREIN, anzeigename: 'Fischer' });
+			expect(feld<HTMLInputElement>(seite, 'input[name="anzeigename"]').readOnly).toBe(false);
+		});
+
+		it('die beiden Speichern-Knöpfe haben unterscheidbare Namen', async () => {
+			const { seite } = await oeffne();
+			expect(speichern(seite, 'Verein').getAttribute('aria-label')).toBe('Vereinsangaben speichern');
+			expect(speichern(seite, 'Vereinsfarbe').getAttribute('aria-label')).toBe('Vereinsfarbe speichern');
+			expect(speichern(seite, 'Verein').textContent?.trim()).toBe('Speichern');
+		});
+
 		it('zeigt die Adresse nur lesend und sagt, dass sie sich nicht ändern lässt', async () => {
 			const { seite } = await oeffne();
 			const adresse = feld<HTMLInputElement>(seite, 'input[name="slug"]');
@@ -212,11 +244,48 @@ describe('Vereinseinstellungen', () => {
 			expect(seite.textContent).toContain(
 				'Für gute Lesbarkeit verwendet die App im hellen Modus einen angepassten Ton.',
 			);
-			// Eine Farbe, die in beiden Modi trägt, braucht keinen Hinweis.
-			const ton = vereinsfarben('#1d4ed8').hell.akzent;
-			tippe(seite, 'input[name="farbe"]', ton);
+			expect(seite.textContent).not.toContain('im dunklen Modus einen angepassten Ton');
+			// Keine Farbe trägt in beiden Modi (AA auf Weiß und auf dem dunklen Grund schließen sich aus). Das Blau
+			// trägt im hellen Modus, im dunklen wird es angepasst: Es steht nur der Satz zum dunklen Modus.
+			tippe(seite, 'input[name="farbe"]', vereinsfarben('#1d4ed8').hell.akzent);
 			await stabil(harness);
 			expect(seite.textContent).not.toContain('im hellen Modus einen angepassten Ton');
+			expect(seite.textContent).toContain(
+				'Für gute Lesbarkeit verwendet die App im dunklen Modus einen angepassten Ton.',
+			);
+		});
+
+		it('verknüpft Hinweise und Fehler mit dem Farbwähler', async () => {
+			const { harness, seite, http } = await oeffne();
+			const waehler = feld<HTMLInputElement>(seite, 'input[name="farbe"]');
+			tippe(seite, 'input[name="farbe"]', '#ffff00');
+			await stabil(harness);
+			const beschreibung = waehler.getAttribute('aria-describedby') ?? '';
+			expect(beschreibung).toContain('farbe-hinweis-hell');
+			expect(waehler.getAttribute('aria-invalid')).toBeNull();
+			speichern(seite, 'Vereinsfarbe').click();
+			http
+				.expectOne(`${API}/einstellungen`)
+				.flush(
+					{ fehler: 'Bitte eine Farbe als #rrggbb angeben', feld: 'farbe' },
+					{ status: 400, statusText: 'Bad Request' },
+				);
+			await stabil(harness);
+			expect(waehler.getAttribute('aria-invalid')).toBe('true');
+			expect(waehler.getAttribute('aria-describedby')).toContain('farbe-fehler');
+			expect(feld(seite, '#farbe-fehler').textContent).toContain('#rrggbb');
+		});
+
+		it('sperrt den Farbwähler, solange die Farbe gespeichert wird', async () => {
+			const { harness, seite, http } = await oeffne();
+			tippe(seite, 'input[name="farbe"]', '#e11d48');
+			await stabil(harness);
+			speichern(seite, 'Vereinsfarbe').click();
+			harness.detectChanges();
+			expect(feld<HTMLInputElement>(seite, 'input[name="farbe"]').disabled).toBe(true);
+			http.expectOne(`${API}/einstellungen`).flush({ ...EINSTELLUNGEN, farbe: '#e11d48' });
+			await vereinNeu(http, harness, { ...VEREIN, farbe: '#e11d48' });
+			expect(feld<HTMLInputElement>(seite, 'input[name="farbe"]').disabled).toBe(false);
 		});
 
 		it('Speichern übernimmt die Farbe, lädt den Verein neu und meldet Gespeichert', async () => {
@@ -302,6 +371,10 @@ describe('Vereinseinstellungen', () => {
 				'Das Bild ist zu groß (höchstens 1 MB)',
 			);
 			http.expectNone(`${API}/verein`);
+			const eingabe = feld<HTMLInputElement>(seite, 'input[type="file"]');
+			expect(eingabe.getAttribute('aria-invalid')).toBe('true');
+			expect(eingabe.getAttribute('aria-describedby')).toContain('logo-fehler');
+			expect(feld(seite, '#logo-fehler').textContent).toContain('zu groß');
 		});
 
 		it('genau 1 MB geht noch durch', async () => {

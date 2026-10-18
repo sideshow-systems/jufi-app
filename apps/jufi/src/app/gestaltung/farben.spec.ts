@@ -41,14 +41,18 @@ describe('farbeAngepasst', () => {
 		expect(farbeAngepasst(AUSGANGSFARBE).hell).toBe(false);
 	});
 
-	// Ein Fixpunkt: Die Farbe, die vereinsfarben fuer einen Modus liefert, erreicht in diesem Modus schon AA
-	// und bleibt deshalb unveraendert. Daran laesst sich pruefen, dass "angepasst" nicht immer wahr ist.
-	for (const modus of ['hell', 'dunkel'] as const) {
-		it(`meldet den fertigen Ton fuer ${modus} nicht noch einmal als angepasst`, () => {
-			const ton = vereinsfarben(AUSGANGSFARBE)[modus].akzent;
-			expect(farbeAngepasst(ton)[modus]).toBe(false);
-		});
-	}
+	// Auf dunklem Grund traegt das Teal der Ausgangsfarbe nicht: Der dunkle Modus hellt es auf.
+	it('meldet die Ausgangsfarbe im dunklen Modus als angepasst', () => {
+		expect(farbeAngepasst(AUSGANGSFARBE).dunkel).toBe(true);
+	});
+
+	// Ein Fixpunkt: Der Ton, den vereinsfarben fuer den dunklen Modus liefert, erreicht dort schon AA
+	// und bleibt unveraendert. Daran laesst sich pruefen, dass "angepasst" nicht immer wahr ist.
+	// (Fuer hell ist das die Ausgangsfarbe selbst und steht schon im Test davor.)
+	it('meldet den fertigen Ton fuer dunkel nicht noch einmal als angepasst', () => {
+		const ton = vereinsfarben(AUSGANGSFARBE).dunkel.akzent;
+		expect(farbeAngepasst(ton).dunkel).toBe(false);
+	});
 
 	it('vergleicht mit der normalisierten Eingabe, nicht mit der Schreibweise', () => {
 		expect(farbeAngepasst('#0F766E').hell).toBe(false);

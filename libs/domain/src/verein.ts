@@ -89,3 +89,9 @@ export function initialen(anzeigename: string): string {
 		.join('');
 	return text === '' ? '?' : text.toLocaleUpperCase('de');
 }
+
+// Hoechste Groesse des Logos in Bytes (Spec 8.5) und der Text, mit dem Server und Oberflaeche ein
+// zu grosses Bild ablehnen. Hier und nicht im Server, weil auch die Seite vorab pruefen soll und
+// keinen Server-Code (sharp) ins Bundle ziehen darf; so kann keine der beiden Seiten abweichen.
+export const LOGO_MAX_BYTES = 1024 * 1024;
+export const LOGO_ZU_GROSS = 'Das Bild ist zu groß (höchstens 1 MB)';
