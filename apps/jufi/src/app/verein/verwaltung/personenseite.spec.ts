@@ -250,7 +250,7 @@ describe('Personenseite', () => {
 		expect(seite.textContent).toContain('Der Link gilt bis 01.11.2026, 01:00 Uhr');
 	});
 
-	it('Per Mail senden gibt es nur mit Adresse und sendet mail:true', async () => {
+	it('Per Mail senden gibt es nur mit Adresse', async () => {
 		const ohne = await oeffneVerwaltung(kind());
 		expect(() => knopf(ohne.seite, 'Per Mail senden')).toThrow();
 	});
@@ -323,6 +323,73 @@ describe('Personenseite', () => {
 		http.expectOne(`${API}/personen/k1`).flush({ folgeangebot: [] });
 		await stabil(harness);
 		expect(seite.textContent).not.toContain('dein Link');
+	});
+
+	it('Zuordnung lösen räumt den angezeigten Link weg, weil der Server die Einladungen löscht', async () => {
+		const { harness, seite, http } = await oeffneVerwaltung(kind());
+		knopf(seite, 'Einladung erzeugen').click();
+		http
+			.expectOne(`${API}/personen/k1/einladung`)
+			.flush(
+				{ link: 'l', text: 'Hallo Lena, dein Link', ablauf: '2026-11-01T00:00:00.000Z' },
+				{ status: 201, statusText: 'Created' },
+			);
+		await neuGeladen(http, harness, kind());
+		expect(seite.textContent).toContain('dein Link');
+		knopf(seite, 'Zuordnung lösen').click();
+		await stabil(harness);
+		knopf(seite, 'Ja, lösen').click();
+		http.expectOne(`${API}/personen/k1/familie/e1`).flush(null, { status: 204, statusText: 'No Content' });
+		await neuGeladen(http, harness, kind({ familie: [] }));
+		expect(seite.textContent).not.toContain('dein Link');
+	});
+
+	it('Teilerfolg beim Hinzufügen: die neu angelegte Person steht danach zur Auswahl', async () => {
+		const { harness, seite, http } = await oeffneVerwaltung(kind());
+		hake(seite, 'input[name="modus"][value="neu"]');
+		await stabil(harness);
+		tippe(seite, 'input[name="neuVorname"]', 'Hans');
+		tippe(seite, 'input[name="neuNachname"]', 'Muster');
+		waehle(seite, 'select[name="beziehung"]', 'GROSSVATER');
+		await stabil(harness);
+		knopf(seite, 'Zur Familie hinzufügen').click();
+		http.expectOne(`${API}/personen`).flush({ id: 'e9' }, { status: 201, statusText: 'Created' });
+		const zuordnung = await vi.waitFor(() => http.expectOne(`${API}/personen/k1/familie/e9`));
+		zuordnung.flush({ fehler: 'kaputt' }, { status: 500, statusText: 'Server Error' });
+		await vi.waitFor(() =>
+			http.expectOne(`${API}/personen`).flush({
+				personen: [...ERWACHSENE.personen, { id: 'e9', art: 'ERWACHSENER', vorname: 'Hans', nachname: 'Muster' }],
+			}),
+		);
+		await stabil(harness);
+		expect((seite.querySelector('input[name="modus"][value="vorhanden"]') as HTMLInputElement).checked).toBe(true);
+		expect((seite.querySelector('select[name="erwachsener"]') as HTMLSelectElement).value).toBe('e9');
+		await vi.waitFor(async () => {
+			await stabil(harness);
+			expect(seite.querySelector('[role="alert"]')?.textContent).toContain('kaputt');
+		});
+	});
+
+	it('Freitext der Beziehung ist auf 100 Zeichen begrenzt', async () => {
+		const { harness, seite } = await oeffneVerwaltung(kind());
+		waehle(seite, 'select[name="beziehung"]', 'ANDERE');
+		await stabil(harness);
+		expect(seite.querySelector('input[name="freitext"]')?.getAttribute('maxlength')).toBe('100');
+	});
+
+	it('Stammdaten: Fehler mit Feld markiert das Feld', async () => {
+		const { harness, seite, http } = await oeffneVerwaltung(kind());
+		tippe(seite, 'input[name="nachname"]', 'Neu');
+		knopf(seite, 'Speichern').click();
+		http
+			.expectOne(`${API}/personen/k1`)
+			.flush(
+				{ fehler: 'Nachname braucht 1 bis 60 Zeichen', feld: 'nachname' },
+				{ status: 400, statusText: 'Bad Request' },
+			);
+		await stabil(harness);
+		expect(seite.querySelector('input[name="nachname"]')?.getAttribute('aria-invalid')).toBe('true');
+		expect(seite.querySelector('input[name="vorname"]')?.getAttribute('aria-invalid')).toBeNull();
 	});
 
 	it('Volljährigkeitshinweis bietet die drei Wege', async () => {

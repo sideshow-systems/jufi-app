@@ -60,6 +60,10 @@ export function verwaltungsfehler(f: ApiFehler): string {
 			return 'Das geht nicht: Der Verein braucht mindestens eine Person, die Rechte vergeben darf.';
 		case 'EMAIL_MIT_ZUGANG':
 			return 'Die E-Mail-Adresse lässt sich nicht ändern, weil die Person sich schon anmelden kann: Die Adresse ist ihre Kennung.';
+		case 'DOPPELT':
+			return f.person
+				? `Diese Person gibt es vielleicht schon: ${f.person.vorname} ${f.person.nachname}. Wähle sie unter „Vorhandene Person“ aus oder lege sie über „Person anlegen“ trotzdem neu an.`
+				: 'Diese Person gibt es vielleicht schon.';
 		case 'EMAIL_VERGEBEN':
 			return 'Diese E-Mail-Adresse gehört im Verein schon jemand anderem.';
 	}

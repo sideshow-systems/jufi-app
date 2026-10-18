@@ -191,7 +191,13 @@ interface Entfernt {
 								<div class="felder">
 									<label class="feld">
 										Vorname
-										<input name="vorname" autocomplete="off" [value]="vorname()" (input)="vorname.set(wert($event))" />
+										<input
+											name="vorname"
+											autocomplete="off"
+											[value]="vorname()"
+											[attr.aria-invalid]="markiert('vorname')"
+											(input)="vorname.set(wert($event))"
+										/>
 									</label>
 									<label class="feld">
 										Nachname
@@ -199,6 +205,7 @@ interface Entfernt {
 											name="nachname"
 											autocomplete="off"
 											[value]="nachname()"
+											[attr.aria-invalid]="markiert('nachname')"
 											(input)="nachname.set(wert($event))"
 										/>
 									</label>
@@ -209,6 +216,7 @@ interface Entfernt {
 												type="date"
 												name="geburtsdatum"
 												[value]="geburtsdatum()"
+												[attr.aria-invalid]="markiert('geburtsdatum')"
 												(input)="geburtsdatum.set(wert($event))"
 											/>
 										</label>
@@ -221,6 +229,7 @@ interface Entfernt {
 											autocomplete="off"
 											[value]="email()"
 											[disabled]="mailFest()"
+											[attr.aria-invalid]="markiert('email')"
 											[attr.aria-describedby]="mailFest() ? 'mail-fest' : null"
 											(input)="email.set(wert($event))"
 										/>
@@ -374,7 +383,9 @@ interface Entfernt {
 												<select name="erwachsener" [value]="erwachsenerId()" (change)="erwachsenerId.set(wert($event))">
 													<option value="">Bitte wählen</option>
 													@for (e of kandidaten(); track e.id) {
-														<option [value]="e.id">{{ e.vorname }} {{ e.nachname }}</option>
+														<option [value]="e.id" [selected]="e.id === erwachsenerId()">
+															{{ e.vorname }} {{ e.nachname }}
+														</option>
 													}
 												</select>
 											</label>
@@ -423,6 +434,7 @@ interface Entfernt {
 												<input
 													name="freitext"
 													autocomplete="off"
+													maxlength="100"
 													[value]="freitext()"
 													(input)="freitext.set(wert($event))"
 												/>
@@ -625,6 +637,8 @@ export class PersonenseiteComponent {
 	protected readonly laeuft = signal(false);
 	protected readonly fehler = signal<Partial<Record<Bereich, string>>>({});
 	protected readonly gespeichert = signal<Bereich | null>(null);
+	/** Das Feld, auf das sich der letzte Serverfehler bezieht (feld in der Antwort). */
+	protected readonly fehlerFeld = signal<string | null>(null);
 	protected readonly frage = signal<Frage | null>(null);
 	protected readonly link = signal<EinladungsLink | null>(null);
 	protected readonly entfernt = signal<Entfernt | null>(null);
@@ -706,6 +720,8 @@ export class PersonenseiteComponent {
 		this.ladefehler.set(null);
 		try {
 			const p = await firstValueFrom(this.api.person(this.slug(), this.id()));
+			// Eine Antwort fuer die vorige Person (Wechsel waehrend der Anfrage) darf die neue Seite nicht ueberschreiben.
+			if (p.id !== this.id()) return;
 			this.person.set(p);
 			this.fuelle(p);
 			if (mitHilfen) void this.ladeHilfen(p);
@@ -757,6 +773,10 @@ export class PersonenseiteComponent {
 	/** Die Gegenseite der Zuordnung: beim Kind der Erwachsene, beim Erwachsenen das Kind. */
 	protected gegenueberId(p: PersonDetail, f: FamilienEintrag): string {
 		return p.art === 'JUNGFISCHER' ? f.erwachsenerId : f.jungfischerId;
+	}
+
+	protected markiert(feld: string): 'true' | null {
+		return this.fehlerFeld() === feld && !!this.fehler().stamm ? 'true' : null;
 	}
 
 	protected angehakt(ereignis: Event): boolean {
@@ -813,6 +833,7 @@ export class PersonenseiteComponent {
 		this.laeuft.set(true);
 		this.fehler.update((alt) => ({ ...alt, [bereich]: '' }));
 		this.gespeichert.set(null);
+		this.fehlerFeld.set(null);
 		try {
 			await aktion();
 			this.frage.set(null);
@@ -820,7 +841,9 @@ export class PersonenseiteComponent {
 			return true;
 		} catch (ursache) {
 			this.frage.set(null);
-			this.fehler.update((alt) => ({ ...alt, [bereich]: verwaltungsfehler(alsApiFehler(ursache)) }));
+			const f = alsApiFehler(ursache);
+			this.fehlerFeld.set(f.feld ?? null);
+			this.fehler.update((alt) => ({ ...alt, [bereich]: verwaltungsfehler(f) }));
 			return false;
 		} finally {
 			this.laeuft.set(false);
@@ -909,13 +932,23 @@ export class PersonenseiteComponent {
 						)
 					).id;
 				}
-				await firstValueFrom(
-					this.api.setzeFamilie(this.slug(), p.id, erwachsenerId, {
-						beziehung,
-						...(beziehung === 'ANDERE' ? { beziehungFreitext: this.freitext().trim() } : {}),
-						erziehungsberechtigt: this.erziehungsberechtigt(),
-					}),
-				);
+				try {
+					await firstValueFrom(
+						this.api.setzeFamilie(this.slug(), p.id, erwachsenerId, {
+							beziehung,
+							...(beziehung === 'ANDERE' ? { beziehungFreitext: this.freitext().trim() } : {}),
+							erziehungsberechtigt: this.erziehungsberechtigt(),
+						}),
+					);
+				} catch (ursache) {
+					// Die Person gibt es jetzt: Ein Wiederholen im Modus neu liefe in DOPPELT. Darum steht sie danach zur Auswahl.
+					if (this.modus() === 'neu') {
+						await this.ladeErwachsene();
+						this.modus.set('vorhanden');
+						this.erwachsenerId.set(erwachsenerId);
+					}
+					throw ursache;
+				}
 			},
 			false,
 		);
@@ -931,21 +964,32 @@ export class PersonenseiteComponent {
 	}
 
 	protected schalteBerechtigung(f: FamilienEintrag): Promise<boolean> {
-		return this.fuehreAus('familie', () =>
-			firstValueFrom(
+		return this.fuehreAus('familie', async () => {
+			await firstValueFrom(
 				this.api.setzeFamilie(this.slug(), f.jungfischerId, f.erwachsenerId, {
 					beziehung: f.beziehung,
 					...(f.beziehung === 'ANDERE' && f.beziehungFreitext ? { beziehungFreitext: f.beziehungFreitext } : {}),
 					erziehungsberechtigt: !f.erziehungsberechtigt,
 				}),
-			),
-		);
+			);
+			this.verwirfLink();
+		});
+	}
+
+	/**
+	 * Aendert sich die Familie, kann der Server den Zugang des Kindes entziehen (entzieheZugangWennUngueltig)
+	 * und loescht dabei die offenen Einladungen: Der angezeigte Link waere tot. Verworfen: nur nach dem
+	 * Neuladen am Zugangsstand pruefen -- der Stand sagt nicht, ob genau diese Einladung noch gilt.
+	 */
+	private verwirfLink(): void {
+		this.link.set(null);
 	}
 
 	protected async loese(f: FamilienEintrag): Promise<void> {
-		await this.fuehreAus('familie', () =>
-			firstValueFrom(this.api.loeseFamilie(this.slug(), f.jungfischerId, f.erwachsenerId)),
-		);
+		await this.fuehreAus('familie', async () => {
+			await firstValueFrom(this.api.loeseFamilie(this.slug(), f.jungfischerId, f.erwachsenerId));
+			this.verwirfLink();
+		});
 	}
 
 	protected async loeseAlle(p: PersonDetail): Promise<void> {
@@ -953,6 +997,7 @@ export class PersonenseiteComponent {
 		await this.fuehreAus('volljaehrig', async () => {
 			for (const f of eintraege) {
 				await firstValueFrom(this.api.loeseFamilie(this.slug(), f.jungfischerId, f.erwachsenerId));
+				this.verwirfLink();
 			}
 		});
 	}
