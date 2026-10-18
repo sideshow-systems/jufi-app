@@ -4,6 +4,7 @@ import type {
 	PublicKeyCredentialCreationOptionsJSON,
 	PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
+import type { Beziehung, RechtName } from '@jufi/domain';
 import { catchError, type Observable, throwError } from 'rxjs';
 import { alsApiFehler } from '../gemeinsam/api-fehler';
 
@@ -14,6 +15,8 @@ export interface MitgliedIch {
 	kennung: string | null;
 	passkeys: { id: string; label: string; erstelltAm: string; zuletztGenutztAm: string | null }[];
 	hatPasswort: boolean;
+	/** Ob die Person (noch nicht entfernte) Kinder hat; nur dann zeigt die Oberflaeche "Meine Jungfischer". */
+	hatKinder: boolean;
 	totp: { moeglich: boolean; aktiv: boolean; wiederherstellungscodesUebrig: number };
 }
 
@@ -28,6 +31,24 @@ export interface EinladungInfo {
 	kennung: { fest: boolean; wert: string | null };
 	hatZugang: boolean;
 	einwilligungFehlt: boolean;
+	/** Nur Kinder, fuer die diese Person heute einwilligen duerfte; fuer Jungfischer immer leer. */
+	kinder: EinladungKind[];
+	/** Was die Person beim Einwilligen liest; die Version hält der Server als Nachweis fest. */
+	einwilligungsText: { version: string; text: string };
+}
+
+export interface EinladungKind {
+	id: string;
+	vorname: string;
+	zugangErlaubt: boolean;
+	/** Hat schon jemand aus der Familie gueltig eingewilligt? Dann ist der Schritt freiwillig. */
+	einwilligungVorhanden: boolean;
+}
+
+export interface Einwilligungswunsch {
+	kindId: string;
+	einwilligen: boolean;
+	zugang: boolean;
 }
 
 export interface EinloesenDaten {
@@ -36,6 +57,8 @@ export interface EinloesenDaten {
 	passwort?: string;
 	/** Antwort der Passkey-Zeremonie, wenn statt eines Passworts ein Passkey eingerichtet wird. */
 	passkey?: unknown;
+	/** Nur bei Erwachsenen mit Kindern; fehlt der Schluessel, aendert sich an den Kindern nichts. */
+	einwilligungen?: Einwilligungswunsch[];
 }
 
 export interface MitgliedTotpStart {
@@ -43,6 +66,102 @@ export interface MitgliedTotpStart {
 	geheimnis: string;
 	uri: string;
 	wiederherstellungscodes: string[];
+}
+
+/** Die Hinweise der Verwaltung; Zeitpunkte kommen als ISO-Text, nicht als Date. */
+export type Warnhinweis =
+	| { art: 'OHNE_FAMILIE' }
+	| { art: 'EINWILLIGUNG_FEHLT' }
+	| { art: 'EINLADUNG_OFFEN'; ablauf: string }
+	| { art: 'MAIL_NICHT_ZUGESTELLT' }
+	| { art: 'VOLLJAEHRIG'; seit: string };
+
+/**
+ * Eine Zeile der Mitgliederliste. Der Server baut sie je nach Einsicht des Betrachters
+ * auf: alles ausser den Namen kann fehlen, darum sind die Felder optional.
+ */
+export interface PersonListe {
+	id: string;
+	art: 'ERWACHSENER' | 'JUNGFISCHER';
+	vorname: string;
+	nachname: string;
+	geburtsdatum?: string;
+	jugendsprecher?: boolean;
+	rechte?: string[];
+	email?: string;
+	untergruppen?: { id: string; name: string }[];
+	warnhinweise?: Warnhinweis[];
+}
+
+/** Familienbeziehung aus Sicht der angezeigten Person: vorname/nachname sind die der Gegenseite. */
+export interface FamilienEintrag {
+	erwachsenerId: string;
+	jungfischerId: string;
+	vorname: string;
+	nachname: string;
+	beziehung: Beziehung;
+	beziehungFreitext: string | null;
+	erziehungsberechtigt: boolean;
+}
+
+export interface PersonDetail extends PersonListe {
+	familie?: FamilienEintrag[];
+	/** Nur fuer die Verwaltung. */
+	einladung?: { offen: boolean; ablauf: string | null; mailNichtZugestellt: boolean } | null;
+	/** Nur fuer die Verwaltung. */
+	zugang?: { vorhanden: boolean; letzteAnmeldungAm: string | null; erlaubt: boolean } | null;
+}
+
+export interface Untergruppe {
+	id: string;
+	name: string;
+	mitglieder: number;
+}
+
+export interface NeuePerson {
+	art: 'ERWACHSENER' | 'JUNGFISCHER';
+	vorname: string;
+	nachname: string;
+	geburtsdatum?: string;
+	email?: string | null;
+	untergruppenIds?: string[];
+	/** Bestaetigt die Anlage trotz Doppelt-Hinweis (409 DOPPELT). */
+	trotzdem?: boolean;
+}
+
+export interface PersonAenderung {
+	vorname?: string;
+	nachname?: string;
+	geburtsdatum?: string;
+	email?: string | null;
+	jugendsprecher?: boolean;
+}
+
+export interface FamilienAngabe {
+	beziehung: Beziehung;
+	beziehungFreitext?: string;
+	/** Fehlt sie, setzt der Server die Vorbelegung der Beziehung. */
+	erziehungsberechtigt?: boolean;
+}
+
+/** Einladungs- oder Zugangslink, wie der Server ihn ausgibt; das Token steht nur hier und in der Mail. */
+export interface EinladungsLink {
+	link: string;
+	text: string;
+	ablauf: string;
+}
+
+/** Ein Kind aus Sicht seiner Familie ("Meine Jungfischer"). */
+export interface KindAnsicht {
+	id: string;
+	vorname: string;
+	nachname: string;
+	jugendsprecher: boolean;
+	untergruppen: { id: string; name: string }[];
+	familie: { vorname: string; nachname: string; beziehung: Beziehung; beziehungFreitext: string | null }[];
+	zugang: { erlaubt: boolean; vorhanden: boolean; einwilligungGueltig: boolean };
+	ichBinErziehungsberechtigt: boolean;
+	volljaehrig: boolean;
 }
 
 /**
@@ -65,7 +184,12 @@ export class MitgliederApi {
 			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
-	private senden<T>(methode: 'POST' | 'PATCH' | 'DELETE', slug: string, pfad: string, koerper?: object): Observable<T> {
+	private senden<T>(
+		methode: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+		slug: string,
+		pfad: string,
+		koerper?: object,
+	): Observable<T> {
 		return this.http
 			.request<T>(methode, `${this.basis(slug)}${pfad}`, koerper === undefined ? {} : { body: koerper })
 			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
@@ -148,5 +272,101 @@ export class MitgliederApi {
 
 	totpBestaetigen(slug: string, marke: string, code: string): Observable<{ ok: true }> {
 		return this.senden('POST', slug, '/profil/totp/bestaetigen', { marke, code });
+	}
+
+	personen(slug: string): Observable<{ personen: PersonListe[] }> {
+		return this.holen(slug, '/personen');
+	}
+
+	person(slug: string, id: string): Observable<PersonDetail> {
+		return this.holen(slug, `/personen/${encodeURIComponent(id)}`);
+	}
+
+	legePersonAn(slug: string, daten: NeuePerson): Observable<{ id: string }> {
+		return this.senden('POST', slug, '/personen', daten);
+	}
+
+	aenderePerson(slug: string, id: string, daten: PersonAenderung): Observable<{ ok: true }> {
+		return this.senden('PATCH', slug, `/personen/${encodeURIComponent(id)}`, daten);
+	}
+
+	/** Die Antwort bietet Erwachsene an, die nach dem Entfernen des Kindes ohne Kind und Rechte dastehen. */
+	entfernePerson(
+		slug: string,
+		id: string,
+	): Observable<{ folgeangebot: { id: string; vorname: string; nachname: string }[] }> {
+		return this.senden('DELETE', slug, `/personen/${encodeURIComponent(id)}`);
+	}
+
+	volljaehrigBelassen(slug: string, id: string): Observable<{ ok: true }> {
+		return this.senden('POST', slug, `/personen/${encodeURIComponent(id)}/volljaehrig-belassen`, {});
+	}
+
+	setzeFamilie(
+		slug: string,
+		jungfischerId: string,
+		erwachsenerId: string,
+		angabe: FamilienAngabe,
+	): Observable<{ erziehungsberechtigt: boolean }> {
+		return this.senden('PUT', slug, this.familienPfad(jungfischerId, erwachsenerId), angabe);
+	}
+
+	loeseFamilie(slug: string, jungfischerId: string, erwachsenerId: string): Observable<void> {
+		return this.senden('DELETE', slug, this.familienPfad(jungfischerId, erwachsenerId));
+	}
+
+	private familienPfad(jungfischerId: string, erwachsenerId: string): string {
+		return `/personen/${encodeURIComponent(jungfischerId)}/familie/${encodeURIComponent(erwachsenerId)}`;
+	}
+
+	untergruppen(slug: string): Observable<{ untergruppen: Untergruppe[] }> {
+		return this.holen(slug, '/untergruppen');
+	}
+
+	legeUntergruppeAn(slug: string, name: string): Observable<{ id: string }> {
+		return this.senden('POST', slug, '/untergruppen', { name });
+	}
+
+	benenneUntergruppeUm(slug: string, id: string, name: string): Observable<void> {
+		return this.senden('PATCH', slug, `/untergruppen/${encodeURIComponent(id)}`, { name });
+	}
+
+	loescheUntergruppe(slug: string, id: string): Observable<void> {
+		return this.senden('DELETE', slug, `/untergruppen/${encodeURIComponent(id)}`);
+	}
+
+	/** Ersetzt die Mitgliedschaften des Kindes als Ganzes. */
+	setzeUntergruppen(
+		slug: string,
+		personId: string,
+		untergruppenIds: string[],
+	): Observable<{ untergruppenIds: string[] }> {
+		return this.senden('PUT', slug, `/personen/${encodeURIComponent(personId)}/untergruppen`, { untergruppenIds });
+	}
+
+	/** Ersetzt die Rechte der Person als Ganzes. */
+	setzeRechte(slug: string, id: string, rechte: RechtName[]): Observable<{ rechte: RechtName[] }> {
+		return this.senden('PUT', slug, `/personen/${encodeURIComponent(id)}/rechte`, { rechte });
+	}
+
+	/** Einladung (ohne Zugang) oder Reset (mit Zugang); mail schickt den Link zusaetzlich an die Adresse der Person. */
+	ladePersonEin(slug: string, id: string, mail = false): Observable<EinladungsLink> {
+		return this.senden('POST', slug, `/personen/${encodeURIComponent(id)}/einladung`, { mail });
+	}
+
+	meineJungfischer(slug: string): Observable<{ kinder: KindAnsicht[] }> {
+		return this.holen(slug, '/meine-jungfischer');
+	}
+
+	setzeKindZugang(slug: string, kindId: string, erlaubt: boolean): Observable<{ erlaubt: boolean }> {
+		return this.senden('POST', slug, `/meine-jungfischer/${encodeURIComponent(kindId)}/zugang`, { erlaubt });
+	}
+
+	kindEinladung(slug: string, kindId: string): Observable<EinladungsLink> {
+		return this.senden('POST', slug, `/meine-jungfischer/${encodeURIComponent(kindId)}/einladung`, {});
+	}
+
+	kindEinwilligung(slug: string, kindId: string, erteilen: boolean): Observable<{ erteilt: boolean }> {
+		return this.senden('POST', slug, `/meine-jungfischer/${encodeURIComponent(kindId)}/einwilligung`, { erteilen });
 	}
 }
