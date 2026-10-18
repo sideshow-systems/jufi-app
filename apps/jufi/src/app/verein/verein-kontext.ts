@@ -71,7 +71,7 @@ export class VereinKontext {
 	readonly logoUrl: Signal<string | null> = computed(() => {
 		const v = this.verein();
 		if (!v || v === 'nicht-gefunden' || !v.hatLogo) return null;
-		return `/${encodeURIComponent(v.slug)}/api/v1/verein/logo${versionsAnhang(v.logoStand)}`;
+		return logoAdresse(v.slug, v.logoStand);
 	});
 
 	constructor() {
@@ -114,6 +114,15 @@ export class VereinKontext {
 		this.dokument.head.appendChild(e);
 		return e;
 	}
+}
+
+/**
+ * Adresse des Vereinslogos mit dem Stand als ?v=. Auch die Einstellungen bauen sie, denn dort
+ * ist der Stand schon bekannt, bevor der Kontext neu geladen hat; verworfen: die Adresse dort
+ * ein zweites Mal zu schreiben, die Pfade liefen sonst auseinander.
+ */
+export function logoAdresse(slug: string, logoStand: string | null): string {
+	return `/${encodeURIComponent(slug)}/api/v1/verein/logo${versionsAnhang(logoStand)}`;
 }
 
 function versionsAnhang(logoStand: string | null): string {

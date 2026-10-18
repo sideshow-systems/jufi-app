@@ -70,7 +70,10 @@ export const routes: Routes = [
 						path: 'rechte',
 						loadComponent: () => import('./verein/verwaltung/rechte').then((m) => m.RechteComponent),
 					},
-					// Task 13 ergaenzt die Route einstellungen mit ihrer Seite; bis dahin fuehrt der Punkt in der Leiste ins Leere.
+					{
+						path: 'einstellungen',
+						loadComponent: () => import('./verein/verwaltung/einstellungen').then((m) => m.EinstellungenComponent),
+					},
 				],
 			},
 			// Ziel des Waechters bei 404; unter dem Slug statt als eigener Pfad, sonst waere der Pfadname ein reservierter Verein.

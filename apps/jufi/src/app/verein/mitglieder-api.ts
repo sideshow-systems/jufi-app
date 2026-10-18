@@ -181,6 +181,25 @@ export interface NotfallLinkHinweis {
 	nachname: string | null;
 }
 
+/** Die Vereinseinstellungen, wie GET und PATCH /einstellungen sie liefern (Server: verein/einstellungen.ts). */
+export interface Einstellungen {
+	slug: string;
+	name: string;
+	anzeigename: string;
+	kontakt: string | null;
+	farbe: string;
+	/** ISO-Zeit der letzten Logo-Aenderung, null ohne Logo. */
+	logoStand: string | null;
+}
+
+/** Was PATCH /einstellungen annimmt; was fehlt, bleibt unveraendert. Ein leerer Kontakt ist null. */
+export interface EinstellungenAenderung {
+	name?: string;
+	anzeigename?: string;
+	kontakt?: string | null;
+	farbe?: string;
+}
+
 /**
  * Alle Aufrufe der Mitglieder-API, einer je Endpunkt, der Slug stets als erster
  * Parameter. Der Slug ist Teil des Pfads und nicht im Dienst gemerkt: Ein
@@ -400,5 +419,32 @@ export class MitgliederApi {
 	/** Nur fuer Personen mit dem Recht JUGENDLEITER_RECHTE; sonst antwortet der Server mit 404. */
 	verwaltungsHinweise(slug: string): Observable<{ notfallLinks: NotfallLinkHinweis[] }> {
 		return this.holen(slug, '/verwaltung/hinweise');
+	}
+
+	/** Nur fuer Personen mit dem Recht EINSTELLUNGEN; sonst antwortet der Server mit 404. */
+	einstellungen(slug: string): Observable<Einstellungen> {
+		return this.holen(slug, '/einstellungen');
+	}
+
+	aendereEinstellungen(slug: string, daten: EinstellungenAenderung): Observable<Einstellungen> {
+		return this.senden('PATCH', slug, '/einstellungen', daten);
+	}
+
+	/**
+	 * Das Bild geht roh als Body, nicht als Formular: Der Server liest den Body dieser Route als
+	 * Puffer und ordnet das Format am Inhalt zu. Der Content-Type ist der der Datei; ein leerer
+	 * (unbekanntes Format) liesse den Browser keinen setzen, und der Server antwortete 415.
+	 * Verworfen: multipart, denn der Server brauchte dafuer einen eigenen Parser.
+	 */
+	ladeLogoHoch(slug: string, datei: File): Observable<{ logoStand: string }> {
+		return this.http
+			.put<{ logoStand: string }>(`${this.basis(slug)}/einstellungen/logo`, datei, {
+				headers: { 'Content-Type': datei.type },
+			})
+			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
+	}
+
+	entferneLogo(slug: string): Observable<{ logoStand: null }> {
+		return this.senden('DELETE', slug, '/einstellungen/logo');
 	}
 }

@@ -1,4 +1,4 @@
-import { FLAECHEN, kontrast, vereinsfarben } from './farben';
+import { AUSGANGSFARBE, FLAECHEN, farbeAngepasst, kontrast, vereinsfarben } from './farben';
 
 describe('kontrast', () => {
 	it('rechnet nach WCAG', () => {
@@ -29,5 +29,30 @@ describe('vereinsfarben', () => {
 
 	it('verkraftet kaputte Eingaben mit der Ausgangsfarbe', () => {
 		expect(vereinsfarben('nix').hell.akzent).toBe('#0f766e');
+	});
+});
+
+describe('farbeAngepasst', () => {
+	it('meldet Gelb im hellen Modus als angepasst (auf Weiss erreicht es AA nie)', () => {
+		expect(farbeAngepasst('#ffff00').hell).toBe(true);
+	});
+
+	it('laesst die Ausgangsfarbe im hellen Modus unveraendert', () => {
+		expect(farbeAngepasst(AUSGANGSFARBE).hell).toBe(false);
+	});
+
+	// Ein Fixpunkt: Die Farbe, die vereinsfarben fuer einen Modus liefert, erreicht in diesem Modus schon AA
+	// und bleibt deshalb unveraendert. Daran laesst sich pruefen, dass "angepasst" nicht immer wahr ist.
+	for (const modus of ['hell', 'dunkel'] as const) {
+		it(`meldet den fertigen Ton fuer ${modus} nicht noch einmal als angepasst`, () => {
+			const ton = vereinsfarben(AUSGANGSFARBE)[modus].akzent;
+			expect(farbeAngepasst(ton)[modus]).toBe(false);
+		});
+	}
+
+	it('vergleicht mit der normalisierten Eingabe, nicht mit der Schreibweise', () => {
+		expect(farbeAngepasst('#0F766E').hell).toBe(false);
+		expect(farbeAngepasst('0f766e').hell).toBe(false);
+		expect(farbeAngepasst('#FFFF00').hell).toBe(true);
 	});
 });
