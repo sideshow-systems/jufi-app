@@ -126,6 +126,8 @@ describe('MitgliederApi', () => {
 				'/v/api/v1/meine-jungfischer/k1/einwilligung',
 				{ erteilen: false },
 			],
+			[() => api.ansprechpartner('v'), 'GET', '/v/api/v1/ansprechpartner'],
+			[() => api.verwaltungsHinweise('v'), 'GET', '/v/api/v1/verwaltung/hinweise'],
 		];
 		for (const [aufruf, methode, url, body] of faelle) {
 			(aufruf() as { subscribe: (o: object) => void }).subscribe({});
@@ -134,5 +136,44 @@ describe('MitgliederApi', () => {
 			if (body !== undefined) expect(anfrage.request.body).toEqual(body);
 			anfrage.flush({});
 		}
+	});
+
+	it('einstellungen und aendereEinstellungen sprechen GET und PATCH /einstellungen', () => {
+		api.einstellungen('v').subscribe();
+		const lesen = http.expectOne('/v/api/v1/einstellungen');
+		expect(lesen.request.method).toBe('GET');
+		lesen.flush({});
+		api.aendereEinstellungen('v', { anzeigename: 'Neu', kontakt: null }).subscribe();
+		const schreiben = http.expectOne('/v/api/v1/einstellungen');
+		expect(schreiben.request.method).toBe('PATCH');
+		expect(schreiben.request.body).toEqual({ anzeigename: 'Neu', kontakt: null });
+		schreiben.flush({});
+	});
+
+	it('ladeLogoHoch schickt die Datei roh als Body mit ihrem Content-Type', () => {
+		const datei = new File([new Uint8Array([1, 2, 3])], 'logo.png', { type: 'image/png' });
+		api.ladeLogoHoch('v', datei).subscribe();
+		const anfrage = http.expectOne('/v/api/v1/einstellungen/logo');
+		expect(anfrage.request.method).toBe('PUT');
+		expect(anfrage.request.body).toBe(datei);
+		expect(anfrage.request.headers.get('Content-Type')).toBe('image/png');
+		anfrage.flush({ logoStand: 'x' });
+	});
+
+	it('entferneLogo ist ein DELETE auf /einstellungen/logo', () => {
+		api.entferneLogo('v').subscribe();
+		const anfrage = http.expectOne('/v/api/v1/einstellungen/logo');
+		expect(anfrage.request.method).toBe('DELETE');
+		anfrage.flush({ logoStand: null });
+	});
+
+	it('ein Fehler beim Logo kommt als ApiFehler mit dem Text des Servers an', () => {
+		let fehler: ApiFehler | undefined;
+		const datei = new File([new Uint8Array([1])], 'logo.gif', { type: 'image/png' });
+		api.ladeLogoHoch('v', datei).subscribe({ error: (e: ApiFehler) => (fehler = e) });
+		http
+			.expectOne('/v/api/v1/einstellungen/logo')
+			.flush({ fehler: 'Bitte ein PNG- oder JPEG-Bild wählen' }, { status: 415, statusText: 'Unsupported Media Type' });
+		expect(fehler).toEqual({ status: 415, fehler: 'Bitte ein PNG- oder JPEG-Bild wählen' });
 	});
 });

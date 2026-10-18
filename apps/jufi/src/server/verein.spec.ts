@@ -32,12 +32,13 @@ describe('Verein aus dem Slug', () => {
 			anzeigename: 'Jungfischer Glonntal',
 			farbe: '#0f766e',
 			hatLogo: false,
+			logoStand: null,
 		});
 	});
 
-	it('meldet hatLogo, sobald ein Logo hinterlegt ist', async () => {
+	it('meldet hatLogo und logoStand, sobald ein Logo hinterlegt ist', async () => {
 		const verein = await legeVereinAn(prisma, { slug: 'verein-mit-logo' });
-		await prisma.vereinLogo.create({
+		const logo = await prisma.vereinLogo.create({
 			data: {
 				vereinId: verein.id,
 				bild: Buffer.from([1]),
@@ -48,7 +49,10 @@ describe('Verein aus dem Slug', () => {
 		});
 		const r = await fetch(`${server.url}/verein-mit-logo/api/v1/verein`);
 		expect(r.status).toBe(200);
-		expect(((await r.json()) as { hatLogo: boolean }).hatLogo).toBe(true);
+		const antwort = (await r.json()) as { hatLogo: boolean; logoStand: string | null };
+		expect(antwort.hatLogo).toBe(true);
+		// ISO-Text der Aenderungszeit: Der Browser haengt ihn als ?v= an die Logo-Adresse.
+		expect(antwort.logoStand).toBe(logo.geaendertAm.toISOString());
 	});
 
 	it('gesperrter Verein ist nicht gefunden', async () => {

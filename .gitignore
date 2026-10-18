@@ -42,3 +42,10 @@ apps/entwurf/src/konfig.generated.ts
 apps/jufi/src/version.generated.ts
 libs/db/src/generated/
 apps/cli/dist/
+
+# Playwright (apps/jufi-e2e): Sitzungen und Server-Log eines Laufs, Spuren und
+# Berichte bei Fehlschlaegen. Die Sitzungen gelten nur gegen die Testdatenbank
+# des Laufs, gehoeren aber trotzdem nicht ins Repo.
+apps/jufi-e2e/.zustand/
+test-results/
+playwright-report/

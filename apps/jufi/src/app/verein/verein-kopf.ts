@@ -1,22 +1,16 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
-import { rxResource } from '@angular/core/rxjs-interop';
-import { VereinApi } from '../daten/verein-api';
-import { ThemaService } from '../gestaltung/thema';
-
-/** Gleich dem title in index.html; dorthin faellt der Titel zurueck, sobald die Seite weg ist. */
-const STANDARDTITEL = 'JuFi App';
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { VereinKontext } from './verein-kontext';
 
 /**
- * Name des Vereins als Ueberschrift, dazu Vereinsfarbe und Seitentitel. Gemeinsam fuer
- * Anmelden und Zugang verloren, damit beide Seiten nicht dieselbe Ladelogik tragen.
- * Ein unbekannter Verein oder ein Ladefehler zeigt nur den Plattformnamen: Das
+ * Name des Vereins als Ueberschrift. Gemeinsam fuer alle Vereinsseiten; den Verein selbst
+ * laedt der VereinKontext, dort stehen auch Vereinsfarbe und Seitentitel. Ein unbekannter Verein oder ein Ladefehler zeigt nur den Plattformnamen: Das
  * Formular darunter bleibt benutzbar, der Server entscheidet ohnehin selbst (404).
  */
 @Component({
 	selector: 'jf-verein-kopf',
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		@if (verein.hasValue() && verein.value(); as v) {
+		@if (kontext.verein(); as v) {
 			@if (v !== 'nicht-gefunden') {
 				<p class="gruss">{{ untertitel() }}</p>
 				<h1>{{ v.anzeigename }}</h1>
@@ -41,30 +35,11 @@ const STANDARDTITEL = 'JuFi App';
 	`,
 })
 export class VereinKopfComponent {
+	// Die Seiten reichen den Slug weiter, der Kontext kennt ihn aber schon aus der Adresse;
+	// die Eingabe bleibt, damit die Aufrufer unveraendert sind.
 	readonly slug = input.required<string>();
 	/** Die kleine Zeile ueber dem Vereinsnamen, etwa Anmelden. */
 	readonly untertitel = input.required<string>();
 
-	private readonly api = inject(VereinApi);
-	private readonly thema = inject(ThemaService);
-
-	protected readonly verein = rxResource({
-		params: () => this.slug(),
-		stream: ({ params }) => this.api.lade(params),
-	});
-
-	constructor() {
-		effect((onCleanup) => {
-			if (!this.verein.hasValue()) return;
-			const v = this.verein.value();
-			if (v && v !== 'nicht-gefunden') {
-				this.thema.setzeVereinsfarbe(v.farbe);
-				document.title = v.anzeigename;
-				onCleanup(() => {
-					this.thema.entferneVereinsfarbe();
-					document.title = STANDARDTITEL;
-				});
-			}
-		});
-	}
+	protected readonly kontext = inject(VereinKontext);
 }

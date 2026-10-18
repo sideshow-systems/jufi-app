@@ -70,6 +70,7 @@ describe('demoEinspielen', () => {
 		const rechte = async (vorname: string) =>
 			(await prisma.person.findFirstOrThrow({ where: { vorname } })).rechte.slice().sort();
 		expect(await rechte('Thomas')).toHaveLength(7);
+		expect(await rechte('Thomas')).toContain('EINSTELLUNGEN');
 		const katrin = await rechte('Katrin');
 		expect(katrin).toHaveLength(5);
 		expect(katrin).not.toContain('JUGENDLEITER_RECHTE');
@@ -90,6 +91,16 @@ describe('demoEinspielen', () => {
 		});
 		expect(sandra.map((b) => b.jungfischer.vorname).sort()).toEqual(['Lena', 'Max']);
 		expect(sandra.every((b) => b.beziehung === 'MUTTER' && b.erziehungsberechtigt)).toBe(true);
+	});
+
+	it('der Verein hat einen erfundenen Kontakttext und kein Logo', async () => {
+		await demoEinspielen(prisma, BEZUGSTAG);
+
+		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug: 'demo' } });
+		// Der Text steht in den Vereinseinstellungen im Feld Kontakt; die Adresse liegt unter example.org (RFC 2606).
+		expect(verein.kontakt).toBe('Fragen an die Jugendleitung: jugend@example.org');
+		// Ohne Logo zeigt das Icon die Initialen, das die Demo vorfuehren soll.
+		expect(await prisma.vereinLogo.count({ where: { vereinId: verein.id } })).toBe(0);
 	});
 
 	it('Erwachsene haben erfundene Adressen unter example.org', async () => {

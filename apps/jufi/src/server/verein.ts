@@ -8,11 +8,14 @@ import { familieRouten } from './mitglieder/familie.js';
 import { jungfischerRouten } from './mitglieder/jungfischer.js';
 import { personenRouten } from './mitglieder/personen.js';
 import { rechteRouten } from './mitglieder/rechte.js';
+import { datenauszugRouten } from './mitglieder/datenauszug.js';
 import { profilRouten } from './mitglieder/profil.js';
+import { startRouten } from './mitglieder/start.js';
 import { untergruppenRouten } from './mitglieder/untergruppen.js';
 import { einladenRouten, zugangRouten } from './mitglieder/zugang.js';
 import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
 import { routenAus } from './routen.js';
+import { einstellungenRouten } from './verein/einstellungen.js';
 
 /** Was vereinAusSlug in res.locals ablegt; die Endpunkte lesen es ueber vereinsKontext. */
 export interface VereinsLocals {
@@ -82,9 +85,40 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	router.get('/verein', async (_req, res, next) => {
 		try {
 			const { verein, db } = vereinsKontext(res);
-			// count statt Logo laden: das Bild bleibt in der Datenbank.
-			const hatLogo = (await db.vereinLogo.count()) > 0;
-			res.json({ slug: verein.slug, anzeigename: verein.anzeigename, farbe: verein.farbe, hatLogo });
+			// Nur die Aenderungszeit, nie die Bytes: das Bild bleibt in der Datenbank. Sie dient
+			// dem Browser als ?v= an der Logo-Adresse; ein Zaehler oder Hash waere ein weiteres
+			// Feld, das mit jeder Aenderung mitwandern muesste (verworfen).
+			const logo = await db.vereinLogo.findUnique({
+				where: { vereinId: verein.id },
+				select: { geaendertAm: true },
+			});
+			res.json({
+				slug: verein.slug,
+				anzeigename: verein.anzeigename,
+				farbe: verein.farbe,
+				hatLogo: logo !== null,
+				logoStand: logo?.geaendertAm.toISOString() ?? null,
+			});
+		} catch (error) {
+			next(error);
+		}
+	});
+
+	router.get('/verein/logo', async (_req, res, next) => {
+		try {
+			const { verein, db } = vereinsKontext(res);
+			const logo = await db.vereinLogo.findUnique({
+				where: { vereinId: verein.id },
+				select: { bild: true, mimeType: true },
+			});
+			if (!logo) {
+				res.status(404).json(NICHT_GEFUNDEN);
+				return;
+			}
+			// Ohne Anmeldung, weil die Anmeldeseite das Logo zeigt. no-cache mit ETag: Der
+			// Browser fragt nach und bekommt bei unveraendertem Logo ein 304; die Adresse
+			// traegt zusaetzlich ?v=, sodass ein neues Logo gar nicht erst aus dem Cache kommt.
+			res.type(logo.mimeType).set('Cache-Control', 'no-cache').send(Buffer.from(logo.bild));
 		} catch (error) {
 			next(error);
 		}
@@ -93,6 +127,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	einladungsRouten(router, deps);
 	anmeldeRouten(router, deps);
 	profilRouten(router, deps);
+	datenauszugRouten(router, deps);
 	personenRouten(router, deps);
 	familieRouten(router, deps);
 	untergruppenRouten(router, deps);
@@ -101,6 +136,8 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	einladenRouten(router, deps);
 	jungfischerRouten(router, deps);
 	zugangVerlorenRouten(router, deps);
+	einstellungenRouten(router, deps);
+	startRouten(router, deps);
 
 	return router;
 }

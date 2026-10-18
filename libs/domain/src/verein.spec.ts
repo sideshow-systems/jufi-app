@@ -1,8 +1,11 @@
 import {
 	DEMO_SLUG,
+	initialen,
+	KONTAKT_MAX,
 	normalisiereFarbe,
 	pruefeAnzeigename,
 	pruefeFarbe,
+	pruefeKontakt,
 	pruefeNeuenSlug,
 	pruefeVereinsname,
 	SLUG_HINWEIS,
@@ -96,5 +99,43 @@ describe('Namen', () => {
 		expect(pruefeVereinsname('a'.repeat(120))).toBe(true);
 		expect(pruefeVereinsname('a'.repeat(121))).toBe(false);
 		expect(pruefeVereinsname('  ')).toBe(false);
+	});
+});
+
+describe('initialen', () => {
+	it.each([
+		['Jungfischer Glonntal', 'JG'],
+		['jungfischer demo', 'JD'],
+		['Ötztaler Fischer', 'ÖF'],
+		['Petershausen', 'P'],
+		['Fischer-Jugend Nord', 'FJ'],
+		['  ', '?'],
+		['1889 Verein', '1V'],
+	])('macht aus %j die Initialen %j', (name, erwartet) => {
+		expect(initialen(name)).toBe(erwartet);
+	});
+
+	it('nimmt ein ganzes Graphem statt eines halben Code-Points', () => {
+		expect(initialen('🐟 Fischer')).toBe('🐟F');
+		expect(initialen('e\u0301cole Nord')).toBe('E\u0301N');
+	});
+
+	it('liefert fuer einen Namen aus lauter Trennern ein Fragezeichen', () => {
+		expect(initialen('- -')).toBe('?');
+	});
+});
+
+describe('Kontakt', () => {
+	it('erlaubt leer und bis zu 500 Zeichen', () => {
+		expect(KONTAKT_MAX).toBe(500);
+		expect(pruefeKontakt('')).toBe(true);
+		expect(pruefeKontakt('   ')).toBe(true);
+		expect(pruefeKontakt('a'.repeat(500))).toBe(true);
+		expect(pruefeKontakt('a'.repeat(501))).toBe(false);
+	});
+
+	it('zaehlt nach dem Trimmen und in Code-Points', () => {
+		expect(pruefeKontakt(' ' + 'a'.repeat(500) + ' ')).toBe(true);
+		expect(pruefeKontakt('🐟'.repeat(500))).toBe(true);
 	});
 });

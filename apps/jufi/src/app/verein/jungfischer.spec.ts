@@ -1,5 +1,6 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { adminTestAnbieter, knopf } from '../admin/test-hilfen';
 import type { KindAnsicht } from './mitglieder-api';
@@ -42,7 +43,7 @@ describe('Meine Jungfischer', () => {
 	async function oeffne(kinder: KindAnsicht[]): Promise<void> {
 		http = TestBed.inject(HttpTestingController);
 		harness = await RouterTestingHarness.create();
-		const navigation = harness.navigateByUrl('/demo/jungfischer');
+		const navigation = harness.navigateByUrl('/demo/meine-jungfischer');
 		await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
 		await navigation;
 		await vi.waitFor(() => http.expectOne(`${API}/meine-jungfischer`).flush({ kinder }));
@@ -57,6 +58,11 @@ describe('Meine Jungfischer', () => {
 		await vi.waitFor(() => http.expectOne(`${API}/meine-jungfischer`).flush({ kinder }));
 		await stabil();
 	}
+
+	it('hat die Ueberschrift Meine Jungfischer', async () => {
+		await oeffne([kind()]);
+		expect(seite.querySelector('h1')?.textContent).toBe('Meine Jungfischer');
+	});
 
 	it('zeigt die Kinder mit Familie und Untergruppen', async () => {
 		await oeffne([kind()]);
@@ -82,6 +88,25 @@ describe('Meine Jungfischer', () => {
 		await oeffne([kind({ volljaehrig: true })]);
 		expect(seite.querySelectorAll('article button').length).toBe(0);
 		expect(seite.textContent).toContain('volljährig');
+	});
+
+	// Der Waechter laeuft nur beim Betreten der Huelle; beim Wechsel zwischen den Seiten faengt die Seite das 401 selbst ab.
+	it('eine abgelaufene Sitzung beim Laden fuehrt zur Anmeldung mit weiter', async () => {
+		http = TestBed.inject(HttpTestingController);
+		harness = await RouterTestingHarness.create();
+		const navigation = harness.navigateByUrl('/demo/meine-jungfischer');
+		await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
+		await navigation;
+		await vi.waitFor(() =>
+			http
+				.expectOne(`${API}/meine-jungfischer`)
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' }),
+		);
+		await vi.waitFor(() =>
+			expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo%2Fmeine-jungfischer'),
+		);
+		// Die Anmeldeseite laedt ihren Vereinskopf; hier zaehlt nur das Ziel der Umleitung.
+		http.match(`${API}/verein`);
 	});
 
 	it('Zugang erlauben sendet und lädt neu', async () => {

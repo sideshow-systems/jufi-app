@@ -24,9 +24,9 @@ describe('mitgliedAngemeldet', () => {
 
 	afterEach(() => http.verify());
 
-	function frage(): Promise<boolean | UrlTree> {
+	function frage(url = '/glonntal'): Promise<boolean | UrlTree> {
 		const route = { paramMap: convertToParamMap({ slug: 'glonntal' }) } as ActivatedRouteSnapshot;
-		const ergebnis = TestBed.runInInjectionContext(() => mitgliedAngemeldet(route, {} as RouterStateSnapshot));
+		const ergebnis = TestBed.runInInjectionContext(() => mitgliedAngemeldet(route, { url } as RouterStateSnapshot));
 		return firstValueFrom(ergebnis as Observable<boolean | UrlTree>);
 	}
 
@@ -36,14 +36,14 @@ describe('mitgliedAngemeldet', () => {
 		expect(await ergebnis).toBe(true);
 	});
 
-	it('leitet bei 401 auf die Anmeldung des Vereins', async () => {
-		const ergebnis = frage();
+	it('leitet bei 401 auf die Anmeldung des Vereins und gibt die aufgerufene Seite als weiter mit', async () => {
+		const ergebnis = frage('/glonntal/profil');
 		http
 			.expectOne('/glonntal/api/v1/ich')
 			.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
 		const ziel = await ergebnis;
 		expect(ziel).toBeInstanceOf(UrlTree);
-		expect(TestBed.inject(Router).serializeUrl(ziel as UrlTree)).toBe('/glonntal/anmelden');
+		expect(TestBed.inject(Router).serializeUrl(ziel as UrlTree)).toBe('/glonntal/anmelden?weiter=%2Fglonntal%2Fprofil');
 	});
 
 	it('leitet bei 404 auf die Nicht-gefunden-Seite', async () => {

@@ -34,12 +34,15 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
  * beim Aufraeumen niemand raten muss:
  *
  * - Server (apps/jufi/project.json, externalDependencies): @node-rs/argon2,
- *   @prisma/client, @prisma/adapter-pg, pg, otplib, express, nodemailer.
+ *   @prisma/client, @prisma/adapter-pg, pg, otplib, express, nodemailer, sharp.
  * - CLI (apps/cli/package.json, external): @prisma/client, @prisma/adapter-pg,
  *   pg, @node-rs/argon2. Dazu otplib und @simplewebauthn/server, die nirgends
  *   ausdruecklich als extern stehen: @nx/esbuild laesst die Abhaengigkeiten der
  *   Workspace-Bibliotheken aussen, und libs/auth/package.json nennt beide. Im
  *   Server-Buendel ist @simplewebauthn/server dagegen eingebuendelt.
+ * - sharp: native Bildverarbeitung (Logo, Icons). Die Plattformpakete
+ *   (@img/sharp-linuxmusl-*) holt `npm install` in Stufe 3 selbst, passend zur
+ *   Architektur des Images; die Versionsangabe hier legt nur sharp fest.
  * - pg: Peer von @prisma/adapter-pg, auch wo kein Buendel es direkt importiert.
  * - prisma: die Kommandozeile fuer `prisma migrate deploy` im Dienst
  *   jufi-migrate. Seit Prisma 7 ohne Rust-Engines und klein genug fuer dasselbe
@@ -60,6 +63,7 @@ const RUNTIME_PACKAGES = [
 	'otplib',
 	'pg',
 	'prisma',
+	'sharp',
 ];
 
 /**

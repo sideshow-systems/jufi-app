@@ -1,0 +1,30 @@
+{
+	"name": "jufi-e2e",
+	"$schema": "../../node_modules/nx/schemas/project-schema.json",
+	"projectType": "application",
+	"sourceRoot": "apps/jufi-e2e/src",
+	"implicitDependencies": ["jufi", "cli"],
+	"targets": {
+		"e2e": {
+			"//": "Baut App (production) und CLI vorher, denn der Aufbau startet genau diese Ausgaben. Nie zwischengespeichert: Das Ergebnis haengt an Datenbank, Mailpit und Browser, nicht nur an Dateien. Nicht in pnpm test, weil es einen Bau braucht und Minuten dauert.",
+			"executor": "nx:run-commands",
+			"dependsOn": ["jufi:build", "cli:build"],
+			"cache": false,
+			"options": {
+				"cwd": "{workspaceRoot}",
+				"command": "playwright test -c apps/jufi-e2e/playwright.config.ts"
+			}
+		},
+		"typecheck": {
+			"//": "Ausdruecklich statt vom Plugin @nx/js/typescript erzeugt: Dessen tsc --build setzt Projektverweise und Deklarationen voraus, dieses Projekt erzeugt keine Ausgabe. ^typecheck schreibt die Deklarationen von libs/db, auf die der Projektverweis in tsconfig.json zeigt (den nx sync dort eintraegt).",
+			"executor": "nx:run-commands",
+			"cache": true,
+			"dependsOn": ["^typecheck"],
+			"inputs": ["default", "^default"],
+			"options": {
+				"cwd": "apps/jufi-e2e",
+				"command": "tsc -p tsconfig.json --noEmit"
+			}
+		}
+	}
+}

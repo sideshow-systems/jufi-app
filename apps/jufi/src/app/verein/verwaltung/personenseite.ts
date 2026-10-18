@@ -10,7 +10,7 @@ import {
 	untracked,
 	viewChild,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { type Beziehung, beziehungVorbelegung } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { EinladungAnzeigeComponent } from '../../admin/einladung-anzeige';
@@ -27,7 +27,7 @@ import {
 	type PersonListe,
 	type Untergruppe,
 } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { BEZIEHUNG_TEXT, BEZIEHUNGEN, beziehungText, tagBerlin, verwaltungsfehler, warnhinweisText } from './texte';
 
 type Bereich = 'stamm' | 'gruppen' | 'familie' | 'zugang' | 'entfernen' | 'volljaehrig';
@@ -57,494 +57,481 @@ interface Entfernt {
  */
 @Component({
 	selector: 'jf-personenseite',
-	imports: [EinladungAnzeigeComponent, KarteComponent, PilleComponent, RouterLink, VereinKopfComponent],
+	imports: [EinladungAnzeigeComponent, KarteComponent, PilleComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<main>
-			<jf-verein-kopf [slug]="slug()" untertitel="Person" />
-			<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
-			@if (ladefehler(); as text) {
-				<jf-karte>
+		<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
+		@if (ladefehler(); as text) {
+			<h1>Person</h1>
+			<jf-karte>
+				<p class="fehler" role="alert">{{ text }}</p>
+				<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
+			</jf-karte>
+		} @else if (entfernt(); as e) {
+			<jf-karte>
+				<h1>{{ e.name }} wurde entfernt</h1>
+				@for (a of e.angebot; track a.id) {
+					<div class="angebot" [attr.data-angebot]="a.id">
+						<p>{{ a.vorname }} {{ a.nachname }} hat keine Jungfischer mehr in der Gruppe – auch entfernen?</p>
+						<div class="reihe">
+							<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="entferneAngebot(a.id)">
+								Auch entfernen
+							</button>
+							<button type="button" class="knopf" [disabled]="laeuft()" (click)="behalteAngebot(a.id)">Behalten</button>
+						</div>
+					</div>
+				}
+				@if (e.fehler; as text) {
 					<p class="fehler" role="alert">{{ text }}</p>
-					<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
-				</jf-karte>
-			} @else if (entfernt(); as e) {
-				<jf-karte>
-					<h2>{{ e.name }} wurde entfernt</h2>
-					@for (a of e.angebot; track a.id) {
-						<div class="angebot" [attr.data-angebot]="a.id">
-							<p>{{ a.vorname }} {{ a.nachname }} hat keine Jungfischer mehr in der Gruppe – auch entfernen?</p>
+				}
+				<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Zur Mitgliederliste</a>
+			</jf-karte>
+		} @else if (person(); as p) {
+			<div class="stapel">
+				@if (frage(); as f) {
+					<jf-karte>
+						<div
+							#dialog
+							tabindex="-1"
+							class="frage"
+							role="alertdialog"
+							aria-label="Rückfrage"
+							aria-describedby="frage-text"
+						>
+							<p id="frage-text">{{ frageText(f, p) }}</p>
 							<div class="reihe">
-								<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="entferneAngebot(a.id)">
-									Auch entfernen
+								<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="bestaetige(f, p)">
+									{{ frageKnopf(f) }}
 								</button>
-								<button type="button" class="knopf" [disabled]="laeuft()" (click)="behalteAngebot(a.id)">
-									Behalten
-								</button>
+								<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(null)">Abbrechen</button>
 							</div>
 						</div>
-					}
-					@if (e.fehler; as text) {
-						<p class="fehler" role="alert">{{ text }}</p>
-					}
-					<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Zur Mitgliederliste</a>
-				</jf-karte>
-			} @else if (person(); as p) {
-				<div class="stapel">
-					@if (frage(); as f) {
-						<jf-karte>
-							<div
-								#dialog
-								tabindex="-1"
-								class="frage"
-								role="alertdialog"
-								aria-label="Rückfrage"
-								aria-describedby="frage-text"
-							>
-								<p id="frage-text">{{ frageText(f, p) }}</p>
-								<div class="reihe">
-									<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="bestaetige(f, p)">
-										{{ frageKnopf(f) }}
-									</button>
-									<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(null)">Abbrechen</button>
-								</div>
-							</div>
-						</jf-karte>
-					}
-
-					<jf-karte>
-						<h2>{{ p.vorname }} {{ p.nachname }}</h2>
-						<p class="gedaempft">{{ p.art === 'JUNGFISCHER' ? 'Jungfischer' : 'Erwachsene' }}</p>
-						@if ((p.warnhinweise ?? []).length > 0) {
-							<ul class="pillen" aria-label="Warnhinweise">
-								@for (h of p.warnhinweise ?? []; track $index) {
-									<li>
-										<jf-pille art="offen">{{ hinweis(h) }}</jf-pille>
-									</li>
-								}
-							</ul>
-						}
-						@if (!darfAendern()) {
-							<dl>
-								@if (p.geburtsdatum) {
-									<dt>Geburtsdatum</dt>
-									<dd>{{ datum(p.geburtsdatum) }}</dd>
-								}
-								@if (p.art === 'JUNGFISCHER' && p.jugendsprecher) {
-									<dt>Rolle</dt>
-									<dd>Jugendsprecher</dd>
-								}
-								@if (p.untergruppen) {
-									<dt>Untergruppen</dt>
-									<dd>{{ gruppenText(p) }}</dd>
-								}
-								@if (p.email) {
-									<dt>E-Mail</dt>
-									<dd>{{ p.email }}</dd>
-								}
-							</dl>
-						}
 					</jf-karte>
+				}
 
-					@if (volljaehrigHinweis(); as seit) {
-						@if (darfAendern()) {
-							<jf-karte>
-								<div role="group" aria-label="Volljährigkeit" data-volljaehrig>
-									<h2>Volljährig</h2>
-									<p>
-										{{ p.vorname }} ist seit dem {{ datum(seit) }} volljährig. Die Familie entscheidet nicht mehr über
-										den Zugang. Wie soll es weitergehen?
-									</p>
-									<div class="reihe">
-										<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="belasse()">
-											Belassen
-										</button>
-										@if ((p.familie ?? []).length > 0) {
-											<button
-												type="button"
-												class="knopf"
-												[disabled]="laeuft()"
-												(click)="frage.set({ art: 'familie-loesen' })"
-											>
-												Familie lösen
-											</button>
-										}
-										@if (darfEntfernen()) {
-											<button
-												type="button"
-												class="knopf"
-												[disabled]="laeuft()"
-												(click)="frage.set({ art: 'entfernen' })"
-											>
-												Aus der Gruppe entfernen
-											</button>
-										}
-									</div>
-									@if (fehler().volljaehrig; as text) {
-										<p class="fehler" role="alert">{{ text }}</p>
-									}
-								</div>
-							</jf-karte>
-						}
+				<jf-karte>
+					<h1>{{ p.vorname }} {{ p.nachname }}</h1>
+					<p class="gedaempft">{{ p.art === 'JUNGFISCHER' ? 'Jungfischer' : 'Erwachsene' }}</p>
+					@if ((p.warnhinweise ?? []).length > 0) {
+						<ul class="pillen" aria-label="Warnhinweise">
+							@for (h of p.warnhinweise ?? []; track $index) {
+								<li>
+									<jf-pille art="offen">{{ hinweis(h) }}</jf-pille>
+								</li>
+							}
+						</ul>
 					}
+					@if (!darfAendern()) {
+						<dl>
+							@if (p.geburtsdatum) {
+								<dt>Geburtsdatum</dt>
+								<dd>{{ datum(p.geburtsdatum) }}</dd>
+							}
+							@if (p.art === 'JUNGFISCHER' && p.jugendsprecher) {
+								<dt>Rolle</dt>
+								<dd>Jugendsprecher</dd>
+							}
+							@if (p.untergruppen) {
+								<dt>Untergruppen</dt>
+								<dd>{{ gruppenText(p) }}</dd>
+							}
+							@if (p.email) {
+								<dt>E-Mail</dt>
+								<dd>{{ p.email }}</dd>
+							}
+						</dl>
+					}
+				</jf-karte>
 
+				@if (volljaehrigHinweis(); as seit) {
 					@if (darfAendern()) {
 						<jf-karte>
-							<form (submit)="speichereStamm($event)" novalidate>
-								<h2>Stammdaten</h2>
-								<div class="felder">
-									<label class="feld">
-										Vorname
-										<input
-											name="vorname"
-											autocomplete="off"
-											[value]="vorname()"
-											[attr.aria-invalid]="markiert('vorname')"
-											(input)="vorname.set(wert($event))"
-										/>
-									</label>
-									<label class="feld">
-										Nachname
-										<input
-											name="nachname"
-											autocomplete="off"
-											[value]="nachname()"
-											[attr.aria-invalid]="markiert('nachname')"
-											(input)="nachname.set(wert($event))"
-										/>
-									</label>
-									@if (p.art === 'JUNGFISCHER') {
-										<label class="feld">
-											Geburtsdatum
-											<input
-												type="date"
-												name="geburtsdatum"
-												[value]="geburtsdatum()"
-												[attr.aria-invalid]="markiert('geburtsdatum')"
-												(input)="geburtsdatum.set(wert($event))"
-											/>
-										</label>
-									}
-									<label class="feld">
-										E-Mail
-										<input
-											type="email"
-											name="email"
-											autocomplete="off"
-											[value]="email()"
-											[disabled]="mailFest()"
-											[attr.aria-invalid]="markiert('email')"
-											[attr.aria-describedby]="mailFest() ? 'mail-fest' : null"
-											(input)="email.set(wert($event))"
-										/>
-										@if (mailFest()) {
-											<span class="hinweis" id="mail-fest"
-												>Die Adresse ist die Kennung der Anmeldung und lässt sich nicht mehr ändern.</span
-											>
-										}
-									</label>
-									@if (p.art === 'JUNGFISCHER') {
-										<label class="haken">
-											<input
-												type="checkbox"
-												name="jugendsprecher"
-												[checked]="jugendsprecher()"
-												(change)="jugendsprecher.set(angehakt($event))"
-											/>
-											Jugendsprecher
-										</label>
-									}
-								</div>
+							<div role="group" aria-label="Volljährigkeit" data-volljaehrig>
+								<h2>Volljährig</h2>
+								<p>
+									{{ p.vorname }} ist seit dem {{ datum(seit) }} volljährig. Die Familie entscheidet nicht mehr über den
+									Zugang. Wie soll es weitergehen?
+								</p>
 								<div class="reihe">
-									<button type="submit" class="knopf primaer" [disabled]="laeuft()">Speichern</button>
-								</div>
-								@if (fehler().stamm; as text) {
-									<p class="fehler" role="alert">{{ text }}</p>
-								}
-								@if (gespeichert() === 'stamm') {
-									<p class="erfolg" role="status">Gespeichert</p>
-								}
-							</form>
-						</jf-karte>
-
-						@if (p.art === 'JUNGFISCHER') {
-							<jf-karte>
-								<form (submit)="speichereGruppen($event)">
-									<fieldset>
-										<legend><h2>Untergruppen</h2></legend>
-										@for (u of untergruppenAlle(); track u.id) {
-											<label class="haken">
-												<input
-													type="checkbox"
-													[name]="'untergruppe-' + u.id"
-													[checked]="gewaehlteGruppen().includes(u.id)"
-													(change)="schalteGruppe(u.id)"
-												/>
-												{{ u.name }}
-											</label>
-										} @empty {
-											<p class="gedaempft">Es gibt noch keine Untergruppen.</p>
-										}
-									</fieldset>
-									@if (untergruppenAlle().length > 0) {
-										<div class="reihe">
-											<button type="submit" class="knopf primaer" [disabled]="laeuft()">Untergruppen speichern</button>
-										</div>
-									}
-									@if (fehler().gruppen; as text) {
-										<p class="fehler" role="alert">{{ text }}</p>
-									}
-									@if (gespeichert() === 'gruppen') {
-										<p class="erfolg" role="status">Gespeichert</p>
-									}
-								</form>
-							</jf-karte>
-						}
-					}
-
-					@if (p.familie) {
-						<jf-karte>
-							<h2>{{ p.art === 'JUNGFISCHER' ? 'Familie' : 'Kinder' }}</h2>
-							<ul class="liste">
-								@for (f of p.familie; track f.erwachsenerId + f.jungfischerId) {
-									<li [attr.data-familie]="gegenueberId(p, f)">
-										<span>
-											<a [routerLink]="['/', slug(), 'verwaltung', 'personen', gegenueberId(p, f)]"
-												>{{ f.vorname }} {{ f.nachname }}</a
-											>
-											· {{ beziehung(f) }} ·
-											{{ f.erziehungsberechtigt ? 'erziehungsberechtigt' : 'nicht erziehungsberechtigt' }}
-										</span>
-										@if (darfAendern()) {
-											<span class="reihe">
-												@if (p.art === 'JUNGFISCHER') {
-													<button
-														type="button"
-														class="knopf klein"
-														[disabled]="laeuft()"
-														(click)="schalteBerechtigung(f)"
-													>
-														{{
-															f.erziehungsberechtigt
-																? 'Nicht mehr erziehungsberechtigt'
-																: 'Als erziehungsberechtigt eintragen'
-														}}
-													</button>
-												}
-												<button
-													type="button"
-													class="knopf klein"
-													[disabled]="laeuft()"
-													(click)="frage.set({ art: 'loesen', eintrag: f })"
-												>
-													Zuordnung lösen
-												</button>
-											</span>
-										}
-									</li>
-								} @empty {
-									<li class="gedaempft">
-										{{ p.art === 'JUNGFISCHER' ? 'Noch niemand zugeordnet.' : 'Keine Jungfischer zugeordnet.' }}
-									</li>
-								}
-							</ul>
-							@if (fehler().familie; as text) {
-								<p class="fehler" role="alert">{{ text }}</p>
-							}
-						</jf-karte>
-
-						@if (darfAendern() && p.art === 'JUNGFISCHER') {
-							<jf-karte>
-								<form (submit)="fuegeFamilieHinzu($event)" novalidate>
-									<h2>Familie hinzufügen</h2>
-									<div class="felder">
-										<fieldset>
-											<legend>Wer?</legend>
-											<label class="haken">
-												<input
-													type="radio"
-													name="modus"
-													value="vorhanden"
-													[checked]="modus() === 'vorhanden'"
-													(change)="modus.set('vorhanden')"
-												/>
-												Vorhandene Person
-											</label>
-											<label class="haken">
-												<input
-													type="radio"
-													name="modus"
-													value="neu"
-													[checked]="modus() === 'neu'"
-													(change)="modus.set('neu')"
-												/>
-												Neue Person anlegen
-											</label>
-										</fieldset>
-										@if (modus() === 'vorhanden') {
-											<label class="feld">
-												Erwachsene
-												<select name="erwachsener" [value]="erwachsenerId()" (change)="erwachsenerId.set(wert($event))">
-													<option value="">Bitte wählen</option>
-													@for (e of kandidaten(); track e.id) {
-														<option [value]="e.id" [selected]="e.id === erwachsenerId()">
-															{{ e.vorname }} {{ e.nachname }}
-														</option>
-													}
-												</select>
-											</label>
-										} @else {
-											<label class="feld">
-												Vorname
-												<input
-													name="neuVorname"
-													autocomplete="off"
-													[value]="neuVorname()"
-													(input)="neuVorname.set(wert($event))"
-												/>
-											</label>
-											<label class="feld">
-												Nachname
-												<input
-													name="neuNachname"
-													autocomplete="off"
-													[value]="neuNachname()"
-													(input)="neuNachname.set(wert($event))"
-												/>
-											</label>
-											<label class="feld">
-												E-Mail (freiwillig)
-												<input
-													type="email"
-													name="neuEmail"
-													autocomplete="off"
-													[value]="neuEmail()"
-													(input)="neuEmail.set(wert($event))"
-												/>
-											</label>
-										}
-										<label class="feld">
-											Beziehung
-											<select name="beziehung" [value]="beziehungNeu()" (change)="waehleBeziehung(wert($event))">
-												<option value="">Bitte wählen</option>
-												@for (b of beziehungen; track b) {
-													<option [value]="b">{{ beziehungsName[b] }}</option>
-												}
-											</select>
-										</label>
-										@if (beziehungNeu() === 'ANDERE') {
-											<label class="feld">
-												Welche Beziehung?
-												<input
-													name="freitext"
-													autocomplete="off"
-													maxlength="100"
-													[value]="freitext()"
-													(input)="freitext.set(wert($event))"
-												/>
-											</label>
-										}
-										<label class="haken">
-											<input
-												type="checkbox"
-												name="erziehungsberechtigt"
-												[checked]="erziehungsberechtigt()"
-												(change)="erziehungsberechtigt.set(angehakt($event))"
-											/>
-											Erziehungsberechtigt
-										</label>
-									</div>
-									<div class="reihe">
-										<button type="submit" class="knopf primaer" [disabled]="laeuft()">Zur Familie hinzufügen</button>
-									</div>
-								</form>
-							</jf-karte>
-						}
-					}
-
-					@if (darfAendern() && p.einladung !== undefined) {
-						<jf-karte>
-							<h2>Zugang</h2>
-							<dl>
-								@if (p.art === 'JUNGFISCHER') {
-									<dt>Zugang erlaubt</dt>
-									<dd>{{ p.zugang?.erlaubt ? 'Ja' : 'Nein' }}</dd>
-								}
-								<dt>Anmeldung</dt>
-								<dd>{{ zugangStand(p) }}</dd>
-								<dt>Einladung</dt>
-								<dd>{{ einladungStand(p) }}</dd>
-							</dl>
-							<div class="reihe">
-								<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="erzeugeLink(false)">
-									{{ p.zugang?.vorhanden ? 'Neuen Zugangslink erzeugen' : 'Einladung erzeugen' }}
-								</button>
-								@if (p.email) {
-									<button type="button" class="knopf" [disabled]="laeuft()" (click)="erzeugeLink(true)">
-										Per Mail senden
+									<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="belasse()">
+										Belassen
 									</button>
-								}
-								@if (p.art === 'JUNGFISCHER') {
-									@if (p.zugang?.erlaubt) {
+									@if ((p.familie ?? []).length > 0) {
 										<button
 											type="button"
 											class="knopf"
 											[disabled]="laeuft()"
-											(click)="frage.set({ art: 'zugang-entziehen' })"
+											(click)="frage.set({ art: 'familie-loesen' })"
 										>
-											Zugang entziehen
-										</button>
-									} @else {
-										<button type="button" class="knopf" [disabled]="laeuft()" (click)="setzeZugang(true)">
-											Zugang erlauben
+											Familie lösen
 										</button>
 									}
+									@if (darfEntfernen()) {
+										<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set({ art: 'entfernen' })">
+											Aus der Gruppe entfernen
+										</button>
+									}
+								</div>
+								@if (fehler().volljaehrig; as text) {
+									<p class="fehler" role="alert">{{ text }}</p>
 								}
 							</div>
-							@if (fehler().zugang; as text) {
+						</jf-karte>
+					}
+				}
+
+				@if (darfAendern()) {
+					<jf-karte>
+						<form (submit)="speichereStamm($event)" novalidate>
+							<h2>Stammdaten</h2>
+							<div class="felder">
+								<label class="feld">
+									Vorname
+									<input
+										name="vorname"
+										autocomplete="off"
+										[value]="vorname()"
+										[attr.aria-invalid]="markiert('vorname')"
+										(input)="vorname.set(wert($event))"
+									/>
+								</label>
+								<label class="feld">
+									Nachname
+									<input
+										name="nachname"
+										autocomplete="off"
+										[value]="nachname()"
+										[attr.aria-invalid]="markiert('nachname')"
+										(input)="nachname.set(wert($event))"
+									/>
+								</label>
+								@if (p.art === 'JUNGFISCHER') {
+									<label class="feld">
+										Geburtsdatum
+										<input
+											type="date"
+											name="geburtsdatum"
+											[value]="geburtsdatum()"
+											[attr.aria-invalid]="markiert('geburtsdatum')"
+											(input)="geburtsdatum.set(wert($event))"
+										/>
+									</label>
+								}
+								<label class="feld">
+									E-Mail
+									<input
+										type="email"
+										name="email"
+										autocomplete="off"
+										[value]="email()"
+										[disabled]="mailFest()"
+										[attr.aria-invalid]="markiert('email')"
+										[attr.aria-describedby]="mailFest() ? 'mail-fest' : null"
+										(input)="email.set(wert($event))"
+									/>
+									@if (mailFest()) {
+										<span class="hinweis" id="mail-fest"
+											>Die Adresse ist die Kennung der Anmeldung und lässt sich nicht mehr ändern.</span
+										>
+									}
+								</label>
+								@if (p.art === 'JUNGFISCHER') {
+									<label class="haken">
+										<input
+											type="checkbox"
+											name="jugendsprecher"
+											[checked]="jugendsprecher()"
+											(change)="jugendsprecher.set(angehakt($event))"
+										/>
+										Jugendsprecher
+									</label>
+								}
+							</div>
+							<div class="reihe">
+								<button type="submit" class="knopf primaer" [disabled]="laeuft()">Speichern</button>
+							</div>
+							@if (fehler().stamm; as text) {
 								<p class="fehler" role="alert">{{ text }}</p>
 							}
-							@if (link(); as l) {
-								<p class="gedaempft klein">
-									Schick {{ p.vorname }} diesen Text, zum Beispiel per WhatsApp. Er ist nur jetzt zu sehen.
-								</p>
-								<jf-einladung-anzeige [einladung]="l" />
+							@if (gespeichert() === 'stamm') {
+								<p class="erfolg" role="status">Gespeichert</p>
 							}
+						</form>
+					</jf-karte>
+
+					@if (p.art === 'JUNGFISCHER') {
+						<jf-karte>
+							<form (submit)="speichereGruppen($event)">
+								<fieldset>
+									<legend><h2>Untergruppen</h2></legend>
+									@for (u of untergruppenAlle(); track u.id) {
+										<label class="haken">
+											<input
+												type="checkbox"
+												[name]="'untergruppe-' + u.id"
+												[checked]="gewaehlteGruppen().includes(u.id)"
+												(change)="schalteGruppe(u.id)"
+											/>
+											{{ u.name }}
+										</label>
+									} @empty {
+										<p class="gedaempft">Es gibt noch keine Untergruppen.</p>
+									}
+								</fieldset>
+								@if (untergruppenAlle().length > 0) {
+									<div class="reihe">
+										<button type="submit" class="knopf primaer" [disabled]="laeuft()">Untergruppen speichern</button>
+									</div>
+								}
+								@if (fehler().gruppen; as text) {
+									<p class="fehler" role="alert">{{ text }}</p>
+								}
+								@if (gespeichert() === 'gruppen') {
+									<p class="erfolg" role="status">Gespeichert</p>
+								}
+							</form>
 						</jf-karte>
 					}
+				}
 
-					@if (rechteLink()) {
+				@if (p.familie) {
+					<jf-karte>
+						<h2>{{ p.art === 'JUNGFISCHER' ? 'Familie' : 'Kinder' }}</h2>
+						<ul class="liste">
+							@for (f of p.familie; track f.erwachsenerId + f.jungfischerId) {
+								<li [attr.data-familie]="gegenueberId(p, f)">
+									<span>
+										<a [routerLink]="['/', slug(), 'verwaltung', 'personen', gegenueberId(p, f)]"
+											>{{ f.vorname }} {{ f.nachname }}</a
+										>
+										· {{ beziehung(f) }} ·
+										{{ f.erziehungsberechtigt ? 'erziehungsberechtigt' : 'nicht erziehungsberechtigt' }}
+									</span>
+									@if (darfAendern()) {
+										<span class="reihe">
+											@if (p.art === 'JUNGFISCHER') {
+												<button
+													type="button"
+													class="knopf klein"
+													[disabled]="laeuft()"
+													(click)="schalteBerechtigung(f)"
+												>
+													{{
+														f.erziehungsberechtigt
+															? 'Nicht mehr erziehungsberechtigt'
+															: 'Als erziehungsberechtigt eintragen'
+													}}
+												</button>
+											}
+											<button
+												type="button"
+												class="knopf klein"
+												[disabled]="laeuft()"
+												(click)="frage.set({ art: 'loesen', eintrag: f })"
+											>
+												Zuordnung lösen
+											</button>
+										</span>
+									}
+								</li>
+							} @empty {
+								<li class="gedaempft">
+									{{ p.art === 'JUNGFISCHER' ? 'Noch niemand zugeordnet.' : 'Keine Jungfischer zugeordnet.' }}
+								</li>
+							}
+						</ul>
+						@if (fehler().familie; as text) {
+							<p class="fehler" role="alert">{{ text }}</p>
+						}
+					</jf-karte>
+
+					@if (darfAendern() && p.art === 'JUNGFISCHER') {
 						<jf-karte>
-							<h2>Rechte</h2>
-							<p class="gedaempft">Welche Rechte {{ p.vorname }} im Verein hat, ändert sich auf der Seite Rechte.</p>
-							<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'rechte']">Zu den Rechten</a>
+							<form (submit)="fuegeFamilieHinzu($event)" novalidate>
+								<h2>Familie hinzufügen</h2>
+								<div class="felder">
+									<fieldset>
+										<legend>Wer?</legend>
+										<label class="haken">
+											<input
+												type="radio"
+												name="modus"
+												value="vorhanden"
+												[checked]="modus() === 'vorhanden'"
+												(change)="modus.set('vorhanden')"
+											/>
+											Vorhandene Person
+										</label>
+										<label class="haken">
+											<input
+												type="radio"
+												name="modus"
+												value="neu"
+												[checked]="modus() === 'neu'"
+												(change)="modus.set('neu')"
+											/>
+											Neue Person anlegen
+										</label>
+									</fieldset>
+									@if (modus() === 'vorhanden') {
+										<label class="feld">
+											Erwachsene
+											<select name="erwachsener" [value]="erwachsenerId()" (change)="erwachsenerId.set(wert($event))">
+												<option value="">Bitte wählen</option>
+												@for (e of kandidaten(); track e.id) {
+													<option [value]="e.id" [selected]="e.id === erwachsenerId()">
+														{{ e.vorname }} {{ e.nachname }}
+													</option>
+												}
+											</select>
+										</label>
+									} @else {
+										<label class="feld">
+											Vorname
+											<input
+												name="neuVorname"
+												autocomplete="off"
+												[value]="neuVorname()"
+												(input)="neuVorname.set(wert($event))"
+											/>
+										</label>
+										<label class="feld">
+											Nachname
+											<input
+												name="neuNachname"
+												autocomplete="off"
+												[value]="neuNachname()"
+												(input)="neuNachname.set(wert($event))"
+											/>
+										</label>
+										<label class="feld">
+											E-Mail (freiwillig)
+											<input
+												type="email"
+												name="neuEmail"
+												autocomplete="off"
+												[value]="neuEmail()"
+												(input)="neuEmail.set(wert($event))"
+											/>
+										</label>
+									}
+									<label class="feld">
+										Beziehung
+										<select name="beziehung" [value]="beziehungNeu()" (change)="waehleBeziehung(wert($event))">
+											<option value="">Bitte wählen</option>
+											@for (b of beziehungen; track b) {
+												<option [value]="b">{{ beziehungsName[b] }}</option>
+											}
+										</select>
+									</label>
+									@if (beziehungNeu() === 'ANDERE') {
+										<label class="feld">
+											Welche Beziehung?
+											<input
+												name="freitext"
+												autocomplete="off"
+												maxlength="100"
+												[value]="freitext()"
+												(input)="freitext.set(wert($event))"
+											/>
+										</label>
+									}
+									<label class="haken">
+										<input
+											type="checkbox"
+											name="erziehungsberechtigt"
+											[checked]="erziehungsberechtigt()"
+											(change)="erziehungsberechtigt.set(angehakt($event))"
+										/>
+										Erziehungsberechtigt
+									</label>
+								</div>
+								<div class="reihe">
+									<button type="submit" class="knopf primaer" [disabled]="laeuft()">Zur Familie hinzufügen</button>
+								</div>
+							</form>
 						</jf-karte>
 					}
+				}
 
-					@if (darfEntfernen()) {
-						<jf-karte>
-							<h2>Entfernen</h2>
-							<p class="gedaempft">Die Person verschwindet aus allen Listen, ihr Zugang endet.</p>
-							<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set({ art: 'entfernen' })">
-								Aus der Gruppe entfernen
+				@if (darfAendern() && p.einladung !== undefined) {
+					<jf-karte>
+						<h2>Zugang</h2>
+						<dl>
+							@if (p.art === 'JUNGFISCHER') {
+								<dt>Zugang erlaubt</dt>
+								<dd>{{ p.zugang?.erlaubt ? 'Ja' : 'Nein' }}</dd>
+							}
+							<dt>Anmeldung</dt>
+							<dd>{{ zugangStand(p) }}</dd>
+							<dt>Einladung</dt>
+							<dd>{{ einladungStand(p) }}</dd>
+						</dl>
+						<div class="reihe">
+							<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="erzeugeLink(false)">
+								{{ p.zugang?.vorhanden ? 'Neuen Zugangslink erzeugen' : 'Einladung erzeugen' }}
 							</button>
-							@if (fehler().entfernen; as text) {
-								<p class="fehler" role="alert">{{ text }}</p>
+							@if (p.email) {
+								<button type="button" class="knopf" [disabled]="laeuft()" (click)="erzeugeLink(true)">
+									Per Mail senden
+								</button>
 							}
-						</jf-karte>
-					}
-				</div>
-			}
-		</main>
+							@if (p.art === 'JUNGFISCHER') {
+								@if (p.zugang?.erlaubt) {
+									<button
+										type="button"
+										class="knopf"
+										[disabled]="laeuft()"
+										(click)="frage.set({ art: 'zugang-entziehen' })"
+									>
+										Zugang entziehen
+									</button>
+								} @else {
+									<button type="button" class="knopf" [disabled]="laeuft()" (click)="setzeZugang(true)">
+										Zugang erlauben
+									</button>
+								}
+							}
+						</div>
+						@if (fehler().zugang; as text) {
+							<p class="fehler" role="alert">{{ text }}</p>
+						}
+						@if (link(); as l) {
+							<p class="gedaempft klein">
+								Schick {{ p.vorname }} diesen Text, zum Beispiel per WhatsApp. Er ist nur jetzt zu sehen.
+							</p>
+							<jf-einladung-anzeige [einladung]="l" />
+						}
+					</jf-karte>
+				}
+
+				@if (rechteLink()) {
+					<jf-karte>
+						<h2>Rechte</h2>
+						<p class="gedaempft">Welche Rechte {{ p.vorname }} im Verein hat, ändert sich auf der Seite Rechte.</p>
+						<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'rechte']">Zu den Rechten</a>
+					</jf-karte>
+				}
+
+				@if (darfEntfernen()) {
+					<jf-karte>
+						<h2>Entfernen</h2>
+						<p class="gedaempft">Die Person verschwindet aus allen Listen, ihr Zugang endet.</p>
+						<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set({ art: 'entfernen' })">
+							Aus der Gruppe entfernen
+						</button>
+						@if (fehler().entfernen; as text) {
+							<p class="fehler" role="alert">{{ text }}</p>
+						}
+					</jf-karte>
+				}
+			</div>
+		}
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
 			max-width: 36rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
 		}
 		.zurueck {
 			display: inline-flex;
@@ -556,6 +543,7 @@ interface Entfernt {
 			display: grid;
 			gap: var(--a4);
 		}
+		h1,
 		h2 {
 			margin: 0 0 var(--a3);
 			font-size: var(--schrift-gross);
@@ -655,6 +643,7 @@ export class PersonenseiteComponent {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly sitzung = inject(MitgliedSitzung);
+	private readonly router = inject(Router);
 	private readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
 
 	protected readonly person = signal<PersonDetail | null>(null);
@@ -762,7 +751,9 @@ export class PersonenseiteComponent {
 			this.fuelle(p);
 			if (mitHilfen) void this.ladeHilfen(p);
 		} catch (ursache) {
-			this.ladefehler.set(fehlertext(alsApiFehler(ursache)));
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.ladefehler.set(fehlertext(f));
 		}
 	}
 
@@ -891,6 +882,7 @@ export class PersonenseiteComponent {
 		} catch (ursache) {
 			this.frage.set(null);
 			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return false;
 			this.fehlerFeld.set(f.feld ?? null);
 			this.fehler.update((alt) => ({ ...alt, [bereich]: verwaltungsfehler(f) }));
 			return false;
@@ -1110,7 +1102,9 @@ export class PersonenseiteComponent {
 			await firstValueFrom(this.api.entfernePerson(this.slug(), id));
 			this.nimmAngebotWeg(id, null);
 		} catch (ursache) {
-			this.nimmAngebotWeg(undefined, verwaltungsfehler(alsApiFehler(ursache)));
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.nimmAngebotWeg(undefined, verwaltungsfehler(f));
 		} finally {
 			this.laeuft.set(false);
 		}

@@ -90,9 +90,10 @@ describe('Profil', () => {
 		expect(seite.textContent).toContain('Ein Passwort ist gesetzt');
 	});
 
-	it('der Name des Vereins steht im Kopf', async () => {
+	// Der Vereinsname steht im Kopf der Huelle; die Seite hat nur ihre eigene Ueberschrift.
+	it('hat die Ueberschrift Profil', async () => {
 		await oeffne();
-		expect(seite.querySelector('h1')?.textContent).toContain('Jungfischer Demo');
+		expect(seite.querySelector('h1')?.textContent).toBe('Profil');
 	});
 
 	describe('Passkeys', () => {
@@ -284,6 +285,19 @@ describe('Profil', () => {
 		});
 	});
 
+	describe('Meine Daten', () => {
+		// Ein schlichter Link statt HttpClient und Blob (Plan-Entscheidung 9): Der Server schickt Content-Disposition attachment.
+		it('bietet den Datenauszug als Link mit download an', async () => {
+			await oeffne();
+
+			expect(seite.textContent).toContain('Alles, was die App über dich speichert, als Datei.');
+			const link = [...seite.querySelectorAll('a')].find((a) => a.textContent?.includes('Meine Daten herunterladen'));
+			expect(link?.getAttribute('href')).toBe('/demo/api/v1/ich/daten');
+			expect(link?.hasAttribute('download')).toBe(true);
+			expect(link?.classList.contains('knopf')).toBe(true);
+		});
+	});
+
 	describe('Abmelden', () => {
 		it('Abmelden ruft die API und geht zur Anmeldung des Vereins', async () => {
 			await oeffne();
@@ -294,6 +308,19 @@ describe('Profil', () => {
 			await stabil();
 
 			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+		});
+
+		// Die Sitzung ist dann ohnehin weg; ein Fehlertext waere falsch (gleiche Regel wie auf Mehr).
+		it('Abmelden bei 401 nicht angemeldet fuehrt zur Anmeldung und zeigt keinen Fehler', async () => {
+			await oeffne();
+			knopf(seite, 'Abmelden').click();
+			http
+				.expectOne(`${API}/abmelden`)
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+			await stabil();
+
+			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+			expect(seite.querySelector('[role="alert"]')).toBeNull();
 		});
 
 		it('Ueberall abmelden ruft die API fuer alle Geraete und geht zur Anmeldung', async () => {
@@ -324,6 +351,6 @@ describe('Profil', () => {
 			.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
 		await stabil();
 
-		expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+		expect(navigiert).toHaveBeenCalledWith('/demo/anmelden?weiter=%2Fdemo%2Fprofil');
 	});
 });

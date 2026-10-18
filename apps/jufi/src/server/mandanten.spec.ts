@@ -1,5 +1,7 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
-import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
+import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
+import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
@@ -14,12 +16,12 @@ type Passkey = Awaited<ReturnType<PrismaClient['passkey']['findUniqueOrThrow']>>
 
 interface Kontext {
 	url: string;
-	eigen: { slug: string };
+	eigen: { id: string; slug: string };
 	fremd: { id: string; slug: string };
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
-	/** Cookie einer Person aus eigen mit Verwaltungs- und Rechterecht: sieht in eigen alles, in fremd nichts. */
+	/** Cookie einer Person aus eigen mit Verwaltungs-, Rechte- und Einstellungsrecht: sieht in eigen alles, in fremd nichts. */
 	eigenerLeiter: string;
 	/** Eine Person im Verein fremd. */
 	fremdePersonId: string;
@@ -72,6 +74,22 @@ async function meineJungfischerSchreibfall(k: Kontext, was: string, body: object
 	expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
 }
 
+/** Das Logo des Vereins fremd; legt eines an, falls noch keins da ist, damit Loeschen und Ersetzen etwas zu verlieren haben. */
+async function fremdesLogo(k: Kontext) {
+	const daten = {
+		bild: Buffer.from([1, 2, 3]),
+		mimeType: 'image/png',
+		icon192: Buffer.from([1]),
+		icon512: Buffer.from([1]),
+	};
+	await k.prisma.vereinLogo.upsert({
+		where: { vereinId: k.fremd.id },
+		create: { vereinId: k.fremd.id, ...daten },
+		update: {},
+	});
+	return k.prisma.vereinLogo.findUnique({ where: { vereinId: k.fremd.id } });
+}
+
 /**
  * Jede Vereins-Route braucht hier einen Fall (Spec 9). Kommt eine Route
  * hinzu, scheitert der erste Test, bis der Fall eingetragen ist.
@@ -81,6 +99,21 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Ohne Objekt-ID: der Verein kommt allein aus dem Slug. Geprueft wird,
 		// dass ein gesperrter fremder Verein nichts preisgibt.
 		expect((await fetch(`${k.url}/${k.gesperrt.slug}/api/v1/verein`)).status).toBe(404);
+	},
+	'GET /verein/logo': async (k) => {
+		// Beide fremden Vereine haben ein Logo: der gesperrte gibt es nicht heraus (404), und der
+		// eigene Verein, der selbst keins hat, bekommt das fremde nicht unter seinem Slug.
+		const gesperrt = await k.prisma.verein.findUniqueOrThrow({ where: { slug: k.gesperrt.slug } });
+		for (const vereinId of [gesperrt.id, k.fremd.id]) {
+			await vereinDb(k.prisma, vereinId).vereinLogo.create({
+				data: { bild: Buffer.from([1]), mimeType: 'image/png', icon192: Buffer.from([1]), icon512: Buffer.from([1]) },
+			});
+		}
+		expect((await fetch(`${k.url}/${k.gesperrt.slug}/api/v1/verein/logo`)).status).toBe(404);
+		expect((await fetch(`${k.url}/${k.eigen.slug}/api/v1/verein/logo`)).status).toBe(404);
+		// Gegenprobe: das Logo des fremden Vereins ist unter dessen eigenem Slug erreichbar, das 404
+		// oben kommt also von der Trennung und nicht davon, dass die Route nichts ausliefert.
+		expect((await fetch(`${k.url}/${k.fremd.slug}/api/v1/verein/logo`)).status).toBe(200);
 	},
 	'POST /einladung/pruefen': async (k) => {
 		for (const verein of [k.fremd, k.gesperrt]) {
@@ -417,6 +450,69 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await setze(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
 		expect((await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } })).rechte).toEqual(vorher);
 	},
+	// Die vier Einstellungs-Routen: Die Leitung aus eigen hat das Recht, aber nur dort. In fremd hat
+	// sie keine Sitzung (401), im gesperrten Verein ist alles 404, und fremd bleibt wie es war.
+	'GET /einstellungen': async (k) => {
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/einstellungen`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Gegenprobe: In eigen geht es, die 401 oben kommt also von der Trennung und nicht vom Recht.
+		const r = await hole(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(200);
+		expect(((await r.json()) as { slug: string }).slug).toBe(k.eigen.slug);
+	},
+	'PATCH /einstellungen': async (k) => {
+		const vorher = await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } });
+		const aendere = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/einstellungen`, {
+				methode: 'PATCH',
+				body: { anzeigename: 'Uebernommen', kontakt: 'Uebernommen', farbe: '#000000' },
+				cookie,
+			});
+		expect((await aendere(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await aendere(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect(await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).toEqual(vorher);
+	},
+	'PUT /einstellungen/logo': async (k) => {
+		const vorher = await fremdesLogo(k);
+		const lade = async (slug: string) =>
+			fetch(`${k.url}/${slug}/api/v1/einstellungen/logo`, {
+				method: 'PUT',
+				headers: { Origin: TEST_UMGEBUNG.basisUrl, 'Content-Type': 'image/png', Cookie: k.eigenerLeiter },
+				body: new Uint8Array(
+					await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } })
+						.png()
+						.toBuffer(),
+				),
+			});
+		expect((await lade(k.gesperrt.slug)).status).toBe(404);
+		expect((await lade(k.fremd.slug)).status).toBe(401);
+		expect(await fremdesLogo(k)).toEqual(vorher);
+	},
+	'DELETE /einstellungen/logo': async (k) => {
+		const vorher = await fremdesLogo(k);
+		expect(vorher).not.toBeNull();
+		const loesche = (slug: string) =>
+			sende(k.url, `/${slug}/api/v1/einstellungen/logo`, { methode: 'DELETE', cookie: k.eigenerLeiter });
+		expect((await loesche(k.gesperrt.slug)).status).toBe(404);
+		expect((await loesche(k.fremd.slug)).status).toBe(401);
+		expect(await fremdesLogo(k)).toEqual(vorher);
+		// Gegenprobe: Im eigenen Verein geht das Loeschen, und es trifft nur dessen Logo. Ein
+		// Fehler in der Begrenzung auf den Verein liesse hier das fremde Logo mitfallen.
+		const eigenerVerein = await k.prisma.verein.findUniqueOrThrow({ where: { slug: k.eigen.slug } });
+		await k.prisma.vereinLogo.create({
+			data: {
+				vereinId: eigenerVerein.id,
+				bild: Buffer.from([9]),
+				mimeType: 'image/png',
+				icon192: Buffer.from([9]),
+				icon512: Buffer.from([9]),
+			},
+		});
+		expect((await loesche(k.eigen.slug)).status).toBe(200);
+		expect(await k.prisma.vereinLogo.count({ where: { vereinId: eigenerVerein.id } })).toBe(0);
+		expect(await k.prisma.vereinLogo.findUnique({ where: { vereinId: k.fremd.id } })).toEqual(vorher);
+	},
 	'POST /abmelden': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -430,6 +526,55 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	'DELETE /profil/passkeys/:id': (k) => fremderPasskeyBleibt(k, 'DELETE'),
 	'POST /profil/totp/start': (k) => profilOhneId(k, 'POST', '/profil/totp/start'),
 	'POST /profil/totp/bestaetigen': (k) => profilOhneId(k, 'POST', '/profil/totp/bestaetigen'),
+	'GET /ich/daten': async (k) => {
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ich/daten`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		// Die Sitzung gilt nur im eigenen Verein: mit dem Slug von fremd kein Auszug, auch nicht der eigene.
+		const fremd = await hole(k.fremd.slug, k.eigenesCookie);
+		expect(fremd.status).toBe(401);
+		expect(fremd.headers.get('content-disposition')).toBeNull();
+		// Gegenprobe: In eigen geht es, und der Auszug gehoert der Person der Sitzung.
+		const r = await hole(k.eigen.slug, k.eigenesCookie);
+		expect(r.status).toBe(200);
+		const auszug = (await r.json()) as { verein: unknown; zugang: unknown };
+		expect(auszug.zugang).not.toBeNull();
+		const fremdePerson = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } });
+		expect(JSON.stringify(auszug)).not.toContain(fremdePerson.email ?? 'keine-adresse');
+	},
+	'GET /ansprechpartner': async (k) => {
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ansprechpartner`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		// Die Sitzung gilt nur im eigenen Verein.
+		expect((await hole(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+		// Gegenprobe: In eigen geht es, und die Liste enthaelt dort niemanden aus fremd.
+		const r = await hole(k.eigen.slug, k.eigenesCookie);
+		expect(r.status).toBe(200);
+		const { ansprechpartner } = (await r.json()) as { ansprechpartner: { id: string }[] };
+		expect(ansprechpartner.length).toBeGreaterThan(0);
+		expect(ansprechpartner.map((a) => a.id)).not.toContain(k.fremdePersonId);
+	},
+	// Der Hinweis liest AdminProtokoll mit dem schlichten PrismaClient (Plan-Entscheidung 2); gerade
+	// deshalb darf der Eintrag eines anderen Vereins nie durchkommen, auch nicht mit Namen.
+	'GET /verwaltung/hinweise': async (k) => {
+		const admin = await k.prisma.plattformAdmin.create({
+			data: { benutzername: `mandant-${randomUUID().slice(0, 8)}` },
+		});
+		const protokolliere = (vereinId: string, vereinSlug: string, betroffenePersonId: string | null) =>
+			k.prisma.adminProtokoll.create({
+				data: { adminId: admin.id, aktion: 'NOTFALL_LINK', vereinId, vereinSlug, betroffenePersonId },
+			});
+		await protokolliere(k.fremd.id, k.fremd.slug, k.fremdePersonId);
+		await protokolliere(k.eigen.id, k.eigen.slug, null);
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/verwaltung/hinweise`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Gegenprobe: In eigen geht es und zeigt genau den eigenen Eintrag, ohne den Namen der fremden Person.
+		const r = await hole(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(200);
+		expect(((await r.json()) as { notfallLinks: unknown[] }).notfallLinks).toEqual([
+			{ am: expect.any(String), vorname: null, nachname: null },
+		]);
+	},
 	'POST /abmelden/alle': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden/alle`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -476,7 +621,7 @@ describe('Mandanten-Test', () => {
 		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
 		const leiter = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
-			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE'],
+			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE', 'EINSTELLUNGEN'],
 		});
 		const fremderPasskey = await prisma.passkey.create({
 			data: {

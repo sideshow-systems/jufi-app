@@ -1,6 +1,6 @@
 # JuFi App — Teilprojekt 2: Fundament
 
-Stand: 14.10.2026 · Ergebnis des Brainstormings vom 13.10.2026, nachgezogen mit Etappe 3 · Status: zur Freigabe
+Stand: 18.10.2026 · Ergebnis des Brainstormings vom 13.10.2026, nachgezogen mit Etappe 5 · Status: zur Freigabe
 
 Teilprojekt 2 baut die echte App bis zu dem Punkt, an dem ein Verein **einladen, anmelden und Mitglieder pflegen** kann (Rahmen-Spezifikation `2026-10-11-jufi-rahmen-design.md`, Abschnitt 11). Threads, Module, Medien, Offline-Betrieb und Push folgen in den Teilprojekten 3 bis 5.
 
@@ -41,16 +41,16 @@ Preis der Kopie: Eine Sicherheitskorrektur in einem Projekt muss im anderen von 
 
 Jede Etappe ist für sich lauffähig, bekommt einen eigenen Plan und wird vom Eigentümer lokal abgenommen, bevor die nächste beginnt.
 
-| #   | Etappe                  | Inhalt                                                                                                             | Abschnitte |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------- |
-| 1   | Gerüst                  | `apps/jufi`, `apps/cli`, `libs/domain`, `libs/db`, `libs/auth`; Postgres und Mailpit lokal; Healthcheck            | 2, 3       |
-| 2   | Plattform-Admin         | CLI zum Anlegen, `/admin` mit Anmeldung, Vereine anlegen, sperren, erste Einladung, Protokoll                      | 7          |
-| 3   | Einladung und Anmeldung | Einladung annehmen, Passkey, Passwort, Anmeldename, TOTP, Zurücksetzen per Mail, Sitzungen, Backoff, Mail-Arbeiter | 4          |
-| 4   | Mitglieder pflegen      | Personen, Familie, Jugendsprecher, Untergruppen, Rechte, Einwilligung, Volljährigkeit, Entfernen                   | 5          |
-| 5   | Oberflächen             | Mitglieder-Hülle (Start, Mehr, Profil, Meine Jungfischer), Verwaltungs-Hülle, PWA-Manifest, Plattformseite         | 6          |
-| 6   | Betrieb                 | Dienste auf dem Server, Deploy, Rollback, Sicherung mit Wiederherstellungsprobe, Mail-Versand                      | 8          |
+| #   | Etappe                  | Inhalt                                                                                                                                     | Abschnitte |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| 1   | Gerüst                  | `apps/jufi`, `apps/cli`, `libs/domain`, `libs/db`, `libs/auth`; Postgres und Mailpit lokal; Healthcheck                                    | 2, 3       |
+| 2   | Plattform-Admin         | CLI zum Anlegen, `/admin` mit Anmeldung, Vereine anlegen, sperren, erste Einladung, Protokoll                                              | 7          |
+| 3   | Einladung und Anmeldung | Einladung annehmen, Passkey, Passwort, Anmeldename, TOTP, Zurücksetzen per Mail, Sitzungen, Backoff, Mail-Arbeiter                         | 4          |
+| 4   | Mitglieder pflegen      | Personen, Familie, Jugendsprecher, Untergruppen, Rechte, Einwilligung, Volljährigkeit, Entfernen                                           | 5          |
+| 5   | Oberflächen             | Mitglieder-Hülle (Start, Mehr, Profil, Meine Jungfischer), Verwaltungs-Hülle, PWA-Manifest, Plattformseite, Rechtstexte, Ende-zu-Ende-Test | 6, 9       |
+| 6   | Betrieb                 | Dienste auf dem Server, Deploy, Rollback, Sicherung mit Wiederherstellungsprobe, Mail-Versand                                              | 8          |
 
-Die API-Endpunkte einer Etappe entstehen zusammen mit den Bauteilen, die sie brauchen. Etappe 5 baut die beiden Hüllen fertig aus (Navigation, Start, Profil, Gestaltung, Messungen); die Seiten, die Etappen 2 bis 4 brauchen, entstehen dort bereits in schlichter Form.
+Die API-Endpunkte einer Etappe entstehen zusammen mit den Bauteilen, die sie brauchen. Etappe 5 baut die beiden Hüllen fertig aus (Navigation, Start, Profil, Gestaltung, Messungen, jetzt automatisch in Playwright, 9); die Seiten, die Etappen 2 bis 4 brauchen, entstehen dort bereits in schlichter Form.
 
 ---
 
@@ -63,6 +63,7 @@ apps/
 	jufi/      Angular (CSR) + Express-Server-Routen; WebSocket folgt in TP3
 	cli/       Plattform-Admin anlegen und zurücksetzen, Verein löschen, Demo-Verein
 	entwurf/   klickbarer Entwurf, bleibt unverändert (Wegwerfcode)
+	jufi-e2e/  Ende-zu-Ende-Test mit Playwright (9); nicht im Image
 libs/
 	domain/    reine Regeln: Rechte, Sichtbarkeit von Personen, Familie,
 	           Volljährigkeit, Slug, Anmeldename, Passwortregel
@@ -82,7 +83,7 @@ Jede Anfrage an `/<slug>/…`:
 1. Verein aus dem Slug bestimmen; unbekannt oder gesperrt → 404.
 2. Sitzung aus dem Cookie lesen (Pfad `/<slug>/`); die Sitzung gilt nur, wenn ihr Verein der Verein des Slugs ist.
 3. Rechte und Sichtbarkeit mit den Funktionen aus `libs/domain` prüfen.
-4. Lesen und Schreiben nur über `vereinDb(vereinId)`.
+4. Lesen und Schreiben nur über `vereinDb(vereinId)`. Einzige benannte Ausnahme: das Lesen des Admin-Protokolls für den Notfall-Link-Hinweis (6.3).
 
 `/admin/…` hat eine eigene Sitzung und eine eigene Datenschicht, die an Vereinsdaten nur über Kennzahlen und Ansprechpartner herankommt (Abschnitt 7).
 
@@ -107,21 +108,22 @@ Verworfen:
 
 Ergänzt Rahmen-Spezifikation 5.4.
 
-| URL                                                           | Inhalt                                                                      |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `/`, `/impressum`, `/datenschutz`                             | Plattformseite und Rechtstexte                                              |
-| `/admin/…`                                                    | Plattform-Admin (Abschnitt 7)                                               |
-| `/<slug>/`                                                    | Start                                                                       |
-| `/<slug>/anmelden?weiter=…`                                   | Anmeldung; `weiter` gilt nur als relativer Pfad innerhalb desselben Vereins |
-| `/<slug>/einladung#<token>`                                   | Einladung annehmen                                                          |
-| `/<slug>/passwort-vergessen`, `/<slug>/zuruecksetzen#<token>` | Zugang verloren                                                             |
-| `/<slug>/mehr`, `/<slug>/profil`, `/<slug>/meine-jungfischer` | Mitglieder-Hülle                                                            |
-| `/<slug>/verwaltung/…`                                        | Verwaltungs-Hülle                                                           |
-| `/<slug>/manifest.webmanifest`, `/<slug>/icon-<größe>.png`    | PWA-Manifest und Icons des Vereins                                          |
-| `/<slug>/api/v1/…`                                            | REST-API des Vereins                                                        |
-| `/healthz`                                                    | Healthcheck (Node und Datenbank, Versionsnummer)                            |
+| URL                                                           | Inhalt                                                                                             |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `/`, `/impressum`, `/datenschutz`                             | Plattformseite und Rechtstexte                                                                     |
+| `/admin/…`                                                    | Plattform-Admin (Abschnitt 7)                                                                      |
+| `/<slug>/`                                                    | Start                                                                                              |
+| `/<slug>/anmelden?weiter=…`                                   | Anmeldung; `weiter` gilt nur als relativer Pfad innerhalb desselben Vereins (`sichererWeiterPfad`) |
+| `/<slug>/einladung#<token>`                                   | Einladung annehmen, auch der Reset-Link                                                            |
+| `/<slug>/zugang-verloren`                                     | Zugang verloren ("Passwort vergessen?")                                                            |
+| `/<slug>/mehr`, `/<slug>/profil`, `/<slug>/meine-jungfischer` | Mitglieder-Hülle                                                                                   |
+| `/<slug>/verwaltung/…`                                        | Verwaltungs-Hülle                                                                                  |
+| `/<slug>/manifest.webmanifest`, `/<slug>/icon-<größe>.png`    | PWA-Manifest und Icons des Vereins                                                                 |
+| `/<slug>/api/v1/…`                                            | REST-API des Vereins                                                                               |
+| `/healthz`                                                    | Healthcheck (Node und Datenbank, Versionsnummer)                                                   |
 
-- Ohne Sitzung führt jede Vereinsseite zu `anmelden?weiter=…`.
+- Ohne Sitzung führt jede Vereinsseite zu `anmelden?weiter=…`. Nach der Anmeldung prüft `sichererWeiterPfad` in `libs/domain` den Wert: Erlaubt ist nur ein Pfad, der nach dem Normalisieren unter `/<slug>/` liegt und nicht wieder auf `anmelden`, `einladung` oder `zugang-verloren` zeigt. Alles andere (`//fremd.example`, `/\fremd.example`, eine vollständige Adresse, `/<slug>/../admin`, ein fremder Slug, `javascript:`) führt zum Start des Vereins, nie woandershin. Verworfen: eine Positivliste der erlaubten Seiten — sie müsste mit jeder neuen Seite des Vereins wachsen.
+- **„Meine Jungfischer" liegt unter `/<slug>/meine-jungfischer`** und nicht unter `/<slug>/jungfischer`. Verworfen: eine Weiterleitung vom alten Pfad. Echte Nutzer haben ihn nie gesehen, sie wäre Code für niemanden.
 - **Reservierte Slugs**: `admin`, `api`, `entwurf`, `assets`, `impressum`, `datenschutz`, `healthz`, `favicon.ico`, `robots.txt` sowie alles, was die Plattform künftig auf oberster Ebene braucht. Die Prüfung liegt in `libs/domain`.
 
 ---
@@ -152,7 +154,11 @@ Ergänzt Rahmen-Spezifikation 5.4.
 
 Der offizielle Name ist mit 46 Zeichen für Kopfzeile, Passkey-Auswahl und Home-Bildschirm zu lang; deshalb zwei Namen. Der `gruppenname` aus Rahmen-Spec 7.3 entfällt, weil der Anzeigename ihn abdeckt.
 
-**`VereinLogo`**: eigene Tabelle mit dem Logo als Bytes (PNG oder JPEG, höchstens 1 MB) und den daraus erzeugten Icons (192 und 512 px). Eigene Tabelle, damit nicht jede Vereinsabfrage das Bild mitlädt. Verworfen: Dateiablage im Volume — die entsteht erst in TP4, und so ist das Logo mit der Datenbank gesichert.
+**`VereinLogo`**: eigene Tabelle mit dem Logo als Bytes (PNG oder JPEG) und den daraus erzeugten Icons (192 und 512 px). Eigene Tabelle, damit nicht jede Vereinsabfrage das Bild mitlädt. Verworfen: Dateiablage im Volume — die entsteht erst in TP4, und so ist das Logo mit der Datenbank gesichert.
+
+- **Das Logo wird neu kodiert, nie durchgereicht.** Das Format bestimmt der Inhalt (`sharp(…).metadata()`), nicht der `Content-Type`, den der Aufrufer frei wählt; zugelassen sind nur PNG und JPEG. Gespeichert wird das Bild mit höchstens 1024 px an der längsten Seite, nach EXIF gedreht und ohne Metadaten: Ein Handyfoto trägt sonst womöglich den GPS-Ort, und ein Bild kann hinter seinem Ende weitere Daten verstecken. Verworfen: das hochgeladene Bild unverändert speichern.
+- **Eingabegrenzen**: höchstens 1 MB und 25 Megapixel (`limitInputPixels`). Die Bytegrenze allein schützt nicht, denn ein PNG mit 10 000 × 10 000 Pixeln ist einfarbig wenige KB groß und entpackt 400 MB. Ein falsches Format ergibt 415, ein zu großes Bild 413; das alte Logo bleibt dann unverändert.
+- **Eine Quelle für die Grenze**: `LOGO_MAX_BYTES` und der Text `LOGO_ZU_GROSS` liegen in `libs/domain`. Client und Server nutzen beide diese Konstanten, damit keine der beiden Seiten abweicht. Verworfen: die Konstante im Server neben `sharp`, weil die Oberfläche sie dann nicht importieren kann, ohne `sharp` ins Bundle zu ziehen. Verworfen: je eine Kopie in Oberfläche und Server, weil zwei Zahlen auseinanderliefen.
 
 **`PlattformAdmin`** mit `AdminSession`, `AdminPasskey`, `AdminRecoveryCode`, `AdminEinrichtung` (Einrichtungs-Token) und **`AdminProtokoll`** (Admin, Zeitpunkt, Aktion, Verein): eigene Tabellen ohne `vereinId` und ohne Verbindung zu den Personen. Verworfen: der Admin als `Zugang` ohne Person — dann stünde er in denselben Tabellen wie die Vereinsdaten, und die Trennung nach Rahmen-Spec 8.3 hinge wieder an Abfragen.
 
@@ -371,9 +377,9 @@ Aus dem Entwurf kopiert (2.1): Grundcharakter „Am Wasser", Vereinsfarbe als ei
 ### 6.2 Mitglieder-Hülle (Handy)
 
 - **Untere Leiste in TP2 nur mit Start und Mehr.** Threads, Termine und Medien kommen mit ihren Teilprojekten dazu. Verworfen: die volle Leiste mit Platzhaltern — sie führt in Sackgassen, und echte Nutzer sind in TP2 nur die drei Jugendleiter.
-- **Start**: Begrüßung mit Vereinslogo; für Bezugspersonen eine Karte je eigenem Jungfischer; Ansprechpartner (alle Jugendleiter mit Namen); für Jugendleiter „In der Verwaltung warten" mit offenen Einladungen und Warnhinweisen und einem Link dorthin.
+- **Start**: Begrüßung mit Vereinslogo; für Bezugspersonen eine Karte je eigenem Jungfischer; Ansprechpartner (alle Jugendleiter mit Namen); für Inhaber von „Mitglieder verwalten" „In der Verwaltung warten" mit offenen Einladungen und Warnhinweisen und einem Link dorthin. Betreuer und übrige Jugendleiter sehen den Block nicht: Ihre Sicht zeigt nur einen Teil der Hinweise (Familie und Volljährigkeit, nicht Einwilligungs- und Einladungsstand, 5.2), und sie können nichts davon erledigen (`einsichtIn` liefert für sie nur `LESEN`). Verworfen: der Block für alle Jugendleiter — er zeigte Betreuern Aufgaben, die sie nicht anfassen können.
 - **Mehr**: Profil, Meine Jungfischer (nur Bezugspersonen), Verwaltung (nur Jugendleiter), Darstellung (Hell/Dunkel/System), Impressum, Datenschutz, Abmelden.
-- **Profil**: Name und Kennung nur lesend; Passkeys hinzufügen, umbenennen, löschen (der letzte Anmeldeweg lässt sich nicht löschen); Passwort setzen oder ändern; TOTP (nur Jugendleiter); „Überall abmelden"; **„Meine Daten herunterladen"** als JSON (Rahmen-Spec 8.4) mit Personendaten, Familie, Untergruppen, Einwilligungen, Passkey-Namen und Sitzungen. Spätere Teilprojekte ergänzen ihre Daten.
+- **Profil**: Name und Kennung nur lesend; Passkeys hinzufügen, umbenennen, löschen (der letzte Anmeldeweg lässt sich nicht löschen); Passwort setzen oder ändern; TOTP (nur Jugendleiter); „Überall abmelden"; **„Meine Daten herunterladen"** als JSON (Rahmen-Spec 8.4) mit Personendaten, Zugang (Anmeldename, ob Passwort und TOTP gesetzt sind, Zeitpunkte), Passkey-Namen, Sitzungen, Familie, Untergruppen und Einwilligungen. Spätere Teilprojekte ergänzen ihre Daten. Es ist ein schlichter Link (`<a href="…/ich/daten" download>`) auf einen GET-Endpunkt mit `Content-Disposition: attachment`; das Sitzungscookie geht mit, weil Pfad und Ursprung passen. Verworfen: Laden per `HttpClient` und Blob — mehr Code ohne Gewinn. Der Auszug enthält weder Passwort-Hash noch TOTP-Geheimnis, Token-Hashes, öffentliche Schlüssel oder Credential-IDs. Über andere Personen nennt er nur Vor- und Nachname, Beziehung (mit Freitext bei „Andere"), ob sie erziehungsberechtigt sind, und ob sie Kind oder Bezugsperson sind; die Einwilligungen nennen Kind und Erteiler beim Namen. Ohne Sitzung kommt 401. Verworfen: die ganzen Zeilen nehmen und Geheimnisse herausstreichen — ein später ergänztes Geheimnisfeld landete dann still im Auszug; der Auszug wird Feld für Feld aufgebaut.
 - **Meine Jungfischer**: je Kind Untergruppen, Jugendsprecher-Hinweis, Familie mit Beziehung, Zugangsstand; für Erziehungsberechtigte die Aktionen aus 5.7.
 
 ### 6.3 Verwaltungs-Hülle (Desktop)
@@ -382,19 +388,28 @@ Aus dem Entwurf kopiert (2.1): Grundcharakter „Am Wasser", Vereinsfarbe als ei
 - **Mitglieder**: Liste mit Suche und Filtern (Jungfischer/Erwachsene, Untergruppe, mit Warnhinweis). Personenseite mit Stammdaten, Familie, Untergruppen und Zugang (Einladung mit WhatsApp-Text, Kopieren, optionaler Mail; Status und Ablauf).
 - **Jugendleiter & Rechte**: Rechtetabelle mit Vorlagen (5.4).
 - **Vereinseinstellungen** (Recht „Vereinseinstellungen"): Anzeigename, offizieller Name, Kontakt, Farbe mit Live-Vorschau beider Modi und Kontrasthinweis, Logo. Der Slug ist hier nicht änderbar (7.3).
-- **Hinweis aus dem Admin-Protokoll**: „Der Plattform-Admin hat am … einen neuen Link für Thomas erzeugt" (7.3), sichtbar für Inhaber von „Jugendleiter & Rechte verwalten".
+- **Hinweis aus dem Admin-Protokoll**: „Der Plattform-Admin hat am … einen neuen Link für Thomas erzeugt" (7.3), sichtbar für Inhaber von „Jugendleiter & Rechte verwalten". Er steht **30 Tage** und zeigt alle `NOTFALL_LINK`-Einträge des Vereins aus dieser Zeit, die neuesten zuerst. Es gibt keine Quittung und kein neues Feld. Verworfen: ein Hinweis, der bis zu einer Quittung stehen bleibt — er bräuchte dafür ein Feld und eine Oberfläche.
+  - **Lesen als benannte Ausnahme**: `AdminProtokoll` ist eine Plattformtabelle, die `vereinDb` nicht erreicht; gelesen wird mit dem schlichten `PrismaClient`. Die Abfrage ist eng gefasst: nur `vereinId` aus dem Slug, nur diese Aktion, nur `zeitpunkt` und `betroffenePersonId`.
 - Wechsel zwischen den Hüllen: „Zur App" in der Verwaltung, „Verwaltung" unter Mehr.
 
 ### 6.4 PWA in Teilprojekt 2
 
-- Manifest je Verein: `name` = Anzeigename, `start_url` und `scope` = `/<slug>/`, Farben aus der Vereinsfarbe.
-- Icons 192 und 512 px, beim Hochladen des Logos mit `sharp` erzeugt; ohne Logo ein Icon mit Initialen in der Vereinsfarbe.
+- Manifest je Verein: `name` = Anzeigename, `start_url` = `/<slug>/`, `scope` = `/<slug>` (ohne Schrägstrich am Ende: Nach der Manifest-Spec liegt eine Adresse im Scope, wenn ihr Pfad mit dem des Scopes beginnt, und die App navigiert zu `/<slug>`, weil Angular den Schrägstrich am Ende wegnormalisiert. Damit liegt formal auch `/<slug>-xyz/` im Scope, was harmlos ist. Verworfen: alle Links auf `/<slug>/` umbauen — das liefe gegen den Router), `theme_color` aus der Vereinsfarbe, `background_color` die feste helle Seitenfläche.
+- **Der Manifest-Link steht zur Laufzeit im `<head>`**, zusammen mit `apple-touch-icon` und `theme-color`; `VereinKontext` setzt ihn und nimmt ihn beim Wechsel zu einem anderen Verein, zur Plattform oder zu einem unbekannten Verein wieder heraus. Verworfen: der Server schreibt den Link in `index.html`. Die App rendert nur im Client (`app.routes.server.ts`), und `AngularNodeAppEngine` liefert für jeden Pfad dieselbe Datei aus. Chrome wertet einen nachträglich gesetzten Manifest-Link aus, und iOS liest ihn erst beim „Zum Home-Bildschirm".
+- **Manifest, Icons und Logo sind ohne Anmeldung abrufbar.** Browser laden das Manifest ohne Cookies, und die Anmeldeseite soll das Logo zeigen. Anzeigename und Farbe gibt `GET /verein` schon ohne Anmeldung preis. Ein gesperrter oder unbekannter Verein bleibt 404. Verworfen: Manifest, Icons und Logo nur mit Sitzung — das Manifest käme dann nie an, und die Anmeldeseite zeigte kein Logo. Die Antworten tragen `Cache-Control: no-cache` und einen ETag, die Logo-Adresse hängt `?v=` an, damit nach einer Änderung kein altes Icon aus dem Cache kommt.
+- Icons 192 und 512 px, beim Hochladen des Logos mit `sharp` erzeugt (3.2). Ohne Logo zeigt das Icon die Initialen (`initialen(anzeigename)`) auf `vereinsfarben(farbe).hell.akzent` in `aufAkzent`. Die Schrift ist DejaVu Sans Bold; das Image bringt sie über `apk add font-dejavu` mit. Verworfen: eine Schriftdatei im Repo. Preis der gewählten Lösung: Lokal liefert macOS eine Schrift, im Image könnte sie trotzdem fehlen, und der Fehler bliebe unsichtbar; deshalb prüft Etappe 6 das Icon auf dem Server.
 - Service Worker und Offline-Betrieb erst in TP5. Zum Home-Bildschirm hinzufügen klappt auf iOS und Android auch ohne; TP2 hat damit schon Icon und Namen.
 
 ### 6.5 Fehler
 
 - Unbekannter Verein, fremde oder unsichtbare Person: „Nicht gefunden oder keine Berechtigung".
 - Kein Netz: Meldung „Keine Verbindung – nochmal versuchen". Echtes Offline-Verhalten in TP5.
+
+### 6.6 Rechtstexte
+
+- Impressum und Datenschutz liegen als Markdown unter `apps/jufi/src/rechtstexte/`. Sie werden mit dem Text-Loader des Builds eingebunden und im Browser mit `marked` gerendert (verworfen: HTML-Dateien, weil der Eigentümer Markdown pflegt; verworfen: die Texte als TypeScript-Zeichenketten, aus demselben Grund); Text und Parser laden erst mit ihrer Route nach, damit Mitglieder, die nie ein Impressum aufrufen, beides nicht im Startbündel tragen. Die Gliederung steht, den Inhalt liefert der Eigentümer (8.6). Bis dahin enthalten die Dateien nur Platzhalter in eckigen Klammern, und beide Seiten sind ohne Anmeldung erreichbar.
+- **„← Zurück" erscheint nur nach einer vorherigen Navigation in der App.** Bei einem Direktaufruf (Mail, Messenger, Suche) steht dort „← JuFi App" mit dem Link zur Plattformseite. Gefragt wird, ob die App selbst schon eine Seite gezeigt hat (`previousNavigation` der laufenden Navigation). Verworfen: `history.length > 1`. Ein Direktaufruf hat dort schon zwei Einträge, und `back()` führte aus der App heraus.
+- **Bei einem Ladefehler** zeigt die Seite eine Meldung mit „Neu laden". Nach einem Deployment kann ein veralteter Chunk fehlen; der Link lädt die ganze Seite und holt damit die Dateien des neuen Stands.
 
 ---
 
@@ -477,7 +492,7 @@ Der Server hat 3,7 GB ohne Swap, davon am 12.10.2026 rund 2,2 GB verfügbar. Mit
 ### 8.5 Härtung
 
 - Sicherheits-Header und CSP gleichwertig zum Entwurf: `script-src 'self'`, kein Inline-Code, `frame-ancestors 'none'`, `X-Content-Type-Options`, `Referrer-Policy`.
-- Größengrenzen: Anfragen höchstens 100 KB, Logo-Upload höchstens 1 MB.
+- Größengrenzen: Anfragen höchstens 100 KB, Logo-Upload höchstens 1 MB und 25 Megapixel (3.2).
 - `Origin`-Prüfung für schreibende Anfragen; Postgres ohne Port.
 - Logs enthalten IDs, Status und Dauer, aber weder Tokens noch E-Mail-Adressen noch Namen.
 
@@ -485,7 +500,7 @@ Der Server hat 3,7 GB ohne Swap, davon am 12.10.2026 rund 2,2 GB verfügbar. Mit
 
 Vor der Einladung der echten Jugendleiter:
 
-- Impressum und Datenschutzerklärung der Plattform (Markdown; die Gliederung wird angelegt, der Inhalt kommt vom Eigentümer).
+- Impressum und Datenschutzerklärung der Plattform (Markdown; die Gliederung steht in `apps/jufi/src/rechtstexte/`, der Inhalt kommt vom Eigentümer, 6.6). **Offen:** Beide Dateien enthalten bisher nur Platzhalter in eckigen Klammern und sind ohne Anmeldung erreichbar; vor einem öffentlichen Betrieb muss der Eigentümer sie füllen.
 - Einwilligungstext Fassung 1 für Art. 8 DSGVO; die Fassung wird mit jeder Einwilligung gespeichert. **Offen:** Der Text in Fassung 1 ist ein Platzhalter; den Wortlaut liefert der Eigentümer, bevor echte Familien einwilligen.
 
 ---
@@ -496,8 +511,13 @@ Vor der Einladung der echten Jugendleiter:
 - **API-Tests gegen eine Wegwerf-Postgres** (Port 5433) in jeder Etappe.
 - **Mandanten-Test**: Er liest die Routen aus dem Express-Router, ruft jede mit IDs eines fremden Vereins auf und erwartet 404. **Eine neue Route ohne Eintrag im Test lässt den Test scheitern.**
 - **Admin-Test**: In keiner Admin-Antwort kommt ein Name eines Jungfischers oder einer Bezugsperson aus dem Demo-Verein vor.
-- **Ende-zu-Ende mit Playwright**, Passkeys über den virtuellen Authenticator von Chromium: Verein anlegen → erste Leitung nimmt an → legt Familie mit Kind an → Mutter willigt ein → Kind richtet Passkey ein und meldet sich an.
-- **Layout gemessen** bei 375 × 812 und 1280 × 800, hell und dunkel.
+- **Ende-zu-Ende mit Playwright** (seit Etappe 5), Passkeys über den virtuellen Authenticator von Chromium: Verein anlegen → erste Leitung nimmt an → legt Familie mit Kind an → Mutter willigt ein → Kind richtet Passkey ein und meldet sich an.
+- **Layout gemessen** bei 375 × 812 und 1280 × 800, hell und dunkel, als automatischer Test im selben Lauf.
+- **Aufruf**: `pnpm run e2e`, **nicht** in `pnpm test`. Der Lauf braucht einen Produktionsbau von App und CLI, die Entwicklungsdienste (`pnpm run db:up`) und dauert deutlich länger als die übrigen Tests (die Tests selbst gut eine Minute, dazu der Bau). Einmalig vorher `pnpm exec playwright install chromium`. Verworfen: den Lauf in `pnpm test` aufnehmen — jeder Testlauf bräuchte dann den Bau, und die schnellen Tests würden langsam.
+- **Aufbau**: `apps/jufi-e2e` ist ein eigenes Workspace-Paket mit `type: module` (sonst lädt Playwright als CommonJS und kann `libs/db/src/testing.ts` mit `import.meta` nicht laden) und hängt von `@jufi/db` ab, damit der Aufbau `bereiteTestDatenbankVor` über den Paketnamen findet. Verworfen: `paths` in `tsconfig.json` wie bei `apps/jufi` — `nx sync` verlangt den Projektverweis ohnehin, und die Abhängigkeit steht so dort, wo pnpm und Nx sie lesen.
+- **Server und Umgebung**: Der Aufbau startet den Produktionsbau auf Port 4210 (nicht 4200 wie `pnpm run dev`) mit der Datenbank `jufi_test_e2e` und eigenen, je Lauf neu erzeugten Geheimnissen. Die Umgebung der Kindprozesse hat Vorrang vor der `.env`: `process.loadEnvFile` überschreibt gesetzte Variablen nicht, also stehen alle Werte ausdrücklich im Aufbau; fehlte einer, käme er still aus der `.env`, und der Lauf schriebe etwa in die Entwicklungsdatenbank.
+- **Zwei Playwright-Projekte**: `ablauf` (der Ablauf oben, ein Worker, nur Chromium) und `layout` (die Messungen), das von `ablauf` abhängt, weil es dessen Sitzungen und IDs liest. Verworfen: zusätzlich Firefox und WebKit — der virtuelle Authenticator ist eine CDP-Funktion nur in Chromium, und der Ablauf prüft Fachliches, keine Browserunterschiede.
+- **Nicht im Image**: `apps/jufi-e2e` fehlt im Docker-Bau-Kontext (`Dockerfile.dockerignore`); das Image braucht keinen Playwright.
 - Ausschließlich erfundene Daten.
 
 ---

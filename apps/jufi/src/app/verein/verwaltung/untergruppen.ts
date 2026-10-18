@@ -10,14 +10,14 @@ import {
 	signal,
 	viewChild,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent } from '../../gestaltung/ui';
 import { MitgliedSitzung } from '../mitglied-waechter';
 import { MitgliederApi, type Untergruppe } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 
 /** Wo ein Fehler steht: beim Anlegen, beim Umbenennen oder oben bei der Liste (Laden, Loeschen). */
 type Bereich = 'anlegen' | 'umbenennen' | 'liste';
@@ -32,145 +32,136 @@ type Bereich = 'anlegen' | 'umbenennen' | 'liste';
  */
 @Component({
 	selector: 'jf-untergruppen',
-	imports: [KarteComponent, RouterLink, VereinKopfComponent],
+	imports: [KarteComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<main>
-			<jf-verein-kopf [slug]="slug()" untertitel="Untergruppen" />
-			<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
-			@if (!sichtbar()) {
-				<jf-karte>
-					<h2>Nicht gefunden oder keine Berechtigung</h2>
-				</jf-karte>
-			} @else if (ladefehler(); as text) {
-				<jf-karte>
-					<p class="fehler" role="alert">{{ text }}</p>
-					<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
-				</jf-karte>
-			} @else if (gruppen(); as alle) {
-				<div class="stapel">
-					@if (frage(); as u) {
-						<jf-karte>
-							<div
-								#dialog
-								tabindex="-1"
-								class="frage"
-								role="alertdialog"
-								aria-label="Rückfrage"
-								aria-describedby="frage-text"
-							>
-								<p id="frage-text">
-									Untergruppe „{{ u.name }}“ wirklich löschen? Das Löschen entfernt keine Personen, sie verlieren nur
-									diese Zuordnung.
-								</p>
-								<div class="reihe">
-									<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="loesche(u)">
-										Ja, löschen
-									</button>
-									<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(null)">Abbrechen</button>
-								</div>
-							</div>
-						</jf-karte>
-					}
+		<h1>Untergruppen</h1>
+		@if (!sichtbar()) {
+			<jf-karte>
+				<h2>Nicht gefunden oder keine Berechtigung</h2>
+			</jf-karte>
+		} @else if (ladefehler(); as text) {
+			<jf-karte>
+				<p class="fehler" role="alert">{{ text }}</p>
+				<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
+			</jf-karte>
+		} @else if (gruppen(); as alle) {
+			<div class="stapel">
+				@if (frage(); as u) {
 					<jf-karte>
-						<h2>Untergruppen</h2>
-						@if (fehler()?.bereich === 'liste') {
-							<p class="fehler" role="alert">{{ fehler()?.text }}</p>
-						}
-						<ul class="liste">
-							@for (u of alle; track u.id) {
-								<li [attr.data-gruppe]="u.id">
-									@if (bearbeiteId() === u.id) {
-										<form (submit)="benenneUm($event, u)">
-											<label class="feld">
-												Neuer Name
-												<input
-													type="text"
-													name="umbenennen"
-													maxlength="40"
-													autocomplete="off"
-													[value]="bearbeiteName()"
-													[attr.aria-invalid]="fehler()?.bereich === 'umbenennen' ? 'true' : null"
-													(input)="bearbeiteName.set(wert($event))"
-												/>
-											</label>
-											@if (fehler()?.bereich === 'umbenennen') {
-												<p class="fehler" role="alert">{{ fehler()?.text }}</p>
-											}
-											<div class="reihe">
-												<button type="submit" class="knopf primaer" [disabled]="laeuft()">Speichern</button>
-												<button type="button" class="knopf" [disabled]="laeuft()" (click)="bearbeiteId.set(null)">
-													Abbrechen
-												</button>
-											</div>
-										</form>
-									} @else {
-										<span class="name">{{ u.name }}</span>
-										<span class="gedaempft">{{ anzahl(u) }}</span>
-										@if (darfAendern()) {
-											<span class="reihe">
-												<button
-													type="button"
-													class="knopf umbenennen"
-													[disabled]="laeuft()"
-													(click)="beginneUmbenennen(u)"
-												>
-													Umbenennen
-												</button>
-												<button type="button" class="knopf loeschen" [disabled]="laeuft()" (click)="fragLoeschen(u)">
-													Löschen
-												</button>
-											</span>
-										}
-									}
-								</li>
-							} @empty {
-								<li class="gedaempft">Es gibt noch keine Untergruppen.</li>
-							}
-						</ul>
+						<div
+							#dialog
+							tabindex="-1"
+							class="frage"
+							role="alertdialog"
+							aria-label="Rückfrage"
+							aria-describedby="frage-text"
+						>
+							<p id="frage-text">
+								Untergruppe „{{ u.name }}“ wirklich löschen? Das Löschen entfernt keine Personen, sie verlieren nur
+								diese Zuordnung.
+							</p>
+							<div class="reihe">
+								<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="loesche(u)">
+									Ja, löschen
+								</button>
+								<button type="button" class="knopf" [disabled]="laeuft()" (click)="frage.set(null)">Abbrechen</button>
+							</div>
+						</div>
 					</jf-karte>
-					@if (darfAendern()) {
-						<jf-karte>
-							<form (submit)="lege($event)">
-								<label class="feld">
-									Neue Untergruppe
-									<input
-										type="text"
-										name="neuerName"
-										maxlength="40"
-										autocomplete="off"
-										[value]="neuerName()"
-										[attr.aria-invalid]="fehler()?.bereich === 'anlegen' ? 'true' : null"
-										(input)="neuerName.set(wert($event))"
-									/>
-								</label>
-								@if (fehler()?.bereich === 'anlegen') {
-									<p class="fehler" role="alert">{{ fehler()?.text }}</p>
-								}
-								<div class="reihe">
-									<button type="submit" class="knopf primaer" [disabled]="laeuft()">Anlegen</button>
-								</div>
-							</form>
-						</jf-karte>
+				}
+				<jf-karte>
+					<h2>Untergruppen</h2>
+					@if (fehler()?.bereich === 'liste') {
+						<p class="fehler" role="alert">{{ fehler()?.text }}</p>
 					}
-				</div>
-			}
-		</main>
+					<ul class="liste">
+						@for (u of alle; track u.id) {
+							<li [attr.data-gruppe]="u.id">
+								@if (bearbeiteId() === u.id) {
+									<form (submit)="benenneUm($event, u)">
+										<label class="feld">
+											Neuer Name
+											<input
+												type="text"
+												name="umbenennen"
+												maxlength="40"
+												autocomplete="off"
+												[value]="bearbeiteName()"
+												[attr.aria-invalid]="fehler()?.bereich === 'umbenennen' ? 'true' : null"
+												(input)="bearbeiteName.set(wert($event))"
+											/>
+										</label>
+										@if (fehler()?.bereich === 'umbenennen') {
+											<p class="fehler" role="alert">{{ fehler()?.text }}</p>
+										}
+										<div class="reihe">
+											<button type="submit" class="knopf primaer" [disabled]="laeuft()">Speichern</button>
+											<button type="button" class="knopf" [disabled]="laeuft()" (click)="bearbeiteId.set(null)">
+												Abbrechen
+											</button>
+										</div>
+									</form>
+								} @else {
+									<span class="name">{{ u.name }}</span>
+									<span class="gedaempft">{{ anzahl(u) }}</span>
+									@if (darfAendern()) {
+										<span class="reihe">
+											<button
+												type="button"
+												class="knopf umbenennen"
+												[disabled]="laeuft()"
+												(click)="beginneUmbenennen(u)"
+											>
+												Umbenennen
+											</button>
+											<button type="button" class="knopf loeschen" [disabled]="laeuft()" (click)="fragLoeschen(u)">
+												Löschen
+											</button>
+										</span>
+									}
+								}
+							</li>
+						} @empty {
+							<li class="gedaempft">Es gibt noch keine Untergruppen.</li>
+						}
+					</ul>
+				</jf-karte>
+				@if (darfAendern()) {
+					<jf-karte>
+						<form (submit)="lege($event)">
+							<label class="feld">
+								Neue Untergruppe
+								<input
+									type="text"
+									name="neuerName"
+									maxlength="40"
+									autocomplete="off"
+									[value]="neuerName()"
+									[attr.aria-invalid]="fehler()?.bereich === 'anlegen' ? 'true' : null"
+									(input)="neuerName.set(wert($event))"
+								/>
+							</label>
+							@if (fehler()?.bereich === 'anlegen') {
+								<p class="fehler" role="alert">{{ fehler()?.text }}</p>
+							}
+							<div class="reihe">
+								<button type="submit" class="knopf primaer" [disabled]="laeuft()">Anlegen</button>
+							</div>
+						</form>
+					</jf-karte>
+				}
+			</div>
+		}
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
 			max-width: 40rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
 		}
-		.zurueck {
-			display: inline-flex;
-			align-items: center;
-			min-height: var(--tippflaeche);
+		h1 {
 			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
 		}
 		.stapel {
 			display: grid;
@@ -219,6 +210,7 @@ export class UntergruppenComponent implements OnInit {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly sitzung = inject(MitgliedSitzung);
+	private readonly router = inject(Router);
 	private readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
 
 	protected readonly gruppen = signal<Untergruppe[] | null>(null);
@@ -254,7 +246,10 @@ export class UntergruppenComponent implements OnInit {
 			const antwort = await firstValueFrom(this.api.untergruppen(this.slug()));
 			if (nr === this.ladeNr) this.gruppen.set(antwort.untergruppen);
 		} catch (ursache) {
-			if (nr === this.ladeNr) this.ladefehler.set(fehlertext(alsApiFehler(ursache)));
+			if (nr !== this.ladeNr) return;
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.ladefehler.set(fehlertext(f));
 		}
 	}
 
@@ -319,6 +314,7 @@ export class UntergruppenComponent implements OnInit {
 		} catch (ursache) {
 			this.frage.set(null);
 			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return false;
 			// Bei 404 ist die Zeile weg, in der das Feld stand: Die Meldung gehoert dann zur Liste, sonst waere sie unsichtbar.
 			this.fehler.set({ bereich: f.status === 404 ? 'liste' : bereich, text: untergruppenfehler(f) });
 			if (f.status === 404) {

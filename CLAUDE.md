@@ -9,6 +9,7 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 - `apps/jufi` ist die **echte App** (Teilprojekt 2). Lokal: `pnpm run dev` → http://localhost:4200/ (Demo-Verein: `pnpm run demo`, dann `/demo`).
 - Etappe 3 ist da: Mitglieder nehmen Einladungen an und melden sich unter `/<slug>/anmelden` an (Passkey, Passwort, TOTP, „Passwort vergessen?"). Mails fängt lokal Mailpit ab (http://localhost:8025, braucht `pnpm run db:up`).
 - Etappe 4 ist da: Mitglieder pflegen (Personen, Familie, Untergruppen, Rechte, Einwilligung, „Meine Jungfischer"). Der Demo-Verein (`pnpm run demo`) bringt dafür Untergruppen, Familien, ein Kind ohne Einwilligung und eines, das morgen volljährig wird.
+- Etappe 5 ist da: Oberflächen, PWA-Manifest, Rechtstexte (nur Platzhalter, README „Rechtstexte“) und Ende-zu-Ende-Test. `pnpm run e2e` braucht `pnpm run db:up`, baut selbst, läuft nicht in `pnpm test`; einmalig `pnpm exec playwright install chromium`, Port 4210 muss frei sein.
 - Deployment der echten App: `pnpm run deploy:app` nach https://app-test.jufi-app.de (README, „Deployment der echten App“). Erster Admin dort: `docker compose exec jufi node apps/cli/dist/main.js admin anlegen <name>`; Mails per `ssh -L 8025:127.0.0.1:8025`.
 - Ersten Admin lokal anlegen: `pnpm run cli admin anlegen <name>` gibt den Einrichtungslink aus (braucht `BASIS_URL` in der `.env`).
 - Nach dem Klonen und nach jeder Schemaänderung `pnpm run db:generate` — der Prisma-Client liegt nicht im Repo.

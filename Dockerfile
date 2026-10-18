@@ -22,7 +22,9 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Die Angular-Apps haben bewusst keine eigene package.json -- sie werden ueber
 # project.json konfiguriert und ziehen ihre Abhaengigkeiten aus der Wurzel. Die
-# Workspace-Pakete dagegen muessen hier stehen, sonst passt die Sperrdatei nicht.
+# Workspace-Pakete dagegen muessen hier stehen, sonst passt die Sperrdatei nicht --
+# ausser apps/jufi-e2e, das nur Playwright im Paket haelt und nicht ins Image gehoert;
+# ein fehlender Importer stoert frozen-lockfile nicht.
 COPY apps/cli/package.json apps/cli/
 COPY libs/auth/package.json libs/auth/
 COPY libs/db/package.json libs/db/
@@ -88,7 +90,11 @@ FROM node:22-alpine AS runtime
 # dauert jedes `docker compose stop` zehn Sekunden bis zum SIGKILL -- und der
 # Mail-Arbeiter kaeme nie dazu, einen laufenden Versand zu beenden (server.ts).
 # curl fuer den Healthcheck.
-RUN apk add --no-cache tini curl
+# font-dejavu und fontconfig fuer das Initialen-Icon (server/verein/logo.ts):
+# sharp zeichnet den Text ueber librsvg, und das findet im schlanken Alpine-Image
+# keine einzige Schrift -- die Initialen blieben ohne Fehlermeldung unsichtbar.
+# Verworfen: eine Schriftdatei im Repo.
+RUN apk add --no-cache tini curl font-dejavu fontconfig
 
 ENV NODE_ENV=production \
 	PORT=4000 \

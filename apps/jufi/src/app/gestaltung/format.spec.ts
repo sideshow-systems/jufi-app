@@ -1,5 +1,6 @@
 import {
 	betrag,
+	datumBerlin,
 	datumDeutsch,
 	datumLang,
 	monatKurz,
@@ -37,5 +38,10 @@ describe('format', () => {
 		expect(zeitpunktBerlin('2026-10-13T12:05:00.000Z')).toBe('13.10.2026 14:05');
 		// Winterzeit, und Mitternacht ohne "24".
 		expect(zeitpunktBerlin('2026-12-31T23:30:00.000Z')).toBe('01.01.2027 00:30');
+	});
+
+	it('schreibt nur das Berliner Datum, auch wenn UTC noch beim Vortag steht', () => {
+		expect(datumBerlin('2026-10-12T10:00:00.000Z')).toBe('12.10.2026');
+		expect(datumBerlin('2026-10-09T23:30:00.000Z')).toBe('10.10.2026');
 	});
 });

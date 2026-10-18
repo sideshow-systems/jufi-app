@@ -2,17 +2,13 @@ import { provideHttpClient, withFetch } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import type { EnvironmentProviders, Provider } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter, withComponentInputBinding } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { routes } from '../app.routes';
+import { routerFeatures, routes } from '../app.routes';
 
 /** Gemeinsame Bereitstellung der Admin-Tests: echte Routen, gespielte HTTP-Antworten. */
 export function adminTestAnbieter(): Array<Provider | EnvironmentProviders> {
-	return [
-		provideRouter(routes, withComponentInputBinding()),
-		provideHttpClient(withFetch()),
-		provideHttpClientTesting(),
-	];
+	return [provideRouter(routes, ...routerFeatures), provideHttpClient(withFetch()), provideHttpClientTesting()];
 }
 
 /** Tippt in ein Feld, wie es eine Person taete: Wert setzen, input-Ereignis ausloesen. */

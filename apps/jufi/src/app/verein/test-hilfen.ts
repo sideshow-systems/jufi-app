@@ -18,7 +18,7 @@ export async function oeffneVereinsseite(
 	await vi.waitFor(() =>
 		http
 			.expectOne(`/${slug}/api/v1/verein`)
-			.flush({ slug, anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false }),
+			.flush({ slug, anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false, logoStand: null }),
 	);
 	await navigation;
 	await harness.fixture.whenStable();

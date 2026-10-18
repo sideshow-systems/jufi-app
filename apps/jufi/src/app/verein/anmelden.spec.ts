@@ -153,6 +153,87 @@ describe('Anmeldung im Verein', () => {
 	});
 });
 
+describe('Anmeldung im Verein mit weiter', () => {
+	let http: HttpTestingController;
+	let harness: RouterTestingHarness;
+	let seite: HTMLElement;
+	let navigiert: ReturnType<typeof vi.spyOn>;
+
+	async function oeffne(url: string): Promise<void> {
+		TestBed.configureTestingModule({ providers: adminTestAnbieter() });
+		({ harness, seite, http } = await oeffneVereinsseite(url));
+		navigiert = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+	}
+
+	afterEach(() => http.verify());
+
+	async function stabil(): Promise<void> {
+		await harness.fixture.whenStable();
+		harness.detectChanges();
+	}
+
+	function ausfuellenUndAbsenden(): void {
+		tippe(seite, 'input[name=kennung]', 'flo@example.org');
+		tippe(seite, 'input[name=passwort]', 'ein-langes-passwort');
+		harness.detectChanges();
+		knopf(seite, 'Anmelden').click();
+	}
+
+	it('geht nach der Passwort-Anmeldung zur Seite aus weiter', async () => {
+		await oeffne('/demo/anmelden?weiter=%2Fdemo%2Fprofil');
+		ausfuellenUndAbsenden();
+		http.expectOne(`${API}/anmelden`).flush({ schritt: 'fertig' });
+		await stabil();
+		expect(navigiert).toHaveBeenCalledWith('/demo/profil');
+	});
+
+	it('geht nach dem TOTP-Schritt zur Seite aus weiter', async () => {
+		await oeffne('/demo/anmelden?weiter=%2Fdemo%2Fprofil');
+		ausfuellenUndAbsenden();
+		http.expectOne(`${API}/anmelden`).flush({ schritt: 'totp', zwischenmarke: 'marke-1' });
+		await stabil();
+		tippe(seite, 'input[name=code]', '123456');
+		harness.detectChanges();
+		knopf(seite, 'Anmelden').click();
+		http.expectOne(`${API}/anmelden/totp`).flush({ schritt: 'fertig', wiederherstellungscodesUebrig: 9 });
+		await stabil();
+		expect(navigiert).toHaveBeenCalledWith('/demo/profil');
+	});
+
+	it('geht nach dem Passkey zur Seite aus weiter', async () => {
+		const passkeys: Partial<PasskeyBrowser> = {
+			unterstuetzt: () => true,
+			anmelden: async (wege) => {
+				await new Promise((ok, fehler) => wege.optionen().subscribe({ next: ok, error: fehler }));
+				await new Promise((ok, fehler) => wege.senden({ id: 'p' }).subscribe({ next: ok, error: fehler }));
+				return 'fertig';
+			},
+		};
+		TestBed.configureTestingModule({
+			providers: [...adminTestAnbieter(), { provide: PasskeyBrowser, useValue: passkeys }],
+		});
+		({ harness, seite, http } = await oeffneVereinsseite('/demo/anmelden?weiter=%2Fdemo%2Fprofil'));
+		navigiert = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+
+		knopf(seite, 'Mit Passkey anmelden').click();
+		http.expectOne(`${API}/anmelden/passkey-optionen`).flush({ optionen: { challenge: 'c' } });
+		await vi.waitFor(() => {
+			http.expectOne(`${API}/anmelden/passkey`).flush({ schritt: 'fertig' });
+		});
+		await stabil();
+		expect(navigiert).toHaveBeenCalledWith('/demo/profil');
+	});
+
+	it('ein fremdes Ziel in weiter fuehrt zum Start des Vereins', async () => {
+		await oeffne('/demo/anmelden?weiter=%2F%2Fboese.example');
+		ausfuellenUndAbsenden();
+		http.expectOne(`${API}/anmelden`).flush({ schritt: 'fertig' });
+		await stabil();
+		expect(navigiert).toHaveBeenCalledTimes(1);
+		expect(navigiert).toHaveBeenCalledWith('/demo');
+	});
+});
+
 describe('Anmeldung im Verein ohne Passkey-Unterstuetzung', () => {
 	it('zeigt ohne window.PublicKeyCredential keinen Passkey-Knopf', async () => {
 		const vorher = (window as { PublicKeyCredential?: unknown }).PublicKeyCredential;

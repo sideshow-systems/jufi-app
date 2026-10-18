@@ -29,6 +29,7 @@ import keyRoundIcon from 'lucide/dist/esm/icons/key-round.mjs';
 import layoutDashboardIcon from 'lucide/dist/esm/icons/layout-dashboard.mjs';
 import linkIcon from 'lucide/dist/esm/icons/link.mjs';
 import listChecksIcon from 'lucide/dist/esm/icons/list-checks.mjs';
+import logOutIcon from 'lucide/dist/esm/icons/log-out.mjs';
 import mapPinIcon from 'lucide/dist/esm/icons/map-pin.mjs';
 import messageCircleIcon from 'lucide/dist/esm/icons/message-circle.mjs';
 import messagesSquareIcon from 'lucide/dist/esm/icons/messages-square.mjs';
@@ -107,6 +108,7 @@ const ICONS = {
 	schluessel: keyRoundIcon,
 	einladen: userPlusIcon,
 	ordner: folderIcon,
+	abmelden: logOutIcon,
 } as const;
 
 export type IconName = keyof typeof ICONS;

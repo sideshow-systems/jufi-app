@@ -8,6 +8,8 @@ export interface OeffentlicherVerein {
 	anzeigename: string;
 	farbe: string;
 	hatLogo: boolean;
+	/** ISO-Zeit der letzten Logo-Aenderung; haengt als ?v= an Logo- und Icon-Adressen. null ohne Logo. */
+	logoStand: string | null;
 }
 
 @Injectable({ providedIn: 'root' })

@@ -2,7 +2,17 @@ import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { adminTestAnbieter, knopf, tippe } from '../../admin/test-hilfen';
 import type { PersonDetail } from '../mitglieder-api';
-import { API, hake, ichMit, oeffneSeite, stabil, waehle } from './test-hilfen';
+import {
+	API,
+	antworteAbgelaufen,
+	erwarteAnmeldung,
+	hake,
+	ichMit,
+	oeffneAbgelaufen,
+	oeffneSeite,
+	stabil,
+	waehle,
+} from './test-hilfen';
 
 const GRUPPEN = {
 	untergruppen: [
@@ -480,5 +490,18 @@ describe('Personenseite', () => {
 			http.expectOne(`${API}/personen/k1/familie/e1`).flush(null, { status: 204, statusText: 'No Content' }),
 		);
 		await neuGeladen(http, harness, kind({ familie: [] }));
+	});
+
+	it('ein abgelaufenes Login beim Laden führt zur Anmeldung', async () => {
+		await oeffneAbgelaufen('/demo/verwaltung/personen/k1', ['MITGLIEDER'], '/personen/k1');
+	});
+
+	it('ein abgelaufenes Login beim Speichern führt zur Anmeldung statt zum Fehler am Formular', async () => {
+		const { harness, seite, http } = await oeffneVerwaltung(kind());
+		tippe(seite, 'input[name="nachname"]', 'Beispiel');
+		await stabil(harness);
+		knopf(seite, 'Speichern').click();
+		await antworteAbgelaufen(http, '/personen/k1');
+		await erwarteAnmeldung(http, '/demo/verwaltung/personen/k1');
 	});
 });

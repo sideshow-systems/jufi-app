@@ -10,6 +10,7 @@ import {
 	viewChild,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
+import { sichererWeiterPfad } from '@jufi/domain';
 import { firstValueFrom, map } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { wertVon } from '../gemeinsam/formular';
@@ -135,6 +136,8 @@ const MARKE_ABGELAUFEN = 'Anmeldung abgelaufen, bitte neu beginnen';
 export class AnmeldenComponent {
 	/** Kommt aus dem Pfad (withComponentInputBinding). */
 	readonly slug = input.required<string>();
+	/** Query-Parameter weiter (withComponentInputBinding): die Seite, von der der Waechter hierher geschickt hat. */
+	readonly weiter = input<string>();
 
 	private readonly api = inject(MitgliederApi);
 	private readonly router = inject(Router);
@@ -200,16 +203,29 @@ export class AnmeldenComponent {
 	}
 
 	/**
+	 * weiter kommt aus der Adresszeile und wird deshalb hier, nicht schon beim Lesen,
+	 * geprueft: sichererWeiterPfad laesst nur Pfade im eigenen Verein durch. Der Start
+	 * ohne Schraegstrich am Ende, siehe zurApp in einladung.ts: navigateByUrl('/demo/')
+	 * trifft keine Route.
+	 */
+	private zielNachAnmeldung(): string {
+		// Ein doppelt angegebenes weiter kommt als Liste an; nur eine Zeichenkette gilt.
+		const weiter = this.weiter();
+		const pfad = sichererWeiterPfad(this.slug(), typeof weiter === 'string' ? weiter : undefined);
+		const start = `/${this.slug()}/`;
+		return pfad === start ? `/${encodeURIComponent(this.slug())}` : pfad;
+	}
+
+	/**
 	 * Gemeinsamer Rahmen der Wege: sperrt die Knoepfe, faengt Fehler als Text und geht
-	 * bei Erfolg (true) zur Startseite des Vereins. false heisst: noch nicht fertig
-	 * oder abgebrochen, ohne Meldung.
+	 * bei Erfolg (true) zur Seite aus weiter, sonst zur Startseite des Vereins. false
+	 * heisst: noch nicht fertig oder abgebrochen, ohne Meldung.
 	 */
 	private async versuche(schritt: () => Promise<boolean>): Promise<void> {
 		this.laeuft.set(true);
 		this.fehler.set(null);
 		try {
-			// Ohne Schraegstrich am Ende, siehe zurApp in einladung.ts.
-			if (await schritt()) await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}`);
+			if (await schritt()) await this.router.navigateByUrl(this.zielNachAnmeldung());
 		} catch (ursache) {
 			const fehler = alsApiFehler(ursache);
 			this.fehler.set(fehlertext(fehler));

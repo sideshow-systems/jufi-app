@@ -7,6 +7,13 @@
 			"runtimeArgs": ["run", "dev:entwurf"],
 			"port": 4300,
 			"url": "http://localhost:4300"
+		},
+		{
+			"name": "jufi",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": ["run", "dev"],
+			"port": 4200,
+			"url": "http://localhost:4200"
 		}
 	]
 }

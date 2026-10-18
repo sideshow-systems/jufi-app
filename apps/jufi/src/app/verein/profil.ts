@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, type OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
-import { firstValueFrom, map, type Observable } from 'rxjs';
-import { alsApiFehler, fehlertext, type ApiFehler } from '../gemeinsam/api-fehler';
+import { firstValueFrom, map } from 'rxjs';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { wertVon } from '../gemeinsam/formular';
 import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
 import { TotpEinrichtungComponent } from '../gemeinsam/totp-einrichtung';
@@ -11,20 +11,17 @@ import { KarteComponent } from '../gestaltung/ui';
 import type { MitgliedIch } from './mitglieder-api';
 import { MitgliederApi } from './mitglieder-api';
 import { MitgliedSitzung } from './mitglied-waechter';
-import { VereinKopfComponent } from './verein-kopf';
+import { beiAbgelaufenerSitzung } from './sitzung-abgelaufen';
 
 /** Dieselbe Grenze wie der Server (profil.ts), damit ein Tippfehler keinen Weg ueber das Netz braucht. */
 const NAME_UNGUELTIG = 'Der Name braucht 1 bis 40 Zeichen';
 const MAX_NAME = 40;
 
-/** 401 mit diesem Text heisst abgelaufene Sitzung; ein falsches altes Passwort ist ebenfalls 401, aber mit anderem Text. */
-const NICHT_ANGEMELDET = 'nicht angemeldet';
-
 const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <= MAX_NAME;
 
 /**
  * Das eigene Profil: Name und Kennung zum Lesen, Passkeys, Passwort, zweiter
- * Faktor, Abmelden. Schlicht gehalten; die Huelle mit Navigation baut Etappe 5.
+ * Faktor, Abmelden. Die Huelle (Kopf, Leiste) stellt MitgliederHuelle; die Seite hat kein eigenes main.
  *
  * Nach jeder Aenderung wird der Stand neu geholt statt lokal nachgefuehrt: Der
  * Server entscheidet, was gilt (etwa dass andere Sitzungen nach einer
@@ -32,197 +29,195 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
  */
 @Component({
 	selector: 'jf-profil',
-	imports: [KarteComponent, RouterLink, TotpEinrichtungComponent, VereinKopfComponent],
+	imports: [KarteComponent, RouterLink, TotpEinrichtungComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<main>
-			<jf-verein-kopf [slug]="slug()" untertitel="Profil" />
-			<a class="zurueck" [routerLink]="['/', slug()]">← Zur Startseite</a>
-			@if (ladefehler(); as text) {
+		<h1>Profil</h1>
+		<a class="zurueck" [routerLink]="['/', slug(), 'mehr']">← Mehr</a>
+		@if (ladefehler(); as text) {
+			<jf-karte>
+				<p class="fehler" role="alert">{{ text }}</p>
+				<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
+			</jf-karte>
+		} @else if (ich(); as i) {
+			<div class="stapel">
 				<jf-karte>
-					<p class="fehler" role="alert">{{ text }}</p>
-					<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
+					<h2>Du</h2>
+					<dl>
+						<dt>Name</dt>
+						<dd>{{ i.person.vorname }} {{ i.person.nachname }}</dd>
+						<dt>{{ i.person.art === 'JUNGFISCHER' ? 'Anmeldename' : 'E-Mail-Adresse' }}</dt>
+						<dd>{{ i.kennung ?? '–' }}</dd>
+					</dl>
 				</jf-karte>
-			} @else if (ich(); as i) {
-				<div class="stapel">
-					<jf-karte>
-						<h2>Du</h2>
-						<dl>
-							<dt>Name</dt>
-							<dd>{{ i.person.vorname }} {{ i.person.nachname }}</dd>
-							<dt>{{ i.person.art === 'JUNGFISCHER' ? 'Anmeldename' : 'E-Mail-Adresse' }}</dt>
-							<dd>{{ i.kennung ?? '–' }}</dd>
-						</dl>
-					</jf-karte>
 
-					<jf-karte>
-						<h2>Passkeys</h2>
-						<p class="gedaempft klein">
-							Ein Passkey meldet dich mit der Entsperrung des Geräts an, ohne Passwort. Richte einen je Gerät ein.
-						</p>
-						<ul class="passkeys">
-							@for (p of i.passkeys; track p.id) {
-								<li [attr.data-passkey]="p.id">
-									@if (umbenennenId() === p.id) {
-										<form novalidate (submit)="speichereName($event, p.id)">
-											<label class="feld">
-												Name
-												<input
-													name="label"
-													autocomplete="off"
-													maxlength="40"
-													[value]="labelEingabe()"
-													(input)="labelEingabe.set(wert($event))"
-												/>
-											</label>
-											<div class="reihe">
-												<button type="submit" class="knopf primaer klein" [disabled]="laeuft()">Speichern</button>
-												<button type="button" class="knopf klein" (click)="umbenennenId.set(null)">Abbrechen</button>
-											</div>
-										</form>
-									} @else {
-										<div class="passkey-text">
-											<strong>{{ p.label }}</strong>
-											<span class="klein gedaempft">
-												Eingerichtet {{ datum(p.erstelltAm) }}
-												@if (p.zuletztGenutztAm; as zuletzt) {
-													· zuletzt benutzt {{ datum(zuletzt) }}
-												}
-											</span>
-										</div>
+				<jf-karte>
+					<h2>Passkeys</h2>
+					<p class="gedaempft klein">
+						Ein Passkey meldet dich mit der Entsperrung des Geräts an, ohne Passwort. Richte einen je Gerät ein.
+					</p>
+					<ul class="passkeys">
+						@for (p of i.passkeys; track p.id) {
+							<li [attr.data-passkey]="p.id">
+								@if (umbenennenId() === p.id) {
+									<form novalidate (submit)="speichereName($event, p.id)">
+										<label class="feld">
+											Name
+											<input
+												name="label"
+												autocomplete="off"
+												maxlength="40"
+												[value]="labelEingabe()"
+												(input)="labelEingabe.set(wert($event))"
+											/>
+										</label>
 										<div class="reihe">
-											<button type="button" class="knopf klein" [disabled]="laeuft()" (click)="beginneUmbenennen(p)">
-												Umbenennen
-											</button>
-											<button type="button" class="knopf klein" [disabled]="laeuft()" (click)="entferne(p.id)">
-												Löschen
-											</button>
+											<button type="submit" class="knopf primaer klein" [disabled]="laeuft()">Speichern</button>
+											<button type="button" class="knopf klein" (click)="umbenennenId.set(null)">Abbrechen</button>
 										</div>
-									}
-									@if (zeilenFehler()[p.id]; as text) {
-										<p class="fehler klein" role="alert">{{ text }}</p>
-									}
-								</li>
-							} @empty {
-								<li class="gedaempft">Noch kein Passkey.</li>
-							}
-						</ul>
-						@if (passkeys.unterstuetzt()) {
-							<form class="neu" novalidate (submit)="fuegeHinzu($event)">
-								<label class="feld">
-									Name des neuen Passkeys (optional)
-									<input
-										name="passkey-name"
-										autocomplete="off"
-										maxlength="40"
-										placeholder="zum Beispiel Handy"
-										[value]="neuerName()"
-										(input)="neuerName.set(wert($event))"
-									/>
-								</label>
-								<button type="submit" class="knopf primaer" [disabled]="laeuft()">Passkey hinzufügen</button>
-							</form>
+									</form>
+								} @else {
+									<div class="passkey-text">
+										<strong>{{ p.label }}</strong>
+										<span class="klein gedaempft">
+											Eingerichtet {{ datum(p.erstelltAm) }}
+											@if (p.zuletztGenutztAm; as zuletzt) {
+												· zuletzt benutzt {{ datum(zuletzt) }}
+											}
+										</span>
+									</div>
+									<div class="reihe">
+										<button type="button" class="knopf klein" [disabled]="laeuft()" (click)="beginneUmbenennen(p)">
+											Umbenennen
+										</button>
+										<button type="button" class="knopf klein" [disabled]="laeuft()" (click)="entferne(p.id)">
+											Löschen
+										</button>
+									</div>
+								}
+								@if (zeilenFehler()[p.id]; as text) {
+									<p class="fehler klein" role="alert">{{ text }}</p>
+								}
+							</li>
+						} @empty {
+							<li class="gedaempft">Noch kein Passkey.</li>
 						}
-						@if (passkeyFehler(); as text) {
-							<p class="fehler" role="alert">{{ text }}</p>
-						}
-					</jf-karte>
-
-					<jf-karte>
-						<h2>Passwort</h2>
-						<p class="gedaempft klein">
-							{{
-								i.hatPasswort
-									? 'Ein Passwort ist gesetzt. Wenn du es änderst, werden alle anderen Geräte abgemeldet.'
-									: 'Noch kein Passwort. Mit einem Passwort kannst du dich auch ohne Passkey anmelden.'
-							}}
-						</p>
-						<form novalidate (submit)="speicherePasswort($event)">
-							@if (i.hatPasswort) {
-								<label class="feld">
-									Altes Passwort
-									<input
-										type="password"
-										name="altes-passwort"
-										autocomplete="current-password"
-										[value]="altesPasswort()"
-										(input)="altesPasswort.set(wert($event))"
-									/>
-								</label>
-							}
+					</ul>
+					@if (passkeys.unterstuetzt()) {
+						<form class="neu" novalidate (submit)="fuegeHinzu($event)">
 							<label class="feld">
-								{{ i.hatPasswort ? 'Neues Passwort' : 'Passwort' }}
+								Name des neuen Passkeys (optional)
 								<input
-									type="password"
-									name="neues-passwort"
-									autocomplete="new-password"
-									[value]="neuesPasswort()"
-									(input)="neuesPasswort.set(wert($event))"
+									name="passkey-name"
+									autocomplete="off"
+									maxlength="40"
+									placeholder="zum Beispiel Handy"
+									[value]="neuerName()"
+									(input)="neuerName.set(wert($event))"
 								/>
 							</label>
-							<p class="klein regel" [class.verletzt]="neuesPasswortFehler() !== null">
-								{{ neuesPasswortFehler() ?? 'Das Passwort erfüllt die Regel.' }}
-							</p>
-							<button type="submit" class="knopf primaer" [disabled]="laeuft()">Passwort speichern</button>
+							<button type="submit" class="knopf primaer" [disabled]="laeuft()">Passkey hinzufügen</button>
 						</form>
-						@if (passwortFehler(); as text) {
-							<p class="fehler" id="passwort-fehler" role="alert">{{ text }}</p>
-						}
-						@if (passwortErfolg()) {
-							<p class="erfolg" role="status">Passwort gespeichert.</p>
-						}
-					</jf-karte>
-
-					@if (i.totp.moeglich) {
-						<jf-karte>
-							<h2>Zweiter Faktor</h2>
-							@if (totpOffen()) {
-								<jf-totp-einrichtung
-									[starten]="totpStarten"
-									[bestaetigen]="totpBestaetigen"
-									(eingerichtet)="totpFertig()"
-								/>
-							} @else if (i.totp.aktiv) {
-								<p>Eingerichtet. Noch {{ i.totp.wiederherstellungscodesUebrig }} Wiederherstellungscodes übrig.</p>
-							} @else {
-								<p class="gedaempft klein">
-									Mit einer Authenticator-App schützt du deinen Zugang zusätzlich. Bei jeder Anmeldung fragt die App
-									dann nach einem Code.
-								</p>
-								<button type="button" class="knopf" (click)="totpOffen.set(true)">Zweiten Faktor einrichten</button>
-							}
-						</jf-karte>
 					}
+					@if (passkeyFehler(); as text) {
+						<p class="fehler" role="alert">{{ text }}</p>
+					}
+				</jf-karte>
 
-					<jf-karte>
-						<h2>Abmelden</h2>
-						<p class="gedaempft klein">
-							„Überall abmelden“ beendet die Anmeldung auf allen deinen Geräten, auch auf diesem.
+				<jf-karte>
+					<h2>Passwort</h2>
+					<p class="gedaempft klein">
+						{{
+							i.hatPasswort
+								? 'Ein Passwort ist gesetzt. Wenn du es änderst, werden alle anderen Geräte abgemeldet.'
+								: 'Noch kein Passwort. Mit einem Passwort kannst du dich auch ohne Passkey anmelden.'
+						}}
+					</p>
+					<form novalidate (submit)="speicherePasswort($event)">
+						@if (i.hatPasswort) {
+							<label class="feld">
+								Altes Passwort
+								<input
+									type="password"
+									name="altes-passwort"
+									autocomplete="current-password"
+									[value]="altesPasswort()"
+									(input)="altesPasswort.set(wert($event))"
+								/>
+							</label>
+						}
+						<label class="feld">
+							{{ i.hatPasswort ? 'Neues Passwort' : 'Passwort' }}
+							<input
+								type="password"
+								name="neues-passwort"
+								autocomplete="new-password"
+								[value]="neuesPasswort()"
+								(input)="neuesPasswort.set(wert($event))"
+							/>
+						</label>
+						<p class="klein regel" [class.verletzt]="neuesPasswortFehler() !== null">
+							{{ neuesPasswortFehler() ?? 'Das Passwort erfüllt die Regel.' }}
 						</p>
-						<div class="reihe">
-							<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden(false)">Abmelden</button>
-							<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden(true)">
-								Überall abmelden
-							</button>
-						</div>
-						@if (abmeldefehler(); as text) {
-							<p class="fehler" role="alert">{{ text }}</p>
+						<button type="submit" class="knopf primaer" [disabled]="laeuft()">Passwort speichern</button>
+					</form>
+					@if (passwortFehler(); as text) {
+						<p class="fehler" id="passwort-fehler" role="alert">{{ text }}</p>
+					}
+					@if (passwortErfolg()) {
+						<p class="erfolg" role="status">Passwort gespeichert.</p>
+					}
+				</jf-karte>
+
+				@if (i.totp.moeglich) {
+					<jf-karte>
+						<h2>Zweiter Faktor</h2>
+						@if (totpOffen()) {
+							<jf-totp-einrichtung
+								[starten]="totpStarten"
+								[bestaetigen]="totpBestaetigen"
+								(eingerichtet)="totpFertig()"
+							/>
+						} @else if (i.totp.aktiv) {
+							<p>Eingerichtet. Noch {{ i.totp.wiederherstellungscodesUebrig }} Wiederherstellungscodes übrig.</p>
+						} @else {
+							<p class="gedaempft klein">
+								Mit einer Authenticator-App schützt du deinen Zugang zusätzlich. Bei jeder Anmeldung fragt die App dann
+								nach einem Code.
+							</p>
+							<button type="button" class="knopf" (click)="totpOffen.set(true)">Zweiten Faktor einrichten</button>
 						}
 					</jf-karte>
-				</div>
-			} @else {
-				<p class="gedaempft">Wird geladen …</p>
-			}
-		</main>
+				}
+
+				<jf-karte>
+					<h2>Meine Daten</h2>
+					<p class="gedaempft klein">Alles, was die App über dich speichert, als Datei.</p>
+					<!-- Ein schlichter Link: Der Server antwortet mit attachment, das Cookie geht mit. Verworfen: Laden per HttpClient und Blob. -->
+					<a class="knopf" [href]="'/' + slug() + '/api/v1/ich/daten'" download>Meine Daten herunterladen</a>
+				</jf-karte>
+
+				<jf-karte>
+					<h2>Abmelden</h2>
+					<p class="gedaempft klein">
+						„Überall abmelden“ beendet die Anmeldung auf allen deinen Geräten, auch auf diesem.
+					</p>
+					<div class="reihe">
+						<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden(false)">Abmelden</button>
+						<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden(true)">Überall abmelden</button>
+					</div>
+					@if (abmeldefehler(); as text) {
+						<p class="fehler" role="alert">{{ text }}</p>
+					}
+				</jf-karte>
+			</div>
+		} @else {
+			<p class="gedaempft">Wird geladen …</p>
+		}
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
-			max-width: 32rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
 		}
 		.zurueck {
 			display: inline-flex;
@@ -233,6 +228,10 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
 		.stapel {
 			display: grid;
 			gap: var(--a4);
+		}
+		h1 {
+			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
 		}
 		h2 {
 			margin: 0 0 var(--a3);
@@ -365,7 +364,7 @@ export class ProfilComponent implements OnInit {
 			this.ich.set(await firstValueFrom(this.api.ich(this.slug())));
 		} catch (ursache) {
 			const f = alsApiFehler(ursache);
-			if (await this.beiAbgelaufenerSitzung(f)) return;
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			this.ladefehler.set(fehlertext(f));
 		}
 	}
@@ -469,10 +468,7 @@ export class ProfilComponent implements OnInit {
 		this.laeuft.set(true);
 		this.abmeldefehler.set(null);
 		try {
-			const aufruf: Observable<void> = ueberall ? this.api.abmeldenAlle(this.slug()) : this.api.abmelden(this.slug());
-			await firstValueFrom(aufruf);
-			this.sitzung.ich.set(null);
-			await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
+			await this.sitzung.abmelden(this.slug(), ueberall);
 		} catch (ursache) {
 			// Die Sitzung steht dann vielleicht noch: Die Person soll es erfahren, statt auf einer toten Seite zu glauben, sie sei draussen.
 			this.abmeldefehler.set(fehlertext(alsApiFehler(ursache)));
@@ -506,16 +502,10 @@ export class ProfilComponent implements OnInit {
 			await arbeit();
 		} catch (ursache) {
 			const f = alsApiFehler(ursache);
-			if (await this.beiAbgelaufenerSitzung(f)) return;
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			zeigeFehler(fehlertext(f));
 		} finally {
 			this.laeuft.set(false);
 		}
-	}
-
-	private async beiAbgelaufenerSitzung(f: ApiFehler): Promise<boolean> {
-		if (f.status !== 401 || f.fehler !== NICHT_ANGEMELDET) return false;
-		await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
-		return true;
 	}
 }

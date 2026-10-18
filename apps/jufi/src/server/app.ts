@@ -8,6 +8,7 @@ import { sicherheitsHeader } from './sicherheit.js';
 import { mitgliedAusSitzung } from './mitglieder/sitzung.js';
 import { pruefeUrsprung } from './ursprung.js';
 import { nichtGefunden, vereinAusSlug, vereinsApi } from './verein.js';
+import { pwaRouten } from './verein/pwa.js';
 
 export type { AppDeps, VolleAppDeps, WebauthnPruefer } from './abhaengigkeiten.js';
 export { mitStandardwerten } from './abhaengigkeiten.js';
@@ -46,6 +47,9 @@ export function createApp(appDeps: AppDeps): express.Express {
 	// JSON-404 liefern, bevor server.ts den Angular-Handler dahinter haengt.
 	app.use('/admin/api/v1', adminAusSitzung(deps), adminApi(deps), nichtGefunden);
 	app.use('/:slug/api/v1', vereinAusSlug(deps.prisma), mitgliedAusSitzung(deps), vereinsApi(deps), nichtGefunden);
+	// Manifest und Icons je Verein. Ohne nichtGefunden dahinter: alle anderen Pfade
+	// unter dem Slug gehoeren Angular und muessen server.ts erreichen (siehe pwaRouten).
+	app.use(pwaRouten(deps));
 
 	// Hier schon, damit Tests die Fehlerantworten ohne server.ts sehen. server.ts
 	// registriert sie ein zweites Mal hinter dem Angular-Handler, weil Express

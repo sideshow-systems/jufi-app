@@ -1,4 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
+import { computed, type Signal } from '@angular/core';
 
 /** Wie jeder Fehler der API bei der Seite ankommt (statt HttpErrorResponse). */
 export interface ApiFehler {
@@ -68,4 +69,16 @@ export function fehlertext(fehler: ApiFehler): string {
 		return `Zu viele Versuche – bitte in ${fehler.wartenSekunden} Sekunden erneut`;
 	}
 	return fehler.fehler;
+}
+
+/**
+ * Was eine Ressource im Fehlerfall geworfen hat, als ApiFehler. Angular verpackt alles, was
+ * kein Error ist, in einen Error mit dem Original als cause; der ApiFehler steckt dort.
+ */
+export function fehlerVon(ressource: { error: Signal<Error | undefined> }): Signal<ApiFehler | null> {
+	return computed(() => {
+		const e = ressource.error();
+		if (e === undefined) return null;
+		return alsApiFehler(e.cause !== undefined ? e.cause : e);
+	});
 }

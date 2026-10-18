@@ -5,7 +5,7 @@ import { alsApiFehler, type ApiFehler } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent } from '../../gestaltung/ui';
 import { MitgliederApi, type NeuePerson, type Untergruppe } from '../mitglieder-api';
-import { VereinKopfComponent } from '../verein-kopf';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { verwaltungsfehler } from './texte';
 
 type Art = 'JUNGFISCHER' | 'ERWACHSENER';
@@ -18,135 +18,133 @@ type Art = 'JUNGFISCHER' | 'ERWACHSENER';
  */
 @Component({
 	selector: 'jf-person-neu',
-	imports: [KarteComponent, RouterLink, VereinKopfComponent],
+	imports: [KarteComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<main>
-			<jf-verein-kopf [slug]="slug()" untertitel="Person anlegen" />
-			<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
-			<form (submit)="sende($event)" novalidate>
-				<jf-karte>
-					<div class="felder">
+		<h1>Person anlegen</h1>
+		<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung']">← Zur Mitgliederliste</a>
+		<form (submit)="sende($event)" novalidate>
+			<jf-karte>
+				<div class="felder">
+					<fieldset class="art">
+						<legend>Art</legend>
+						<label class="haken">
+							<input
+								type="radio"
+								name="art"
+								value="JUNGFISCHER"
+								[checked]="art() === 'JUNGFISCHER'"
+								(change)="setzeArt('JUNGFISCHER')"
+							/>
+							Jungfischer
+						</label>
+						<label class="haken">
+							<input
+								type="radio"
+								name="art"
+								value="ERWACHSENER"
+								[checked]="art() === 'ERWACHSENER'"
+								(change)="setzeArt('ERWACHSENER')"
+							/>
+							Erwachsene
+						</label>
+					</fieldset>
+					<label class="feld">
+						Vorname
+						<input
+							name="vorname"
+							autocomplete="off"
+							[value]="vorname()"
+							[attr.aria-invalid]="markiert('vorname')"
+							(input)="vorname.set(wert($event)); aenderung()"
+						/>
+					</label>
+					<label class="feld">
+						Nachname
+						<input
+							name="nachname"
+							autocomplete="off"
+							[value]="nachname()"
+							[attr.aria-invalid]="markiert('nachname')"
+							(input)="nachname.set(wert($event)); aenderung()"
+						/>
+					</label>
+					@if (art() === 'JUNGFISCHER') {
+						<label class="feld">
+							Geburtsdatum
+							<input
+								type="date"
+								name="geburtsdatum"
+								[value]="geburtsdatum()"
+								[attr.aria-invalid]="markiert('geburtsdatum')"
+								(input)="geburtsdatum.set(wert($event)); aenderung()"
+							/>
+						</label>
+					}
+					<label class="feld">
+						E-Mail (freiwillig)
+						<input
+							type="email"
+							name="email"
+							autocomplete="off"
+							[value]="email()"
+							[attr.aria-invalid]="markiert('email')"
+							(input)="email.set(wert($event)); aenderung()"
+						/>
+					</label>
+					@if (art() === 'JUNGFISCHER' && untergruppen().length > 0) {
 						<fieldset class="art">
-							<legend>Art</legend>
-							<label class="haken">
-								<input
-									type="radio"
-									name="art"
-									value="JUNGFISCHER"
-									[checked]="art() === 'JUNGFISCHER'"
-									(change)="setzeArt('JUNGFISCHER')"
-								/>
-								Jungfischer
-							</label>
-							<label class="haken">
-								<input
-									type="radio"
-									name="art"
-									value="ERWACHSENER"
-									[checked]="art() === 'ERWACHSENER'"
-									(change)="setzeArt('ERWACHSENER')"
-								/>
-								Erwachsene
-							</label>
+							<legend>Untergruppen</legend>
+							@for (u of untergruppen(); track u.id) {
+								<label class="haken">
+									<input
+										type="checkbox"
+										[name]="'untergruppe-' + u.id"
+										[checked]="gewaehlt().includes(u.id)"
+										(change)="schalte(u.id)"
+									/>
+									{{ u.name }}
+								</label>
+							}
 						</fieldset>
-						<label class="feld">
-							Vorname
-							<input
-								name="vorname"
-								autocomplete="off"
-								[value]="vorname()"
-								[attr.aria-invalid]="markiert('vorname')"
-								(input)="vorname.set(wert($event)); aenderung()"
-							/>
-						</label>
-						<label class="feld">
-							Nachname
-							<input
-								name="nachname"
-								autocomplete="off"
-								[value]="nachname()"
-								[attr.aria-invalid]="markiert('nachname')"
-								(input)="nachname.set(wert($event)); aenderung()"
-							/>
-						</label>
-						@if (art() === 'JUNGFISCHER') {
-							<label class="feld">
-								Geburtsdatum
-								<input
-									type="date"
-									name="geburtsdatum"
-									[value]="geburtsdatum()"
-									[attr.aria-invalid]="markiert('geburtsdatum')"
-									(input)="geburtsdatum.set(wert($event)); aenderung()"
-								/>
-							</label>
-						}
-						<label class="feld">
-							E-Mail (freiwillig)
-							<input
-								type="email"
-								name="email"
-								autocomplete="off"
-								[value]="email()"
-								[attr.aria-invalid]="markiert('email')"
-								(input)="email.set(wert($event)); aenderung()"
-							/>
-						</label>
-						@if (art() === 'JUNGFISCHER' && untergruppen().length > 0) {
-							<fieldset class="art">
-								<legend>Untergruppen</legend>
-								@for (u of untergruppen(); track u.id) {
-									<label class="haken">
-										<input
-											type="checkbox"
-											[name]="'untergruppe-' + u.id"
-											[checked]="gewaehlt().includes(u.id)"
-											(change)="schalte(u.id)"
-										/>
-										{{ u.name }}
-									</label>
-								}
-							</fieldset>
-						}
+					}
+				</div>
+			</jf-karte>
+
+			@if (doppelt(); as d) {
+				<jf-karte>
+					<div data-doppelt role="alert">
+						<p>
+							Diese Person gibt es vielleicht schon: {{ d.vorname }} {{ d.nachname }}. Gleiche Namen sind möglich, darum
+							sperrt das nicht.
+						</p>
+						<div class="reihe">
+							<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'personen', d.id]"
+								>Vorhandene Person ansehen</a
+							>
+							<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="lege(true)">
+								Trotzdem anlegen
+							</button>
+						</div>
 					</div>
 				</jf-karte>
-
-				@if (doppelt(); as d) {
-					<jf-karte>
-						<div data-doppelt role="alert">
-							<p>
-								Diese Person gibt es vielleicht schon: {{ d.vorname }} {{ d.nachname }}. Gleiche Namen sind möglich,
-								darum sperrt das nicht.
-							</p>
-							<div class="reihe">
-								<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'personen', d.id]"
-									>Vorhandene Person ansehen</a
-								>
-								<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="lege(true)">
-									Trotzdem anlegen
-								</button>
-							</div>
-						</div>
-					</jf-karte>
-				}
-				@if (fehler(); as f) {
-					<p class="fehler" role="alert">{{ f.text }}</p>
-				}
-				<div class="reihe">
-					<button type="submit" class="knopf primaer" [disabled]="laeuft()">Anlegen</button>
-				</div>
-			</form>
-		</main>
+			}
+			@if (fehler(); as f) {
+				<p class="fehler" role="alert">{{ f.text }}</p>
+			}
+			<div class="reihe">
+				<button type="submit" class="knopf primaer" [disabled]="laeuft()">Anlegen</button>
+			</div>
+		</form>
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
 			max-width: 32rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
+		}
+		h1 {
+			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
 		}
 		.zurueck {
 			display: inline-flex;
@@ -212,9 +210,11 @@ export class PersonNeuComponent implements OnInit {
 
 	ngOnInit(): void {
 		// Nur Auswahl: ohne Untergruppen (oder ohne Recht) lassen sich Personen trotzdem anlegen.
+		// Eine abgelaufene Sitzung fuehrt aber gleich zur Anmeldung -- diese Anfrage ist die einzige
+		// beim Oeffnen, und sonst fiele der 401 erst beim Anlegen auf, nachdem alles getippt ist.
 		firstValueFrom(this.api.untergruppen(this.slug())).then(
 			(a) => this.untergruppen.set(a.untergruppen),
-			() => undefined,
+			(ursache: unknown) => beiAbgelaufenerSitzung(this.router, this.slug(), alsApiFehler(ursache)),
 		);
 	}
 
@@ -268,6 +268,7 @@ export class PersonNeuComponent implements OnInit {
 			await this.router.navigate(['/', this.slug(), 'verwaltung', 'personen', id]);
 		} catch (ursache) {
 			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			if (f.code === 'DOPPELT' && f.person) {
 				this.doppelt.set(f.person);
 			} else {
