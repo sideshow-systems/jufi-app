@@ -161,9 +161,9 @@ const EMAIL_VERGEBEN = {
 	code: 'EMAIL_VERGEBEN',
 	feld: 'email',
 };
-const EMAIL_ERFORDERLICH = {
-	fehler: 'Wer sich schon anmelden kann, braucht die Adresse als Kennung',
-	code: 'EMAIL_ERFORDERLICH',
+const EMAIL_MIT_ZUGANG = {
+	fehler: 'Wer sich schon anmelden kann, behält seine Adresse: sie ist die Kennung',
+	code: 'EMAIL_MIT_ZUGANG',
 	feld: 'email',
 };
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
@@ -388,14 +388,18 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 					}
 					if ('email' in body) {
 						aenderung.email = liesEmail(body['email']);
-						// Die Adresse Erwachsener ist ihre Kennung; ohne sie waere der Zugang nicht mehr
-						// erreichbar. Verworfen: den Zugang mitzuloeschen -- das ist eine eigene, bewusste Handlung.
+						// Die Adresse Erwachsener ist ihre Kennung und das Ziel von "Passwort vergessen". Wer sie
+						// still aendert, koennte per Reset-Link ein Elternteil uebernehmen, darum gilt sie mit
+						// Zugang als fest. Verworfen: aendern erlauben und dafuer Sitzungen und Passkeys loeschen
+						// sowie die alte Adresse benachrichtigen -- groesserer Umfang, kommt mit echtem Mailversand
+						// in Etappe 6. Ohne Zugang (Tippfehler vor der Einladung) und bei Jungfischern (dort nur
+						// Benachrichtigung) bleibt sie aenderbar.
 						if (
-							aenderung.email === null &&
 							ziel.art === 'ERWACHSENER' &&
+							aenderung.email !== ziel.email &&
 							(await tx.zugang.count({ where: { personId: ziel.id } })) > 0
 						) {
-							throw new Abbruch(409, EMAIL_ERFORDERLICH);
+							throw new Abbruch(409, EMAIL_MIT_ZUGANG);
 						}
 					}
 					if ('jugendsprecher' in body) {

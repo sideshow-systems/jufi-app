@@ -534,14 +534,35 @@ describe('Personen', () => {
 			});
 		});
 
-		it('PATCH: die Adresse eines Erwachsenen mit Zugang laesst sich nicht entfernen', async () => {
+		it('PATCH: die Adresse eines Erwachsenen mit Zugang bleibt, Aendern und Entfernen gibt 409 EMAIL_MIT_ZUGANG', async () => {
 			const v = await neuerVerein();
 			const verwalter = await v.mitglied(['MITGLIEDER']);
 			const mitZugang = await v.mitglied([], 'Zita');
-			const r = await patch(v, verwalter.cookie, mitZugang.personId, { email: '' });
-			expect(r.status).toBe(409);
-			expect(await r.json()).toMatchObject({ code: 'EMAIL_ERFORDERLICH' });
-			expect((await prisma.person.findUniqueOrThrow({ where: { id: mitZugang.personId } })).email).not.toBeNull();
+			const vorher = (await prisma.person.findUniqueOrThrow({ where: { id: mitZugang.personId } })).email;
+			expect(vorher).not.toBeNull();
+			for (const email of ['andere@example.test', '', null]) {
+				const r = await patch(v, verwalter.cookie, mitZugang.personId, { email });
+				expect(r.status).toBe(409);
+				expect(await r.json()).toMatchObject({ code: 'EMAIL_MIT_ZUGANG' });
+			}
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: mitZugang.personId } })).email).toBe(vorher);
+			// Dieselbe Adresse noch einmal (auch in anderer Schreibweise) aendert nichts und ist erlaubt.
+			expect(
+				(await patch(v, verwalter.cookie, mitZugang.personId, { email: ` ${(vorher ?? '').toUpperCase()} ` })).status,
+			).toBe(200);
+		});
+
+		it('PATCH: die Adresse ohne Zugang (Erwachsener) und bei Jungfischern mit Zugang bleibt aenderbar', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const ohneZugang = await v.erwachsener('Anna');
+			expect((await patch(v, verwalter.cookie, ohneZugang.id, { email: 'richtig@example.test' })).status).toBe(200);
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: ohneZugang.id } })).email).toBe(
+				'richtig@example.test',
+			);
+			const kind = await v.mitglied([], 'Kai', 'JUNGFISCHER');
+			expect((await patch(v, verwalter.cookie, kind.personId, { email: 'kai@example.test' })).status).toBe(200);
+			expect((await patch(v, verwalter.cookie, kind.personId, { email: '' })).status).toBe(200);
 		});
 
 		it('Verwalter ohne JUGENDLEITER_RECHTE aendert einen Jugendleiter nicht: 404, Name unveraendert', async () => {
