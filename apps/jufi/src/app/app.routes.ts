@@ -73,6 +73,10 @@ export const routes: Routes = [
 						loadComponent: () => import('./verein/start').then((m) => m.StartComponent),
 					},
 					{
+						path: 'mehr',
+						loadComponent: () => import('./verein/mehr').then((m) => m.MehrComponent),
+					},
+					{
 						path: 'profil',
 						loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
 					},

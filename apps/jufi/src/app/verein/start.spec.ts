@@ -445,43 +445,6 @@ describe('Start', () => {
 		});
 	});
 
-	describe('Abmelden', () => {
-		it('steht am Ende der Seite, daneben der Link zum Profil', async () => {
-			const { seite } = await oeffneStart();
-
-			const profil = [...seite.querySelectorAll('a')].find((a) => a.textContent?.includes('Profil'));
-			expect(profil?.getAttribute('href')).toBe('/demo/profil');
-			const knoepfe = [...seite.querySelectorAll('button')];
-			expect(knoepfe[knoepfe.length - 1].textContent).toContain('Abmelden');
-		});
-
-		it('ruft abmelden und geht zur Anmeldung des Vereins', async () => {
-			const { harness, seite } = await oeffneStart();
-			const navigiert = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-
-			[...seite.querySelectorAll('button')].find((b) => b.textContent?.includes('Abmelden'))?.click();
-			const anfrage = http.expectOne('/demo/api/v1/abmelden');
-			expect(anfrage.request.method).toBe('POST');
-			anfrage.flush(null, { status: 204, statusText: 'No Content' });
-			await harness.fixture.whenStable();
-
-			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
-		});
-
-		it('bleibt bei einem Netzfehler stehen und sagt es', async () => {
-			const { harness, seite } = await oeffneStart();
-			const navigiert = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-
-			[...seite.querySelectorAll('button')].find((b) => b.textContent?.includes('Abmelden'))?.click();
-			http.expectOne('/demo/api/v1/abmelden').error(new ProgressEvent('error'));
-			await harness.fixture.whenStable();
-			harness.detectChanges();
-
-			expect(navigiert).not.toHaveBeenCalled();
-			expect(text(seite)).toContain('Keine Verbindung – nochmal versuchen');
-		});
-	});
-
 	describe('Waechter und Verein', () => {
 		it('die Adresse mit Schraegstrich am Ende ist nicht die Startseite des Vereins', async () => {
 			// Ursache des Fehlers nach Anmeldung und Zur App: navigateByUrl('/demo/') liefert dem

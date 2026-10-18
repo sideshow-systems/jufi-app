@@ -285,6 +285,19 @@ describe('Profil', () => {
 		});
 	});
 
+	describe('Meine Daten', () => {
+		// Ein schlichter Link statt HttpClient und Blob (Plan-Entscheidung 9): Der Server schickt Content-Disposition attachment.
+		it('bietet den Datenauszug als Link mit download an', async () => {
+			await oeffne();
+
+			expect(seite.textContent).toContain('Alles, was die App über dich speichert, als Datei.');
+			const link = [...seite.querySelectorAll('a')].find((a) => a.textContent?.includes('Meine Daten herunterladen'));
+			expect(link?.getAttribute('href')).toBe('/demo/api/v1/ich/daten');
+			expect(link?.hasAttribute('download')).toBe(true);
+			expect(link?.classList.contains('knopf')).toBe(true);
+		});
+	});
+
 	describe('Abmelden', () => {
 		it('Abmelden ruft die API und geht zur Anmeldung des Vereins', async () => {
 			await oeffne();

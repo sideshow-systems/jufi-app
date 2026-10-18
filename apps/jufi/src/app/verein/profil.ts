@@ -191,6 +191,13 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
 				}
 
 				<jf-karte>
+					<h2>Meine Daten</h2>
+					<p class="gedaempft klein">Alles, was die App über dich speichert, als Datei.</p>
+					<!-- Ein schlichter Link: Der Server antwortet mit attachment, das Cookie geht mit. Verworfen: Laden per HttpClient und Blob. -->
+					<a class="knopf" [href]="'/' + slug() + '/api/v1/ich/daten'" download>Meine Daten herunterladen</a>
+				</jf-karte>
+
+				<jf-karte>
 					<h2>Abmelden</h2>
 					<p class="gedaempft klein">
 						„Überall abmelden“ beendet die Anmeldung auf allen deinen Geräten, auch auf diesem.

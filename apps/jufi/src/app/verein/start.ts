@@ -13,7 +13,7 @@ import { rxResource } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { initialen } from '@jufi/domain';
-import { firstValueFrom, map } from 'rxjs';
+import { map } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
 import { type Ansprechpartner, type KindAnsicht, MitgliederApi, type PersonListe } from './mitglieder-api';
@@ -204,15 +204,6 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 				}
 			</jf-karte>
 		</jf-abschnitt>
-
-		<!-- Zwischenstand bis Mehr: Profil und Abmelden muessen erreichbar bleiben, solange es die Seite Mehr nicht gibt. -->
-		<div class="reihe">
-			<a class="knopf" [routerLink]="['/', slug(), 'profil']">Profil</a>
-			<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden()">Abmelden</button>
-		</div>
-		@if (abmeldefehler(); as meldung) {
-			<p class="fehler" role="alert">{{ meldung }}</p>
-		}
 	`,
 	styles: `
 		:host {
@@ -283,11 +274,6 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 		.zeile {
 			color: var(--text-gedaempft);
 			font-size: var(--schrift-klein);
-		}
-		.reihe {
-			display: flex;
-			flex-wrap: wrap;
-			gap: var(--a3);
 		}
 		.fehler {
 			color: var(--fehler);
@@ -364,9 +350,6 @@ export class StartComponent {
 		return personen ? wartet(personen) : null;
 	});
 
-	protected readonly laeuft = signal(false);
-	protected readonly abmeldefehler = signal<string | null>(null);
-
 	constructor() {
 		// Der Waechter prueft die Sitzung nur beim Betreten; ein Abschnitt, der danach 401 bekommt,
 		// schickt zur Anmeldung statt einen Fehler zu zeigen (wie die Seite Meine Jungfischer).
@@ -390,21 +373,5 @@ export class StartComponent {
 		// Vor dem await gesetzt: Zwei Abschnitte, die gleichzeitig 401 bekommen, navigierten sonst beide.
 		this.abgelaufen.set(true);
 		await beiAbgelaufenerSitzung(this.router, this.slug(), abgelaufen);
-	}
-
-	protected async abmelden(): Promise<void> {
-		if (this.laeuft()) return;
-		this.laeuft.set(true);
-		this.abmeldefehler.set(null);
-		try {
-			await firstValueFrom(this.mitglieder.abmelden(this.slug()));
-			this.sitzung.ich.set(null);
-			await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
-		} catch (ursache) {
-			// Bleibt die Person auf der Seite, weiss sie, dass die Sitzung noch steht: kein stilles Scheitern.
-			this.abmeldefehler.set(fehlertext(alsApiFehler(ursache)));
-		} finally {
-			this.laeuft.set(false);
-		}
 	}
 }

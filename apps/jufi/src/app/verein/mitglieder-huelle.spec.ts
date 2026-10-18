@@ -62,6 +62,8 @@ describe('Mitglieder-Huelle', () => {
 	}
 
 	const profilDaten = () => vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
+	// Mehr laedt nichts selbst; nur der Waechter und der Kopf fragen.
+	const mehrDaten = () => Promise.resolve();
 	const jungfischerDaten = () => vi.waitFor(() => http.expectOne(`${API}/meine-jungfischer`).flush({ kinder: [] }));
 
 	function leiste(): HTMLAnchorElement[] {
@@ -111,6 +113,7 @@ describe('Mitglieder-Huelle', () => {
 	});
 
 	it.each([
+		['/demo/mehr', mehrDaten],
 		['/demo/profil', profilDaten],
 		['/demo/meine-jungfischer', jungfischerDaten],
 	])('macht auf %s den Eintrag Mehr aktiv', async (url, daten) => {
