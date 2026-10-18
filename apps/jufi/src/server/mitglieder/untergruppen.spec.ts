@@ -183,6 +183,27 @@ describe('Untergruppen', () => {
 		expect(await prisma.untergruppeMitglied.count({ where: { vereinId: v.verein.id } })).toBe(0);
 	});
 
+	it('Unterstrich im Namen wirkt nicht als Platzhalter', async () => {
+		const v = await neuerVerein();
+		expect((await v.lege('HechtX1')).status).toBe(201);
+		expect((await v.lege('Hecht_1')).status).toBe(201);
+		expect((await v.lege('Hecht%')).status).toBe(201);
+		expect((await v.lege('hecht_1')).status).toBe(409);
+	});
+
+	it('PUT und DELETE derselben Gruppe zugleich: nie 500', async () => {
+		for (let i = 0; i < 8; i++) {
+			const v = await neuerVerein();
+			const g = await v.gruppe('Hechte');
+			const kind = await v.person('JUNGFISCHER');
+			const [put, del] = await Promise.all([v.ordne(kind.id, [g.id]), v.loesche(g.id)]);
+			expect(del.status).toBe(204);
+			expect([200, 404]).toContain(put.status);
+			// Egal in welcher Reihenfolge: die Gruppe ist weg und mit ihr jede Zuordnung.
+			expect(await v.zugeordnet(kind.id)).toEqual([]);
+		}
+	});
+
 	it('Betreuer liest, schreibt nicht (404)', async () => {
 		const v = await neuerVerein();
 		const g = await v.gruppe('Hechte');
