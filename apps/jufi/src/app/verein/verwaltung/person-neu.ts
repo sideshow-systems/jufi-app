@@ -210,9 +210,11 @@ export class PersonNeuComponent implements OnInit {
 
 	ngOnInit(): void {
 		// Nur Auswahl: ohne Untergruppen (oder ohne Recht) lassen sich Personen trotzdem anlegen.
+		// Eine abgelaufene Sitzung fuehrt aber gleich zur Anmeldung -- diese Anfrage ist die einzige
+		// beim Oeffnen, und sonst fiele der 401 erst beim Anlegen auf, nachdem alles getippt ist.
 		firstValueFrom(this.api.untergruppen(this.slug())).then(
 			(a) => this.untergruppen.set(a.untergruppen),
-			() => undefined,
+			(ursache: unknown) => beiAbgelaufenerSitzung(this.router, this.slug(), alsApiFehler(ursache)),
 		);
 	}
 
