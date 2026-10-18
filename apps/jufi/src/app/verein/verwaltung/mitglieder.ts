@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, type OnInit, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
 import { MitgliedSitzung } from '../mitglied-waechter';
 import { MitgliederApi, type PersonListe, type Untergruppe } from '../mitglieder-api';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { warnhinweisText } from './texte';
 
 type ArtFilter = 'alle' | 'JUNGFISCHER' | 'ERWACHSENER';
@@ -225,6 +226,7 @@ export class MitgliederComponent implements OnInit {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly sitzung = inject(MitgliedSitzung);
+	private readonly router = inject(Router);
 
 	protected readonly personen = signal<PersonListe[] | null>(null);
 	protected readonly untergruppen = signal<Untergruppe[]>([]);
@@ -269,7 +271,9 @@ export class MitgliederComponent implements OnInit {
 		try {
 			this.personen.set((await firstValueFrom(this.api.personen(this.slug()))).personen);
 		} catch (ursache) {
-			this.ladefehler.set(fehlertext(alsApiFehler(ursache)));
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.ladefehler.set(fehlertext(f));
 		}
 		await gruppen;
 	}

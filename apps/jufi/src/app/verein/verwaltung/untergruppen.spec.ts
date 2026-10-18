@@ -1,7 +1,15 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { adminTestAnbieter, knopf, tippe } from '../../admin/test-hilfen';
-import { API, ichMit, oeffneSeite, stabil } from './test-hilfen';
+import {
+	API,
+	antworteAbgelaufen,
+	erwarteAnmeldung,
+	ichMit,
+	oeffneAbgelaufen,
+	oeffneSeite,
+	stabil,
+} from './test-hilfen';
 
 const GRUPPEN = {
 	untergruppen: [
@@ -144,5 +152,17 @@ describe('Untergruppen', () => {
 		);
 		await stabil(harness);
 		expect((harness.routeNativeElement as HTMLElement).textContent).toContain('Nicht gefunden');
+	});
+
+	it('ein abgelaufenes Login beim Laden führt zur Anmeldung', async () => {
+		await oeffneAbgelaufen('/demo/verwaltung/untergruppen', ['MITGLIEDER'], '/untergruppen');
+	});
+
+	it('ein abgelaufenes Login beim Anlegen führt zur Anmeldung', async () => {
+		const { seite, http } = await oeffne();
+		tippe(seite, 'input[name="neuerName"]', 'Gruppe C');
+		knopf(seite, 'Anlegen').click();
+		await antworteAbgelaufen(http, '/untergruppen');
+		await erwarteAnmeldung(http, '/demo/verwaltung/untergruppen');
 	});
 });

@@ -10,7 +10,7 @@ import {
 	untracked,
 	viewChild,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { type Beziehung, beziehungVorbelegung } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { EinladungAnzeigeComponent } from '../../admin/einladung-anzeige';
@@ -27,6 +27,7 @@ import {
 	type PersonListe,
 	type Untergruppe,
 } from '../mitglieder-api';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { BEZIEHUNG_TEXT, BEZIEHUNGEN, beziehungText, tagBerlin, verwaltungsfehler, warnhinweisText } from './texte';
 
 type Bereich = 'stamm' | 'gruppen' | 'familie' | 'zugang' | 'entfernen' | 'volljaehrig';
@@ -642,6 +643,7 @@ export class PersonenseiteComponent {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly sitzung = inject(MitgliedSitzung);
+	private readonly router = inject(Router);
 	private readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
 
 	protected readonly person = signal<PersonDetail | null>(null);
@@ -749,7 +751,9 @@ export class PersonenseiteComponent {
 			this.fuelle(p);
 			if (mitHilfen) void this.ladeHilfen(p);
 		} catch (ursache) {
-			this.ladefehler.set(fehlertext(alsApiFehler(ursache)));
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.ladefehler.set(fehlertext(f));
 		}
 	}
 
@@ -878,6 +882,7 @@ export class PersonenseiteComponent {
 		} catch (ursache) {
 			this.frage.set(null);
 			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return false;
 			this.fehlerFeld.set(f.feld ?? null);
 			this.fehler.update((alt) => ({ ...alt, [bereich]: verwaltungsfehler(f) }));
 			return false;
@@ -1097,7 +1102,9 @@ export class PersonenseiteComponent {
 			await firstValueFrom(this.api.entfernePerson(this.slug(), id));
 			this.nimmAngebotWeg(id, null);
 		} catch (ursache) {
-			this.nimmAngebotWeg(undefined, verwaltungsfehler(alsApiFehler(ursache)));
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.nimmAngebotWeg(undefined, verwaltungsfehler(f));
 		} finally {
 			this.laeuft.set(false);
 		}

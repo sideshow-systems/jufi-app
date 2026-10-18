@@ -56,7 +56,8 @@ export const routes: Routes = [
 			},
 			// Die Verwaltung hat eine eigene Huelle (Seitenleiste) und liegt deshalb neben der Mitglieder-Huelle,
 			// vor deren leerem Pfad. Sie zeigt Rechte nur an; entschieden wird auf dem Server. Der Waechter fragt nur
-			// nach der Sitzung, die Huelle zeigt ohne jedes Recht Nicht gefunden.
+			// nach der Sitzung, die Huelle zeigt ohne jedes Recht Nicht gefunden. Eine Sitzung, die erst beim
+			// Seitenwechsel ablaeuft, faengt jede Seite selbst ab (sitzung-abgelaufen.ts).
 			{
 				path: 'verwaltung',
 				component: VerwaltungHuelle,

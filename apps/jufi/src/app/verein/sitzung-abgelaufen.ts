@@ -15,10 +15,13 @@ export function istNichtAngemeldet(fehler: ApiFehler): boolean {
  * Die aufgerufene Seite geht als weiter mit, wie beim Waechter; ob sie sicher ist, prueft die
  * Anmeldeseite (sichererWeiterPfad).
  *
- * Gebraucht, weil der Waechter nur beim Betreten der Huelle laeuft: Wer in der Huelle von Seite
- * zu Seite wechselt, wird nicht mehr gefragt. Verworfen: runGuardsAndResolvers 'always' an der
- * Huelle, das kostete bei jedem Wechsel ein GET /ich, obwohl die Seite ihre Daten ohnehin
- * gleich selbst holt und dabei dasselbe 401 bekommt.
+ * Gebraucht, weil der Waechter nur beim Betreten einer Huelle laeuft: Wer in der Huelle von Seite
+ * zu Seite wechselt, wird nicht mehr gefragt. Das gilt fuer die Mitglieder-Huelle wie fuer die
+ * Verwaltung, und jede Seite darunter ruft den Helfer in jedem Lade- und Aktionspfad auf, der
+ * einen Fehler setzt. Verworfen: runGuardsAndResolvers 'always' an der Huelle (fuer die
+ * Verwaltung wegen der einen Stelle erwogen). Das kostete bei jedem Wechsel ein GET /ich, obwohl
+ * die Seite ihre Daten ohnehin gleich selbst holt und dabei dasselbe 401 bekommt, und die
+ * Verwaltung verhielte sich anders als die Mitglieder-Huelle.
  */
 export async function beiAbgelaufenerSitzung(router: Router, slug: string, fehler: ApiFehler): Promise<boolean> {
 	if (!istNichtAngemeldet(fehler)) return false;

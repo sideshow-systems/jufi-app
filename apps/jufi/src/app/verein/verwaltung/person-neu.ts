@@ -5,6 +5,7 @@ import { alsApiFehler, type ApiFehler } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent } from '../../gestaltung/ui';
 import { MitgliederApi, type NeuePerson, type Untergruppe } from '../mitglieder-api';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { verwaltungsfehler } from './texte';
 
 type Art = 'JUNGFISCHER' | 'ERWACHSENER';
@@ -265,6 +266,7 @@ export class PersonNeuComponent implements OnInit {
 			await this.router.navigate(['/', this.slug(), 'verwaltung', 'personen', id]);
 		} catch (ursache) {
 			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			if (f.code === 'DOPPELT' && f.person) {
 				this.doppelt.set(f.person);
 			} else {

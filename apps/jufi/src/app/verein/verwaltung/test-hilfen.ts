@@ -1,5 +1,6 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import type { MitgliedIch } from '../mitglieder-api';
 
@@ -67,4 +68,39 @@ export function hake(wurzel: HTMLElement, selektor: string, an = true): void {
 	const feld = wurzel.querySelector<HTMLInputElement>(selektor);
 	if (!feld) throw new Error(`Feld nicht gefunden: ${selektor}`);
 	if (feld.checked !== an) feld.click();
+}
+
+const ABGELAUFEN = { fehler: 'nicht angemeldet' };
+
+/** Beantwortet eine Anfrage mit "nicht angemeldet", wie die API bei abgelaufener Sitzung. */
+export async function antworteAbgelaufen(http: HttpTestingController, pfad: string): Promise<void> {
+	await vi.waitFor(() =>
+		http.expectOne(`${API}${pfad}`).flush(ABGELAUFEN, { status: 401, statusText: 'Unauthorized' }),
+	);
+}
+
+/**
+ * Wartet, bis die Seite zur Anmeldung gefuehrt hat, mit der Seite davor als weiter. Die Huelle und
+ * die Anmeldeseite haben dabei eigene Anfragen gestellt (Verein, Hinweise); sie zaehlen hier nicht.
+ */
+export async function erwarteAnmeldung(http: HttpTestingController, vonUrl: string): Promise<void> {
+	await vi.waitFor(() =>
+		expect(TestBed.inject(Router).url).toBe(`/demo/anmelden?weiter=${encodeURIComponent(vonUrl)}`),
+	);
+	http.match(() => true);
+}
+
+/**
+ * Oeffnet eine Verwaltungsseite, deren erste Datenanfrage mit "nicht angemeldet" scheitert: Die
+ * Sitzung galt beim Betreten (GET /ich), lief aber danach ab. Parallele Anfragen der Seite werden
+ * verworfen.
+ */
+export async function oeffneAbgelaufen(url: string, rechte: string[], ladepfad: string): Promise<void> {
+	const http = TestBed.inject(HttpTestingController);
+	const harness = await RouterTestingHarness.create();
+	const navigation = harness.navigateByUrl(url);
+	await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ichMit(rechte)));
+	await navigation;
+	await antworteAbgelaufen(http, ladepfad);
+	await erwarteAnmeldung(http, url);
 }

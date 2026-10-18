@@ -4,7 +4,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { ALLE_RECHTE, RECHTE_VORLAGEN } from '@jufi/domain';
 import { adminTestAnbieter, knopf } from '../../admin/test-hilfen';
 import type { PersonListe } from '../mitglieder-api';
-import { API, hake, ichMit, oeffneSeite, stabil, waehle } from './test-hilfen';
+import { API, hake, ichMit, oeffneAbgelaufen, oeffneSeite, stabil, waehle } from './test-hilfen';
 
 const PERSONEN: { personen: PersonListe[] } = {
 	personen: [
@@ -187,5 +187,9 @@ describe('Rechte', () => {
 		expect(seite.textContent).toContain('Nicht gefunden');
 		expect(seite.querySelector('input')).toBeNull();
 		http.expectNone(`${API}/personen`);
+	});
+
+	it('ein abgelaufenes Login beim Laden führt zur Anmeldung', async () => {
+		await oeffneAbgelaufen('/demo/verwaltung/rechte', [...ALLE_RECHTE], '/personen');
 	});
 });

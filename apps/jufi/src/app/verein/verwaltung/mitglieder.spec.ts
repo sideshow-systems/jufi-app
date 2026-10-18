@@ -2,7 +2,7 @@ import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { adminTestAnbieter, tippe } from '../../admin/test-hilfen';
 import type { PersonListe } from '../mitglieder-api';
-import { hake, ichMit, oeffneSeite, stabil, waehle } from './test-hilfen';
+import { hake, ichMit, oeffneAbgelaufen, oeffneSeite, stabil, waehle } from './test-hilfen';
 
 const GRUPPEN = {
 	untergruppen: [
@@ -123,5 +123,9 @@ describe('Mitgliederliste', () => {
 		expect(seite.textContent).not.toContain('E-Mail');
 		expect(seite.querySelector('a[href="/demo/verwaltung/neu"]')).toBeNull();
 		expect(seite.textContent).toContain('Lena Muster');
+	});
+
+	it('ein abgelaufenes Login beim Laden führt zur Anmeldung', async () => {
+		await oeffneAbgelaufen('/demo/verwaltung', ['MITGLIEDER'], '/personen');
 	});
 });

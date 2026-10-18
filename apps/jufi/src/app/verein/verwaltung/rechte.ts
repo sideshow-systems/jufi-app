@@ -10,6 +10,7 @@ import {
 	signal,
 	viewChild,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { ALLE_RECHTE, RECHTE_VORLAGEN, type RechtName } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
@@ -17,6 +18,7 @@ import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
 import { MitgliedSitzung } from '../mitglied-waechter';
 import { MitgliederApi, type PersonListe } from '../mitglieder-api';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { RECHT_TEXT } from './texte';
 
 type Vorlage = keyof typeof RECHTE_VORLAGEN;
@@ -260,6 +262,7 @@ export class RechteComponent implements OnInit {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly sitzung = inject(MitgliedSitzung);
+	private readonly router = inject(Router);
 	private readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
 	private readonly editor = viewChild<ElementRef<HTMLElement>>('editor');
 
@@ -319,7 +322,10 @@ export class RechteComponent implements OnInit {
 			const antwort = await firstValueFrom(this.api.personen(this.slug()));
 			if (nr === this.ladeNr) this.personen.set(antwort.personen);
 		} catch (ursache) {
-			if (nr === this.ladeNr) this.ladefehler.set(fehlertext(alsApiFehler(ursache)));
+			if (nr !== this.ladeNr) return;
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.ladefehler.set(fehlertext(f));
 		}
 	}
 
@@ -390,6 +396,7 @@ export class RechteComponent implements OnInit {
 		} catch (ursache) {
 			this.frage.set(false);
 			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			this.fehler.set(rechtefehler(f));
 			if (f.status === 404) await this.lade();
 		} finally {

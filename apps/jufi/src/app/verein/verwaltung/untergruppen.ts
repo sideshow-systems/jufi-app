@@ -10,12 +10,14 @@ import {
 	signal,
 	viewChild,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { KarteComponent } from '../../gestaltung/ui';
 import { MitgliedSitzung } from '../mitglied-waechter';
 import { MitgliederApi, type Untergruppe } from '../mitglieder-api';
+import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 
 /** Wo ein Fehler steht: beim Anlegen, beim Umbenennen oder oben bei der Liste (Laden, Loeschen). */
 type Bereich = 'anlegen' | 'umbenennen' | 'liste';
@@ -208,6 +210,7 @@ export class UntergruppenComponent implements OnInit {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly sitzung = inject(MitgliedSitzung);
+	private readonly router = inject(Router);
 	private readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
 
 	protected readonly gruppen = signal<Untergruppe[] | null>(null);
@@ -243,7 +246,10 @@ export class UntergruppenComponent implements OnInit {
 			const antwort = await firstValueFrom(this.api.untergruppen(this.slug()));
 			if (nr === this.ladeNr) this.gruppen.set(antwort.untergruppen);
 		} catch (ursache) {
-			if (nr === this.ladeNr) this.ladefehler.set(fehlertext(alsApiFehler(ursache)));
+			if (nr !== this.ladeNr) return;
+			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
+			this.ladefehler.set(fehlertext(f));
 		}
 	}
 
@@ -308,6 +314,7 @@ export class UntergruppenComponent implements OnInit {
 		} catch (ursache) {
 			this.frage.set(null);
 			const f = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return false;
 			// Bei 404 ist die Zeile weg, in der das Feld stand: Die Meldung gehoert dann zur Liste, sonst waere sie unsichtbar.
 			this.fehler.set({ bereich: f.status === 404 ? 'liste' : bereich, text: untergruppenfehler(f) });
 			if (f.status === 404) {
