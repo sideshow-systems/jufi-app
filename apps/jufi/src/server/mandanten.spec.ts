@@ -526,6 +526,21 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	'DELETE /profil/passkeys/:id': (k) => fremderPasskeyBleibt(k, 'DELETE'),
 	'POST /profil/totp/start': (k) => profilOhneId(k, 'POST', '/profil/totp/start'),
 	'POST /profil/totp/bestaetigen': (k) => profilOhneId(k, 'POST', '/profil/totp/bestaetigen'),
+	'GET /ich/daten': async (k) => {
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ich/daten`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		// Die Sitzung gilt nur im eigenen Verein: mit dem Slug von fremd kein Auszug, auch nicht der eigene.
+		const fremd = await hole(k.fremd.slug, k.eigenesCookie);
+		expect(fremd.status).toBe(401);
+		expect(fremd.headers.get('content-disposition')).toBeNull();
+		// Gegenprobe: In eigen geht es, und der Auszug gehoert der Person der Sitzung.
+		const r = await hole(k.eigen.slug, k.eigenesCookie);
+		expect(r.status).toBe(200);
+		const auszug = (await r.json()) as { verein: unknown; zugang: unknown };
+		expect(auszug.zugang).not.toBeNull();
+		const fremdePerson = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } });
+		expect(JSON.stringify(auszug)).not.toContain(fremdePerson.email ?? 'keine-adresse');
+	},
 	'GET /ansprechpartner': async (k) => {
 		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ansprechpartner`, { cookie });
 		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);

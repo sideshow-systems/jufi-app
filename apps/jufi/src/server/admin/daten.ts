@@ -85,7 +85,7 @@ const BERLINER_DATUM = new Intl.DateTimeFormat('en', {
 	day: '2-digit',
 });
 
-function berlinerDatum(zeitpunkt: Date): string {
+export function berlinerDatum(zeitpunkt: Date): string {
 	const teile = Object.fromEntries(BERLINER_DATUM.formatToParts(zeitpunkt).map((t) => [t.type, t.value]));
 	return `${teile['year']}-${teile['month']}-${teile['day']}`;
 }
