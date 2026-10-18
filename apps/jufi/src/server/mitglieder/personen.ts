@@ -128,9 +128,9 @@ function baueListe(
 	if (verwaltung) {
 		antwort.warnhinweise = hinweise;
 	} else if (einsicht === 'LESEN') {
-		// Betreuer sehen, was das Kind betrifft (Familie, Einwilligung, Volljaehrigkeit),
-		// aber nicht den Stand von Einladung und Mailversand.
-		antwort.warnhinweise = hinweise.filter((h) => h.art !== 'EINLADUNG_OFFEN' && h.art !== 'MAIL_NICHT_ZUGESTELLT');
+		// Betreuer sehen, was ihre Aufsicht betrifft (Familie, Volljaehrigkeit), aber weder
+		// Einwilligungsstand noch Einladung und Mailversand: die gehoeren der Verwaltung (Spec 5.2).
+		antwort.warnhinweise = hinweise.filter((h) => h.art === 'OHNE_FAMILIE' || h.art === 'VOLLJAEHRIG');
 	}
 	return antwort;
 }
@@ -140,16 +140,22 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 
 	/** Alles, was die Regeln und Serialisierer fuer die Anfrage brauchen. */
 	async function laden(db: VereinDb, betrachter: Person, nur?: string) {
-		const { personen, zuordnungen } = await ladeUmfeld(db);
+		const umfeld = await ladeUmfeld(db);
+		const { personen } = umfeld;
 		const angaben = await ladeAngaben(db, nur);
 		const jetztWert = jetzt();
-		const sichten = new Map<string, PersonSicht>(personen.map((p) => [p.id, p]));
+		const sichten = new Map<string, Person>(personen.map((p) => [p.id, p]));
+		// Eine Zuordnung zaehlt nur, wenn beide Enden nicht entfernt sind. Ohne das verbaende
+		// ein entferntes gemeinsames Kind seine Erwachsenen weiter (teilenKind kennt entfernte
+		// Kinder nur, wenn sie in der Map stehen) und entfernte Erwachsene zaehlten als Familie.
+		const zuordnungen: Bezugsperson[] = umfeld.zuordnungen.filter(
+			(z) => sichten.has(z.erwachsenerId) && sichten.has(z.jungfischerId),
+		);
 		const betrachterSicht = alsSicht(betrachter);
 
 		const hinweiseFuer = (p: Person): Warnhinweis[] => {
 			const a = angaben.get(p.id);
-			// Zuordnungen entfernter Erwachsener zaehlen nicht: warnhinweise filtert sie nicht selbst.
-			const aktiv: Zuordnung[] = zuordnungen.filter((z) => sichten.has(z.erwachsenerId));
+			const aktiv: Zuordnung[] = zuordnungen;
 			const einladungOffen = a?.einladung && a.einladung.ablauf > jetztWert ? a.einladung : null;
 			return warnhinweise(
 				{
@@ -206,7 +212,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 				zugang?: { vorhanden: boolean; letzteAnmeldungAm: string | null; erlaubt: boolean } | null;
 			} = baueListe(betrachter, p, einsicht, a, u.hinweiseFuer(p));
 
-			if (einsicht === 'VOLL') {
+			if (einsicht !== 'NAME') {
 				antwort.familie = familieVon(p, u.zuordnungen, u.sichten, (x) => !!u.einsichtFuer(x));
 			}
 			if (hatRecht(betrachter, 'MITGLIEDER')) {
@@ -238,7 +244,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 function familieVon(
 	p: Person,
 	zuordnungen: readonly Bezugsperson[],
-	sichten: ReadonlyMap<string, PersonSicht>,
+	sichten: ReadonlyMap<string, Person>,
 	sichtbar: (gegenueber: Person) => boolean,
 ) {
 	const eintraege = [];
@@ -246,7 +252,7 @@ function familieVon(
 		const eigene = p.art === 'JUNGFISCHER' ? z.jungfischerId === p.id : z.erwachsenerId === p.id;
 		if (!eigene) continue;
 		const gegenueberId = p.art === 'JUNGFISCHER' ? z.erwachsenerId : z.jungfischerId;
-		const gegenueber = sichten.get(gegenueberId) as Person | undefined;
+		const gegenueber = sichten.get(gegenueberId);
 		if (!gegenueber || !sichtbar(gegenueber)) continue;
 		eintraege.push({
 			erwachsenerId: z.erwachsenerId,

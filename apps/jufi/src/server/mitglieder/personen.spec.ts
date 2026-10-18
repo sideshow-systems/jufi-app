@@ -123,12 +123,12 @@ describe('Personen lesen', () => {
 		// Die eigene Adresse sieht jeder selbst, die der anderen nur die Verwaltung.
 		for (const p of liste.filter((x) => x.id !== betreuer.personId)) {
 			expect(p).not.toHaveProperty('email');
-			expect(p).not.toHaveProperty('einladung');
-			expect(p).not.toHaveProperty('zugang');
 			const arten = (p.warnhinweise ?? []).map((w) => w.art);
 			expect(arten).not.toContain('EINLADUNG_OFFEN');
 			expect(arten).not.toContain('MAIL_NICHT_ZUGESTELLT');
 		}
+		// Der Einwilligungsstand gehoert der Verwaltung (Spec 5.2).
+		expect(liste.find((p) => p.id === kind.id)?.warnhinweise?.map((w) => w.art)).not.toContain('EINWILLIGUNG_FEHLT');
 		// Betreuer sehen die Sicherheitshinweise zum Kind weiterhin.
 		expect(liste.find((p) => p.id === kind.id)?.warnhinweise?.map((w) => w.art)).toContain('OHNE_FAMILIE');
 		expect(liste.find((p) => p.id === kind.id)?.geburtsdatum).toBe('2015-05-05');
@@ -211,6 +211,43 @@ describe('Personen lesen', () => {
 		// Die Mutter sieht im Erwachsenen-Profil statt der Familie die Kinder.
 		const sieSelbst = (await (await v.api(`/personen/${mutter.personId}`, mutter.cookie)).json()) as Eintrag;
 		expect(sieSelbst.familie).toEqual([expect.objectContaining({ jungfischerId: kind.id, vorname: 'Kai' })]);
+	});
+
+	it('Einzelansicht fuer Betreuer: Familie, aber weder Adresse noch Einladung noch Zugang noch Einwilligungshinweis', async () => {
+		const v = await neuerVerein();
+		const betreuer = await v.mitglied(['ANTWORTEN_DETAIL']);
+		const verwalter = await v.mitglied(['MITGLIEDER'], 'Vera');
+		const mutter = await v.erwachsener('Mia');
+		const kind = await v.kind('Kai');
+		await v.zuordnen(mutter.id, kind.id);
+		const alsBetreuer = (await (await v.api(`/personen/${kind.id}`, betreuer.cookie)).json()) as Eintrag;
+		expect(alsBetreuer.familie).toEqual([expect.objectContaining({ erwachsenerId: mutter.id })]);
+		for (const feld of ['email', 'einladung', 'zugang']) expect(alsBetreuer).not.toHaveProperty(feld);
+		expect(alsBetreuer.warnhinweise?.map((w) => w.art)).not.toContain('EINWILLIGUNG_FEHLT');
+		const alsVerwalter = (await (await v.api(`/personen/${kind.id}`, verwalter.cookie)).json()) as Eintrag;
+		expect(alsVerwalter.warnhinweise?.map((w) => w.art)).toContain('EINWILLIGUNG_FEHLT');
+	});
+
+	it('Einzelansicht der Leitung durch die Mutter zeigt nur den Namen', async () => {
+		const v = await neuerVerein();
+		const mutter = await v.mitglied([]);
+		const leitung = await v.mitglied(['MITGLIEDER', 'JUGENDLEITER_RECHTE'], 'Lena');
+		const r = await v.api(`/personen/${leitung.personId}`, mutter.cookie);
+		expect(r.status).toBe(200);
+		expect(Object.keys((await r.json()) as object).sort()).toEqual(['art', 'id', 'nachname', 'vorname']);
+	});
+
+	it('ein entferntes gemeinsames Kind verbindet Erwachsene nicht mehr', async () => {
+		const v = await neuerVerein();
+		const mutter = await v.mitglied([]);
+		const vater = await v.erwachsener('Vater');
+		const kind = await v.kind('Kai');
+		await v.zuordnen(mutter.personId, kind.id);
+		await v.zuordnen(vater.id, kind.id);
+		expect((await v.liste(mutter.cookie)).map((p) => p.id)).toContain(vater.id);
+		await prisma.person.update({ where: { id: kind.id }, data: { entferntAm: new Date() } });
+		expect((await v.liste(mutter.cookie)).map((p) => p.id)).not.toContain(vater.id);
+		expect((await v.api(`/personen/${vater.id}`, mutter.cookie)).status).toBe(404);
 	});
 
 	it('Warnhinweise: Kind ohne Familie ist OHNE_FAMILIE, Einladungsmail nach MAIL_MAX_VERSUCHE Fehlschlaegen ist MAIL_NICHT_ZUGESTELLT', async () => {
