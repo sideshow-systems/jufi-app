@@ -19,6 +19,10 @@ interface Kontext {
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
+	/** Cookie einer Person aus eigen mit Verwaltungs- und Rechterecht: sieht in eigen alles, in fremd nichts. */
+	eigenerLeiter: string;
+	/** Eine Person im Verein fremd. */
+	fremdePersonId: string;
 	/** Token einer offenen Einladung im Verein eigen. */
 	einladungsToken: string;
 	/** Kennung und Passwort einer Person mit TOTP im Verein eigen. */
@@ -175,6 +179,21 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Das Cookie aus eigen gilt in fremd nicht: angemeldet ist nur, wer dort eine Sitzung hat.
 		expect((await sende(k.url, `/${k.fremd.slug}/api/v1/ich`, { cookie: k.eigenesCookie })).status).toBe(401);
 	},
+	'GET /personen': async (k) => {
+		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/personen`)).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}/api/v1/personen`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		// In eigen taucht die Person aus fremd auch fuer die Verwaltung nicht auf.
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/personen`, { cookie: k.eigenerLeiter });
+		const { personen } = (await r.json()) as { personen: { id: string }[] };
+		expect(personen.map((p) => p.id)).not.toContain(k.fremdePersonId);
+	},
+	'GET /personen/:id': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdePersonId}`;
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		// Die ID aus fremd ist in eigen unbekannt, auch fuer die Verwaltung: 404, nie 403.
+		expect((await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+	},
 	'POST /abmelden': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -232,6 +251,10 @@ describe('Mandanten-Test', () => {
 		const { cookie } = await legeMitgliedAn(prisma, eigen, { art: 'ERWACHSENER', rechte: ['MITGLIEDER'] });
 		// Mit Passwort, damit ein Loeschen nicht schon am letzten Anmeldeweg scheiterte.
 		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
+		const leiter = await legeMitgliedAn(prisma, eigen, {
+			art: 'ERWACHSENER',
+			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE'],
+		});
 		const fremderPasskey = await prisma.passkey.create({
 			data: {
 				vereinId: fremd.id,
@@ -257,6 +280,8 @@ describe('Mandanten-Test', () => {
 			fremd,
 			gesperrt,
 			eigenesCookie: cookie,
+			eigenerLeiter: leiter.cookie,
+			fremdePersonId: nachbar.personId,
 			einladungsToken: await einladungsToken(prisma, eigen),
 			totpPerson,
 			prisma,

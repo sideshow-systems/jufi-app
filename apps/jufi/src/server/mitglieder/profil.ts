@@ -143,13 +143,15 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 			const { person, zugang } = mitgliedKontext(res);
 			// select statt der ganzen Zeile: publicKey und credentialId gehoeren nicht
 			// in die Oberflaeche, und ein spaeter ergaenztes Feld kaeme sonst still mit.
-			const [passkeys, uebrig] = await Promise.all([
+			const [passkeys, uebrig, kinder] = await Promise.all([
 				db.passkey.findMany({
 					where: { zugangId: zugang.id },
 					select: { id: true, label: true, createdAt: true, lastUsedAt: true },
 					orderBy: { createdAt: 'asc' },
 				}),
 				db.recoveryCode.count({ where: { zugangId: zugang.id, verwendetAm: null } }),
+				// Die Oberflaeche zeigt "Meine Kinder" nur, wo es welche gibt; entfernte zaehlen nicht.
+				db.bezugsperson.count({ where: { erwachsenerId: person.id, jungfischer: { entferntAm: null } } }),
 			]);
 			res.json({
 				person: {
@@ -159,6 +161,7 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 					art: person.art,
 					rechte: person.rechte,
 				},
+				hatKinder: kinder > 0,
 				// Erwachsene melden sich mit der Adresse an, Jungfischer mit dem Anmeldenamen.
 				kennung: person.art === 'ERWACHSENER' ? person.email : zugang.anmeldename,
 				passkeys: passkeys.map((p) => ({
