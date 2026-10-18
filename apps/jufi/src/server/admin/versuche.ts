@@ -38,7 +38,7 @@ export function reserviere(
 	// dieselbe Antwort wie eine Sperre, kein 500; gewartet wird, bis die
 	// naechste Sperre ablaeuft und wieder Platz ist.
 	if (!versuche.platzFuer(schluessel)) return { wartenMs: versuche.naechsteFreigabeMs(), loestSperreAus: false };
-	for (const s of schluessel) versuche.fail(s);
+	for (const s of schluessel) versuche.fail(s, schluessel);
 	return { wartenMs: 0, loestSperreAus: sperre(versuche, schluessel) > 0 };
 }
 
@@ -63,4 +63,12 @@ export function scheitere(
 		return;
 	}
 	res.status(401).json(fehler);
+}
+
+/**
+ * Ein Erfolg erstattet nur seine eigene Reservierung (siehe reserviere), die
+ * Fehlversuche anderer bleiben stehen.
+ */
+export function erstatte(versuche: AttemptTracker, schluessel: string[]): void {
+	for (const s of schluessel) versuche.erstatte(s);
 }

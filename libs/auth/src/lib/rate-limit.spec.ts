@@ -169,3 +169,60 @@ describe('AttemptTracker: Ueberlauf', () => {
 		expect(t.naechsteFreigabeMs()).toBe(500);
 	});
 });
+
+describe('AttemptTracker: erstatte', () => {
+	it('nimmt einen Fehlversuch zurueck und laesst lastFailureAt unveraendert', () => {
+		let now = 0;
+		const t = new AttemptTracker(() => now);
+		for (let i = 0; i < 5; i++) t.fail('a');
+		expect(t.remaining('a')).toBe(2_000);
+		now = 500;
+		t.erstatte('a');
+		// Vier Fehlversuche (1 s) ab Zeitpunkt 0: Rest 500. Waere lastFailureAt auf 500
+		// gesetzt worden, waere der Rest 1 000.
+		expect(t.remaining('a')).toBe(500);
+	});
+
+	it('bei 0 wird der Eintrag geloescht', () => {
+		const t = new AttemptTracker(() => 0);
+		t.fail('a');
+		t.erstatte('a');
+		expect(t.has('a')).toBe(false);
+	});
+
+	it('ein fehlender Eintrag bleibt fehlend', () => {
+		const t = new AttemptTracker(() => 0);
+		t.erstatte('nie');
+		expect(t.has('nie')).toBe(false);
+	});
+
+	it('hebt eine Sperre auf, die der erstattete Versuch ausgeloest hat', () => {
+		const t = new AttemptTracker(() => 0);
+		for (let i = 0; i <= FREE_ATTEMPTS; i++) t.fail('a');
+		expect(t.isLocked('a')).toBe(true);
+		t.erstatte('a');
+		expect(t.isLocked('a')).toBe(false);
+	});
+});
+
+describe('AttemptTracker: geschuetzte Schluessel', () => {
+	it('zaehlt eigene, ungesperrte Schluessel der Anfrage nicht als verdraengbar', () => {
+		const t = new AttemptTracker(() => 0);
+		t.fail('eigen');
+		for (let i = 0; i < MAX_SCHLUESSEL - 1; i++) for (let j = 0; j <= FREE_ATTEMPTS; j++) t.fail(`s${i}`);
+		// Voll: 'eigen' ist der einzige Verdraengbare, braucht aber selbst einen Platz.
+		expect(t.platzFuer(['eigen', 'neu'])).toBe(false);
+		expect(t.platzFuer(['eigen'])).toBe(true);
+		expect(t.platzFuer(['neu'])).toBe(true);
+	});
+
+	it('eine abgelaufene Sperre wird ueber die Uhr wieder verdraengbar', () => {
+		let now = 0;
+		const t = new AttemptTracker(() => now);
+		for (let i = 0; i < MAX_SCHLUESSEL; i++) for (let j = 0; j <= FREE_ATTEMPTS; j++) t.fail(`s${i}`);
+		expect(t.platzFuer(['neu'])).toBe(false);
+		now = 2_000;
+		expect(t.platzFuer(['neu'])).toBe(true);
+		expect(t.fail('neu')?.failures).toBe(1);
+	});
+});

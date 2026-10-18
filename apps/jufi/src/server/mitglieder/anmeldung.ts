@@ -15,7 +15,7 @@ import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { PLATZHALTER_HASH } from '../admin/anmeldung.js';
 import { asynchron, text } from '../admin/asynchron.js';
 import { relyingParty } from '../admin/passkeys.js';
-import { reserviere, scheitere, zuVieleVersuche } from '../admin/versuche.js';
+import { erstatte, reserviere, scheitere, zuVieleVersuche } from '../admin/versuche.js';
 import { vereinsKontext } from '../verein.js';
 import { nimmChallenge, speichereChallenge } from './challenges.js';
 import { legeSitzungAn, setzeMitgliederCookie } from './sitzung.js';
@@ -120,7 +120,8 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 			// und wer Grossschreibung variiert, bekaeme die Versuche mehrfach.
 			// reserviere vor dem ersten await (siehe versuche.ts).
 			const kennungSchluessel = `m:${verein.id}:${kennung.wert}`;
-			const schluessel = [`m-ip:${req.ip}`, kennungSchluessel];
+			const ipSchluessel = `m-ip:${req.ip}`;
+			const schluessel = [ipSchluessel, kennungSchluessel];
 			const versuch = reserviere(versuche, schluessel);
 			if (versuch.wartenMs > 0) {
 				zuVieleVersuche(res, versuch.wartenMs);
@@ -144,6 +145,10 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 			// Verworfen: beide zuruecksetzen -- ein Angreifer mit eigenem Konto
 			// loeschte so nach jedem Raten seinen IP-Zaehler.
 			versuche.reset(kennungSchluessel);
+			// Der Erfolg erstattet seine eigene Zaehlung auf m-ip, damit Vereins-WLAN und
+			// CGNAT nicht an der Zahl legitimer Logins sperren; die Fehlversuche anderer
+			// bleiben stehen.
+			erstatte(versuche, [ipSchluessel]);
 
 			// Nur an totpAktivAm entschieden, wie beim Admin: ein kaputter Datensatz
 			// (aktiv, aber ohne Geheimnis) scheitert im TOTP-Schritt, statt mit dem
@@ -361,7 +366,9 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				scheitert();
 				return;
 			}
-			versuche.reset(schluessel[0] ?? '');
+			// Nur die eigene Zaehlung auf m-ip zurueck, kein Reset: sonst hebelte ein
+			// Passkey-Login den Zaehler eines Angreifers derselben IP aus.
+			erstatte(versuche, schluessel);
 			setzeMitgliederCookie(req, res, verein.slug, token);
 			res.json({ schritt: 'fertig' });
 		}),

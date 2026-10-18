@@ -1,6 +1,15 @@
 import { AttemptTracker, FREE_ATTEMPTS, MAX_SCHLUESSEL } from '@jufi/auth';
 import { describe, expect, it } from 'vitest';
-import { reserviere } from './versuche.js';
+import { erstatte, reserviere } from './versuche.js';
+
+describe('erstatte', () => {
+	it('reicht an den Tracker durch', () => {
+		const t = new AttemptTracker(() => 0);
+		reserviere(t, ['a']);
+		erstatte(t, ['a']);
+		expect(t.has('a')).toBe(false);
+	});
+});
 
 describe('reserviere bei vollem Speicher', () => {
 	it('lehnt einen neuen Schluessel bei lauter Sperren mit Wartezeit ab, ohne zu werfen', () => {
