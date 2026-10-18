@@ -21,6 +21,19 @@ export const routerFeatures = [withComponentInputBinding(), withRouterConfig({ p
  */
 export const routes: Routes = [
 	{ path: '', component: PlattformStartComponent, pathMatch: 'full' },
+	// Wie admin vor ':slug' (beide Namen sind reserviert). Die Texte stehen als Markdown im Repo; Seite, Text und
+	// Markdown-Parser werden mit der Route nachgeladen, das Startbuendel traegt nichts davon. Die Seite bekommt art
+	// ueber data. Ohne Huelle und ohne Waechter: Sie sind ohne Anmeldung lesbar.
+	{
+		path: 'impressum',
+		loadComponent: () => import('./seiten/rechtstext').then((m) => m.RechtstextComponent),
+		data: { art: 'impressum' },
+	},
+	{
+		path: 'datenschutz',
+		loadComponent: () => import('./seiten/rechtstext').then((m) => m.RechtstextComponent),
+		data: { art: 'datenschutz' },
+	},
 	// Vor ':slug', sonst waere "admin" ein Vereinsname. Nachgeladen, damit Admin-Seiten
 	// und qrcode nicht im Startbuendel der Mitglieder liegen.
 	{ path: 'admin', loadChildren: () => import('./admin/admin.routes').then((m) => m.ADMIN_ROUTES) },
