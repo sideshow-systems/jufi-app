@@ -1,4 +1,4 @@
-import { createPrismaClientFromEnv } from '@jufi/db';
+import { createPrismaClientFromEnv, sperreVereinszeile } from '@jufi/db';
 import { RECHTE_VORLAGEN } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -96,15 +96,22 @@ describe('Rechte vergeben', () => {
 		}
 	});
 
-	it('Handelnder, dem das Recht in der Datenbank fehlt, obwohl die Sitzung besteht: 404', async () => {
-		// Die Middleware liest die Person ohnehin frisch; der Test haelt dieses Verhalten fest. Die
-		// Neubewertung unter der Sperre selbst ist ohne Eingriff in die Anfrage nicht deterministisch ausloesbar.
+	it('Handelnder verliert das Recht, waehrend sein PUT an der Sperre wartet: 404, Rechte unveraendert', async () => {
 		const v = await neuerVerein();
-		const zweiter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', rechte: ['JUGENDLEITER_RECHTE'] });
+		const a = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', rechte: ['JUGENDLEITER_RECHTE'] });
 		const ziel = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
-		await prisma.person.update({ where: { id: zweiter.personId }, data: { rechte: [] } });
-		expect((await v.setze(ziel.personId, ['DOKUMENTE'], zweiter.cookie)).status).toBe(404);
+		let anfrage!: Promise<Response>;
+		// Die externe Transaktion haelt die Sperre; Standard-Timeout 5 s reicht fuer die kurze Wartezeit.
+		await prisma.$transaction(async (tx) => {
+			await sperreVereinszeile(tx, v.verein.id);
+			anfrage = v.setze(ziel.personId, ['DOKUMENTE'], a.cookie);
+			// Der Request ist an der Vorpruefung vorbei und haengt an der Sperre.
+			await new Promise((r) => setTimeout(r, 300));
+			await tx.person.update({ where: { id: a.personId }, data: { rechte: [] } });
+		});
+		expect((await anfrage).status).toBe(404);
 		expect(await v.rechteVon(ziel.personId)).toEqual([]);
+		expect(await v.rechteVon(a.personId)).toEqual([]);
 	});
 
 	it('Jungfischer als Ziel: 404', async () => {
