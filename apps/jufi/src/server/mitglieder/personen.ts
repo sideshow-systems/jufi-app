@@ -11,6 +11,7 @@ import {
 	pruefeGeburtsdatum,
 	pruefeName,
 	warnhinweise,
+	wuerdeLetzteLeitungVerlieren,
 	type Einsicht,
 	type Warnhinweis,
 	type Zuordnung,
@@ -22,6 +23,7 @@ import { MAIL_MAX_VERSUCHE } from '../mail/arbeiter.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 import { alsSicht, ladeUmfeld, statt404 } from './verwaltung.js';
+import { entferne } from './zugang.js';
 
 export interface PersonListe {
 	id: string;
@@ -439,6 +441,81 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 					}
 				});
 				res.json({ ok: true });
+			} catch (error) {
+				antworteAbbruch(res, error);
+			}
+		}),
+	);
+
+	router.delete(
+		'/personen/:id',
+		brauchtMitglied,
+		asynchron(async (req, res) => {
+			if (nurVerwaltung(res)) return;
+			const { person: handelnder } = mitgliedKontext(res);
+			const { verein, db } = vereinsKontext(res);
+			const zielId = req.params['id'] ?? '';
+			const zeit = jetzt();
+			try {
+				const folgeangebot = await db.$transaction(async (tx) => {
+					// Angenommen oder nicht haengt an Rechten, Entfernt-Stand und der Leitung; dazu gehoert auch
+					// eine Einloesung der Einladung dieser Person, die entweder vorher fertig ist oder an der
+					// Sperre wartet und dann ein 404 sieht.
+					await sperreVereinszeile(tx, verein.id);
+					// Erst jetzt gelesen, auch der Handelnde (wie in rechte.ts): hat eine andere Anfrage ihm
+					// MITGLIEDER entzogen oder ihn entfernt, waere sein Stand aus der Sitzung veraltet, und
+					// sein Entfernen hebelte den Entzug aus.
+					const erwachsene = await tx.person.findMany({ where: { art: 'ERWACHSENER', entferntAm: null } });
+					const ich = erwachsene.find((p) => p.id === handelnder.id);
+					if (!ich || !hatRecht(ich, 'MITGLIEDER')) throw new Abbruch(404, NICHT_GEFUNDEN);
+					// Vor allen Rechtepruefungen: die eigene Person zu nennen verraet nichts.
+					if (zielId === ich.id) {
+						throw new Abbruch(409, {
+							fehler: 'Du kannst dich nicht selbst entfernen',
+							code: 'SELBST',
+						});
+					}
+					const ziel = await tx.person.findFirst({ where: { id: zielId, entferntAm: null } });
+					// 404 statt 403 bei Personen mit Rechten, sonst verriete die Antwort, wer Jugendleiter ist.
+					if (!ziel || (istJugendleiter(ziel) && !hatRecht(ich, 'JUGENDLEITER_RECHTE'))) {
+						throw new Abbruch(404, NICHT_GEFUNDEN);
+					}
+					// Mit den Pruefungen oben nicht erreichbar (wer ein Leitungsrecht entfernt, hat es selbst und
+					// ist nicht das Ziel); bleibt als Netz, falls sich die Rechte-Regeln aendern.
+					if (wuerdeLetzteLeitungVerlieren(erwachsene.map(alsSicht), ziel.id, [])) {
+						throw new Abbruch(409, {
+							fehler: 'Der Verein braucht mindestens eine Person mit Recht zum Vergeben von Rechten',
+							code: 'LETZTE_LEITUNG',
+						});
+					}
+
+					// Vor dem Entfernen merken, wer zum Kind gehoerte: danach sind die Zuordnungen weg.
+					const bisherige =
+						ziel.art === 'JUNGFISCHER'
+							? (await tx.bezugsperson.findMany({ where: { jungfischerId: ziel.id } })).map((z) => z.erwachsenerId)
+							: [];
+					await entferne(tx, ziel.id, zeit);
+
+					// Erwachsene ohne Kind und ohne Rechte brauchen die Verwaltung nicht mehr (Spec 5.8). Nur
+					// ein Angebot: ob sie gehen, entscheidet die Verwaltung. Verworfen: sie gleich mitzuentfernen
+					// -- ein Grossvater, der spaeter ein anderes Enkelkind bekommt, waere dann weg.
+					if (bisherige.length === 0) return [];
+					const [kandidaten, weiterhin] = await Promise.all([
+						tx.person.findMany({
+							where: { id: { in: bisherige }, entferntAm: null },
+							orderBy: [{ nachname: 'asc' }, { vorname: 'asc' }, { id: 'asc' }],
+						}),
+						// Ein entferntes Kind zaehlt nicht, auch falls eine alte Zuordnung auf seinen Grabstein blieb.
+						tx.bezugsperson.findMany({
+							where: { erwachsenerId: { in: bisherige }, jungfischer: { entferntAm: null } },
+						}),
+					]);
+					const mitKind = new Set(weiterhin.map((z) => z.erwachsenerId));
+					return kandidaten
+						.filter((e) => !istJugendleiter(e) && !mitKind.has(e.id))
+						.map((e) => ({ id: e.id, vorname: e.vorname, nachname: e.nachname }));
+				});
+				res.json({ folgeangebot });
 			} catch (error) {
 				antworteAbbruch(res, error);
 			}

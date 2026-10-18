@@ -268,6 +268,17 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await loese(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
 		expect(await k.prisma.bezugsperson.findMany({ where: { vereinId: k.fremd.id } })).toEqual(vorher);
 	},
+	'DELETE /personen/:id': async (k) => {
+		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });
+		const entferne = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/personen/${k.fremdesKindId}`, { methode: 'DELETE', cookie });
+		expect((await entferne(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await entferne(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Das Kind gehoert zu fremd: in eigen unbekannt, auch fuer die Verwaltung.
+		expect((await entferne(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
+		expect(await k.prisma.untergruppeMitglied.count({ where: { personId: k.fremdesKindId } })).toBe(1);
+	},
 	'GET /untergruppen': async (k) => {
 		const liste = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/untergruppen`, { cookie });
 		expect((await liste(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);

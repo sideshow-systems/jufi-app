@@ -172,6 +172,66 @@ describe('Familie verknuepfen', () => {
 		expect((await v.loesche(kind.id, erw.id)).status).toBe(404);
 	});
 
+	/** Kind mit Zugang, dessen einzige Einwilligung die Mutter erteilt hat. */
+	async function kindMitEinwilligung(v: Awaited<ReturnType<typeof neuerVerein>>) {
+		const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+		const mutter = await v.erwachsener('Mutter');
+		await v.put(kind.personId, mutter.id, { beziehung: 'MUTTER' });
+		await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: kind.personId,
+				erteiltVon: mutter.id,
+				art: 'DSGVO_ART8',
+				textVersion: '1',
+			},
+		});
+		return { kind, mutter };
+	}
+	const hatZugang = async (kindId: string) => ({
+		erlaubt: (await prisma.person.findUniqueOrThrow({ where: { id: kindId } })).zugangErlaubt,
+		zugaenge: await prisma.zugang.count({ where: { personId: kindId } }),
+	});
+
+	it('Familie loesen ohne verbleibende gueltige Einwilligung entzieht den Zugang des Kindes', async () => {
+		const v = await neuerVerein();
+		const { kind, mutter } = await kindMitEinwilligung(v);
+		expect((await v.loesche(kind.personId, mutter.id)).status).toBe(204);
+		expect(await hatZugang(kind.personId)).toEqual({ erlaubt: false, zugaenge: 0 });
+	});
+
+	it('Familie loesen mit anderem einwilligenden Erziehungsberechtigten laesst den Zugang', async () => {
+		const v = await neuerVerein();
+		const { kind, mutter } = await kindMitEinwilligung(v);
+		const vater = await v.erwachsener('Vater');
+		await v.put(kind.personId, vater.id, { beziehung: 'VATER' });
+		await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: kind.personId,
+				erteiltVon: vater.id,
+				art: 'DSGVO_ART8',
+				textVersion: '1',
+			},
+		});
+		expect((await v.loesche(kind.personId, mutter.id)).status).toBe(204);
+		expect(await hatZugang(kind.personId)).toEqual({ erlaubt: true, zugaenge: 1 });
+	});
+
+	it('Wechsel erziehungsberechtigt true auf false entzieht den Zugang; false auf true oder gleichbleibend nicht', async () => {
+		const v = await neuerVerein();
+		const { kind, mutter } = await kindMitEinwilligung(v);
+		// Gleichbleibend und true: nichts geschieht.
+		expect((await v.put(kind.personId, mutter.id, { beziehung: 'MUTTER', erziehungsberechtigt: true })).status).toBe(
+			200,
+		);
+		expect(await hatZugang(kind.personId)).toEqual({ erlaubt: true, zugaenge: 1 });
+		expect((await v.put(kind.personId, mutter.id, { beziehung: 'MUTTER', erziehungsberechtigt: false })).status).toBe(
+			200,
+		);
+		expect(await hatZugang(kind.personId)).toEqual({ erlaubt: false, zugaenge: 0 });
+	});
+
 	it('ohne MITGLIEDER: 404, nichts geschrieben', async () => {
 		const v = await neuerVerein();
 		const kind = await v.kind();

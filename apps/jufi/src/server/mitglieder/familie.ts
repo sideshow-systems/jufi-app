@@ -36,7 +36,7 @@ function ungueltig(fehler: string, feld: string): Abbruch {
 	return new Abbruch(400, { fehler, feld });
 }
 
-export function familieRouten(router: Router, _deps: VolleAppDeps): void {
+export function familieRouten(router: Router, deps: VolleAppDeps): void {
 	router.put(
 		'/personen/:jungfischerId/familie/:erwachsenerId',
 		brauchtMitglied,
@@ -93,7 +93,7 @@ export function familieRouten(router: Router, _deps: VolleAppDeps): void {
 					}
 					// Ein Wechsel von true auf false nimmt dem Kind womoeglich die Einwilligung.
 					if (vorhanden?.erziehungsberechtigt && !erziehungsberechtigt) {
-						await entzieheZugangWennUngueltig(tx, kind);
+						await entzieheZugangWennUngueltig(tx, kind, deps.jetzt());
 					}
 					return { erziehungsberechtigt };
 				});
@@ -126,7 +126,7 @@ export function familieRouten(router: Router, _deps: VolleAppDeps): void {
 					}
 					// Idempotent: deleteMany meldet auch "nichts da" ohne Fehler.
 					const geloest = await tx.bezugsperson.deleteMany({ where: { erwachsenerId: erwId, jungfischerId: kindId } });
-					if (geloest.count > 0) await entzieheZugangWennUngueltig(tx, kind);
+					if (geloest.count > 0) await entzieheZugangWennUngueltig(tx, kind, deps.jetzt());
 				});
 				res.status(204).end();
 			} catch (error) {
