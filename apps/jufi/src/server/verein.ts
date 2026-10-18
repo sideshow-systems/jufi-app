@@ -4,6 +4,7 @@ import { Router, type RequestHandler, type Response } from 'express';
 import type { VolleAppDeps } from './abhaengigkeiten.js';
 import { anmeldeRouten } from './mitglieder/anmeldung.js';
 import { einladungsRouten } from './mitglieder/einladung.js';
+import { familieRouten } from './mitglieder/familie.js';
 import { personenRouten } from './mitglieder/personen.js';
 import { profilRouten } from './mitglieder/profil.js';
 import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
@@ -89,6 +90,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	anmeldeRouten(router, deps);
 	profilRouten(router, deps);
 	personenRouten(router, deps);
+	familieRouten(router, deps);
 	zugangVerlorenRouten(router, deps);
 
 	return router;
