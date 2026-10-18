@@ -3,3 +3,6 @@ export * from './passwort.js';
 export * from './kennung.js';
 export * from './verein.js';
 export * from './einladung.js';
+export * from './rechte.js';
+export * from './personen.js';
+export * from './einwilligung.js';

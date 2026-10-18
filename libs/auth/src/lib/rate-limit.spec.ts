@@ -81,7 +81,7 @@ describe('AttemptTracker', () => {
 		expect(t.isLocked('kind')).toBe(true);
 		now += 16 * 60 * 1_000;
 		expect(t.remaining('kind')).toBe(0);
-		expect(t.fail('kind').failures).toBe(1);
+		expect(t.fail('kind')?.failures).toBe(1);
 	});
 
 	it('Der Speicher ist begrenzt', () => {
@@ -90,5 +90,139 @@ describe('AttemptTracker', () => {
 		expect(t.has('k0')).toBe(false);
 		expect(t.remaining('k0')).toBe(0);
 		expect(t.has(`k${MAX_SCHLUESSEL}`)).toBe(true);
+	});
+});
+
+describe('AttemptTracker: Ueberlauf', () => {
+	/** Sperrt einen Schluessel (vier Fehlversuche). */
+	function sperre(t: AttemptTracker, key: string): void {
+		for (let i = 0; i <= FREE_ATTEMPTS; i++) t.fail(key);
+	}
+
+	it('Ueberlauf entfernt zuerst nicht gesperrte Schluessel, aelteste zuerst', () => {
+		const t = new AttemptTracker(() => 0);
+		sperre(t, 'gesperrt');
+		t.fail('alt');
+		t.fail('neu');
+		for (let i = 0; i < MAX_SCHLUESSEL - 3; i++) t.fail(`k${i}`);
+		expect(t.has('gesperrt') && t.has('alt') && t.has('neu')).toBe(true);
+		t.fail('eins-zu-viel');
+		// 'gesperrt' ist der aelteste Eintrag, bleibt aber; 'alt' geht als erster.
+		expect(t.has('gesperrt')).toBe(true);
+		expect(t.has('alt')).toBe(false);
+		expect(t.has('neu')).toBe(true);
+		t.fail('noch-einer');
+		expect(t.has('neu')).toBe(false);
+		expect(t.has('gesperrt')).toBe(true);
+	});
+
+	it('erneuter Fehlversuch macht einen Schluessel wieder juenger', () => {
+		const t = new AttemptTracker(() => 0);
+		t.fail('a');
+		t.fail('b');
+		t.fail('a');
+		for (let i = 0; i < MAX_SCHLUESSEL - 2; i++) t.fail(`k${i}`);
+		t.fail('ueberlauf');
+		expect(t.has('b')).toBe(false);
+		expect(t.has('a')).toBe(true);
+	});
+
+	it('Lesen aendert die Reihenfolge nicht', () => {
+		const t = new AttemptTracker(() => 0);
+		t.fail('a');
+		t.fail('b');
+		for (let i = 0; i < MAX_SCHLUESSEL - 2; i++) t.fail(`k${i}`);
+		t.has('a');
+		t.remaining('a');
+		t.isLocked('a');
+		t.fail('ueberlauf');
+		expect(t.has('a')).toBe(false);
+		expect(t.has('b')).toBe(true);
+	});
+
+	it('eine Sperre ueberlebt 10 000 Fremdschluessel', () => {
+		const t = new AttemptTracker(() => 0);
+		sperre(t, 'opfer');
+		for (let i = 0; i < MAX_SCHLUESSEL; i++) t.fail(`fremd${i}`);
+		expect(t.isLocked('opfer')).toBe(true);
+		expect(t.has('fremd0')).toBe(false);
+	});
+
+	it('bei lauter Sperren wird ein neuer Schluessel abgelehnt', () => {
+		const t = new AttemptTracker(() => 0);
+		for (let i = 0; i < MAX_SCHLUESSEL; i++) sperre(t, `s${i}`);
+		expect(t.platzFuer(['neu'])).toBe(false);
+		expect(t.fail('neu')).toBeUndefined();
+		expect(t.has('neu')).toBe(false);
+		expect(t.isLocked('s0')).toBe(true);
+		// Ein bekannter Schluessel zaehlt weiter.
+		expect(t.platzFuer(['s0'])).toBe(true);
+		expect(t.fail('s0')?.failures).toBe(5);
+	});
+
+	it('naechsteFreigabeMs nennt die kuerzeste Restsperre', () => {
+		let now = 0;
+		const t = new AttemptTracker(() => now);
+		sperre(t, 'a');
+		for (let i = 0; i < 5; i++) t.fail('b');
+		now = 500;
+		expect(t.naechsteFreigabeMs()).toBe(500);
+	});
+});
+
+describe('AttemptTracker: erstatte', () => {
+	it('nimmt einen Fehlversuch zurueck und laesst lastFailureAt unveraendert', () => {
+		let now = 0;
+		const t = new AttemptTracker(() => now);
+		for (let i = 0; i < 5; i++) t.fail('a');
+		expect(t.remaining('a')).toBe(2_000);
+		now = 500;
+		t.erstatte('a');
+		// Vier Fehlversuche (1 s) ab Zeitpunkt 0: Rest 500. Waere lastFailureAt auf 500
+		// gesetzt worden, waere der Rest 1 000.
+		expect(t.remaining('a')).toBe(500);
+	});
+
+	it('bei 0 wird der Eintrag geloescht', () => {
+		const t = new AttemptTracker(() => 0);
+		t.fail('a');
+		t.erstatte('a');
+		expect(t.has('a')).toBe(false);
+	});
+
+	it('ein fehlender Eintrag bleibt fehlend', () => {
+		const t = new AttemptTracker(() => 0);
+		t.erstatte('nie');
+		expect(t.has('nie')).toBe(false);
+	});
+
+	it('hebt eine Sperre auf, die der erstattete Versuch ausgeloest hat', () => {
+		const t = new AttemptTracker(() => 0);
+		for (let i = 0; i <= FREE_ATTEMPTS; i++) t.fail('a');
+		expect(t.isLocked('a')).toBe(true);
+		t.erstatte('a');
+		expect(t.isLocked('a')).toBe(false);
+	});
+});
+
+describe('AttemptTracker: geschuetzte Schluessel', () => {
+	it('zaehlt eigene, ungesperrte Schluessel der Anfrage nicht als verdraengbar', () => {
+		const t = new AttemptTracker(() => 0);
+		t.fail('eigen');
+		for (let i = 0; i < MAX_SCHLUESSEL - 1; i++) for (let j = 0; j <= FREE_ATTEMPTS; j++) t.fail(`s${i}`);
+		// Voll: 'eigen' ist der einzige Verdraengbare, braucht aber selbst einen Platz.
+		expect(t.platzFuer(['eigen', 'neu'])).toBe(false);
+		expect(t.platzFuer(['eigen'])).toBe(true);
+		expect(t.platzFuer(['neu'])).toBe(true);
+	});
+
+	it('eine abgelaufene Sperre wird ueber die Uhr wieder verdraengbar', () => {
+		let now = 0;
+		const t = new AttemptTracker(() => now);
+		for (let i = 0; i < MAX_SCHLUESSEL; i++) for (let j = 0; j <= FREE_ATTEMPTS; j++) t.fail(`s${i}`);
+		expect(t.platzFuer(['neu'])).toBe(false);
+		now = 2_000;
+		expect(t.platzFuer(['neu'])).toBe(true);
+		expect(t.fail('neu')?.failures).toBe(1);
 	});
 });

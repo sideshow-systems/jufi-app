@@ -37,6 +37,37 @@ export const routes: Routes = [
 				loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
 				canActivate: [mitgliedAngemeldet],
 			},
+			{
+				path: 'jungfischer',
+				loadComponent: () => import('./verein/jungfischer').then((m) => m.JungfischerComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			// Die Verwaltung zeigt Rechte nur an; entschieden wird auf dem Server. Der Waechter fragt nur nach der Sitzung.
+			{
+				path: 'verwaltung',
+				loadComponent: () => import('./verein/verwaltung/mitglieder').then((m) => m.MitgliederComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			{
+				path: 'verwaltung/neu',
+				loadComponent: () => import('./verein/verwaltung/person-neu').then((m) => m.PersonNeuComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			{
+				path: 'verwaltung/untergruppen',
+				loadComponent: () => import('./verein/verwaltung/untergruppen').then((m) => m.UntergruppenComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			{
+				path: 'verwaltung/rechte',
+				loadComponent: () => import('./verein/verwaltung/rechte').then((m) => m.RechteComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
+			{
+				path: 'verwaltung/personen/:id',
+				loadComponent: () => import('./verein/verwaltung/personenseite').then((m) => m.PersonenseiteComponent),
+				canActivate: [mitgliedAngemeldet],
+			},
 			// Ziel des Waechters bei 404; unter dem Slug statt als eigener Pfad, sonst waere der Pfadname ein reservierter Verein.
 			{ path: 'nicht-gefunden', component: NichtGefundenComponent },
 		],

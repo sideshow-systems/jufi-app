@@ -16,6 +16,7 @@ const ICH: MitgliedIch = {
 		{ id: 'k2', label: 'Handy', erstelltAm: '2026-09-02T10:00:00.000Z', zuletztGenutztAm: '2026-10-01T08:00:00.000Z' },
 	],
 	hatPasswort: true,
+	hatKinder: false,
 	totp: { moeglich: true, aktiv: false, wiederherstellungscodesUebrig: 0 },
 };
 

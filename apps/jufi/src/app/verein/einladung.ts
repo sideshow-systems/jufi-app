@@ -13,11 +13,11 @@ import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { wertVon } from '../gemeinsam/formular';
 import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
 import { KarteComponent } from '../gestaltung/ui';
-import type { EinladungInfo } from './mitglieder-api';
+import type { EinladungInfo, Einwilligungswunsch } from './mitglieder-api';
 import { MitgliederApi } from './mitglieder-api';
 import { VereinKopfComponent } from './verein-kopf';
 
-type Schritt = 'laedt' | 'ungueltig' | 'netzfehler' | 'begruessung' | 'kennung' | 'zugang' | 'fertig';
+type Schritt = 'laedt' | 'ungueltig' | 'netzfehler' | 'begruessung' | 'einwilligung' | 'kennung' | 'zugang' | 'fertig';
 
 /** Dieselben Texte wie der Server (einladung.ts), damit die Seite vorab nichts anderes sagt als er danach. */
 const KENNUNG_UNGUELTIG = {
@@ -26,10 +26,9 @@ const KENNUNG_UNGUELTIG = {
 } as const;
 
 /**
- * Einladung annehmen (/:slug/einladung#<token>): Begruessung, Kennung, Zugang
- * einrichten, Fertig. Gesendet wird erst am Ende von Zugang einrichten; die
- * Schritte davor sammeln nur. Der Einwilligungsschritt (Spec 4.2 Nr. 2) kommt
- * mit Etappe 4.
+ * Einladung annehmen (/:slug/einladung#<token>): Begruessung, Einwilligung (nur wenn
+ * der Link Kinder nennt), Kennung, Zugang einrichten, Fertig. Gesendet wird erst am
+ * Ende von Zugang einrichten; die Schritte davor sammeln nur.
  */
 @Component({
 	selector: 'jf-einladung',
@@ -65,6 +64,53 @@ const KENNUNG_UNGUELTIG = {
 								</p>
 								<button type="button" class="knopf primaer" (click)="weiterZurKennung()">Weiter</button>
 							}
+						}
+					}
+					@case ('einwilligung') {
+						<h2>Einwilligung</h2>
+						@if (info(); as i) {
+							<p>{{ i.einwilligungsText.text }}</p>
+							<form novalidate (submit)="einwilligungWeiter($event)">
+								@for (kind of i.kinder; track kind.id) {
+									<fieldset>
+										<legend>{{ kind.vorname }}</legend>
+										@if (kind.einwilligungVorhanden) {
+											<p class="gedaempft klein">
+												Für {{ kind.vorname }} hat schon jemand aus der Familie eingewilligt. Dieser Schritt ist für
+												dich freiwillig.
+											</p>
+										}
+										<label class="haken">
+											<input
+												type="checkbox"
+												[name]="'einwilligen-' + kind.id"
+												[checked]="wunsch(kind.id).einwilligen"
+												(change)="setzeEinwilligen(kind.id, gesetzt($event))"
+											/>
+											Ich willige ein
+										</label>
+										@if (wunsch(kind.id).einwilligen) {
+											<div role="group" [attr.aria-labelledby]="'frage-' + kind.id">
+												<p class="frage" [id]="'frage-' + kind.id">
+													Soll {{ kind.vorname }} einen eigenen Zugang bekommen?
+												</p>
+												<label class="haken">
+													<input
+														type="checkbox"
+														[name]="'zugang-' + kind.id"
+														[checked]="wunsch(kind.id).zugang"
+														(change)="setzeZugang(kind.id, gesetzt($event))"
+													/>
+													Ja, mit eigenem Anmeldenamen
+												</label>
+											</div>
+										} @else {
+											<p class="gedaempft klein">Die Familie handelt dann in seinem Namen.</p>
+										}
+									</fieldset>
+								}
+								<button type="submit" class="knopf primaer">Weiter</button>
+							</form>
 						}
 					}
 					@case ('kennung') {
@@ -172,6 +218,20 @@ const KENNUNG_UNGUELTIG = {
 		form p {
 			margin: 0;
 		}
+		fieldset {
+			margin: 0;
+			padding: 0;
+			border: 0;
+			min-width: 0;
+		}
+		legend {
+			padding: 0;
+			font-weight: 600;
+			overflow-wrap: anywhere;
+		}
+		.frage {
+			margin: 0;
+		}
 		hr {
 			border: 0;
 			border-top: 1px solid var(--linie);
@@ -206,7 +266,15 @@ export class EinladungComponent implements OnInit {
 	protected readonly fehler = signal<string | null>(null);
 	protected readonly kennungFehler = signal<string | null>(null);
 
+	/**
+	 * Je Kind die Antwort der Person. Die Einwilligung beginnt immer ungesetzt: eine
+	 * vorangekreuzte Einwilligung waere keine (DSGVO Art. 7). Der Zugang ist vorbelegt
+	 * auf ja, weil das der Normalfall ist; er zaehlt erst mit der Einwilligung.
+	 */
+	protected readonly wuensche = signal<Record<string, { einwilligen: boolean; zugang: boolean }>>({});
+
 	protected readonly wert = wertVon;
+	protected readonly gesetzt = (ereignis: Event): boolean => (ereignis.target as HTMLInputElement).checked;
 
 	protected readonly istJungfischer = computed(() => this.info()?.personArt === 'JUNGFISCHER');
 
@@ -242,6 +310,7 @@ export class EinladungComponent implements OnInit {
 			const info = await firstValueFrom(this.api.einladungPruefen(this.slug(), this.token));
 			this.info.set(info);
 			this.kennung.set(info.kennung.wert ?? '');
+			this.wuensche.set(Object.fromEntries(info.kinder.map((k) => [k.id, { einwilligen: false, zugang: true }])));
 			this.schritt.set('begruessung');
 		} catch (ursache) {
 			this.schritt.set(alsApiFehler(ursache).status === 404 ? 'ungueltig' : 'netzfehler');
@@ -249,6 +318,34 @@ export class EinladungComponent implements OnInit {
 	}
 
 	protected weiterZurKennung(): void {
+		// Der Link nennt Kinder nur, wenn die Person heute fuer sie einwilligen duerfte (Server).
+		if ((this.info()?.kinder.length ?? 0) > 0) {
+			this.schritt.set('einwilligung');
+			return;
+		}
+		this.nachEinwilligung();
+	}
+
+	protected einwilligungWeiter(ereignis: Event): void {
+		ereignis.preventDefault();
+		// Kein Zwang: wer nicht einwilligt, richtet nur den eigenen Zugang ein; die Familie
+		// kann spaeter unter "Meine Jungfischer" einwilligen.
+		this.nachEinwilligung();
+	}
+
+	protected wunsch(kindId: string): { einwilligen: boolean; zugang: boolean } {
+		return this.wuensche()[kindId] ?? { einwilligen: false, zugang: true };
+	}
+
+	protected setzeEinwilligen(kindId: string, an: boolean): void {
+		this.wuensche.update((w) => ({ ...w, [kindId]: { ...this.wunsch(kindId), einwilligen: an } }));
+	}
+
+	protected setzeZugang(kindId: string, an: boolean): void {
+		this.wuensche.update((w) => ({ ...w, [kindId]: { ...this.wunsch(kindId), zugang: an } }));
+	}
+
+	private nachEinwilligung(): void {
 		// Eine feste Kennung gibt es nur zur Anzeige; ein Feld dafuer waere eine Einladung zum Irrtum.
 		this.schritt.set(this.info()?.kennung.fest ? 'zugang' : 'kennung');
 	}
@@ -306,8 +403,15 @@ export class EinladungComponent implements OnInit {
 
 	/** Die feste Kennung gehoert nicht in den Body: Der Server kennt sie und wertet eine mitgeschickte nicht aus. */
 	private koerper(passkey?: unknown) {
+		const kinder = this.info()?.kinder ?? [];
+		// Ohne Einwilligung zaehlt der Zugangswunsch nicht; false sagt das dem Server ausdruecklich.
+		const einwilligungen: Einwilligungswunsch[] = kinder.map((k) => {
+			const w = this.wunsch(k.id);
+			return { kindId: k.id, einwilligen: w.einwilligen, zugang: w.einwilligen && w.zugang };
+		});
 		return {
 			token: this.token,
+			...(kinder.length > 0 ? { einwilligungen } : {}),
 			...(this.info()?.kennung.fest ? {} : { kennung: this.kennung() }),
 			...(this.passwort() !== '' ? { passwort: this.passwort() } : {}),
 			...(passkey !== undefined ? { passkey } : {}),

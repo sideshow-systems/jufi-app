@@ -21,11 +21,27 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 /** Fuenf Minuten, so lange darf man zwischen Passwort und Code in die App wechseln. */
 export const ZWISCHENMARKE_GUELTIG_MS = 5 * 60 * 1000;
 
-function mac(nutzlast: string, geheimnis: string): string {
-	return createHmac('sha256', geheimnis).update(nutzlast).digest('base64url');
+/**
+ * Wofuer eine Marke gilt. Pflichtparameter mit Union-Typ: wer den Typ vergisst
+ * oder einen erfundenen nimmt, scheitert schon beim Uebersetzen.
+ */
+export type ZwischenmarkenTyp = 'm-totp' | 'admin-totp';
+
+/**
+ * Der Typ steckt nur in der Signatur, nicht im Token: das Format bleibt
+ * `id.ablauf.nonce.hmac`, aber eine Marke des einen Typs besteht die Pruefung
+ * des anderen nicht. Sonst taete eine Marke aus dem Admin-Passwortschritt im
+ * Mitglieder-TOTP-Schritt (und umgekehrt) Dienst, sobald eine ID in beiden
+ * Namensraeumen vorkommt. Verworfen: den Typ als Praefix der ID -- dann
+ * trennte der Aufrufer ihn wieder ab, und ein Vergessen fiele nicht auf.
+ * Marken, die vor dieser Aenderung ausgestellt wurden, sind ungueltig; sie
+ * leben nur fuenf Minuten, die Anwender melden sich neu an.
+ */
+function mac(typ: ZwischenmarkenTyp, nutzlast: string, geheimnis: string): string {
+	return createHmac('sha256', geheimnis).update(`${typ}\n${nutzlast}`).digest('base64url');
 }
 
-export function signiereZwischenmarke(id: string, geheimnis: string, jetztMs: number): string {
+export function signiereZwischenmarke(typ: ZwischenmarkenTyp, id: string, geheimnis: string, jetztMs: number): string {
 	// Der Punkt trennt die Teile. Eine ID mit Punkt wuerde beim Pruefen anders
 	// zerlegt und still abgelehnt; hier laut zu scheitern findet den Fehler beim
 	// Aufrufer statt beim Anwender.
@@ -35,15 +51,20 @@ export function signiereZwischenmarke(id: string, geheimnis: string, jetztMs: nu
 	// Millisekunde.
 	const nonce = randomBytes(8).toString('base64url');
 	const nutzlast = `${id}.${ablauf}.${nonce}`;
-	return `${nutzlast}.${mac(nutzlast, geheimnis)}`;
+	return `${nutzlast}.${mac(typ, nutzlast, geheimnis)}`;
 }
 
 /** Liefert die ID, oder `undefined` bei jeder Abweichung (kein Grund wird verraten). */
-export function pruefeZwischenmarke(marke: string, geheimnis: string, jetztMs: number): string | undefined {
+export function pruefeZwischenmarke(
+	typ: ZwischenmarkenTyp,
+	marke: string,
+	geheimnis: string,
+	jetztMs: number,
+): string | undefined {
 	const teile = marke.split('.');
 	if (teile.length !== 4) return undefined;
 	const [id, ablauf, nonce, signatur] = teile;
-	const erwartet = Buffer.from(mac(`${id}.${ablauf}.${nonce}`, geheimnis));
+	const erwartet = Buffer.from(mac(typ, `${id}.${ablauf}.${nonce}`, geheimnis));
 	const vorgelegt = Buffer.from(signatur);
 	// `timingSafeEqual` wirft bei ungleicher Laenge, daher zuerst die Laenge. Sie
 	// verraet nichts: die Laenge einer SHA-256-Signatur ist fest.

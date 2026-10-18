@@ -325,9 +325,30 @@ describe('Anmelden', () => {
 		it('Erfolg setzt zurueck', async () => {
 			const { email } = await erwachsener(verein);
 			const falsch = { kennung: email, passwort: 'falsches-passwort-123' };
-			for (let i = 0; i < 3; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
+			for (let i = 0; i < 2; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
 			expect((await post(verein, '/anmelden', { kennung: email, passwort: PASSWORT })).status).toBe(200);
+			// Die Kennung ist zurueckgesetzt: von einer anderen IP sind wieder drei frei.
+			for (let i = 0; i < 3; i++) expect((await post(verein, '/anmelden', falsch, '10.250.0.2')).status).toBe(401);
+		});
+
+		it('Erfolg eines Kontos laesst die Fehlversuche anderer auf m-ip stehen', async () => {
+			const eigenes = await erwachsener(verein);
+			const falsch = { kennung: 'gibt-es-nicht', passwort: 'falsches-passwort-123' };
+			// Drei Fehlversuche des Angreifers, dann ein gueltiges Konto derselben IP:
+			// der Login darf den Zaehler nicht loeschen, der naechste Fehlversuch sperrt.
 			for (let i = 0; i < 3; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
+			expect((await post(verein, '/anmelden', { kennung: eigenes.email, passwort: PASSWORT })).status).toBe(200);
+			expect((await post(verein, '/anmelden', falsch)).status).toBe(429);
+		});
+
+		it('Erfolg erstattet nur seine eigene Zaehlung auf m-ip', async () => {
+			const eigenes = await erwachsener(verein);
+			const falsch = { kennung: 'gibt-es-nicht', passwort: 'falsches-passwort-123' };
+			for (let i = 0; i < 2; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
+			expect((await post(verein, '/anmelden', { kennung: eigenes.email, passwort: PASSWORT })).status).toBe(200);
+			// Zaehler 2 (Erfolg erstattet): der dritte Fehlversuch ist noch 401, der vierte sperrt.
+			expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
+			expect((await post(verein, '/anmelden', falsch)).status).toBe(429);
 		});
 
 		it('zwei Vereine mit gleicher Kennung teilen den Zaehler nicht', async () => {
@@ -605,6 +626,18 @@ describe('Anmelden', () => {
 			expect(cookieAus(r)).toBeUndefined();
 			expect(await sitzungen(m.zugangId)).toBe(0);
 			expect(await letzteAnmeldung(m.zugangId)).toEqual(angelegt);
+		});
+
+		it('Passkey-Erfolg erstattet nur seine eigene Zaehlung auf m-ip', async () => {
+			const m = await erwachsener(verein);
+			const credentialId = await passkey(verein, m.zugangId);
+			for (let i = 0; i < 2; i++) expect((await post(verein, '/anmelden/passkey', {})).status).toBe(401);
+			const { challenge } = await optionen(verein);
+			verifyAuthentication.mockResolvedValue({ counter: 0 });
+			const ok = await post(verein, '/anmelden/passkey', { antwort: antwort(challenge, credentialId) });
+			expect(ok.status).toBe(200);
+			expect((await post(verein, '/anmelden/passkey', {})).status).toBe(401);
+			expect((await post(verein, '/anmelden/passkey', {})).status).toBe(429);
 		});
 
 		it('Backoff je IP', async () => {

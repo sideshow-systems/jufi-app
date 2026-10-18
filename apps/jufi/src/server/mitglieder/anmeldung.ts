@@ -15,7 +15,7 @@ import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { PLATZHALTER_HASH } from '../admin/anmeldung.js';
 import { asynchron, text } from '../admin/asynchron.js';
 import { relyingParty } from '../admin/passkeys.js';
-import { reserviere, scheitere, zuVieleVersuche } from '../admin/versuche.js';
+import { erstatte, reserviere, scheitere, zuVieleVersuche } from '../admin/versuche.js';
 import { vereinsKontext } from '../verein.js';
 import { nimmChallenge, speichereChallenge } from './challenges.js';
 import { legeSitzungAn, setzeMitgliederCookie } from './sitzung.js';
@@ -119,7 +119,9 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 			// Normalisiert im Schluessel: sonst zaehlten "Lena" und "lena " getrennt,
 			// und wer Grossschreibung variiert, bekaeme die Versuche mehrfach.
 			// reserviere vor dem ersten await (siehe versuche.ts).
-			const schluessel = [`m-ip:${req.ip}`, `m:${verein.id}:${kennung.wert}`];
+			const kennungSchluessel = `m:${verein.id}:${kennung.wert}`;
+			const ipSchluessel = `m-ip:${req.ip}`;
+			const schluessel = [ipSchluessel, kennungSchluessel];
 			const versuch = reserviere(versuche, schluessel);
 			if (versuch.wartenMs > 0) {
 				zuVieleVersuche(res, versuch.wartenMs);
@@ -138,7 +140,15 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				scheitere(versuche, schluessel, versuch.loestSperreAus, res, FEHLGESCHLAGEN);
 				return;
 			}
-			for (const s of schluessel) versuche.reset(s);
+			// Nur die Kennung zuruecksetzen, nicht m-ip: sonst setzte ein eigenes
+			// gueltiges Konto den Zaehler eines Angreifers derselben IP zurueck.
+			// Verworfen: beide zuruecksetzen -- ein Angreifer mit eigenem Konto
+			// loeschte so nach jedem Raten seinen IP-Zaehler.
+			versuche.reset(kennungSchluessel);
+			// Der Erfolg erstattet seine eigene Zaehlung auf m-ip, damit Vereins-WLAN und
+			// CGNAT nicht an der Zahl legitimer Logins sperren; die Fehlversuche anderer
+			// bleiben stehen.
+			erstatte(versuche, [ipSchluessel]);
 
 			// Nur an totpAktivAm entschieden, wie beim Admin: ein kaputter Datensatz
 			// (aktiv, aber ohne Geheimnis) scheitert im TOTP-Schritt, statt mit dem
@@ -150,7 +160,7 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				// aber ein zweites Format neben dem des Admins fuer keinen Gewinn.
 				res.json({
 					schritt: 'totp',
-					zwischenmarke: signiereZwischenmarke(zugang.id, umgebung.sitzungsGeheimnis, jetzt().getTime()),
+					zwischenmarke: signiereZwischenmarke('m-totp', zugang.id, umgebung.sitzungsGeheimnis, jetzt().getTime()),
 				});
 				return;
 			}
@@ -182,7 +192,12 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 		asynchron(async (req, res) => {
 			const { verein, db } = vereinsKontext(res);
 			const zeit = jetzt();
-			const zugangId = pruefeZwischenmarke(text(req.body?.zwischenmarke), umgebung.sitzungsGeheimnis, zeit.getTime());
+			const zugangId = pruefeZwischenmarke(
+				'm-totp',
+				text(req.body?.zwischenmarke),
+				umgebung.sitzungsGeheimnis,
+				zeit.getTime(),
+			);
 			if (!zugangId) {
 				res.status(401).json(ABGELAUFEN);
 				return;
@@ -351,7 +366,9 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 				scheitert();
 				return;
 			}
-			versuche.reset(schluessel[0] ?? '');
+			// Nur die eigene Zaehlung auf m-ip zurueck, kein Reset: sonst hebelte ein
+			// Passkey-Login den Zaehler eines Angreifers derselben IP aus.
+			erstatte(versuche, schluessel);
 			setzeMitgliederCookie(req, res, verein.slug, token);
 			res.json({ schritt: 'fertig' });
 		}),

@@ -1,5 +1,5 @@
 import { Recht, type Beziehung, type PrismaClient } from '@jufi/db';
-import { DEMO_SLUG } from '@jufi/domain';
+import { DEMO_SLUG, EINWILLIGUNG_TEXT_VERSION } from '@jufi/domain';
 import { CliFehler } from './fehler.js';
 
 const ALLE_RECHTE = Object.values(Recht);
@@ -30,6 +30,15 @@ export class DemoGeschuetztFehler extends CliFehler {
  */
 function geburtsdatumFuer(alter: number, jetzt: Date): Date {
 	return new Date(Date.UTC(jetzt.getUTCFullYear() - alter, jetzt.getUTCMonth() - 6, 1));
+}
+
+/**
+ * Geburtsdatum, an dem die Person bei `jetzt` 17 Jahre und 364 Tage alt ist, also
+ * morgen volljaehrig wird. Damit zeigt die Demo den Randfall des
+ * Volljaehrigkeitshinweises, ohne dass er mit der Zeit verstreicht.
+ */
+function geburtsdatumMorgenVolljaehrig(jetzt: Date): Date {
+	return new Date(Date.UTC(jetzt.getUTCFullYear() - 18, jetzt.getUTCMonth(), jetzt.getUTCDate() + 1));
 }
 
 /**
@@ -100,16 +109,9 @@ export async function demoEinspielen(
 					email: `${vorname}.${nachname}@example.org`.toLowerCase(),
 				},
 			});
-		const jungfischer = (vorname: string, nachname: string, alter: number, jugendsprecher = false) =>
+		const jungfischer = (vorname: string, nachname: string, geburtsdatum: Date, jugendsprecher = false) =>
 			tx.person.create({
-				data: {
-					vereinId,
-					art: 'JUNGFISCHER',
-					vorname,
-					nachname,
-					geburtsdatum: geburtsdatumFuer(alter, jetzt),
-					jugendsprecher,
-				},
+				data: { vereinId, art: 'JUNGFISCHER', vorname, nachname, geburtsdatum, jugendsprecher },
 			});
 
 		await erwachsener('Thomas', 'Beispiel', ALLE_RECHTE);
@@ -118,12 +120,17 @@ export async function demoEinspielen(
 			'Muster',
 			ALLE_RECHTE.filter((r) => r !== 'JUGENDLEITER_RECHTE' && r !== 'EINSTELLUNGEN'),
 		);
+		// Betreuer: darf Threads erstellen, aber keine Mitglieder pflegen.
+		await erwachsener('Bernd', 'Betreuer', ['THREADS_ERSTELLEN']);
 		const sandra = await erwachsener('Sandra', 'Huber', []);
 		const hans = await erwachsener('Hans', 'Huber', []);
+		const gerda = await erwachsener('Gerda', 'Huber', []);
+		const petra = await erwachsener('Petra', 'Weber', []);
 
-		const lena = await jungfischer('Lena', 'Huber', 14);
-		const max = await jungfischer('Max', 'Huber', 12);
-		const jonas = await jungfischer('Jonas', 'Weber', 17, true);
+		const lena = await jungfischer('Lena', 'Huber', geburtsdatumFuer(14, jetzt));
+		// Ohne Einwilligung: zeigt, was Verwaltung und Eltern ohne sie sehen.
+		const max = await jungfischer('Max', 'Huber', geburtsdatumFuer(12, jetzt));
+		const jonas = await jungfischer('Jonas', 'Weber', geburtsdatumMorgenVolljaehrig(jetzt), true);
 
 		const bezug = (
 			erwachsenerId: string,
@@ -137,11 +144,39 @@ export async function demoEinspielen(
 			beziehung,
 			erziehungsberechtigt,
 		});
+		// Familie Huber: Mutter und Vater erziehungsberechtigt, die Grossmutter nicht.
+		// Familie Weber: nur die Mutter.
 		await tx.bezugsperson.createMany({
 			data: [
 				bezug(sandra.id, lena.id, 'MUTTER', true),
 				bezug(sandra.id, max.id, 'MUTTER', true),
-				bezug(hans.id, lena.id, 'GROSSVATER', false),
+				bezug(hans.id, lena.id, 'VATER', true),
+				bezug(hans.id, max.id, 'VATER', true),
+				bezug(gerda.id, lena.id, 'GROSSMUTTER', false),
+				bezug(gerda.id, max.id, 'GROSSMUTTER', false),
+				bezug(petra.id, jonas.id, 'MUTTER', true),
+			],
+		});
+
+		// Max hat keine: Einwilligung nur durch eine erziehungsberechtigte Bezugsperson.
+		await tx.einwilligung.createMany({
+			data: [
+				{
+					vereinId,
+					jungfischerId: lena.id,
+					erteiltVon: sandra.id,
+					art: 'DSGVO_ART8',
+					textVersion: EINWILLIGUNG_TEXT_VERSION,
+					erteiltAm: jetzt,
+				},
+				{
+					vereinId,
+					jungfischerId: jonas.id,
+					erteiltVon: petra.id,
+					art: 'DSGVO_ART8',
+					textVersion: EINWILLIGUNG_TEXT_VERSION,
+					erteiltAm: jetzt,
+				},
 			],
 		});
 
@@ -153,6 +188,9 @@ export async function demoEinspielen(
 				name: 'Ältere',
 				mitglieder: { create: [{ personId: lena.id }, { personId: jonas.id }] },
 			},
+		});
+		await tx.untergruppe.create({
+			data: { vereinId, name: 'Jüngere', mitglieder: { create: [{ personId: max.id }] } },
 		});
 
 		return { vereinId, personen: await tx.person.count({ where: { vereinId } }) };

@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { MeldungService } from '../gestaltung/meldung';
 import { KarteComponent } from '../gestaltung/ui';
+import { zeitpunktBerlin } from '../gestaltung/format';
 import type { Einladung } from './admin-api';
 
 /**
@@ -24,7 +25,7 @@ import type { Einladung } from './admin-api';
 					Kopieren geht hier nicht – klicke auf den Text, er wird markiert, und kopiere ihn von Hand.
 				</p>
 			}
-			<p class="klein gedaempft">Der Link gilt 14 Tage.</p>
+			<p class="klein gedaempft">{{ frist() }}</p>
 		</jf-karte>
 	`,
 	styles: `
@@ -57,6 +58,16 @@ import type { Einladung } from './admin-api';
 })
 export class EinladungAnzeigeComponent {
 	readonly einladung = input.required<Einladung>();
+
+	// Die Frist kommt vom Server: Ein Reset fuer ein Kind mit Zugang gilt nur eine Stunde, eine
+	// Einladung 14 Tage. Ein fester Satz stimmte nur fuer einen der beiden. Die Verwaltungs-Antwort
+	// nennt noch keinen Ablauf; dort bleibt es bei den 14 Tagen der Leitungseinladung.
+	protected readonly frist = computed(() => {
+		const ablauf = this.einladung().ablauf;
+		if (!ablauf) return 'Der Link gilt 14 Tage.';
+		const [tag, zeit] = zeitpunktBerlin(ablauf).split(' ');
+		return `Der Link gilt bis ${tag}, ${zeit} Uhr.`;
+	});
 
 	private readonly meldung = inject(MeldungService);
 	protected readonly kopierenFehlt = signal(false);

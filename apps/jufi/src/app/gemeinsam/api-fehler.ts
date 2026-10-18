@@ -6,6 +6,10 @@ export interface ApiFehler {
 	status: number;
 	fehler: string;
 	feld?: string;
+	/** Maschinenlesbarer Grund (etwa DOPPELT, EINWILLIGUNG_FEHLT); die Seite entscheidet daran, nicht am Text. */
+	code?: string;
+	/** Bei DOPPELT die gefundene Person. */
+	person?: { id: string; vorname: string; nachname: string };
 	wartenSekunden?: number;
 }
 
@@ -29,11 +33,24 @@ export function alsApiFehler(ursache: unknown): ApiFehler {
 						? KEINE_VERBINDUNG
 						: 'Unerwarteter Fehler',
 			...(typeof feldweise['feld'] === 'string' ? { feld: feldweise['feld'] } : {}),
+			...(typeof feldweise['code'] === 'string' ? { code: feldweise['code'] } : {}),
+			...(istPerson(feldweise['person']) ? { person: feldweise['person'] } : {}),
 			...(typeof feldweise['wartenSekunden'] === 'number' ? { wartenSekunden: feldweise['wartenSekunden'] } : {}),
 		};
 	}
 	if (istApiFehler(ursache)) return ursache;
 	return { status: 0, fehler: ursache instanceof Error ? ursache.message : 'Unerwarteter Fehler' };
+}
+
+function istPerson(wert: unknown): wert is NonNullable<ApiFehler['person']> {
+	const p = wert as Record<string, unknown> | null;
+	return (
+		!!p &&
+		typeof p === 'object' &&
+		typeof p['id'] === 'string' &&
+		typeof p['vorname'] === 'string' &&
+		typeof p['nachname'] === 'string'
+	);
 }
 
 export function istApiFehler(wert: unknown): wert is ApiFehler {

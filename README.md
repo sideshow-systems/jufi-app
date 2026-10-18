@@ -41,6 +41,8 @@ Die App läuft dann unter <http://localhost:4200/>, der Demo-Verein unter <http:
 fängt Mailpit unter <http://127.0.0.1:8025> ab. Nach jeder Schemaänderung ist `pnpm run db:generate` erneut nötig. `pnpm run demo` spielt den Demo-Verein jedes Mal frisch ein; andere
 Vereine bleiben unberührt.
 
+Der Demo-Verein enthält zwei Untergruppen, drei Jungfischer (einer ohne Einwilligung, einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Er legt keine Zugänge an; die entstehen erst durch Einladung.
+
 Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<projekt>` und brauchen deshalb das
 laufende `pnpm run db:up`. Sie legen ihre Datenbanken selbst an und setzen sie zurück, die Entwicklungsdatenbank
 `jufi` berühren sie nicht.

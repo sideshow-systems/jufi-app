@@ -1,12 +1,22 @@
 import { challengeAusAntwort, hashPassword, hashToken, passkeyLabel, registrationOptions } from '@jufi/auth';
 import { sperreVereinszeile, type VereinDb } from '@jufi/db';
-import { anmeldenameVorschlag, PASSWORT_HINWEIS, pruefeKennung, pruefePasswort } from '@jufi/domain';
+import {
+	anmeldenameVorschlag,
+	darfEinwilligen,
+	EINWILLIGUNG_TEXT,
+	EINWILLIGUNG_TEXT_VERSION,
+	istVolljaehrig,
+	PASSWORT_HINWEIS,
+	pruefeKennung,
+	pruefePasswort,
+} from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { relyingParty } from '../admin/passkeys.js';
 import { asynchron, text } from '../admin/asynchron.js';
 import { vereinsKontext } from '../verein.js';
 import { nimmChallenge, speichereChallenge } from './challenges.js';
+import { entzieheZugang, hatEinwilligung } from './zugang.js';
 import { legeSitzungAn, setzeMitgliederCookie } from './sitzung.js';
 
 const LINK_UNGUELTIG = { fehler: 'Dieser Link gilt nicht mehr' };
@@ -15,6 +25,7 @@ const KEIN_WEG = { fehler: 'Ein Passwort oder ein Passkey ist nötig' };
 const EINWILLIGUNG_FEHLT = { fehler: 'Die Einwilligung der Familie fehlt noch' };
 const ADRESSE_VERGEBEN = { fehler: 'Diese Adresse ist hier schon vergeben', feld: 'kennung' };
 const NAME_VERGEBEN = { fehler: 'Dieser Anmeldename ist schon vergeben', feld: 'kennung' };
+const EINWILLIGUNGEN_UNGUELTIG = { fehler: 'Die Angaben zur Einwilligung sind unvollständig', feld: 'einwilligungen' };
 const PASSKEY_VERGEBEN = { fehler: 'Dieser Passkey ist schon eingerichtet' };
 const KENNUNG_UNGUELTIG = {
 	ERWACHSENER: { fehler: 'Bitte eine gültige E-Mail-Adresse angeben', feld: 'kennung' },
@@ -54,6 +65,32 @@ async function eindeutig<T>(schritt: Promise<T>, antwort: object): Promise<T> {
 	}
 }
 
+interface EinwilligungsWunsch {
+	kindId: string;
+	einwilligen: boolean;
+	zugang: boolean;
+}
+
+/**
+ * Liest die Einwilligungen aus dem Body, oder null bei falscher Form. Fehlt das Feld, ist es
+ * leer. Ein Kind darf nur einmal vorkommen: zwei Eintraege mit widerspruechlichem zugang
+ * haetten sonst eine Reihenfolge als Bedeutung. Verworfen: still den letzten gelten lassen.
+ */
+function leseEinwilligungen(roh: unknown): EinwilligungsWunsch[] | null {
+	if (roh === undefined || roh === null) return [];
+	if (!Array.isArray(roh)) return null;
+	const ergebnis: EinwilligungsWunsch[] = [];
+	for (const eintrag of roh as unknown[]) {
+		const e = (eintrag ?? {}) as Record<string, unknown>;
+		if (typeof e['kindId'] !== 'string' || typeof e['einwilligen'] !== 'boolean' || typeof e['zugang'] !== 'boolean') {
+			return null;
+		}
+		if (ergebnis.some((w) => w.kindId === e['kindId'])) return null;
+		ergebnis.push({ kindId: e['kindId'], einwilligen: e['einwilligen'], zugang: e['zugang'] });
+	}
+	return ergebnis;
+}
+
 type Registrierung = NonNullable<Awaited<ReturnType<VolleAppDeps['webauthn']['verifyRegistration']>>>;
 type Antwort = Parameters<typeof challengeAusAntwort>[0];
 
@@ -90,7 +127,8 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 		'/einladung/pruefen',
 		asynchron(async (req, res) => {
 			const { verein, db } = vereinsKontext(res);
-			const treffer = await offeneEinladung(db, text(req.body?.token), jetzt());
+			const zeit = jetzt();
+			const treffer = await offeneEinladung(db, text(req.body?.token), zeit);
 			if (!treffer) {
 				res.status(404).json(LINK_UNGUELTIG);
 				return;
@@ -113,9 +151,33 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 					new Set(vergeben.map((z) => z.anmeldename).filter((n): n is string => n !== null)),
 				);
 			}
-			const einwilligungFehlt =
-				person.art === 'JUNGFISCHER' &&
-				(await db.einwilligung.count({ where: { jungfischerId: person.id, widerrufenAm: null } })) === 0;
+			// Eine Transaktion, damit hatEinwilligung (die Regel aus zugang.ts) dieselbe Frage stellt
+			// wie das Einloesen. Verworfen: sie hier nachzubauen -- die Regel stuende dann an zwei Stellen.
+			const { einwilligungFehlt, kinder } = await db.$transaction(async (tx) => {
+				if (person.art === 'JUNGFISCHER') {
+					return { einwilligungFehlt: !(await hatEinwilligung(tx, person, zeit)), kinder: [] };
+				}
+				// Nur Kinder, fuer die dieser Erwachsene heute einwilligen duerfte (Spec 5.6): ein
+				// anderes Kind der Familie zu nennen, gaebe einen Namen preis.
+				const zuordnungen = await tx.bezugsperson.findMany({
+					where: { erwachsenerId: person.id },
+					include: { jungfischer: true },
+				});
+				const kinder = [];
+				for (const z of zuordnungen) {
+					const kind = z.jungfischer;
+					if (kind.entferntAm || istVolljaehrig(kind, zeit) || !darfEinwilligen(person, kind, zuordnungen, zeit)) {
+						continue;
+					}
+					kinder.push({
+						id: kind.id,
+						vorname: kind.vorname,
+						zugangErlaubt: kind.zugangErlaubt,
+						einwilligungVorhanden: await hatEinwilligung(tx, kind, zeit),
+					});
+				}
+				return { einwilligungFehlt: false, kinder };
+			});
 			res.json({
 				vorname: person.vorname,
 				art: einladung.art,
@@ -124,6 +186,8 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 				kennung: { fest: zugang !== null, wert },
 				hatZugang: zugang !== null,
 				einwilligungFehlt,
+				kinder,
+				einwilligungsText: { version: EINWILLIGUNG_TEXT_VERSION, text: EINWILLIGUNG_TEXT },
 			});
 		}),
 	);
@@ -210,6 +274,11 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 				res.status(400).json(KEIN_WEG);
 				return;
 			}
+			const wuensche = leseEinwilligungen(req.body?.einwilligungen);
+			if (!wuensche) {
+				res.status(400).json(EINWILLIGUNGEN_UNGUELTIG);
+				return;
+			}
 
 			// 2. Passkey pruefen. Die Challenge ist danach verbraucht, auch wenn die
 			// Pruefung scheitert; die Einladung bleibt einloesbar, das Geraet holt
@@ -262,11 +331,42 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 					if (!p || p.entferntAm || (p.art === 'JUNGFISCHER' && !p.zugangErlaubt)) {
 						throw new Abbruch(404, LINK_UNGUELTIG);
 					}
-					if (
-						p.art === 'JUNGFISCHER' &&
-						(await tx.einwilligung.count({ where: { jungfischerId: p.id, widerrufenAm: null } })) === 0
-					) {
+					// Frisch unter der Sperre: eine Entfernung der Erteilerin oder ein Widerruf zwischen
+					// Vorpruefung und hier zaehlt. Nur das minderjaehrige Kind braucht eine Einwilligung
+					// (Spec 5.6); das volljaehrige willigt mit dem Einloesen selbst ein.
+					if (p.art === 'JUNGFISCHER' && !(await hatEinwilligung(tx, p, zeit))) {
 						throw new Abbruch(409, EINWILLIGUNG_FEHLT);
+					}
+
+					// Erst Einloesen (oben angenommen), dann Einwilligung: scheitert das Einloesen, rollt
+					// die Transaktion beides zurueck und es bleibt keine Einwilligung, die niemand erteilt
+					// hat. Nur bei Erwachsenen; bei einer Kindeinladung gibt es keine Kinder zu fragen,
+					// ein mitgeschicktes Feld bleibt ohne Wirkung.
+					if (p.art === 'ERWACHSENER') {
+						for (const wunsch of wuensche) {
+							// Frisch gelesen: Kind und Zuordnung koennen sich seit pruefen geaendert haben.
+							// Jeder Eintrag zaehlt, auch einwilligen false -- eine fremde Kind-Id soll nie
+							// stillschweigend durchgehen. Verworfen: nur die Eintraege mit true pruefen.
+							const kind = await tx.person.findFirst({ where: { id: wunsch.kindId, entferntAm: null } });
+							const zuordnungen = kind ? await tx.bezugsperson.findMany({ where: { jungfischerId: kind.id } }) : [];
+							if (!kind || istVolljaehrig(kind, zeit) || !darfEinwilligen(p, kind, zuordnungen, zeit)) {
+								throw new Abbruch(404, LINK_UNGUELTIG);
+							}
+							if (!wunsch.einwilligen) continue;
+							await tx.einwilligung.create({
+								data: {
+									jungfischerId: kind.id,
+									erteiltVon: p.id,
+									art: 'DSGVO_ART8',
+									textVersion: EINWILLIGUNG_TEXT_VERSION,
+									erteiltAm: zeit,
+								},
+							});
+							// Ein Nein zum Zugang nimmt auch einen bestehenden weg (Spec 4.6); nur
+							// zugangErlaubt zu setzen liesse Passkeys und Sitzungen stehen.
+							if (wunsch.zugang) await tx.person.update({ where: { id: kind.id }, data: { zugangErlaubt: true } });
+							else await entzieheZugang(tx, kind.id);
+						}
 					}
 
 					let zugangId: string;

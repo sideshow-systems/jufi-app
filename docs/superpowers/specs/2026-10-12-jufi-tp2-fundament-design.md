@@ -237,7 +237,7 @@ Weitere Tabellen:
 Eine Seite mit Schritten:
 
 1. **Begrüßung**: „Hallo Sandra, willkommen bei den Jungfischern Glonntal." Ein abgelaufener oder benutzter Link zeigt „Dieser Link gilt nicht mehr – frag nach einem neuen".
-2. **Einwilligung** (nur Erziehungsberechtigte, je eigenem minderjährigem Kind): Häkchen für die Einwilligung nach Art. 8 DSGVO mit dem Text in seiner aktuellen Fassung, dazu „Soll Lena einen eigenen Zugang bekommen?" (vorbelegt: ja). Ohne Einwilligung bleibt das Kind ohne Zugang; die Familie handelt dann in seinem Namen. Die Oberfläche folgt mit Etappe 4; Etappe 3 prüft nur das Vorhandensein einer gültigen Einwilligung beim Einlösen. Hat schon eine andere erziehungsberechtigte Person eingewilligt, steht das dort, und der Schritt ist freiwillig.
+2. **Einwilligung** (nur Erziehungsberechtigte, je eigenem minderjährigem Kind): Häkchen für die Einwilligung nach Art. 8 DSGVO mit dem Text in seiner aktuellen Fassung, dazu „Soll Lena einen eigenen Zugang bekommen?" (vorbelegt: ja). Ohne Einwilligung bleibt das Kind ohne Zugang; die Familie handelt dann in seinem Namen. Die Oberfläche folgt mit Etappe 4; Etappe 3 prüft nur das Vorhandensein einer gültigen Einwilligung beim Einlösen. Hat schon eine andere erziehungsberechtigte Person eingewilligt, steht das dort, und der Schritt ist freiwillig. **Gültig** ist eine Einwilligung, wenn sie nicht widerrufen ist **und** ihr Erteiler noch erziehungsberechtigt ist (und das Kind minderjährig). Wird die Familie gelöst, fällt die Einwilligung des Erteilers damit weg, ohne dass ein Datensatz geändert wird.
 3. **Kennung**: Erwachsene bestätigen ihre E-Mail (vorbelegt, änderbar, eindeutig im Verein). Jungfischer wählen ihren Anmeldenamen; vorbelegt ist der Vorname, ist er vergeben, schlägt die App „lena2" vor.
 4. **Zugang einrichten**: Kann das Gerät Passkeys, steht der Passkey vorne, sonst ein Passwort; beides zusammen geht auch.
 5. **Fertig**: Die Person ist angemeldet. Ein Hinweis erklärt, wie man die App auf den Home-Bildschirm holt, und dass man sich dort noch einmal anmeldet (iOS teilt die Sitzung des WhatsApp-Browsers nicht mit der installierten App; mit Passkey ist das ein Tipp).
@@ -255,7 +255,7 @@ Unter `/<slug>/anmelden`:
 - „Mit Passkey anmelden" ohne `allowCredentials`; zusätzlich schlägt das Kennungsfeld vorhandene Passkeys per Autofill vor.
 - Kennung (E-Mail bei Erwachsenen, Anmeldename bei Jungfischern) plus Passwort; mit TOTP danach Code oder Wiederherstellungscode.
 - Fehlermeldung immer nur „Anmeldung fehlgeschlagen", ohne Hinweis, ob die Kennung existiert.
-- Backoff je Kennung und je IP wie in hwyd (drei freie Versuche, dann verdoppelnd bis 15 Minuten).
+- Backoff je Kennung und je IP wie in hwyd (drei freie Versuche, dann verdoppelnd bis 15 Minuten). Ein Erfolg erstattet nur die eigene Zählung auf dem IP-Zähler (`m-ip`), setzt ihn nicht zurück: Wer mit einer gültigen Anmeldung dazwischenfunkt, soll die Zählung für andere Kennungen derselben IP nicht löschen können. Läuft der Zähler über, lehnt die Anmeldung ab (fail-closed), statt durchzulassen.
 - Ein Passkey eines anderen Vereins ergibt „Dieser Passkey gehört nicht zu diesem Verein". Das verrät nichts, denn nur der Besitzer kann ihn vorlegen. Die Anmeldung schlägt den Passkey nur im eigenen Verein nach; „fremd" und „gelöscht" sind für sie dasselbe und bekommen dieselbe Meldung. Verworfen: globales Nachschlagen ohne Vereinsfilter, nur um beides zu unterscheiden.
 - Gesperrter oder unbekannter Verein: „nicht gefunden".
 
@@ -280,6 +280,8 @@ Unter `/<slug>/anmelden`:
 ### 4.6 Zugang entziehen
 
 Erziehungsberechtigte des Kindes oder wer „Mitglieder verwalten" hat: `zugangErlaubt` wird nein; `Zugang`, Passkeys, Sitzungen und offene Einladungen werden gelöscht. Die Person bleibt, ihre Familie handelt weiter für sie. Ein Widerruf der Einwilligung, wenn danach keine gültige Einwilligung eines Erziehungsberechtigten mehr besteht, entzieht den Zugang ebenso.
+
+Die Verwaltung tut das mit `POST /personen/:id/zugang` (`{ erlaubt }`, Recht „Mitglieder verwalten“); Erlauben verlangt bei Minderjährigen eine gültige Einwilligung (409 `EINWILLIGUNG_FEHLT`), und eine Korrektur des Geburtsdatums auf „minderjährig“ ohne Einwilligung entzieht den Zugang ebenso (5.6).
 
 ### 4.7 TOTP
 
@@ -329,7 +331,9 @@ Recht „Jugendleiter & Rechte verwalten":
 
 - Rechte vergeben über die Vorlagen Leitung (alle), Jugendleiter (alle außer „Jugendleiter & Rechte verwalten" und „Vereinseinstellungen"), Betreuer („Antworten im Detail sehen"); danach jedes Häkchen einzeln.
 - Erwachsene **mit Rechten** bearbeiten, einladen oder entfernen kann nur, wer dieses Recht hat. Sonst könnte jemand mit „Mitglieder verwalten" einen Jugendleiter löschen.
-- Der **letzte Inhaber** dieses Rechts kann es nicht abgeben und nicht entfernt werden. Der Server prüft das in einer serialisierbaren Transaktion, damit zwei Leitungen, die sich gleichzeitig gegenseitig das Recht entziehen, nicht beide ohne dastehen.
+- Der **letzte Inhaber** dieses Rechts kann es nicht abgeben und nicht entfernt werden. Der Server schützt das mit `sperreVereinszeile`, damit zwei Leitungen, die sich gleichzeitig gegenseitig das Recht entziehen, nicht beide ohne dastehen. Verworfen: `Serializable` (bricht mit Serialisierungsfehlern ab, die der Aufrufer wiederholen müsste) und `SELECT FOR UPDATE` auf den Inhabern (sperrt nur vorhandene Zeilen, nicht die Entscheidung „bin ich der letzte").
+- **Fehlendes Recht ergibt 404, nicht 403** (Rahmen-Spec 8): Wer eine Person oder Aktion nicht sehen darf, erfährt nicht, dass es sie gibt.
+- **Keine Selbstentfernung**: Wer sich selbst entfernen will, bekommt 409 `SELBST`. Das Entfernen übernimmt eine andere Leitung.
 
 ### 5.5 Jugendsprecher und Untergruppen
 
@@ -341,17 +345,18 @@ Recht „Jugendleiter & Rechte verwalten":
 Klärt Rahmen-Spezifikation 15 („Jungfischer, die volljährig werden").
 
 - Ab dem 18. Geburtstag wirkt „erziehungsberechtigt" nicht mehr: `istErziehungsberechtigt` liefert nein. Die Familie bleibt verknüpft und darf weiter sehen und für den Jungfischer antworten, aber nicht mehr einwilligen und den Zugang nicht mehr steuern.
+- Die Volljährigkeit ergibt sich immer aus dem Geburtsdatum; `volljaehrigGeprueftAm` quittiert nur den Hinweis und ändert keine Rechte.
 - Die Verwaltung zeigt „Lena ist seit dem … volljährig" mit drei Wegen: **Belassen** (setzt `volljaehrigGeprueftAm`, der Hinweis verschwindet), **Familie lösen**, **Aus der Gruppe entfernen**.
 - Die Einwilligung der Familie wird für **alle Minderjährigen** verlangt. Art. 8 DSGVO ließe ab 16 die eigene Einwilligung genügen; verworfen, weil zwei Altersgrenzen schwerer zu erklären sind und der Verein die Familie ohnehin braucht.
 - Vorgemerkt für später: eine Übergangszeit und „als Erwachsenen weiterführen" (etwa wenn ein Jugendsprecher Jugendleiter wird). Bis dahin legt man ihn als Erwachsenen neu an.
 
 ### 5.7 Was Erziehungsberechtigte selbst tun
 
-Unter „Meine Jungfischer": Zugang erlauben oder entziehen, neuen Link erzeugen, Einwilligung geben oder widerrufen. Namen und Zuordnungen ändern sie nicht; das bleibt beim Verein (Rahmen-Spec 3.3).
+Unter „Meine Jungfischer": Zugang erlauben oder entziehen, neuen Link erzeugen, Einwilligung geben oder widerrufen. Namen und Zuordnungen ändern sie nicht; das bleibt beim Verein (Rahmen-Spec 3.3). **Der Widerruf der Einwilligung entzieht dem Kind den Zugang**, und ein minderjähriges Kind ohne gültige Einwilligung verliert ihn auch, wenn die Familie gelöst wird.
 
 ### 5.8 Entfernen
 
-- Die Zeile bleibt als **Grabstein**: Namen und Geburtsdatum geleert, Rechte geleert, `entferntAm` gesetzt. Zugang, Passkeys, Sitzungen, Einladungen, Familienzuordnungen und Untergruppen-Mitgliedschaften werden gelöscht. Einwilligungen bleiben als Nachweis.
+- Die Zeile bleibt als **Grabstein**: Namen, Geburtsdatum und E-Mail geleert (die Adresse wird frei und kann im Verein neu vergeben werden), Rechte geleert, `entferntAm` gesetzt. Zugang, Passkeys, Sitzungen, Einladungen, Familienzuordnungen und Untergruppen-Mitgliedschaften werden gelöscht. Einwilligungen bleiben als Nachweis.
 - Spätere Antworten und Kommentare verweisen weiter auf die Zeile und erscheinen als „ehemaliges Mitglied" (Rahmen-Spec 8.4).
 - Hat ein Erwachsener nach dem Entfernen eines Jungfischers keine Jungfischer und keine Rechte mehr, fragt die App: „Opa Hans hat keine Jungfischer mehr in der Gruppe – auch entfernen?"
 
@@ -481,7 +486,7 @@ Der Server hat 3,7 GB ohne Swap, davon am 12.10.2026 rund 2,2 GB verfügbar. Mit
 Vor der Einladung der echten Jugendleiter:
 
 - Impressum und Datenschutzerklärung der Plattform (Markdown; die Gliederung wird angelegt, der Inhalt kommt vom Eigentümer).
-- Einwilligungstext Fassung 1 für Art. 8 DSGVO; die Fassung wird mit jeder Einwilligung gespeichert.
+- Einwilligungstext Fassung 1 für Art. 8 DSGVO; die Fassung wird mit jeder Einwilligung gespeichert. **Offen:** Der Text in Fassung 1 ist ein Platzhalter; den Wortlaut liefert der Eigentümer, bevor echte Familien einwilligen.
 
 ---
 

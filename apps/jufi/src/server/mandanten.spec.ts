@@ -15,10 +15,18 @@ type Passkey = Awaited<ReturnType<PrismaClient['passkey']['findUniqueOrThrow']>>
 interface Kontext {
 	url: string;
 	eigen: { slug: string };
-	fremd: { slug: string };
+	fremd: { id: string; slug: string };
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
+	/** Cookie einer Person aus eigen mit Verwaltungs- und Rechterecht: sieht in eigen alles, in fremd nichts. */
+	eigenerLeiter: string;
+	/** Eine Person im Verein fremd. */
+	fremdePersonId: string;
+	/** Ein volljaehriges Kind im Verein fremd. */
+	fremdesKindId: string;
+	/** Eine Untergruppe im Verein fremd, mit dem fremden Kind als Mitglied. */
+	fremdeGruppeId: string;
 	/** Token einer offenen Einladung im Verein eigen. */
 	einladungsToken: string;
 	/** Kennung und Passwort einer Person mit TOTP im Verein eigen. */
@@ -51,6 +59,17 @@ async function fremderPasskeyBleibt(k: Kontext, methode: string): Promise<void> 
 	});
 	expect(r.status).toBe(404);
 	expect(await k.prisma.passkey.findUnique({ where: { id: k.fremderPasskey.id } })).toEqual(k.fremderPasskey);
+}
+
+/** Schreib-Route unter /meine-jungfischer mit der Id eines Kindes aus fremd: gesperrt 404, fremd 401, eigen 404. */
+async function meineJungfischerSchreibfall(k: Kontext, was: string, body: object): Promise<void> {
+	const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });
+	const sendeAn = (slug: string, cookie?: string) =>
+		sende(k.url, `/${slug}/api/v1/meine-jungfischer/${k.fremdesKindId}/${was}`, { methode: 'POST', body, cookie });
+	expect((await sendeAn(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+	expect((await sendeAn(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+	expect((await sendeAn(k.eigen.slug, k.eigenesCookie)).status).toBe(404);
+	expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
 }
 
 /**
@@ -175,6 +194,229 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Das Cookie aus eigen gilt in fremd nicht: angemeldet ist nur, wer dort eine Sitzung hat.
 		expect((await sende(k.url, `/${k.fremd.slug}/api/v1/ich`, { cookie: k.eigenesCookie })).status).toBe(401);
 	},
+	'GET /personen': async (k) => {
+		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/personen`)).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}/api/v1/personen`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		// In eigen taucht die Person aus fremd auch fuer die Verwaltung nicht auf.
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/personen`, { cookie: k.eigenerLeiter });
+		const { personen } = (await r.json()) as { personen: { id: string }[] };
+		expect(personen.map((p) => p.id)).not.toContain(k.fremdePersonId);
+	},
+	'GET /personen/:id': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdePersonId}`;
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		// Die ID aus fremd ist in eigen unbekannt, auch fuer die Verwaltung: 404, nie 403.
+		expect((await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+	},
+	'POST /personen': async (k) => {
+		const koerper = { art: 'ERWACHSENER', vorname: 'Neu', nachname: 'Mandant' };
+		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/personen`, { methode: 'POST', body: koerper })).status).toBe(
+			404,
+		);
+		// Das Cookie aus eigen gilt in fremd nicht, und angelegt wird nichts.
+		expect(
+			(
+				await sende(k.url, `/${k.fremd.slug}/api/v1/personen`, {
+					methode: 'POST',
+					body: koerper,
+					cookie: k.eigenerLeiter,
+				})
+			).status,
+		).toBe(401);
+		expect(await k.prisma.person.count({ where: { nachname: 'Mandant' } })).toBe(0);
+	},
+	'PATCH /personen/:id': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdePersonId}`;
+		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } });
+		const patch = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}${pfad}`, { methode: 'PATCH', body: { vorname: 'Uebernommen' }, cookie });
+		expect((await patch(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await patch(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Die ID aus fremd ist in eigen unbekannt, auch fuer die Verwaltung: 404, nie 403.
+		expect((await patch(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } })).toEqual(vorher);
+	},
+	'POST /personen/:id/volljaehrig-belassen': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdesKindId}/volljaehrig-belassen`;
+		const belassen = (slug: string, cookie?: string) => sende(k.url, `/${slug}${pfad}`, { methode: 'POST', cookie });
+		expect((await belassen(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await belassen(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await belassen(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(
+			(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).volljaehrigGeprueftAm,
+		).toBeNull();
+	},
+	'PUT /personen/:jungfischerId/familie/:erwachsenerId': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdesKindId}/familie/${k.fremdePersonId}`;
+		const vorher = await k.prisma.bezugsperson.findMany({ where: { vereinId: k.fremd.id } });
+		const verknuepfe = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}${pfad}`, { methode: 'PUT', body: { beziehung: 'MUTTER' }, cookie });
+		expect((await verknuepfe(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await verknuepfe(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Beide IDs gehoeren zu fremd: in eigen unbekannt, auch fuer die Verwaltung.
+		expect((await verknuepfe(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.bezugsperson.findMany({ where: { vereinId: k.fremd.id } })).toEqual(vorher);
+	},
+	'DELETE /personen/:jungfischerId/familie/:erwachsenerId': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdesKindId}/familie/${k.fremdePersonId}`;
+		// Die Zuordnung in fremd gibt es wirklich; sie darf von eigen aus nicht fallen.
+		await k.prisma.bezugsperson.upsert({
+			where: { erwachsenerId_jungfischerId: { erwachsenerId: k.fremdePersonId, jungfischerId: k.fremdesKindId } },
+			create: {
+				vereinId: k.fremd.id,
+				erwachsenerId: k.fremdePersonId,
+				jungfischerId: k.fremdesKindId,
+				beziehung: 'MUTTER',
+				erziehungsberechtigt: true,
+			},
+			update: {},
+		});
+		const vorher = await k.prisma.bezugsperson.findMany({ where: { vereinId: k.fremd.id } });
+		const loese = (slug: string, cookie?: string) => sende(k.url, `/${slug}${pfad}`, { methode: 'DELETE', cookie });
+		expect((await loese(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await loese(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await loese(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.bezugsperson.findMany({ where: { vereinId: k.fremd.id } })).toEqual(vorher);
+	},
+	'DELETE /personen/:id': async (k) => {
+		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });
+		const entferne = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/personen/${k.fremdesKindId}`, { methode: 'DELETE', cookie });
+		expect((await entferne(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await entferne(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Das Kind gehoert zu fremd: in eigen unbekannt, auch fuer die Verwaltung.
+		expect((await entferne(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
+		expect(await k.prisma.untergruppeMitglied.count({ where: { personId: k.fremdesKindId } })).toBe(1);
+	},
+	'POST /personen/:id/einladung': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdePersonId}/einladung`;
+		const vorher = await k.prisma.einladung.count({ where: { personId: k.fremdePersonId } });
+		const lade = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}${pfad}`, { methode: 'POST', body: { mail: true }, cookie });
+		expect((await lade(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await lade(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Die Person gehoert zu fremd: in eigen unbekannt, auch fuer die Leitung.
+		expect((await lade(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.einladung.count({ where: { personId: k.fremdePersonId } })).toBe(vorher);
+	},
+	// Die vier Routen unter /meine-jungfischer: das Kind gehoert zu fremd, die Id ist in eigen unbekannt.
+	'GET /meine-jungfischer': async (k) => {
+		const liste = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/meine-jungfischer`, { cookie });
+		expect((await liste(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		expect((await liste(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+		const r = await liste(k.eigen.slug, k.eigenesCookie);
+		expect(r.status).toBe(200);
+		expect(JSON.stringify(await r.json())).not.toContain(k.fremdesKindId);
+	},
+	'POST /meine-jungfischer/:kindId/zugang': async (k) => {
+		await meineJungfischerSchreibfall(k, 'zugang', { erlaubt: false });
+	},
+	'POST /meine-jungfischer/:kindId/einladung': async (k) => {
+		await meineJungfischerSchreibfall(k, 'einladung', {});
+		expect(await k.prisma.einladung.count({ where: { personId: k.fremdesKindId } })).toBe(0);
+	},
+	'POST /meine-jungfischer/:kindId/einwilligung': async (k) => {
+		await meineJungfischerSchreibfall(k, 'einwilligung', { erteilen: true });
+		expect(await k.prisma.einwilligung.count({ where: { jungfischerId: k.fremdesKindId } })).toBe(0);
+	},
+	'POST /personen/:id/zugang': async (k) => {
+		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });
+		const setze = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/personen/${k.fremdesKindId}/zugang`, {
+				methode: 'POST',
+				body: { erlaubt: false },
+				cookie,
+			});
+		expect((await setze(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await setze(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await setze(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).toEqual(vorher);
+	},
+	'GET /untergruppen': async (k) => {
+		const liste = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/untergruppen`, { cookie });
+		expect((await liste(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await liste(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Die eigene Liste kennt die Gruppe aus fremd nicht.
+		const r = await liste(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(200);
+		expect(JSON.stringify(await r.json())).not.toContain(k.fremdeGruppeId);
+	},
+	'POST /untergruppen': async (k) => {
+		const anzahl = () => k.prisma.untergruppe.count({ where: { vereinId: k.fremd.id } });
+		const vorher = await anzahl();
+		const lege = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/untergruppen`, { methode: 'POST', body: { name: 'Mandant-Neu' }, cookie });
+		expect((await lege(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await lege(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect(await anzahl()).toBe(vorher);
+	},
+	'PATCH /untergruppen/:id': async (k) => {
+		const vorher = await k.prisma.untergruppe.findUniqueOrThrow({ where: { id: k.fremdeGruppeId } });
+		const benenne = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/untergruppen/${k.fremdeGruppeId}`, {
+				methode: 'PATCH',
+				body: { name: 'Uebernommen' },
+				cookie,
+			});
+		expect((await benenne(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await benenne(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await benenne(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.untergruppe.findUniqueOrThrow({ where: { id: k.fremdeGruppeId } })).toEqual(vorher);
+	},
+	'DELETE /untergruppen/:id': async (k) => {
+		const loesche = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/untergruppen/${k.fremdeGruppeId}`, { methode: 'DELETE', cookie });
+		expect((await loesche(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await loesche(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await loesche(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.untergruppe.count({ where: { id: k.fremdeGruppeId } })).toBe(1);
+		expect(await k.prisma.untergruppeMitglied.count({ where: { untergruppeId: k.fremdeGruppeId } })).toBe(1);
+	},
+	'PUT /personen/:id/untergruppen': async (k) => {
+		const vorher = await k.prisma.untergruppeMitglied.findMany({ where: { vereinId: k.fremd.id } });
+		const ordne = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/personen/${k.fremdesKindId}/untergruppen`, {
+				methode: 'PUT',
+				body: { untergruppenIds: [] },
+				cookie,
+			});
+		expect((await ordne(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await ordne(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Das Kind gehoert zu fremd: in eigen unbekannt, auch fuer die Verwaltung.
+		expect((await ordne(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		// Umgekehrt: ein eigenes Kind mit der Gruppe aus fremd.
+		const eigenerVerein = await k.prisma.verein.findUniqueOrThrow({ where: { slug: k.eigen.slug } });
+		const eigenesKind = await k.prisma.person.create({
+			data: {
+				vereinId: eigenerVerein.id,
+				art: 'JUNGFISCHER',
+				vorname: 'Eigenes',
+				nachname: 'Kind',
+				geburtsdatum: new Date('2015-05-05'),
+			},
+		});
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/personen/${eigenesKind.id}/untergruppen`, {
+			methode: 'PUT',
+			body: { untergruppenIds: [k.fremdeGruppeId] },
+			cookie: k.eigenerLeiter,
+		});
+		expect(r.status).toBe(404);
+		expect(await k.prisma.untergruppeMitglied.count({ where: { personId: eigenesKind.id } })).toBe(0);
+		expect(await k.prisma.untergruppeMitglied.findMany({ where: { vereinId: k.fremd.id } })).toEqual(vorher);
+	},
+	'PUT /personen/:id/rechte': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdePersonId}/rechte`;
+		const vorher = (await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } })).rechte;
+		const setze = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}${pfad}`, { methode: 'PUT', body: { rechte: ['DOKUMENTE'] }, cookie });
+		expect((await setze(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await setze(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Die Person gehoert zu fremd: in eigen unbekannt, auch fuer die Leitung.
+		expect((await setze(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } })).rechte).toEqual(vorher);
+	},
 	'POST /abmelden': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -232,6 +474,10 @@ describe('Mandanten-Test', () => {
 		const { cookie } = await legeMitgliedAn(prisma, eigen, { art: 'ERWACHSENER', rechte: ['MITGLIEDER'] });
 		// Mit Passwort, damit ein Loeschen nicht schon am letzten Anmeldeweg scheiterte.
 		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
+		const leiter = await legeMitgliedAn(prisma, eigen, {
+			art: 'ERWACHSENER',
+			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE'],
+		});
 		const fremderPasskey = await prisma.passkey.create({
 			data: {
 				vereinId: fremd.id,
@@ -240,6 +486,20 @@ describe('Mandanten-Test', () => {
 				publicKey: 'cHVibGljLWtleQ',
 				label: 'Telefon in fremd',
 			},
+		});
+		// Volljaehrig, damit volljaehrig-belassen nur an der Vereinsgrenze scheitern kann.
+		const fremdesKind = await prisma.person.create({
+			data: {
+				vereinId: fremd.id,
+				art: 'JUNGFISCHER',
+				vorname: 'Fremdes',
+				nachname: 'Kind',
+				geburtsdatum: new Date('2000-01-01'),
+			},
+		});
+		const fremdeGruppe = await prisma.untergruppe.create({ data: { vereinId: fremd.id, name: 'Fremde Hechte' } });
+		await prisma.untergruppeMitglied.create({
+			data: { vereinId: fremd.id, untergruppeId: fremdeGruppe.id, personId: fremdesKind.id },
 		});
 		const totpPerson = { kennung: 'mandant-totp@example.test', passwort: 'gruene-forelle-am-see' };
 		const { zugangId } = await legeMitgliedAn(prisma, eigen, {
@@ -257,6 +517,10 @@ describe('Mandanten-Test', () => {
 			fremd,
 			gesperrt,
 			eigenesCookie: cookie,
+			eigenerLeiter: leiter.cookie,
+			fremdePersonId: nachbar.personId,
+			fremdesKindId: fremdesKind.id,
+			fremdeGruppeId: fremdeGruppe.id,
 			einladungsToken: await einladungsToken(prisma, eigen),
 			totpPerson,
 			prisma,

@@ -4,7 +4,13 @@ import { Router, type RequestHandler, type Response } from 'express';
 import type { VolleAppDeps } from './abhaengigkeiten.js';
 import { anmeldeRouten } from './mitglieder/anmeldung.js';
 import { einladungsRouten } from './mitglieder/einladung.js';
+import { familieRouten } from './mitglieder/familie.js';
+import { jungfischerRouten } from './mitglieder/jungfischer.js';
+import { personenRouten } from './mitglieder/personen.js';
+import { rechteRouten } from './mitglieder/rechte.js';
 import { profilRouten } from './mitglieder/profil.js';
+import { untergruppenRouten } from './mitglieder/untergruppen.js';
+import { einladenRouten, zugangRouten } from './mitglieder/zugang.js';
 import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
 import { routenAus } from './routen.js';
 
@@ -87,6 +93,13 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	einladungsRouten(router, deps);
 	anmeldeRouten(router, deps);
 	profilRouten(router, deps);
+	personenRouten(router, deps);
+	familieRouten(router, deps);
+	untergruppenRouten(router, deps);
+	rechteRouten(router, deps);
+	zugangRouten(router, deps);
+	einladenRouten(router, deps);
+	jungfischerRouten(router, deps);
 	zugangVerlorenRouten(router, deps);
 
 	return router;

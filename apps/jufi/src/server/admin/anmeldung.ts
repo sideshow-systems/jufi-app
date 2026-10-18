@@ -195,7 +195,7 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 			if (admin.totpAktivAm) {
 				res.json({
 					schritt: 'totp',
-					zwischenmarke: signiereZwischenmarke(admin.id, umgebung.sitzungsGeheimnis, jetzt().getTime()),
+					zwischenmarke: signiereZwischenmarke('admin-totp', admin.id, umgebung.sitzungsGeheimnis, jetzt().getTime()),
 				});
 				return;
 			}
@@ -211,7 +211,12 @@ export function anmeldeRouten(router: Router, deps: VolleAppDeps): void {
 		'/anmelden/totp',
 		asynchron(async (req, res) => {
 			const zeit = jetzt();
-			const adminId = pruefeZwischenmarke(text(req.body?.zwischenmarke), umgebung.sitzungsGeheimnis, zeit.getTime());
+			const adminId = pruefeZwischenmarke(
+				'admin-totp',
+				text(req.body?.zwischenmarke),
+				umgebung.sitzungsGeheimnis,
+				zeit.getTime(),
+			);
 			if (!adminId) {
 				res.status(401).json({ fehler: 'Anmeldung abgelaufen, bitte neu beginnen' });
 				return;

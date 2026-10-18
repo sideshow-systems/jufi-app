@@ -74,6 +74,58 @@ describe('MitgliederApi', () => {
 				'/v/api/v1/profil/totp/bestaetigen',
 				{ marke: 'm', code: '123456' },
 			],
+			[() => api.personen('v'), 'GET', '/v/api/v1/personen'],
+			[() => api.person('v', 'p/1'), 'GET', '/v/api/v1/personen/p%2F1'],
+			[
+				() =>
+					api.legePersonAn('v', { art: 'JUNGFISCHER', vorname: 'Lena', nachname: 'Bach', geburtsdatum: '2015-05-01' }),
+				'POST',
+				'/v/api/v1/personen',
+				{ art: 'JUNGFISCHER', vorname: 'Lena', nachname: 'Bach', geburtsdatum: '2015-05-01' },
+			],
+			[() => api.aenderePerson('v', 'p1', { vorname: 'Lea' }), 'PATCH', '/v/api/v1/personen/p1', { vorname: 'Lea' }],
+			[() => api.entfernePerson('v', 'p1'), 'DELETE', '/v/api/v1/personen/p1'],
+			[() => api.setzePersonZugang('v', 'p1', false), 'POST', '/v/api/v1/personen/p1/zugang', { erlaubt: false }],
+			[() => api.volljaehrigBelassen('v', 'p1'), 'POST', '/v/api/v1/personen/p1/volljaehrig-belassen', {}],
+			[
+				() => api.setzeFamilie('v', 'k1', 'e1', { beziehung: 'MUTTER' }),
+				'PUT',
+				'/v/api/v1/personen/k1/familie/e1',
+				{ beziehung: 'MUTTER' },
+			],
+			[() => api.loeseFamilie('v', 'k1', 'e1'), 'DELETE', '/v/api/v1/personen/k1/familie/e1'],
+			[() => api.untergruppen('v'), 'GET', '/v/api/v1/untergruppen'],
+			[() => api.legeUntergruppeAn('v', 'Hechte'), 'POST', '/v/api/v1/untergruppen', { name: 'Hechte' }],
+			[
+				() => api.benenneUntergruppeUm('v', 'u1', 'Forellen'),
+				'PATCH',
+				'/v/api/v1/untergruppen/u1',
+				{ name: 'Forellen' },
+			],
+			[() => api.loescheUntergruppe('v', 'u1'), 'DELETE', '/v/api/v1/untergruppen/u1'],
+			[
+				() => api.setzeUntergruppen('v', 'k1', ['u1']),
+				'PUT',
+				'/v/api/v1/personen/k1/untergruppen',
+				{ untergruppenIds: ['u1'] },
+			],
+			[
+				() => api.setzeRechte('v', 'e1', ['MITGLIEDER']),
+				'PUT',
+				'/v/api/v1/personen/e1/rechte',
+				{ rechte: ['MITGLIEDER'] },
+			],
+			[() => api.ladePersonEin('v', 'p1'), 'POST', '/v/api/v1/personen/p1/einladung', { mail: false }],
+			[() => api.ladePersonEin('v', 'p1', true), 'POST', '/v/api/v1/personen/p1/einladung', { mail: true }],
+			[() => api.meineJungfischer('v'), 'GET', '/v/api/v1/meine-jungfischer'],
+			[() => api.setzeKindZugang('v', 'k1', true), 'POST', '/v/api/v1/meine-jungfischer/k1/zugang', { erlaubt: true }],
+			[() => api.kindEinladung('v', 'k1'), 'POST', '/v/api/v1/meine-jungfischer/k1/einladung', {}],
+			[
+				() => api.kindEinwilligung('v', 'k1', false),
+				'POST',
+				'/v/api/v1/meine-jungfischer/k1/einwilligung',
+				{ erteilen: false },
+			],
 		];
 		for (const [aufruf, methode, url, body] of faelle) {
 			(aufruf() as { subscribe: (o: object) => void }).subscribe({});
