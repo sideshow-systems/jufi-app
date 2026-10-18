@@ -5,7 +5,6 @@ import {
 	hatRecht,
 	warnhinweise,
 	type Einsicht,
-	type PersonSicht,
 	type Warnhinweis,
 	type Zuordnung,
 } from '@jufi/domain';
