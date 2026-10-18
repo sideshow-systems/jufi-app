@@ -23,6 +23,8 @@ interface Kontext {
 	eigenerLeiter: string;
 	/** Eine Person im Verein fremd. */
 	fremdePersonId: string;
+	/** Ein volljaehriges Kind im Verein fremd. */
+	fremdesKindId: string;
 	/** Token einer offenen Einladung im Verein eigen. */
 	einladungsToken: string;
 	/** Kennung und Passwort einer Person mit TOTP im Verein eigen. */
@@ -194,6 +196,44 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Die ID aus fremd ist in eigen unbekannt, auch fuer die Verwaltung: 404, nie 403.
 		expect((await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
 	},
+	'POST /personen': async (k) => {
+		const koerper = { art: 'ERWACHSENER', vorname: 'Neu', nachname: 'Mandant' };
+		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/personen`, { methode: 'POST', body: koerper })).status).toBe(
+			404,
+		);
+		// Das Cookie aus eigen gilt in fremd nicht, und angelegt wird nichts.
+		expect(
+			(
+				await sende(k.url, `/${k.fremd.slug}/api/v1/personen`, {
+					methode: 'POST',
+					body: koerper,
+					cookie: k.eigenerLeiter,
+				})
+			).status,
+		).toBe(401);
+		expect(await k.prisma.person.count({ where: { nachname: 'Mandant' } })).toBe(0);
+	},
+	'PATCH /personen/:id': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdePersonId}`;
+		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } });
+		const patch = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}${pfad}`, { methode: 'PATCH', body: { vorname: 'Uebernommen' }, cookie });
+		expect((await patch(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await patch(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Die ID aus fremd ist in eigen unbekannt, auch fuer die Verwaltung: 404, nie 403.
+		expect((await patch(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } })).toEqual(vorher);
+	},
+	'POST /personen/:id/volljaehrig-belassen': async (k) => {
+		const pfad = `/api/v1/personen/${k.fremdesKindId}/volljaehrig-belassen`;
+		const belassen = (slug: string, cookie?: string) => sende(k.url, `/${slug}${pfad}`, { methode: 'POST', cookie });
+		expect((await belassen(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await belassen(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await belassen(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(
+			(await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } })).volljaehrigGeprueftAm,
+		).toBeNull();
+	},
 	'POST /abmelden': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -264,6 +304,16 @@ describe('Mandanten-Test', () => {
 				label: 'Telefon in fremd',
 			},
 		});
+		// Volljaehrig, damit volljaehrig-belassen nur an der Vereinsgrenze scheitern kann.
+		const fremdesKind = await prisma.person.create({
+			data: {
+				vereinId: fremd.id,
+				art: 'JUNGFISCHER',
+				vorname: 'Fremdes',
+				nachname: 'Kind',
+				geburtsdatum: new Date('2000-01-01'),
+			},
+		});
 		const totpPerson = { kennung: 'mandant-totp@example.test', passwort: 'gruene-forelle-am-see' };
 		const { zugangId } = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
@@ -282,6 +332,7 @@ describe('Mandanten-Test', () => {
 			eigenesCookie: cookie,
 			eigenerLeiter: leiter.cookie,
 			fremdePersonId: nachbar.personId,
+			fremdesKindId: fremdesKind.id,
 			einladungsToken: await einladungsToken(prisma, eigen),
 			totpPerson,
 			prisma,

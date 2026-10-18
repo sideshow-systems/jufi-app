@@ -23,7 +23,7 @@ type Eintrag = {
 	zugang?: { vorhanden: boolean } | null;
 };
 
-describe('Personen lesen', () => {
+describe('Personen', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
 
@@ -299,5 +299,297 @@ describe('Personen lesen', () => {
 			((await (await v.api('/ich', cookie)).json()) as { hatKinder: boolean }).hatKinder;
 		expect(await hat(mutter.cookie)).toBe(true);
 		expect(await hat(ohne.cookie)).toBe(false);
+	});
+
+	describe('anlegen und aendern', () => {
+		const tagesText = (d: Date) => d.toISOString().slice(0, 10);
+		/** Geburtstag vor genau jahren Jahren plus tage Tagen Abstand: tage > 0 liegt davor (aelter). */
+		const vor = (jahre: number, tage = 0) => {
+			const d = new Date();
+			d.setUTCFullYear(d.getUTCFullYear() - jahre);
+			d.setUTCDate(d.getUTCDate() - tage);
+			return tagesText(d);
+		};
+		const post = (v: Awaited<ReturnType<typeof neuerVerein>>, cookie: string, body: unknown) =>
+			sende(server.url, `/${v.verein.slug}/api/v1/personen`, { methode: 'POST', body, cookie });
+		const patch = (v: Awaited<ReturnType<typeof neuerVerein>>, cookie: string, id: string, body: unknown) =>
+			sende(server.url, `/${v.verein.slug}/api/v1/personen/${id}`, { methode: 'PATCH', body, cookie });
+		const belassen = (v: Awaited<ReturnType<typeof neuerVerein>>, cookie: string, id: string) =>
+			sende(server.url, `/${v.verein.slug}/api/v1/personen/${id}/volljaehrig-belassen`, { methode: 'POST', cookie });
+
+		it('Jungfischer anlegen mit Untergruppen', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const a = await prisma.untergruppe.create({ data: { vereinId: v.verein.id, name: 'Stufe A' } });
+			const b = await prisma.untergruppe.create({ data: { vereinId: v.verein.id, name: 'Stufe B' } });
+			const r = await post(v, verwalter.cookie, {
+				art: 'JUNGFISCHER',
+				vorname: ' Mia ',
+				nachname: 'Fisch',
+				geburtsdatum: '2014-03-04',
+				untergruppenIds: [a.id, b.id, a.id],
+			});
+			expect(r.status).toBe(201);
+			const { id } = (await r.json()) as { id: string };
+			const person = await prisma.person.findUniqueOrThrow({ where: { id } });
+			expect(person).toMatchObject({ vorname: 'Mia', art: 'JUNGFISCHER', rechte: [], vereinId: v.verein.id });
+			const mitgliedschaften = await prisma.untergruppeMitglied.findMany({ where: { personId: id } });
+			expect(mitgliedschaften.map((m) => m.untergruppeId).sort()).toEqual([a.id, b.id].sort());
+		});
+
+		it('fremde Untergruppe gibt 400 und legt nichts an', async () => {
+			const v = await neuerVerein();
+			const w = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const fremd = await prisma.untergruppe.create({ data: { vereinId: w.verein.id, name: 'Fremd' } });
+			const r = await post(v, verwalter.cookie, {
+				art: 'JUNGFISCHER',
+				vorname: 'Mia',
+				nachname: 'Fisch',
+				geburtsdatum: '2014-03-04',
+				untergruppenIds: [fremd.id],
+			});
+			expect(r.status).toBe(400);
+			expect(await prisma.person.count({ where: { vereinId: v.verein.id, vorname: 'Mia' } })).toBe(0);
+		});
+
+		it('Jungfischer ohne Geburtsdatum gibt 400, Geburtsdatum in der Zukunft ebenso', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const basis = { art: 'JUNGFISCHER', vorname: 'Mia', nachname: 'Fisch' };
+			const ohne = await post(v, verwalter.cookie, basis);
+			expect(ohne.status).toBe(400);
+			expect(await ohne.json()).toMatchObject({ feld: 'geburtsdatum' });
+			const zukunft = new Date();
+			zukunft.setUTCFullYear(zukunft.getUTCFullYear() + 1);
+			expect((await post(v, verwalter.cookie, { ...basis, geburtsdatum: tagesText(zukunft) })).status).toBe(400);
+			expect((await post(v, verwalter.cookie, { ...basis, geburtsdatum: '2015-02-31' })).status).toBe(400);
+			expect((await post(v, verwalter.cookie, { ...basis, vorname: '  ', geburtsdatum: '2015-02-01' })).status).toBe(
+				400,
+			);
+			expect((await post(v, verwalter.cookie, { ...basis, art: 'ROBOTER', geburtsdatum: '2015-02-01' })).status).toBe(
+				400,
+			);
+		});
+
+		it('Erwachsener: Rechte im Body werden ignoriert, Geburtsdatum ist verboten', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER', 'JUGENDLEITER_RECHTE']);
+			const r = await post(v, verwalter.cookie, {
+				art: 'ERWACHSENER',
+				vorname: 'Egon',
+				nachname: 'Erw',
+				rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE'],
+			});
+			expect(r.status).toBe(201);
+			const { id } = (await r.json()) as { id: string };
+			expect((await prisma.person.findUniqueOrThrow({ where: { id } })).rechte).toEqual([]);
+			const mitDatum = await post(v, verwalter.cookie, {
+				art: 'ERWACHSENER',
+				vorname: 'Erna',
+				nachname: 'Erw',
+				geburtsdatum: '1980-01-01',
+			});
+			expect(mitDatum.status).toBe(400);
+		});
+
+		it('Dublette gibt 409 DOPPELT, mit trotzdem 201', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const bestehend = await v.kind('Kai');
+			const body = { art: 'JUNGFISCHER', vorname: 'kai', nachname: 'Kind ', geburtsdatum: '2015-05-05' };
+			const r = await post(v, verwalter.cookie, body);
+			expect(r.status).toBe(409);
+			expect(await r.json()).toMatchObject({
+				code: 'DOPPELT',
+				person: { id: bestehend.id, vorname: 'Kai', nachname: 'Kind' },
+			});
+			expect(await prisma.person.count({ where: { vereinId: v.verein.id, nachname: 'Kind' } })).toBe(1);
+			expect((await post(v, verwalter.cookie, { ...body, trotzdem: true })).status).toBe(201);
+			expect(await prisma.person.count({ where: { vereinId: v.verein.id, nachname: 'Kind' } })).toBe(2);
+		});
+
+		it('doppelte E-Mail gibt 409 EMAIL_VERGEBEN, auch in anderer Schreibweise; ungueltige gibt 400', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const vorhanden = await v.erwachsener('Anna');
+			const body = {
+				art: 'ERWACHSENER',
+				vorname: 'Berta',
+				nachname: 'Neu',
+				email: ` ${(vorhanden.email ?? '').toUpperCase()} `,
+			};
+			const r = await post(v, verwalter.cookie, body);
+			expect(r.status).toBe(409);
+			expect(await r.json()).toMatchObject({ code: 'EMAIL_VERGEBEN' });
+			expect((await post(v, verwalter.cookie, { ...body, email: 'kaputt' })).status).toBe(400);
+			// Dieselbe Adresse in einem anderen Verein ist erlaubt.
+			const w = await neuerVerein();
+			const fremdVerwalter = await w.mitglied(['MITGLIEDER']);
+			expect((await post(w, fremdVerwalter.cookie, { ...body, email: vorhanden.email })).status).toBe(201);
+		});
+
+		it('zwei gleichzeitige Anlagen derselben E-Mail: genau eine 201', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const email = `doppelt-${randomUUID().slice(0, 6)}@example.test`;
+			const anlegen = (vorname: string) =>
+				post(v, verwalter.cookie, { art: 'ERWACHSENER', vorname, nachname: 'Rennen', email, trotzdem: true });
+			const antworten = await Promise.all([anlegen('Eins'), anlegen('Zwei'), anlegen('Drei'), anlegen('Vier')]);
+			const stati = antworten.map((r) => r.status).sort();
+			expect(stati).toEqual([201, 409, 409, 409]);
+			expect(await prisma.person.count({ where: { vereinId: v.verein.id, email } })).toBe(1);
+		});
+
+		it('Betreuer ohne MITGLIEDER bekommt auf allen drei Routen 404', async () => {
+			const v = await neuerVerein();
+			const betreuer = await v.mitglied(['ANTWORTEN_DETAIL']);
+			const kind = await v.kind('Kai');
+			const anlegen = await post(v, betreuer.cookie, {
+				art: 'JUNGFISCHER',
+				vorname: 'Neu',
+				nachname: 'Kind',
+				geburtsdatum: '2015-05-05',
+			});
+			expect(anlegen.status).toBe(404);
+			expect((await patch(v, betreuer.cookie, kind.id, { vorname: 'Anders' })).status).toBe(404);
+			expect((await belassen(v, betreuer.cookie, kind.id)).status).toBe(404);
+			expect(await prisma.person.count({ where: { vereinId: v.verein.id, nachname: 'Kind', vorname: 'Neu' } })).toBe(0);
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: kind.id } })).vorname).toBe('Kai');
+		});
+
+		it('unangemeldet gibt 401', async () => {
+			const v = await neuerVerein();
+			const kind = await v.kind('Kai');
+			const roh = (pfad: string, methode: string) =>
+				sende(server.url, `/${v.verein.slug}/api/v1${pfad}`, { methode, body: {} });
+			expect((await roh('/personen', 'POST')).status).toBe(401);
+			expect((await roh(`/personen/${kind.id}`, 'PATCH')).status).toBe(401);
+			expect((await roh(`/personen/${kind.id}/volljaehrig-belassen`, 'POST')).status).toBe(401);
+		});
+
+		it('PATCH: Namen, Geburtsdatum und E-Mail aendern, E-Mail leer entfernt sie', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const kind = await v.kind('Kai');
+			const r = await patch(v, verwalter.cookie, kind.id, {
+				vorname: ' Karl ',
+				geburtsdatum: '2014-01-02',
+				email: 'Karl@Example.test',
+			});
+			expect(r.status).toBe(200);
+			expect(await prisma.person.findUniqueOrThrow({ where: { id: kind.id } })).toMatchObject({
+				vorname: 'Karl',
+				nachname: 'Kind',
+				email: 'karl@example.test',
+			});
+			expect((await patch(v, verwalter.cookie, kind.id, { email: '  ' })).status).toBe(200);
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: kind.id } })).email).toBeNull();
+			expect((await patch(v, verwalter.cookie, kind.id, { geburtsdatum: '' })).status).toBe(400);
+			expect((await patch(v, verwalter.cookie, kind.id, { vorname: '' })).status).toBe(400);
+		});
+
+		it('PATCH: doppelte E-Mail gibt 409 EMAIL_VERGEBEN', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const anna = await v.erwachsener('Anna');
+			const berta = await v.erwachsener('Berta');
+			const r = await patch(v, verwalter.cookie, berta.id, { email: anna.email });
+			expect(r.status).toBe(409);
+			expect(await r.json()).toMatchObject({ code: 'EMAIL_VERGEBEN' });
+		});
+
+		it('PATCH setzt keine Rechte, auch nicht mit rechte im Body', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER', 'JUGENDLEITER_RECHTE']);
+			const erw = await v.erwachsener('Anna');
+			const r = await patch(v, verwalter.cookie, erw.id, { rechte: ['MITGLIEDER'], nachname: 'Neu' });
+			expect(r.status).toBe(200);
+			expect(await prisma.person.findUniqueOrThrow({ where: { id: erw.id } })).toMatchObject({
+				rechte: [],
+				nachname: 'Neu',
+			});
+		});
+
+		it('PATCH: Jugendsprecher setzen und loeschen', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const kind = await v.kind('Kai');
+			expect((await patch(v, verwalter.cookie, kind.id, { jugendsprecher: true })).status).toBe(200);
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: kind.id } })).jugendsprecher).toBe(true);
+			expect((await patch(v, verwalter.cookie, kind.id, { jugendsprecher: false })).status).toBe(200);
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: kind.id } })).jugendsprecher).toBe(false);
+			expect((await patch(v, verwalter.cookie, kind.id, { jugendsprecher: 'ja' })).status).toBe(400);
+		});
+
+		it('PATCH: Jugendsprecher und Geburtsdatum bei Erwachsenem gibt 400', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const erw = await v.erwachsener('Anna');
+			expect((await patch(v, verwalter.cookie, erw.id, { jugendsprecher: true })).status).toBe(400);
+			expect((await patch(v, verwalter.cookie, erw.id, { geburtsdatum: '1980-01-01' })).status).toBe(400);
+			expect(await prisma.person.findUniqueOrThrow({ where: { id: erw.id } })).toMatchObject({
+				jugendsprecher: false,
+				geburtsdatum: null,
+			});
+		});
+
+		it('PATCH: die Adresse eines Erwachsenen mit Zugang laesst sich nicht entfernen', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const mitZugang = await v.mitglied([], 'Zita');
+			const r = await patch(v, verwalter.cookie, mitZugang.personId, { email: '' });
+			expect(r.status).toBe(409);
+			expect(await r.json()).toMatchObject({ code: 'EMAIL_ERFORDERLICH' });
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: mitZugang.personId } })).email).not.toBeNull();
+		});
+
+		it('Verwalter ohne JUGENDLEITER_RECHTE aendert einen Jugendleiter nicht: 404, Name unveraendert', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const leitung = await v.mitglied(['MITGLIEDER', 'JUGENDLEITER_RECHTE'], 'Lena');
+			const r = await patch(v, verwalter.cookie, leitung.personId, { vorname: 'Geaendert' });
+			expect(r.status).toBe(404);
+			expect((await prisma.person.findUniqueOrThrow({ where: { id: leitung.personId } })).vorname).toBe('Lena');
+			// Mit dem Recht geht es.
+			expect((await patch(v, leitung.cookie, leitung.personId, { vorname: 'Lenka' })).status).toBe(200);
+		});
+
+		it('PATCH auf Grabstein und unbekannte ID gibt 404', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const kind = await v.kind('Weg');
+			await prisma.person.update({ where: { id: kind.id }, data: { entferntAm: new Date() } });
+			expect((await patch(v, verwalter.cookie, kind.id, { vorname: 'Zombie' })).status).toBe(404);
+			expect((await patch(v, verwalter.cookie, 'gibt-es-nicht', { vorname: 'X' })).status).toBe(404);
+		});
+
+		it('volljaehrig-belassen: mit 17 gibt 409, mit 18 gibt 200 und der Hinweis verschwindet', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const minderjaehrig = await v.kind('Jung', vor(17));
+			const volljaehrig = await v.kind('Alt', vor(18, 1));
+			const hinweise = async (id: string) =>
+				((await (await v.api(`/personen/${id}`, verwalter.cookie)).json()) as Eintrag).warnhinweise?.map((w) => w.art);
+
+			expect((await belassen(v, verwalter.cookie, minderjaehrig.id)).status).toBe(409);
+			expect(
+				(await prisma.person.findUniqueOrThrow({ where: { id: minderjaehrig.id } })).volljaehrigGeprueftAm,
+			).toBeNull();
+
+			expect(await hinweise(volljaehrig.id)).toContain('VOLLJAEHRIG');
+			expect((await belassen(v, verwalter.cookie, volljaehrig.id)).status).toBe(200);
+			expect(await hinweise(volljaehrig.id)).not.toContain('VOLLJAEHRIG');
+			expect(
+				(await prisma.person.findUniqueOrThrow({ where: { id: volljaehrig.id } })).volljaehrigGeprueftAm,
+			).not.toBeNull();
+		});
+
+		it('volljaehrig-belassen bei Erwachsenem gibt 404', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const erw = await v.erwachsener('Anna');
+			expect((await belassen(v, verwalter.cookie, erw.id)).status).toBe(404);
+		});
 	});
 });

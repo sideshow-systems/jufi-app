@@ -1,16 +1,23 @@
-import type { Bezugsperson, Person, VereinDb } from '@jufi/db';
+import { sperreVereinszeile, type Bezugsperson, type Person, type VereinDb } from '@jufi/db';
 import {
 	einsichtIn,
 	hatGueltigeEinwilligung,
 	hatRecht,
+	istDoppelt,
+	istJugendleiter,
+	istVolljaehrig,
+	normalisiereEmail,
+	pruefeEmail,
+	pruefeGeburtsdatum,
+	pruefeName,
 	warnhinweise,
 	type Einsicht,
 	type Warnhinweis,
 	type Zuordnung,
 } from '@jufi/domain';
-import type { Router } from 'express';
+import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
-import { asynchron } from '../admin/asynchron.js';
+import { asynchron, text } from '../admin/asynchron.js';
 import { MAIL_MAX_VERSUCHE } from '../mail/arbeiter.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
@@ -134,6 +141,77 @@ function baueListe(
 	return antwort;
 }
 
+/**
+ * Ende einer Schreib-Route mit Status und Antwort. Innerhalb der Transaktion
+ * geworfen, damit alles zurueckgenommen wird, was bis dahin geschrieben wurde.
+ * Verworfen: ein Rueckgabewert aus der Transaktion -- die Person bliebe dann bei
+ * einer Ablehnung nach dem ersten Schreibschritt halb angelegt.
+ */
+class Abbruch extends Error {
+	constructor(
+		readonly status: number,
+		readonly antwort: object,
+	) {
+		super('Schreiben abgebrochen');
+	}
+}
+
+const EMAIL_VERGEBEN = {
+	fehler: 'Diese E-Mail-Adresse gehört im Verein schon jemand anderem',
+	code: 'EMAIL_VERGEBEN',
+	feld: 'email',
+};
+const EMAIL_ERFORDERLICH = {
+	fehler: 'Wer sich schon anmelden kann, braucht die Adresse als Kennung',
+	code: 'EMAIL_ERFORDERLICH',
+	feld: 'email',
+};
+const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
+
+function ungueltig(fehler: string, feld: string): Abbruch {
+	return new Abbruch(400, { fehler, feld });
+}
+
+/**
+ * Entscheidet die Datenbank, nicht eine Vorabpruefung: zwei gleichzeitige Anfragen
+ * mit derselben Adresse sehen beide "frei", nur der Unique-Index (vereinId, email)
+ * lehnt die zweite ab. Verworfen: error.meta.target auswerten -- dessen Form haengt
+ * vom Treiber-Adapter ab; es gibt am Person-Schreiben nur diesen einen Index.
+ */
+function istEindeutigVerletzt(error: unknown): boolean {
+	return (error as { code?: unknown } | null)?.code === 'P2002';
+}
+
+/** Name wie gespeichert: ohne Rand, 1 bis 60 Zeichen. */
+function liesName(wert: unknown, feld: 'vorname' | 'nachname'): string {
+	const name = text(wert).trim();
+	if (!pruefeName(name))
+		throw ungueltig(`${feld === 'vorname' ? 'Vorname' : 'Nachname'} braucht 1 bis 60 Zeichen`, feld);
+	return name;
+}
+
+/** Kalenderdatum JJJJ-MM-TT; "2015-02-31" ist ungueltig statt still der 3. Maerz. */
+function liesDatum(wert: unknown, jetzt: Date): Date {
+	const roh = text(wert);
+	const d = new Date(`${roh}T00:00:00.000Z`);
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(roh) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== roh) {
+		throw ungueltig('Bitte ein Geburtsdatum im Format JJJJ-MM-TT angeben', 'geburtsdatum');
+	}
+	if (!pruefeGeburtsdatum(d, jetzt))
+		throw ungueltig('Das Geburtsdatum liegt in der Zukunft oder zu weit zurück', 'geburtsdatum');
+	return d;
+}
+
+/** Leer = keine Adresse (null), sonst normalisiert und geprueft. */
+function liesEmail(wert: unknown): string | null {
+	if (wert === null || wert === undefined) return null;
+	if (typeof wert !== 'string') throw ungueltig('Bitte eine gültige E-Mail-Adresse angeben', 'email');
+	const email = normalisiereEmail(wert);
+	if (email === '') return null;
+	if (!pruefeEmail(email)) throw ungueltig('Bitte eine gültige E-Mail-Adresse angeben', 'email');
+	return email;
+}
+
 export function personenRouten(router: Router, deps: VolleAppDeps): void {
 	const { jetzt } = deps;
 
@@ -172,6 +250,196 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 		const einsichtFuer = (p: Person) => einsichtIn(betrachterSicht, p, zuordnungen, sichten);
 		return { personen, zuordnungen, angaben, sichten, hinweiseFuer, einsichtFuer, jetztWert };
 	}
+
+	/**
+	 * Nur Verwaltung (MITGLIEDER); wer das Recht nicht hat, bekommt 404 wie bei etwas, das
+	 * es nicht gibt (Rahmen-Spec 8). true = abgewiesen.
+	 */
+	function nurVerwaltung(res: Response): boolean {
+		if (hatRecht(mitgliedKontext(res).person, 'MITGLIEDER')) return false;
+		statt404(res);
+		return true;
+	}
+
+	function antworteAbbruch(res: Response, error: unknown): void {
+		if (error instanceof Abbruch) {
+			res.status(error.status).json(error.antwort);
+			return;
+		}
+		if (istEindeutigVerletzt(error)) {
+			res.status(409).json(EMAIL_VERGEBEN);
+			return;
+		}
+		throw error;
+	}
+
+	// Rechte setzt keiner dieser Wege: der Body wird Feld fuer Feld gelesen, nicht
+	// durchgereicht, ein "rechte" darin wird also nie gelesen. Rechte vergibt allein die
+	// eigene Route dafuer (JUGENDLEITER_RECHTE, Spec 5.4). Verworfen: rechte im Body mit
+	// 400 abzulehnen -- ein Formular, das mehr schickt, soll nicht scheitern, aber auch
+	// nichts bewirken.
+	router.post(
+		'/personen',
+		brauchtMitglied,
+		asynchron(async (req, res) => {
+			if (nurVerwaltung(res)) return;
+			const { db } = vereinsKontext(res);
+			const body = (req.body ?? {}) as Record<string, unknown>;
+			try {
+				const art = body['art'];
+				if (art !== 'ERWACHSENER' && art !== 'JUNGFISCHER')
+					throw ungueltig('Bitte Jungfischer oder Erwachsene wählen', 'art');
+				const vorname = liesName(body['vorname'], 'vorname');
+				const nachname = liesName(body['nachname'], 'nachname');
+				const hatDatum =
+					body['geburtsdatum'] !== undefined && body['geburtsdatum'] !== null && body['geburtsdatum'] !== '';
+				if (art === 'ERWACHSENER' && hatDatum) {
+					throw ungueltig('Erwachsene haben kein Geburtsdatum', 'geburtsdatum');
+				}
+				const geburtsdatum = art === 'JUNGFISCHER' ? liesDatum(body['geburtsdatum'], jetzt()) : null;
+				const email = liesEmail(body['email']);
+
+				const roheIds: unknown = body['untergruppenIds'] ?? [];
+				if (!Array.isArray(roheIds) || roheIds.some((i) => typeof i !== 'string')) {
+					throw ungueltig('Untergruppen ungültig', 'untergruppenIds');
+				}
+				const untergruppenIds = [...new Set(roheIds as string[])];
+				if (art === 'ERWACHSENER' && untergruppenIds.length > 0) {
+					throw ungueltig('Nur Jungfischer gehören zu Untergruppen', 'untergruppenIds');
+				}
+				if (untergruppenIds.length > 0) {
+					// Ueber vereinDb gezaehlt: eine Untergruppe eines anderen Vereins findet sich nicht.
+					const vorhanden = await db.untergruppe.count({ where: { id: { in: untergruppenIds } } });
+					if (vorhanden !== untergruppenIds.length)
+						throw ungueltig('Eine Untergruppe gibt es nicht', 'untergruppenIds');
+				}
+
+				// Nur ein Hinweis, keine Sperre (Spec 5.3): es kann wirklich zwei gleichnamige Kinder
+				// mit demselben Geburtstag geben, darum laesst trotzdem die Anlage zu. Die Pruefung
+				// ist nicht gesperrt; zwei gleichzeitige Anlagen duerfen beide durch, es ist ein Rat.
+				if (body['trotzdem'] !== true) {
+					const kandidaten = await db.person.findMany({
+						where: { entferntAm: null },
+						select: { id: true, vorname: true, nachname: true, geburtsdatum: true },
+					});
+					const treffer = kandidaten.find((k) => istDoppelt(k, { vorname, nachname, geburtsdatum }));
+					if (treffer) {
+						throw new Abbruch(409, {
+							fehler: 'Diese Person gibt es vielleicht schon',
+							code: 'DOPPELT',
+							person: { id: treffer.id, vorname: treffer.vorname, nachname: treffer.nachname },
+						});
+					}
+				}
+
+				// Ohne Vereinssperre: angenommen oder nicht entscheidet hier allein der Unique-Index, und
+				// die Sperre liesse die zweite Anfrage nur warten, nicht anders ausgehen.
+				const id = await db.$transaction(async (tx) => {
+					const person = await tx.person.create({
+						data: { art, vorname, nachname, geburtsdatum, email },
+						select: { id: true },
+					});
+					if (untergruppenIds.length > 0) {
+						await tx.untergruppeMitglied.createMany({
+							data: untergruppenIds.map((untergruppeId) => ({ untergruppeId, personId: person.id })),
+						});
+					}
+					return person.id;
+				});
+				res.status(201).json({ id });
+			} catch (error) {
+				antworteAbbruch(res, error);
+			}
+		}),
+	);
+
+	router.patch(
+		'/personen/:id',
+		brauchtMitglied,
+		asynchron(async (req, res) => {
+			if (nurVerwaltung(res)) return;
+			const { verein, db } = vereinsKontext(res);
+			const { person: handelnder } = mitgliedKontext(res);
+			const id = req.params['id'] ?? '';
+			const body = (req.body ?? {}) as Record<string, unknown>;
+			try {
+				await db.$transaction(async (tx) => {
+					// Die Entscheidung "darf ich diese Person aendern" liest Rechte und Art; die Sperre
+					// haelt eine gleichzeitige Rechtevergabe an, bis hier fertig ist.
+					await sperreVereinszeile(tx, verein.id);
+					const ziel = await tx.person.findFirst({ where: { id, entferntAm: null } });
+					// Erwachsene mit Rechten aendert nur, wer Rechte verwalten darf (Spec 5.4). 404 statt
+					// 403: sonst verriete die Antwort, wer im Verein Jugendleiter ist.
+					if (!ziel || (istJugendleiter(ziel) && !hatRecht(handelnder, 'JUGENDLEITER_RECHTE'))) {
+						throw new Abbruch(404, NICHT_GEFUNDEN);
+					}
+					const aenderung: {
+						vorname?: string;
+						nachname?: string;
+						geburtsdatum?: Date;
+						email?: string | null;
+						jugendsprecher?: boolean;
+					} = {};
+					if ('vorname' in body) aenderung.vorname = liesName(body['vorname'], 'vorname');
+					if ('nachname' in body) aenderung.nachname = liesName(body['nachname'], 'nachname');
+					if ('geburtsdatum' in body) {
+						if (ziel.art !== 'JUNGFISCHER') throw ungueltig('Erwachsene haben kein Geburtsdatum', 'geburtsdatum');
+						aenderung.geburtsdatum = liesDatum(body['geburtsdatum'], jetzt());
+					}
+					if ('email' in body) {
+						aenderung.email = liesEmail(body['email']);
+						// Die Adresse Erwachsener ist ihre Kennung; ohne sie waere der Zugang nicht mehr
+						// erreichbar. Verworfen: den Zugang mitzuloeschen -- das ist eine eigene, bewusste Handlung.
+						if (
+							aenderung.email === null &&
+							ziel.art === 'ERWACHSENER' &&
+							(await tx.zugang.count({ where: { personId: ziel.id } })) > 0
+						) {
+							throw new Abbruch(409, EMAIL_ERFORDERLICH);
+						}
+					}
+					if ('jugendsprecher' in body) {
+						if (typeof body['jugendsprecher'] !== 'boolean') throw ungueltig('Ja oder nein erwartet', 'jugendsprecher');
+						if (ziel.art !== 'JUNGFISCHER')
+							throw ungueltig('Nur Jungfischer können Jugendsprecher sein', 'jugendsprecher');
+						aenderung.jugendsprecher = body['jugendsprecher'];
+					}
+					if (Object.keys(aenderung).length > 0) await tx.person.update({ where: { id: ziel.id }, data: aenderung });
+				});
+				res.json({ ok: true });
+			} catch (error) {
+				antworteAbbruch(res, error);
+			}
+		}),
+	);
+
+	router.post(
+		'/personen/:id/volljaehrig-belassen',
+		brauchtMitglied,
+		asynchron(async (req, res) => {
+			if (nurVerwaltung(res)) return;
+			const { verein, db } = vereinsKontext(res);
+			const id = req.params['id'] ?? '';
+			const zeit = jetzt();
+			try {
+				await db.$transaction(async (tx) => {
+					await sperreVereinszeile(tx, verein.id);
+					const ziel = await tx.person.findFirst({ where: { id, entferntAm: null, art: 'JUNGFISCHER' } });
+					if (!ziel) throw new Abbruch(404, NICHT_GEFUNDEN);
+					if (!istVolljaehrig(ziel, zeit)) {
+						throw new Abbruch(409, { fehler: 'Das Kind ist noch nicht volljährig', code: 'NOCH_MINDERJAEHRIG' });
+					}
+					// Ein zweites "Belassen" behaelt den ersten Zeitpunkt: er belegt, wann die Verwaltung hingesehen hat.
+					if (!ziel.volljaehrigGeprueftAm) {
+						await tx.person.update({ where: { id: ziel.id }, data: { volljaehrigGeprueftAm: zeit } });
+					}
+				});
+				res.json({ ok: true });
+			} catch (error) {
+				antworteAbbruch(res, error);
+			}
+		}),
+	);
 
 	router.get(
 		'/personen',
