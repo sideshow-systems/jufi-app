@@ -88,7 +88,11 @@ FROM node:22-alpine AS runtime
 # dauert jedes `docker compose stop` zehn Sekunden bis zum SIGKILL -- und der
 # Mail-Arbeiter kaeme nie dazu, einen laufenden Versand zu beenden (server.ts).
 # curl fuer den Healthcheck.
-RUN apk add --no-cache tini curl
+# font-dejavu und fontconfig fuer das Initialen-Icon (server/verein/logo.ts):
+# sharp zeichnet den Text ueber librsvg, und das findet im schlanken Alpine-Image
+# keine einzige Schrift -- die Initialen blieben ohne Fehlermeldung unsichtbar.
+# Verworfen: eine Schriftdatei im Repo.
+RUN apk add --no-cache tini curl font-dejavu fontconfig
 
 ENV NODE_ENV=production \
 	PORT=4000 \

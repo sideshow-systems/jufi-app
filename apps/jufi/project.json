@@ -42,7 +42,8 @@
 					"pg",
 					"otplib",
 					"express",
-					"nodemailer"
+					"nodemailer",
+					"sharp"
 				],
 				"security": {
 					"allowedHosts": ["app-test.jufi-app.de", "test.jufi-app.de", "localhost", "127.0.0.1"]
