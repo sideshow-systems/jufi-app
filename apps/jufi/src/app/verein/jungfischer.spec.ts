@@ -42,7 +42,7 @@ describe('Meine Jungfischer', () => {
 	async function oeffne(kinder: KindAnsicht[]): Promise<void> {
 		http = TestBed.inject(HttpTestingController);
 		harness = await RouterTestingHarness.create();
-		const navigation = harness.navigateByUrl('/demo/jungfischer');
+		const navigation = harness.navigateByUrl('/demo/meine-jungfischer');
 		await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
 		await navigation;
 		await vi.waitFor(() => http.expectOne(`${API}/meine-jungfischer`).flush({ kinder }));

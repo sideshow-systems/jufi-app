@@ -21,108 +21,101 @@ import { beziehungText } from './verwaltung/texte';
 	imports: [EinladungAnzeigeComponent, KarteComponent, RouterLink, VereinKopfComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<main>
-			<jf-verein-kopf [slug]="slug()" untertitel="Meine Jungfischer" />
-			<a class="zurueck" [routerLink]="['/', slug()]">← Zur Startseite</a>
-			@if (ladefehler(); as text) {
-				<jf-karte>
-					<p class="fehler" role="alert">{{ text }}</p>
-					<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
-				</jf-karte>
-			} @else if (kinder(); as liste) {
-				<div class="stapel">
-					@for (k of liste; track k.id) {
-						<jf-karte>
-							<article [attr.data-kind]="k.id">
-								<h2>{{ k.vorname }} {{ k.nachname }}</h2>
-								@if (k.jugendsprecher) {
-									<!-- Ohne Geschlecht formuliert: Die Daten kennen keines, und Jugendsprecherin oder Jugendsprecher zu raten waere falsch. -->
-									<p>Jugendsprecher-Rolle: {{ k.vorname }} nimmt am Austausch mit den Jugendleitern teil.</p>
-								}
-								<dl>
-									<dt>Untergruppen</dt>
-									<dd>{{ untergruppen(k) }}</dd>
-									<dt>Familie</dt>
-									<dd>
-										<ul>
-											@for (f of k.familie; track $index) {
-												<li>{{ f.vorname }} {{ f.nachname }} · {{ beziehung(f) }}</li>
-											}
-										</ul>
-									</dd>
-									<dt>Zugang</dt>
-									<dd>{{ zugangstext(k) }}</dd>
-								</dl>
+		<jf-verein-kopf [slug]="slug()" untertitel="Meine Jungfischer" />
+		<a class="zurueck" [routerLink]="['/', slug(), 'mehr']">← Mehr</a>
+		@if (ladefehler(); as text) {
+			<jf-karte>
+				<p class="fehler" role="alert">{{ text }}</p>
+				<button type="button" class="knopf primaer" (click)="lade()">Nochmal versuchen</button>
+			</jf-karte>
+		} @else if (kinder(); as liste) {
+			<div class="stapel">
+				@for (k of liste; track k.id) {
+					<jf-karte>
+						<article [attr.data-kind]="k.id">
+							<h2>{{ k.vorname }} {{ k.nachname }}</h2>
+							@if (k.jugendsprecher) {
+								<!-- Ohne Geschlecht formuliert: Die Daten kennen keines, und Jugendsprecherin oder Jugendsprecher zu raten waere falsch. -->
+								<p>Jugendsprecher-Rolle: {{ k.vorname }} nimmt am Austausch mit den Jugendleitern teil.</p>
+							}
+							<dl>
+								<dt>Untergruppen</dt>
+								<dd>{{ untergruppen(k) }}</dd>
+								<dt>Familie</dt>
+								<dd>
+									<ul>
+										@for (f of k.familie; track $index) {
+											<li>{{ f.vorname }} {{ f.nachname }} · {{ beziehung(f) }}</li>
+										}
+									</ul>
+								</dd>
+								<dt>Zugang</dt>
+								<dd>{{ zugangstext(k) }}</dd>
+							</dl>
 
-								@if (k.volljaehrig) {
-									<p class="gedaempft klein">
-										{{ k.vorname }} ist volljährig und entscheidet über den eigenen Zugang selbst. Du kannst hier nichts
-										ändern.
-									</p>
-								} @else if (k.ichBinErziehungsberechtigt) {
-									@if (widerrufId() === k.id) {
-										<div class="frage" role="alertdialog" aria-label="Einwilligung widerrufen">
-											<p>
-												Willst du die Einwilligung wirklich widerrufen? Der Zugang von {{ k.vorname }} endet dann, wenn
-												keine andere Einwilligung besteht.
-											</p>
-											<div class="reihe">
-												<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="widerrufe(k)">
-													Ja, widerrufen
-												</button>
-												<button type="button" class="knopf" [disabled]="laeuft()" (click)="widerrufId.set(null)">
-													Abbrechen
-												</button>
-											</div>
-										</div>
-									} @else {
+							@if (k.volljaehrig) {
+								<p class="gedaempft klein">
+									{{ k.vorname }} ist volljährig und entscheidet über den eigenen Zugang selbst. Du kannst hier nichts
+									ändern.
+								</p>
+							} @else if (k.ichBinErziehungsberechtigt) {
+								@if (widerrufId() === k.id) {
+									<div class="frage" role="alertdialog" aria-label="Einwilligung widerrufen">
+										<p>
+											Willst du die Einwilligung wirklich widerrufen? Der Zugang von {{ k.vorname }} endet dann, wenn
+											keine andere Einwilligung besteht.
+										</p>
 										<div class="reihe">
-											<button
-												type="button"
-												class="knopf"
-												[disabled]="laeuft()"
-												(click)="setzeZugang(k, !k.zugang.erlaubt)"
-											>
-												{{ k.zugang.erlaubt ? 'Zugang entziehen' : 'Zugang erlauben' }}
+											<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="widerrufe(k)">
+												Ja, widerrufen
 											</button>
-											<button type="button" class="knopf" [disabled]="laeuft()" (click)="erzeugeLink(k)">
-												Neuen Link erzeugen
+											<button type="button" class="knopf" [disabled]="laeuft()" (click)="widerrufId.set(null)">
+												Abbrechen
 											</button>
-											@if (k.zugang.einwilligungGueltig) {
-												<button type="button" class="knopf" [disabled]="laeuft()" (click)="widerrufId.set(k.id)">
-													Einwilligung widerrufen
-												</button>
-											} @else {
-												<button type="button" class="knopf" [disabled]="laeuft()" (click)="gibEinwilligung(k)">
-													Einwilligung geben
-												</button>
-											}
 										</div>
-									}
-									@if (fehler()[k.id]; as text) {
-										<p class="fehler" role="alert">{{ text }}</p>
-									}
-									@if (links()[k.id]; as l) {
-										<jf-einladung-anzeige [einladung]="l" />
-									}
+									</div>
+								} @else {
+									<div class="reihe">
+										<button
+											type="button"
+											class="knopf"
+											[disabled]="laeuft()"
+											(click)="setzeZugang(k, !k.zugang.erlaubt)"
+										>
+											{{ k.zugang.erlaubt ? 'Zugang entziehen' : 'Zugang erlauben' }}
+										</button>
+										<button type="button" class="knopf" [disabled]="laeuft()" (click)="erzeugeLink(k)">
+											Neuen Link erzeugen
+										</button>
+										@if (k.zugang.einwilligungGueltig) {
+											<button type="button" class="knopf" [disabled]="laeuft()" (click)="widerrufId.set(k.id)">
+												Einwilligung widerrufen
+											</button>
+										} @else {
+											<button type="button" class="knopf" [disabled]="laeuft()" (click)="gibEinwilligung(k)">
+												Einwilligung geben
+											</button>
+										}
+									</div>
 								}
-							</article>
-						</jf-karte>
-					} @empty {
-						<jf-karte><p class="gedaempft">Es sind keine Jungfischer mit dir verbunden.</p></jf-karte>
-					}
-				</div>
-			}
-		</main>
+								@if (fehler()[k.id]; as text) {
+									<p class="fehler" role="alert">{{ text }}</p>
+								}
+								@if (links()[k.id]; as l) {
+									<jf-einladung-anzeige [einladung]="l" />
+								}
+							}
+						</article>
+					</jf-karte>
+				} @empty {
+					<jf-karte><p class="gedaempft">Es sind keine Jungfischer mit dir verbunden.</p></jf-karte>
+				}
+			</div>
+		}
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
-			max-width: 32rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
 		}
 		.zurueck {
 			display: inline-flex;

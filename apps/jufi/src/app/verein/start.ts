@@ -3,60 +3,41 @@ import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { KarteComponent } from '../gestaltung/ui';
-import { MitgliederApi } from '../verein/mitglieder-api';
-import { MitgliedSitzung } from '../verein/mitglied-waechter';
-import { VereinKontext } from '../verein/verein-kontext';
-import { NichtGefundenComponent } from './nicht-gefunden';
+import { MitgliederApi } from './mitglieder-api';
+import { MitgliedSitzung } from './mitglied-waechter';
+import { VereinKontext } from './verein-kontext';
 
 /** Platzhalter der Vereinsseite: zeigt, dass Slug, API und Vereinsfarbe zusammenspielen. */
 @Component({
-	selector: 'jf-verein-start',
-	imports: [KarteComponent, NichtGefundenComponent, RouterLink],
+	selector: 'jf-start',
+	imports: [KarteComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		@if (kontext.ladefehler()) {
-			<main>
-				<jf-karte>
-					<p>Keine Verbindung – nochmal versuchen</p>
-					<button type="button" class="knopf primaer" (click)="kontext.neuLaden()">Nochmal versuchen</button>
-				</jf-karte>
-			</main>
-		} @else if (kontext.verein(); as v) {
-			@if (v === 'nicht-gefunden') {
-				<jf-nicht-gefunden />
-			} @else {
-				<main>
-					<jf-karte>
-						<!-- Name allein statt im Satz: "bei den" passt zu Jungfischer Demo, nicht zu Glonntal Fischereiverein. -->
-						<p class="gruss">Willkommen</p>
-						<h1>{{ v.anzeigename }}</h1>
-						<!-- Schlicht, bis die Huelle mit Navigation kommt (Etappe 5): Profil und Abmelden muessen schon jetzt erreichbar sein. -->
-						<div class="reihe">
-							@if (zeigeVerwaltung()) {
-								<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Verwaltung</a>
-							}
-							@if (sitzung.ich()?.hatKinder) {
-								<a class="knopf" [routerLink]="['/', slug(), 'jungfischer']">Meine Jungfischer</a>
-							}
-							<a class="knopf" [routerLink]="['/', slug(), 'profil']">Profil</a>
-							<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden()">Abmelden</button>
-						</div>
-						@if (abmeldefehler(); as text) {
-							<p class="fehler" role="alert">{{ text }}</p>
-						}
-					</jf-karte>
-				</main>
-			}
+		@if (name(); as n) {
+			<jf-karte>
+				<!-- Name allein statt im Satz: "bei den" passt zu Jungfischer Demo, nicht zu Glonntal Fischereiverein. -->
+				<p class="gruss">Willkommen</p>
+				<h1>{{ n }}</h1>
+				<!-- Schlicht, bis Start (Task 10) und Mehr (Task 11) kommen: Profil und Abmelden muessen schon jetzt erreichbar sein. -->
+				<div class="reihe">
+					@if (zeigeVerwaltung()) {
+						<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Verwaltung</a>
+					}
+					@if (sitzung.ich()?.hatKinder) {
+						<a class="knopf" [routerLink]="['/', slug(), 'meine-jungfischer']">Meine Jungfischer</a>
+					}
+					<a class="knopf" [routerLink]="['/', slug(), 'profil']">Profil</a>
+					<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden()">Abmelden</button>
+				</div>
+				@if (abmeldefehler(); as text) {
+					<p class="fehler" role="alert">{{ text }}</p>
+				}
+			</jf-karte>
 		}
 	`,
 	styles: `
 		:host {
 			display: block;
-		}
-		main {
-			max-width: 32rem;
-			margin: 0 auto;
-			padding: var(--a5) var(--a4);
 		}
 		h1,
 		p {
@@ -80,11 +61,16 @@ import { NichtGefundenComponent } from './nicht-gefunden';
 		}
 	`,
 })
-export class VereinStartComponent {
+export class StartComponent {
 	/** Kommt aus dem Pfad (withComponentInputBinding). */
 	readonly slug = input.required<string>();
 
-	protected readonly kontext = inject(VereinKontext);
+	private readonly kontext = inject(VereinKontext);
+	/** Leer, solange der Verein laedt; Ladefehler und unbekannten Verein faengt die Huelle ab. */
+	protected readonly name = computed(() => {
+		const v = this.kontext.verein();
+		return v && v !== 'nicht-gefunden' ? v.anzeigename : null;
+	});
 	private readonly mitglieder = inject(MitgliederApi);
 	private readonly router = inject(Router);
 	protected readonly sitzung = inject(MitgliedSitzung);

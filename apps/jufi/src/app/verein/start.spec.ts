@@ -64,7 +64,7 @@ describe('Vereinsseite', () => {
 			.flush({ slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false });
 		await harness.fixture.whenStable();
 		harness.detectChanges();
-		const link = harness.routeNativeElement?.querySelector<HTMLAnchorElement>('a[href="/demo/jungfischer"]');
+		const link = harness.routeNativeElement?.querySelector<HTMLAnchorElement>('a[href="/demo/meine-jungfischer"]');
 		expect(link?.textContent).toContain('Meine Jungfischer');
 	});
 
@@ -75,7 +75,7 @@ describe('Vereinsseite', () => {
 			.flush({ slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false });
 		await harness.fixture.whenStable();
 		harness.detectChanges();
-		expect(harness.routeNativeElement?.querySelector('a[href="/demo/jungfischer"]')).toBeNull();
+		expect(harness.routeNativeElement?.querySelector('a[href="/demo/meine-jungfischer"]')).toBeNull();
 	});
 
 	async function verwaltungsLink(rechte: string[]): Promise<HTMLAnchorElement | null | undefined> {

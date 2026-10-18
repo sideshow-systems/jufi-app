@@ -1,8 +1,8 @@
 import { Routes } from '@angular/router';
 import { NichtGefundenComponent } from './seiten/nicht-gefunden';
 import { PlattformStartComponent } from './seiten/plattform-start';
-import { VereinStartComponent } from './seiten/verein-start';
 import { mitgliedAngemeldet } from './verein/mitglied-waechter';
+import { MitgliederHuelle } from './verein/mitglieder-huelle';
 
 /**
  * Der erste Pfadteil ist der Verein. '' gehoert der Plattform; reservierte Namen
@@ -19,7 +19,6 @@ export const routes: Routes = [
 	{
 		path: ':slug',
 		children: [
-			{ path: '', component: VereinStartComponent, pathMatch: 'full', canActivate: [mitgliedAngemeldet] },
 			{
 				path: 'anmelden',
 				loadComponent: () => import('./verein/anmelden').then((m) => m.AnmeldenComponent),
@@ -31,16 +30,6 @@ export const routes: Routes = [
 			{
 				path: 'zugang-verloren',
 				loadComponent: () => import('./verein/zugang-verloren').then((m) => m.ZugangVerlorenComponent),
-			},
-			{
-				path: 'profil',
-				loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
-				canActivate: [mitgliedAngemeldet],
-			},
-			{
-				path: 'jungfischer',
-				loadComponent: () => import('./verein/jungfischer').then((m) => m.JungfischerComponent),
-				canActivate: [mitgliedAngemeldet],
 			},
 			// Die Verwaltung zeigt Rechte nur an; entschieden wird auf dem Server. Der Waechter fragt nur nach der Sitzung.
 			{
@@ -70,6 +59,30 @@ export const routes: Routes = [
 			},
 			// Ziel des Waechters bei 404; unter dem Slug statt als eigener Pfad, sonst waere der Pfadname ein reservierter Verein.
 			{ path: 'nicht-gefunden', component: NichtGefundenComponent },
+			// Nach anmelden, einladung, zugang-verloren und nicht-gefunden: Eine leere Eltern-Route davor liesse
+			// den Router erst in der Huelle suchen, und diese Seiten haben weder Huelle noch Waechter.
+			// Die Verwaltung (Task 12) wandert spaeter hierher oder in eine eigene Huelle.
+			{
+				path: '',
+				component: MitgliederHuelle,
+				canActivate: [mitgliedAngemeldet],
+				children: [
+					{
+						path: '',
+						pathMatch: 'full',
+						loadComponent: () => import('./verein/start').then((m) => m.StartComponent),
+					},
+					{
+						path: 'profil',
+						loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
+					},
+					// Spec 2.4: meine-jungfischer statt jungfischer. Der alte Pfad war nie ausgeliefert, darum keine Weiterleitung.
+					{
+						path: 'meine-jungfischer',
+						loadComponent: () => import('./verein/jungfischer').then((m) => m.JungfischerComponent),
+					},
+				],
+			},
 		],
 	},
 	{ path: '**', component: NichtGefundenComponent },
