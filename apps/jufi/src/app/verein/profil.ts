@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, type OnIni
 import { Router, RouterLink } from '@angular/router';
 import { PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
 import { firstValueFrom, map, type Observable } from 'rxjs';
-import { alsApiFehler, fehlertext, type ApiFehler } from '../gemeinsam/api-fehler';
+import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { wertVon } from '../gemeinsam/formular';
 import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
 import { TotpEinrichtungComponent } from '../gemeinsam/totp-einrichtung';
@@ -11,14 +11,11 @@ import { KarteComponent } from '../gestaltung/ui';
 import type { MitgliedIch } from './mitglieder-api';
 import { MitgliederApi } from './mitglieder-api';
 import { MitgliedSitzung } from './mitglied-waechter';
-import { VereinKopfComponent } from './verein-kopf';
+import { beiAbgelaufenerSitzung } from './sitzung-abgelaufen';
 
 /** Dieselbe Grenze wie der Server (profil.ts), damit ein Tippfehler keinen Weg ueber das Netz braucht. */
 const NAME_UNGUELTIG = 'Der Name braucht 1 bis 40 Zeichen';
 const MAX_NAME = 40;
-
-/** 401 mit diesem Text heisst abgelaufene Sitzung; ein falsches altes Passwort ist ebenfalls 401, aber mit anderem Text. */
-const NICHT_ANGEMELDET = 'nicht angemeldet';
 
 const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <= MAX_NAME;
 
@@ -32,10 +29,10 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
  */
 @Component({
 	selector: 'jf-profil',
-	imports: [KarteComponent, RouterLink, TotpEinrichtungComponent, VereinKopfComponent],
+	imports: [KarteComponent, RouterLink, TotpEinrichtungComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<jf-verein-kopf [slug]="slug()" untertitel="Profil" />
+		<h1>Profil</h1>
 		<a class="zurueck" [routerLink]="['/', slug(), 'mehr']">← Mehr</a>
 		@if (ladefehler(); as text) {
 			<jf-karte>
@@ -225,6 +222,10 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
 			display: grid;
 			gap: var(--a4);
 		}
+		h1 {
+			margin: 0 0 var(--a3);
+			font-size: var(--schrift-titel);
+		}
 		h2 {
 			margin: 0 0 var(--a3);
 			font-size: var(--schrift-gross);
@@ -356,7 +357,7 @@ export class ProfilComponent implements OnInit {
 			this.ich.set(await firstValueFrom(this.api.ich(this.slug())));
 		} catch (ursache) {
 			const f = alsApiFehler(ursache);
-			if (await this.beiAbgelaufenerSitzung(f)) return;
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			this.ladefehler.set(fehlertext(f));
 		}
 	}
@@ -497,16 +498,10 @@ export class ProfilComponent implements OnInit {
 			await arbeit();
 		} catch (ursache) {
 			const f = alsApiFehler(ursache);
-			if (await this.beiAbgelaufenerSitzung(f)) return;
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			zeigeFehler(fehlertext(f));
 		} finally {
 			this.laeuft.set(false);
 		}
-	}
-
-	private async beiAbgelaufenerSitzung(f: ApiFehler): Promise<boolean> {
-		if (f.status !== 401 || f.fehler !== NICHT_ANGEMELDET) return false;
-		await this.router.navigateByUrl(`/${encodeURIComponent(this.slug())}/anmelden`);
-		return true;
 	}
 }

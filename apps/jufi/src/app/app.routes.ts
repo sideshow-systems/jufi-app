@@ -61,7 +61,7 @@ export const routes: Routes = [
 			{ path: 'nicht-gefunden', component: NichtGefundenComponent },
 			// Nach anmelden, einladung, zugang-verloren und nicht-gefunden: Eine leere Eltern-Route davor liesse
 			// den Router erst in der Huelle suchen, und diese Seiten haben weder Huelle noch Waechter.
-			// Die Verwaltung (Task 12) wandert spaeter hierher oder in eine eigene Huelle.
+			// Die Verwaltung hat noch ihre eigenen Routen und bekommt eine eigene Huelle.
 			{
 				path: '',
 				component: MitgliederHuelle,

@@ -81,6 +81,24 @@ describe('Mitglieder-Huelle', () => {
 		expect(seite.querySelector('main')?.textContent).toContain('Willkommen');
 	});
 
+	// Gewollt: Die Seiten holen ihre Daten selbst, ein leerer Bildschirm bis zur Antwort von /verein waere laenger.
+	it('zeigt den Inhalt schon, bevor GET /verein antwortet', async () => {
+		harness = await RouterTestingHarness.create();
+		const navigation = harness.navigateByUrl('/demo');
+		await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
+		await navigation;
+		harness.detectChanges();
+		seite = harness.routeNativeElement as HTMLElement;
+
+		expect(seite.querySelector('main jf-start')).not.toBeNull();
+		expect(leiste().length).toBe(2);
+		expect(seite.querySelector('header .name')).toBeNull();
+
+		http.expectOne(`${API}/verein`).flush(VEREIN);
+		await stabil();
+		expect(seite.querySelector('header .name')?.textContent).toContain('Jungfischer Demo');
+	});
+
 	it.each([
 		['/demo/profil', profilDaten],
 		['/demo/meine-jungfischer', jungfischerDaten],

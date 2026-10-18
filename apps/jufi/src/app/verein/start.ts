@@ -18,7 +18,7 @@ import { VereinKontext } from './verein-kontext';
 				<!-- Name allein statt im Satz: "bei den" passt zu Jungfischer Demo, nicht zu Glonntal Fischereiverein. -->
 				<p class="gruss">Willkommen</p>
 				<h1>{{ n }}</h1>
-				<!-- Schlicht, bis Start (Task 10) und Mehr (Task 11) kommen: Profil und Abmelden muessen schon jetzt erreichbar sein. -->
+				<!-- Schlicht, bis Start und Mehr ihre endgueltige Form haben: Profil und Abmelden muessen schon jetzt erreichbar sein. -->
 				<div class="reihe">
 					@if (zeigeVerwaltung()) {
 						<a class="knopf" [routerLink]="['/', slug(), 'verwaltung']">Verwaltung</a>

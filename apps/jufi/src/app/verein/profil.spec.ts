@@ -90,9 +90,10 @@ describe('Profil', () => {
 		expect(seite.textContent).toContain('Ein Passwort ist gesetzt');
 	});
 
-	it('der Name des Vereins steht im Kopf', async () => {
+	// Der Vereinsname steht im Kopf der Huelle; die Seite hat nur ihre eigene Ueberschrift.
+	it('hat die Ueberschrift Profil', async () => {
 		await oeffne();
-		expect(seite.querySelector('h1')?.textContent).toContain('Jungfischer Demo');
+		expect(seite.querySelector('h1')?.textContent).toBe('Profil');
 	});
 
 	describe('Passkeys', () => {
@@ -324,6 +325,6 @@ describe('Profil', () => {
 			.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
 		await stabil();
 
-		expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+		expect(navigiert).toHaveBeenCalledWith('/demo/anmelden?weiter=%2Fdemo%2Fprofil');
 	});
 });
