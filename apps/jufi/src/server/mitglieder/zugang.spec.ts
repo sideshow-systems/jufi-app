@@ -207,6 +207,55 @@ describe('Entfernen und Zugang entziehen', () => {
 		expect(await prisma.zugang.count({ where: { personId: kind.personId } })).toBe(1);
 	});
 
+	it('Entfernen eines Erwachsenen laesst volljaehrigen Kindern den Zugang', async () => {
+		const v = await neuerVerein();
+		const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+		await prisma.person.update({ where: { id: kind.personId }, data: { geburtsdatum: new Date('2000-01-01') } });
+		const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await v.verknuepfe(mutter.personId, kind.personId);
+		await v.willigtEin(kind.personId, mutter.personId);
+		expect((await v.entferne(mutter.personId)).status).toBe(200);
+		expect((await v.person(kind.personId)).zugangErlaubt).toBe(true);
+		expect(await prisma.zugang.count({ where: { personId: kind.personId } })).toBe(1);
+	});
+
+	it('Verein ohne Leitung: ein Jungfischer laesst sich trotzdem entfernen (kein 409)', async () => {
+		const v = await neuerVerein();
+		const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+		await prisma.person.update({ where: { id: v.leitung.personId }, data: { rechte: [] } });
+		expect((await v.entferne(kind.personId)).status).toBe(200);
+	});
+
+	it('offene Mails zu den geloeschten Einladungen fallen mit weg, gesendete und fremde bleiben', async () => {
+		const v = await neuerVerein();
+		const erw = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		const andere = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		const einladung = (personId: string) =>
+			prisma.einladung.create({
+				data: {
+					vereinId: v.verein.id,
+					personId,
+					art: 'EINLADUNG',
+					tokenHash: randomUUID(),
+					ablauf: new Date(Date.now() + 86_400_000),
+				},
+			});
+		const mail = (bezug: string, gesendetAm: Date | null = null) =>
+			prisma.mailWarteschlange.create({
+				data: { vereinId: v.verein.id, empfaenger: 'x@example.test', betreff: 'b', text: 't', bezug, gesendetAm },
+			});
+		const e1 = await einladung(erw.personId);
+		const e2 = await einladung(erw.personId);
+		const fremde = await einladung(andere.personId);
+		await mail(`einladung:${e1.id}`);
+		await mail(`reset:${e2.id}`);
+		const gesendet = await mail(`einladung:${e1.id}`, new Date());
+		const fremdeMail = await mail(`einladung:${fremde.id}`);
+		expect((await v.entferne(erw.personId)).status).toBe(200);
+		const rest = await prisma.mailWarteschlange.findMany({ where: { vereinId: v.verein.id } });
+		expect(rest.map((m) => m.id).sort()).toEqual([gesendet.id, fremdeMail.id].sort());
+	});
+
 	it('Leitung entfernt einen Jugendleiter: Rechte geleert, Grabstein', async () => {
 		const v = await neuerVerein();
 		const leiter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', rechte: ['MITGLIEDER', 'DOKUMENTE'] });

@@ -232,6 +232,20 @@ describe('Familie verknuepfen', () => {
 		expect(await hatZugang(kind.personId)).toEqual({ erlaubt: false, zugaenge: 0 });
 	});
 
+	it('volljaehriges Kind: Familie loesen und Wechsel auf nicht erziehungsberechtigt nehmen den Zugang nicht', async () => {
+		const v = await neuerVerein();
+		const { kind, mutter } = await kindMitEinwilligung(v);
+		await prisma.person.update({ where: { id: kind.personId }, data: { geburtsdatum: new Date('2000-01-01') } });
+		expect((await v.put(kind.personId, mutter.id, { beziehung: 'MUTTER', erziehungsberechtigt: false })).status).toBe(
+			200,
+		);
+		expect(await hatZugang(kind.personId)).toEqual({ erlaubt: true, zugaenge: 1 });
+		expect((await sende(server.url, `/${v.verein.slug}/api/v1/ich`, { cookie: kind.cookie })).status).toBe(200);
+		expect((await v.loesche(kind.personId, mutter.id)).status).toBe(204);
+		expect(await hatZugang(kind.personId)).toEqual({ erlaubt: true, zugaenge: 1 });
+		expect((await sende(server.url, `/${v.verein.slug}/api/v1/ich`, { cookie: kind.cookie })).status).toBe(200);
+	});
+
 	it('ohne MITGLIEDER: 404, nichts geschrieben', async () => {
 		const v = await neuerVerein();
 		const kind = await v.kind();

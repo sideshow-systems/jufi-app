@@ -1,5 +1,5 @@
 import type { Person, VereinDb } from '@jufi/db';
-import { hatGueltigeEinwilligung } from '@jufi/domain';
+import { hatGueltigeEinwilligung, istVolljaehrig } from '@jufi/domain';
 
 /** Der Transaktions-Client, den db.$transaction der Vereins-Routen reicht. */
 export type Transaktion = Parameters<Parameters<VereinDb['$transaction']>[0]>[0];
@@ -16,7 +16,21 @@ export type Transaktion = Parameters<Parameters<VereinDb['$transaction']>[0]>[0]
 export async function entzieheZugang(tx: Transaktion, kindId: string): Promise<void> {
 	await tx.person.update({ where: { id: kindId }, data: { zugangErlaubt: false } });
 	await tx.zugang.deleteMany({ where: { personId: kindId } });
-	await tx.einladung.deleteMany({ where: { personId: kindId, eingeloestAm: null } });
+	await loescheEinladungen(tx, { personId: kindId, eingeloestAm: null });
+}
+
+/**
+ * Loescht Einladungen samt ihrer noch nicht gesendeten Mails. Ohne das ginge ein Link
+ * hinaus, dessen Einladung es nicht mehr gibt, und der Mailarbeiter versuchte ihn bis zur
+ * Hoechstzahl der Versuche. Bezug heisst "einladung:<id>" bzw. "reset:<id>"; gesendete Mails
+ * bleiben (Nachweis, und der Arbeiter raeumt sie selbst auf).
+ */
+async function loescheEinladungen(tx: Transaktion, where: { personId: string; eingeloestAm?: null }): Promise<void> {
+	const einladungen = await tx.einladung.findMany({ where, select: { id: true } });
+	if (einladungen.length === 0) return;
+	const bezuege = einladungen.flatMap((e) => [`einladung:${e.id}`, `reset:${e.id}`]);
+	await tx.mailWarteschlange.deleteMany({ where: { bezug: { in: bezuege }, gesendetAm: null } });
+	await tx.einladung.deleteMany({ where: { id: { in: einladungen.map((e) => e.id) } } });
 }
 
 /**
@@ -31,6 +45,11 @@ export async function entzieheZugang(tx: Transaktion, kindId: string): Promise<v
  * Regel stuende dann an jeder Aufrufstelle noch einmal.
  */
 export async function entzieheZugangWennUngueltig(tx: Transaktion, kind: Person, jetzt: Date): Promise<void> {
+	// Die Einwilligung nach Art. 8 DSGVO braucht nur das minderjaehrige Kind (Spec 5.6); ein
+	// volljaehriges willigt selbst ein, und "Familie loesen" ist fuer es ausdruecklich erlaubt.
+	// Dagegen bleibt ein minderjaehriges Kind, das nie eine Einwilligung hatte, ohne Zugang:
+	// im Zweifel die sichere Seite.
+	if (istVolljaehrig(kind, jetzt)) return;
 	const [einwilligungen, zuordnungen] = await Promise.all([
 		tx.einwilligung.findMany({ where: { jungfischerId: kind.id } }),
 		tx.bezugsperson.findMany({ where: { jungfischerId: kind.id } }),
@@ -74,7 +93,7 @@ export async function entferne(tx: Transaktion, personId: string, jetzt: Date): 
 		},
 	});
 	await tx.zugang.deleteMany({ where: { personId } });
-	await tx.einladung.deleteMany({ where: { personId } });
+	await loescheEinladungen(tx, { personId });
 	await tx.bezugsperson.deleteMany({ where: { OR: [{ erwachsenerId: personId }, { jungfischerId: personId }] } });
 	await tx.untergruppeMitglied.deleteMany({ where: { personId } });
 

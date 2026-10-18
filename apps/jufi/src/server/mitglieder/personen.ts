@@ -480,9 +480,14 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 					if (!ziel || (istJugendleiter(ziel) && !hatRecht(ich, 'JUGENDLEITER_RECHTE'))) {
 						throw new Abbruch(404, NICHT_GEFUNDEN);
 					}
-					// Mit den Pruefungen oben nicht erreichbar (wer ein Leitungsrecht entfernt, hat es selbst und
-					// ist nicht das Ziel); bleibt als Netz, falls sich die Rechte-Regeln aendern.
-					if (wuerdeLetzteLeitungVerlieren(erwachsene.map(alsSicht), ziel.id, [])) {
+					// Nur wer selbst Leitung ist, kann sie verlieren: ein Verein, der schon ohne Leitung dasteht
+					// (Notfall-Link ausstehend), soll Jungfischer trotzdem entfernen koennen. Ueber die Routen
+					// ist der Fall sonst kaum erreichbar (wer ein Leitungsrecht entfernt, hat es selbst und ist
+					// nicht das Ziel); bleibt als Netz, falls sich die Rechte-Regeln aendern.
+					if (
+						hatRecht(ziel, 'JUGENDLEITER_RECHTE') &&
+						wuerdeLetzteLeitungVerlieren(erwachsene.map(alsSicht), ziel.id, [])
+					) {
 						throw new Abbruch(409, {
 							fehler: 'Der Verein braucht mindestens eine Person mit Recht zum Vergeben von Rechten',
 							code: 'LETZTE_LEITUNG',
