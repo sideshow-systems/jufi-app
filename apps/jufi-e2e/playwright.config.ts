@@ -32,8 +32,7 @@ export default defineConfig({
 	},
 	projects: [
 		{ name: 'ablauf', testMatch: 'ablauf.spec.ts' },
-		// Task 16 legt die Datei an. Bis dahin findet das Projekt nichts, und das ist kein Fehler,
-		// solange ablauf Tests hat. Haengt an ablauf, weil es dessen Sitzungen aus ZUSTAND liest.
+		// Haengt an ablauf, weil es dessen Sitzungen und Mias ID aus ZUSTAND liest.
 		{ name: 'layout', testMatch: 'layout.spec.ts', dependencies: ['ablauf'] },
 	],
 });

@@ -11,6 +11,8 @@
 		// Wie apps/jufi: Playwright loest ohne Dateiendungen auf, nodenext verlangte sie.
 		"moduleResolution": "bundler",
 		"module": "preserve",
+		// dom fuer die Messungen in page.evaluate (messen.ts, layout.spec.ts): Der Code dort laeuft im Browser.
+		"lib": ["es2022", "dom"],
 		"types": ["node"]
 	},
 	"include": ["playwright.config.ts", "src/**/*.ts"],
