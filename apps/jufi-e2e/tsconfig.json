@@ -1,0 +1,22 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		// Nur Typpruefung: Playwright uebersetzt die Dateien beim Laden selbst.
+		"noEmit": true,
+		"composite": false,
+		"declaration": false,
+		"declarationMap": false,
+		"emitDeclarationOnly": false,
+		"noPropertyAccessFromIndexSignature": true,
+		// Wie apps/jufi: Playwright loest ohne Dateiendungen auf, nodenext verlangte sie.
+		"moduleResolution": "bundler",
+		"module": "preserve",
+		"types": ["node"]
+	},
+	"include": ["playwright.config.ts", "src/**/*.ts"],
+	"references": [
+		{
+			"path": "../../libs/db"
+		}
+	]
+}
