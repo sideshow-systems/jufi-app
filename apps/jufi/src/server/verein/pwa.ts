@@ -52,7 +52,15 @@ export function pwaRouten(deps: VolleAppDeps): Router {
 					short_name: verein.anzeigename,
 					lang: 'de',
 					start_url: `/${verein.slug}/`,
-					scope: `/${verein.slug}/`,
+					// Ohne Schraegstrich am Ende: Nach der Manifest-Spec liegt eine Adresse im Scope, wenn ihr
+					// Pfad mit dem Scope-Pfad beginnt, und die App navigiert zu /<slug>, weil Angular den
+					// Schraegstrich am Ende wegnormalisiert (Start, "Zur App", nach der Anmeldung). Mit
+					// /<slug>/ laege jede dieser Adressen ausserhalb, und Chrome zeigte in der installierten
+					// App die Browserleiste. Formal liegt damit auch /<slug>-xyz/ im Scope; harmlos, denn das
+					// waere ein anderer Verein derselben App unter demselben Ursprung, und der Scope ist keine
+					// Sicherheitsgrenze, er entscheidet nur ueber die Browserleiste. Verworfen: alle Links auf
+					// /<slug>/ umbauen, das liefe an vielen Stellen gegen den Router.
+					scope: `/${verein.slug}`,
 					display: 'standalone',
 					background_color: FLAECHEN.hell.seite,
 					theme_color: vereinsfarben(verein.farbe).hell.akzent,

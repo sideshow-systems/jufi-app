@@ -69,7 +69,7 @@ describe('PWA-Manifest und Icons', () => {
 			short_name: 'Jungfischer Demo',
 			lang: 'de',
 			start_url: '/pwa-demo/',
-			scope: '/pwa-demo/',
+			scope: '/pwa-demo',
 			display: 'standalone',
 			background_color: FLAECHEN.hell.seite,
 			theme_color: vereinsfarben('#0f766e').hell.akzent,
