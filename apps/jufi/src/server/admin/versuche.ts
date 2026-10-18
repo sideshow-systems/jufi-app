@@ -33,6 +33,11 @@ export function reserviere(
 ): { wartenMs: number; loestSperreAus: boolean } {
 	const wartenMs = sperre(versuche, schluessel);
 	if (wartenMs > 0) return { wartenMs, loestSperreAus: false };
+	// Voller Speicher, lauter Sperren: ein neuer Schluessel wird abgelehnt statt
+	// eine Sperre zu verdraengen (fail-closed, siehe AttemptTracker). Das ist
+	// dieselbe Antwort wie eine Sperre, kein 500; gewartet wird, bis die
+	// naechste Sperre ablaeuft und wieder Platz ist.
+	if (!versuche.platzFuer(schluessel)) return { wartenMs: versuche.naechsteFreigabeMs(), loestSperreAus: false };
 	for (const s of schluessel) versuche.fail(s);
 	return { wartenMs: 0, loestSperreAus: sperre(versuche, schluessel) > 0 };
 }

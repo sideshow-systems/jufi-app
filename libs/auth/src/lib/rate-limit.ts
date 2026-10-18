@@ -76,17 +76,68 @@ export class AttemptTracker {
 		return this.remaining(key) > 0;
 	}
 
-	fail(key: string): AttemptState {
-		const next = recordFailure(this.aktuell(key), this.now());
-		// Neu einfügen statt überschreiben, damit die Map-Reihenfolge der letzten
-		// Aktivität folgt und beim Überlauf der am längsten ruhende Schlüssel geht.
+	/**
+	 * Ob alle Schluessel gezaehlt werden koennen, ohne eine aktive Sperre zu
+	 * verdraengen. Der Aufrufer fragt vor dem Zaehlen, damit eine Anfrage mit
+	 * mehreren Schluesseln ganz oder gar nicht gezaehlt wird.
+	 */
+	platzFuer(keys: string[]): boolean {
+		const neue = new Set(keys.filter((k) => !this.has(k))).size;
+		const frei = MAX_SCHLUESSEL - this.states.size;
+		if (neue <= frei) return true;
+		return this.ohneSperre() >= neue - frei;
+	}
+
+	/** Kuerzeste Restsperre aller gemerkten Schluessel in ms; sagt, wann fruehestens wieder Platz wird. */
+	naechsteFreigabeMs(): number {
+		let kleinste = MAX_DELAY_MS;
+		for (const key of this.states.keys()) {
+			const rest = this.remaining(key);
+			if (rest > 0) kleinste = Math.min(kleinste, rest);
+		}
+		return kleinste;
+	}
+
+	private ohneSperre(): number {
+		let n = 0;
+		for (const key of [...this.states.keys()]) if (this.remaining(key) === 0) n++;
+		return n;
+	}
+
+	/**
+	 * Zaehlt einen Fehlversuch. `undefined` heisst: der Schluessel ist neu, der
+	 * Speicher voll und jeder gemerkte Schluessel gesperrt -- der neue wird
+	 * abgelehnt (fail-closed, siehe `platzFuer`).
+	 */
+	fail(key: string): AttemptState | undefined {
+		const vorher = this.aktuell(key);
+		if (!vorher && this.states.size >= MAX_SCHLUESSEL && !this.verdraenge()) return undefined;
+		const next = recordFailure(vorher, this.now());
+		// Neu einfuegen statt ueberschreiben, damit die Map-Reihenfolge der letzten
+		// Aktivitaet (dem letzten Fehlversuch) folgt. Nur `fail` aendert sie; Lesen
+		// (`has`, `remaining`) laesst sie unberuehrt.
 		this.states.delete(key);
 		this.states.set(key, next);
-		if (this.states.size > MAX_SCHLUESSEL) {
-			const aeltester = this.states.keys().next().value;
-			if (aeltester !== undefined) this.states.delete(aeltester);
-		}
 		return next;
+	}
+
+	/**
+	 * Entfernt den aeltesten Schluessel ohne aktive Sperre. Gesperrte bleiben,
+	 * auch wenn sie die aeltesten sind. Verworfen: weiter schlicht den aeltesten
+	 * zu entfernen -- ein Angreifer loeschte so mit 10 000 erfundenen Schluesseln
+	 * eine laufende Sperre. Sind alle gesperrt, wird nichts entfernt (der Aufrufer
+	 * lehnt den neuen Schluessel ab): Verworfen: den neuen Schluessel ungezaehlt
+	 * durchlassen -- dann umginge, wer den Speicher voller Sperren haelt, jeden
+	 * Backoff fuer neue Schluessel.
+	 */
+	private verdraenge(): boolean {
+		for (const key of [...this.states.keys()]) {
+			if (this.remaining(key) === 0) {
+				this.states.delete(key);
+				return true;
+			}
+		}
+		return false;
 	}
 
 	reset(key: string): void {

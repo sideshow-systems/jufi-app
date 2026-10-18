@@ -325,9 +325,20 @@ describe('Anmelden', () => {
 		it('Erfolg setzt zurueck', async () => {
 			const { email } = await erwachsener(verein);
 			const falsch = { kennung: email, passwort: 'falsches-passwort-123' };
-			for (let i = 0; i < 3; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
+			for (let i = 0; i < 2; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
 			expect((await post(verein, '/anmelden', { kennung: email, passwort: PASSWORT })).status).toBe(200);
-			for (let i = 0; i < 3; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
+			// Die Kennung ist zurueckgesetzt: von einer anderen IP sind wieder drei frei.
+			for (let i = 0; i < 3; i++) expect((await post(verein, '/anmelden', falsch, '10.250.0.2')).status).toBe(401);
+		});
+
+		it('Erfolg eines Kontos laesst den m-ip-Zaehler stehen', async () => {
+			const eigenes = await erwachsener(verein);
+			const falsch = { kennung: 'gibt-es-nicht', passwort: 'falsches-passwort-123' };
+			// Zwei Fehlversuche des Angreifers, dann ein gueltiges Konto derselben IP:
+			// mit Zaehler 2 + Erfolg (3) loest schon der naechste Fehlversuch die Sperre aus.
+			for (let i = 0; i < 2; i++) expect((await post(verein, '/anmelden', falsch)).status).toBe(401);
+			expect((await post(verein, '/anmelden', { kennung: eigenes.email, passwort: PASSWORT })).status).toBe(200);
+			expect((await post(verein, '/anmelden', falsch)).status).toBe(429);
 		});
 
 		it('zwei Vereine mit gleicher Kennung teilen den Zaehler nicht', async () => {
