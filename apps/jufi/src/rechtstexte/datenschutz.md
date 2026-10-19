@@ -18,7 +18,7 @@ Die App verarbeitet vor allem Daten von Kindern und Jugendlichen (Jungfischer), 
 
 Technisch gilt:
 
-- Die Personen eines Vereins legt der Verein selbst an und pflegt sie (Jugendleiter mit dem Recht „Mitglieder verwalten“).
+- Die Personen eines Vereins legt der Verein selbst an und pflegt sie (Jugendleiter mit dem Recht „Mitglieder verwalten“). Einzige Ausnahme ist die erste Leitung: Sie erfasst der Plattform-Admin beim Anlegen des Vereins mit Vorname, Nachname und E-Mail-Adresse und schickt ihr die erste Einladung.
 - Der Plattform-Admin legt Vereine an, sperrt und entsperrt sie und kann der Leitung eines Vereins einen neuen Zugangslink erzeugen. Er sieht dabei nur Kennzahlen (Anzahl der Jungfischer und Erwachsenen, eingerichtete Zugänge, offene Einladungen, Tag der letzten Anmeldung im Verein) sowie Name und E-Mail-Adresse der Ansprechpartner des Vereins. Namen von Kindern und Familien, Personenlisten und Inhalte sieht er nicht.
 - Erzeugt der Plattform-Admin einen neuen Zugangslink für die Leitung, sieht der Verein das 30 Tage lang in seiner Verwaltung.
 
@@ -46,20 +46,21 @@ Technisch gilt:
 
 Jugendleiter sind Erwachsene mit mindestens einem Recht im Verein. Zusätzlich zu den Angaben für Erwachsene werden gespeichert:
 
-- ihre Rechte (zum Beispiel „Mitglieder verwalten“, „Jugendleiter & Rechte verwalten“, „Vereinseinstellungen“)
+- ihre Rechte (zum Beispiel „Mitglieder verwalten“, „Jugendleiter & Rechte verwalten“, „Einstellungen“)
 - auf Wunsch ein zweiter Anmeldefaktor (Einmalcodes aus einer Authenticator-App) mit zehn Wiederherstellungscodes
 
 **Für alle mit Zugang**
 
 - Zeitpunkt, an dem der Zugang eingerichtet wurde, und Zeitpunkt der letzten Anmeldung
 - Passwort, nur als Hash (siehe „Anmeldung und Sicherheit“)
-- Passkeys: öffentlicher Schlüssel, Kennung des Passkeys, ein aus dem Browser abgeleiteter Gerätename (etwa „iPhone“ oder „Mac“), ob der Passkey zwischen Geräten synchronisiert wird, Zeitpunkt der Einrichtung und der letzten Nutzung
+- Passkeys: öffentlicher Schlüssel, Kennung des Passkeys, Signaturzähler, die vom Gerät gemeldeten Übertragungswege (etwa USB oder intern), ein Name (zunächst aus dem Browser abgeleitet, etwa „iPhone“ oder „Mac“, im Profil frei änderbar), ob der Passkey zwischen Geräten synchronisiert wird, Zeitpunkt der Einrichtung und der letzten Nutzung
+- für die Dauer einer Anmeldung oder Passkey-Einrichtung eine Prüfzahl (Challenge), bei der Einrichtung mit der internen Kennung der Person; sie verfällt nach zwei Minuten
 - Sitzungen: Zeitpunkt der Anmeldung, zuletzt gesehen, Ablauf und die Browserkennung (User-Agent)
 - Einladungs- und Zurücksetzen-Links: für wen und von wem sie erzeugt wurden, Ablauf und ob der Link eingelöst wurde; der Link selbst nur als Hash
 
 **E-Mails**
 
-Für Einladungen und zum Zurücksetzen des Zugangs schreibt die App E-Mails mit Empfängeradresse, Betreff und Text in eine Warteschlange und versendet sie von dort.
+Für Einladungen (auch die erste Einladung und neue Zugangslinks der Leitung durch den Plattform-Admin) und zum Zurücksetzen des Zugangs schreibt die App E-Mails mit Empfängeradresse, Betreff und Text in eine Warteschlange und versendet sie von dort.
 
 **Plattform-Admin**
 
@@ -72,8 +73,8 @@ Offizieller Name, Anzeigename, Vereinsfarbe, ein freier Kontakttext und das Vere
 ## Wer im Verein was sieht
 
 - **Jugendleiter mit „Mitglieder verwalten“** sehen alle Personen des Vereins mit allen Angaben, auch E-Mail-Adressen, Einladungs- und Einwilligungsstand.
-- **Übrige Jugendleiter** (etwa Betreuer) sehen alle Personen lesend mit Name, Familie, Untergruppen und Jugendsprecher-Merkmal, aber keine E-Mail-Adressen.
-- **Familien und Jungfischer** sehen sich selbst, die eigenen Jungfischer und deren Familie sowie die Namen aller Jugendleiter als Ansprechpartner. Ein Mitgliederverzeichnis gibt es für sie nicht.
+- **Übrige Jugendleiter** (etwa Betreuer) sehen alle Personen lesend mit Name, Geburtsdatum, Familie, Untergruppen, Rechten und Jugendsprecher-Merkmal sowie die Hinweise „ohne Familie“ und „volljährig“, aber keine E-Mail-Adressen.
+- **Familien und Jungfischer** sehen sich selbst, die eigenen Jungfischer und deren Familie sowie die Namen aller Jugendleiter als Ansprechpartner. Den freien Kontakttext, den der Verein in seinen Einstellungen hinterlegt, sehen alle Angemeldeten auf der Startseite, auch Kinder. Ein Mitgliederverzeichnis gibt es für sie nicht.
 - Entfernte Personen sieht niemand mehr.
 
 ## Zwecke
@@ -115,9 +116,9 @@ Offizieller Name, Anzeigename, Vereinsfarbe, ein freier Kontakttext und das Vere
 - **Passkeys:** Die App speichert nur den öffentlichen Schlüssel. Der geheime Schlüssel bleibt auf Ihrem Gerät oder in Ihrem Passwortmanager; Fingerabdruck oder Gesichtsbild erhält die App nicht. Der Passkey trägt auf Ihrem Gerät die Bezeichnung „Vorname Nachname · Name der Gruppe“.
 - **Passwort:** Gespeichert wird nur ein Hash (Argon2id), nie das Passwort selbst.
 - **Zweiter Faktor:** Das Geheimnis für die Einmalcodes wird verschlüsselt gespeichert (AES-256-GCM). Den QR-Code zur Einrichtung erzeugt die App selbst, ohne fremden Dienst. Die zehn Wiederherstellungscodes werden nur als Hash gespeichert.
-- **Links:** Einladungs- und Zurücksetzen-Links werden nur als Hash gespeichert. Das Geheimnis im Link steht hinter einem `#` und wird deshalb beim Aufruf nicht an den Server übertragen. Eine Einladung gilt 14 Tage, ein Link zum Zurücksetzen eine Stunde.
+- **Links:** Einladungs- und Zurücksetzen-Links werden in der Datenbank nur als Hash gespeichert. Ausnahme ist die E-Mail, die den Link überbringt: Bis zum Versand steht ihr Text mit dem Link in der Versandwarteschlange (siehe „Speicherdauer und Löschung“). Das Geheimnis im Link steht hinter einem `#` und wird deshalb beim Aufruf nicht an den Server übertragen. Eine Einladung gilt 14 Tage, ein Link zum Zurücksetzen eine Stunde.
 - **Sitzungen:** In der Datenbank steht nur ein Hash des Sitzungstokens. Unter „Profil“ können Sie sich auf allen Geräten abmelden.
-- **Fehlversuche:** Nach drei falschen Anmeldeversuchen wartet die App zunehmend länger (höchstens 15 Minuten). Dafür merkt sie sich Kennung und IP-Adresse nur im Arbeitsspeicher; der Eintrag verfällt 15 Minuten nach dem letzten Fehlversuch und bei jedem Neustart.
+- **Fehlversuche:** Nach drei falschen Anmeldeversuchen wartet die App zunehmend länger (höchstens 15 Minuten). Dafür merkt sie sich Kennung und IP-Adresse nur im Arbeitsspeicher; der Eintrag zählt 15 Minuten nach dem letzten Fehlversuch nicht mehr und wird spätestens bei einem Neustart verworfen.
 - Die Verbindung ist verschlüsselt (HTTPS).
 
 ## Cookies und lokale Speicherung
@@ -137,8 +138,8 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 
 ## Protokolle
 
-- **Protokoll des Plattform-Admins:** welcher Admin wann welche Aktion an welchem Verein ausgeführt hat (Verein angelegt, gesperrt, entsperrt, Adresse korrigiert, neuer Zugangslink für die Leitung, erste Einladung erneuert), bei einem Zugangslink auch die interne Kennung der betroffenen Person, ohne Namen. Das Protokoll bleibt auch nach dem Löschen eines Vereins bestehen. [Aufbewahrungsdauer des Admin-Protokolls — liefert der Eigentümer; im Code ist keine Löschfrist festgelegt]
-- **Betriebsprotokoll der App:** Die App schreibt keine Namen, E-Mail-Adressen oder Zugangslinks in ihr Protokoll. Beim Mailversand stehen dort nur eine interne Nummer der Mail und gegebenenfalls die Art des Fehlers, bei Programmfehlern Anfrageart und Pfad.
+- **Protokoll des Plattform-Admins:** welcher Admin wann welche Aktion an welchem Verein ausgeführt hat (Verein angelegt, gesperrt, entsperrt, Adresse korrigiert, neuer Zugangslink für die Leitung, erste Einladung erneuert), beim Anlegen des Vereins, bei erneuerter erster Einladung und bei einem Zugangslink auch die interne Kennung der betroffenen Person, ohne Namen. Das Protokoll bleibt auch nach dem Löschen eines Vereins bestehen. [Aufbewahrungsdauer des Admin-Protokolls — liefert der Eigentümer; im Code ist keine Löschfrist festgelegt]
+- **Betriebsprotokoll der App:** Die App schreibt keine Namen, E-Mail-Adressen oder Zugangslinks in ihr Protokoll. Beim Mailversand stehen dort nur eine interne Nummer der Mail und gegebenenfalls die Art des Fehlers, bei Programmfehlern Anfrageart, Pfad und die technische Fehlermeldung. Eine solche Meldung kann im Einzelfall Eingabewerte wiedergeben, etwa einen Namen. [Aufbewahrungsdauer des Betriebsprotokolls — liefert der Eigentümer]
 - [Protokolle des Webservers bzw. Proxys und des Hosters (etwa IP-Adressen beim Seitenaufruf) und deren Aufbewahrungsdauer — liefert der Eigentümer]
 
 ## Speicherdauer und Löschung
@@ -146,13 +147,15 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 - **Personen:** bleiben gespeichert, bis die Verwaltung sie aus der Gruppe entfernt. Beim Entfernen werden Name, Geburtsdatum, E-Mail-Adresse, Rechte und Jugendsprecher-Merkmal geleert; Zugang, Passwort, Passkeys, zweiter Faktor, Sitzungen, Einladungen, Familienzuordnungen und Untergruppen werden gelöscht. Es bleibt ein Datensatz ohne Namen und Kontaktdaten (unter anderem Art der Person sowie Zeitpunkt von Anlage und Entfernen), damit Einwilligungen und spätere Verweise als „ehemaliges Mitglied“ erhalten bleiben.
 - **Einwilligungen:** werden nie gelöscht, nur widerrufen, und bleiben auch nach dem Entfernen der Person als Nachweis stehen.
 - **Sitzungen:** enden 90 Tage nach der letzten Verlängerung oder beim Abmelden; abgelaufene Sitzungen löscht die App selbsttätig.
-- **Einladungen:** Ein neuer Link ersetzt den offenen alten derselben Art; eingelöste Einladungen bleiben bis zum Entfernen der Person. Beim Einlösen eines neuen Links für einen bestehenden Zugang werden altes Passwort, Passkeys, zweiter Faktor und alle Sitzungen gelöscht.
-- **E-Mails:** Nach dem Versand wird der Text der Mail sofort geleert; Empfänger und Betreff bleiben 30 Tage für Rückfragen stehen und werden dann gelöscht. Mails, die nicht zugestellt werden konnten, bleiben mit Text stehen, damit die Verwaltung den Hinweis „Einladungsmail nicht zustellbar“ sieht; wird die zugehörige Einladung gelöscht, fällt eine noch nicht gesendete Mail mit weg. [Frist für endgültig nicht zustellbare Mails — liefert der Eigentümer; im Code ist keine festgelegt]
+- **Einladungen:** Ein neuer Link ersetzt den alten derselben Art; eingelöste und abgelaufene, nie eingelöste Einladungen bleiben bis dahin oder bis zum Entfernen der Person stehen. [Löschfrist für abgelaufene Einladungen — liefert der Eigentümer; im Code ist keine festgelegt] Beim Einlösen eines neuen Links für einen bestehenden Zugang werden altes Passwort, Passkeys, zweiter Faktor und alle Sitzungen gelöscht.
+- **E-Mails:** Nach dem Versand wird der Text der Mail sofort geleert; Empfänger und Betreff bleiben 30 Tage für Rückfragen stehen und werden dann gelöscht. Mails, die nicht zugestellt werden konnten, bleiben mit Text stehen, damit die Verwaltung den Hinweis „Einladungsmail nicht zustellbar“ sieht; wird der Zugang entzogen oder die Person entfernt, fällt eine noch nicht gesendete Mail mit weg. Ersetzt ein neuer Link den alten, bleibt eine noch nicht gesendete oder nicht zustellbare Mail mit dem alten Link stehen; der alte Link selbst gilt dann nicht mehr. [Frist für endgültig nicht zustellbare Mails — liefert der Eigentümer; im Code ist keine festgelegt]
 - **Verein:** Wird ein Verein gelöscht (etwa nach einer Kündigung), entfernt der Betreiber ihn mit allen Daten; erhalten bleibt nur das Protokoll des Plattform-Admins.
 - **Darstellungswahl im Browser:** bis Sie sie im Browser löschen.
 - In den Sicherungskopien bleiben gelöschte Daten bis zum Ablauf der jeweiligen Kopie erhalten (siehe „Sicherung“).
 
 ## Sicherung
+
+[Geplant, noch nicht in Betrieb — nach der Inbetriebnahme vom Eigentümer zu bestätigen]
 
 - Die Datenbank wird täglich gesichert, verschlüsselt und auf einen getrennten Speicher außer Haus übertragen (ein zweites Konto bei Hetzner, eigenes Passwort für die Sicherung).
 - Aufbewahrt werden 7 tägliche, 4 wöchentliche und 6 monatliche Stände. Eine Sicherung kann also bis zu etwa sechs Monate alt werden.
@@ -160,7 +163,7 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 
 ## Auftragsverarbeiter und Empfänger
 
-- **Hetzner** ([Firma und Anschrift der Hetzner-Gesellschaft, Standort des Rechenzentrums, Vertrag zur Auftragsverarbeitung — liefert der Eigentümer]): Server und Datenbank, Versand der E-Mails über den Mailserver von Hetzner und Speicher für die Sicherungskopien.
+- **Hetzner** ([Firma und Anschrift der Hetzner-Gesellschaft, Standort des Rechenzentrums, Vertrag zur Auftragsverarbeitung — liefert der Eigentümer]): Server und Datenbank; geplant außerdem Versand der E-Mails über den Mailserver von Hetzner und Speicher für die Sicherungskopien [nach Inbetriebnahme bestätigen — liefert der Eigentümer].
 - **Keine Drittanbieter-Einbindungen:** Die App lädt keine Schriften, Skripte, Bilder oder sonstige Inhalte von fremden Servern und bindet keine Analyse-, Werbe- oder Social-Media-Dienste ein.
 - Die App selbst gibt keine Daten an weitere Dienste weiter. [Übermittlung in Länder außerhalb der EU: Bestätigung für Hosting, Mailversand und Sicherung — liefert der Eigentümer]
 - Innerhalb des Vereins sehen Jugendleiter und Familien Daten nur im Umfang von „Wer im Verein was sieht“.
@@ -171,7 +174,7 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 
 In der App gilt:
 
-- **Auskunft:** Unter „Profil“ lädt „Meine Daten herunterladen“ eine Datei mit Ihren gespeicherten Angaben: Personendaten samt Rechten, ob ein Zugang erlaubt ist und wann die Volljährigkeit geprüft wurde; Zugang (Anmeldename, ob Passwort und zweiter Faktor gesetzt sind, Zeitpunkte); ob Wiederherstellungscodes eingerichtet sind und wie viele noch unbenutzt sind; noch gültige Einladungs- und Rücksetzlinks mit Erzeugung und Ablauf; Namen der Passkeys, Sitzungen, Familie, Untergruppen und Einwilligungen. Über andere Personen enthält die Datei nur Namen, Beziehung und Erziehungsberechtigung, bei eigenen Kindern zusätzlich, ob deren Zugang erlaubt ist und ob für sie ein Link offen ist. Passwort-Hash, die Wiederherstellungscodes selbst, Links, Geheimnisse und Schlüssel enthält sie nicht. Ebenfalls nicht enthalten sind technische Kennungen, die vollständige Browserkennung der Sitzungen, die Abschriften verschickter E-Mails in der Versandwarteschlange und Einladungen, die Sie für andere Personen erzeugt haben. [Weg zur Auskunft über diese Angaben — liefert der Eigentümer] Für Kinder ohne eigenen Zugang gibt es keinen eigenen Auszug in der App. [Weg zur Auskunft für Personen ohne Zugang — liefert der Eigentümer]
+- **Auskunft:** Unter „Profil“ lädt „Meine Daten herunterladen“ eine Datei mit Ihren gespeicherten Angaben: Personendaten samt Rechten, ob ein Zugang erlaubt ist und wann die Volljährigkeit geprüft wurde; Zugang (Anmeldename, ob Passwort und zweiter Faktor gesetzt sind, Zeitpunkte); ob Wiederherstellungscodes eingerichtet sind und wie viele noch unbenutzt sind; noch gültige Einladungs- und Rücksetzlinks mit Erzeugung und Ablauf; Namen der Passkeys, Sitzungen, Familie (mit Zeitpunkt der Zuordnung), Untergruppen und Einwilligungen. Über andere Personen enthält die Datei nur Namen, Beziehung und Erziehungsberechtigung, bei Ihren Kindern zusätzlich, ob deren Zugang erlaubt ist. Nur bei minderjährigen Kindern, für die Sie erziehungsberechtigt sind, kommen hinzu, wann die Volljährigkeit geprüft wurde und welche Links für sie noch gültig sind (Art, Erzeugung, Ablauf). Passwort-Hash, die Wiederherstellungscodes selbst, Links, Geheimnisse und Schlüssel enthält sie nicht. Ebenfalls nicht enthalten sind technische Kennungen, die vollständige Browserkennung der Sitzungen, die Abschriften verschickter E-Mails in der Versandwarteschlange und Einladungen, die Sie für andere erzeugt haben, soweit sie nicht als noch gültige Links Ihrer Kinder aufgeführt sind. [Weg zur Auskunft über diese Angaben — liefert der Eigentümer] Für Kinder ohne eigenen Zugang gibt es keinen eigenen Auszug in der App. [Weg zur Auskunft für Personen ohne Zugang — liefert der Eigentümer]
 - **Berichtigung:** Im Profil sind Name und Kennung nur lesbar. Namen, Geburtsdatum, E-Mail-Adresse, Untergruppen und Familienzuordnungen ändert die Verwaltung des Vereins (Recht „Mitglieder verwalten“); Angaben zu Jugendleitern ändert nur, wer „Jugendleiter & Rechte verwalten“ hat. Die E-Mail-Adresse eines Erwachsenen, der bereits einen Zugang eingerichtet hat, lässt sich in der App derzeit nicht ändern. Passwort, Passkeys und zweiten Faktor verwalten Sie selbst im Profil.
 - **Erziehungsberechtigte** können unter „Meine Jungfischer“ den Zugang ihres Kindes erlauben oder entziehen, einen neuen Link erzeugen und ihre Einwilligung geben oder widerrufen. Namen und Zuordnungen ändern sie nicht; das bleibt beim Verein.
 - **Löschung:** Ein Konto löscht man in der App nicht selbst; das Entfernen übernimmt die Verwaltung des Vereins (siehe „Speicherdauer und Löschung“).
