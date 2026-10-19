@@ -528,6 +528,23 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	'POST /profil/totp/bestaetigen': (k) => profilOhneId(k, 'POST', '/profil/totp/bestaetigen'),
 	'GET /ich/daten': async (k) => {
 		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ich/daten`, { cookie });
+		// Eine eigene Person im Nachbarverein, damit der Fall keinen Stand der anderen Faelle veraendert:
+		// offene Einladung und Wiederherstellungscodes, die der Auszug aus eigen nicht kennen darf.
+		const nachbar = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
+		const einladung = await k.prisma.einladung.create({
+			data: {
+				vereinId: k.fremd.id,
+				personId: nachbar.personId,
+				art: 'RESET',
+				tokenHash: `einladung-${randomUUID()}`,
+				ablauf: new Date('2031-03-04T05:06:07.000Z'),
+				angelegtAm: new Date('2030-02-03T04:05:06.000Z'),
+			},
+		});
+		const codeHashes = [`code-${randomUUID()}`, `code-${randomUUID()}`];
+		await k.prisma.recoveryCode.createMany({
+			data: codeHashes.map((codeHash) => ({ vereinId: k.fremd.id, zugangId: nachbar.zugangId, codeHash })),
+		});
 		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
 		// Die Sitzung gilt nur im eigenen Verein: mit dem Slug von fremd kein Auszug, auch nicht der eigene.
 		const fremd = await hole(k.fremd.slug, k.eigenesCookie);
@@ -536,10 +553,26 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Gegenprobe: In eigen geht es, und der Auszug gehoert der Person der Sitzung.
 		const r = await hole(k.eigen.slug, k.eigenesCookie);
 		expect(r.status).toBe(200);
-		const auszug = (await r.json()) as { verein: unknown; zugang: unknown };
+		const auszug = (await r.json()) as { verein: unknown; zugang: unknown; offeneEinladungen: unknown };
 		expect(auszug.zugang).not.toBeNull();
 		const fremdePerson = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } });
 		expect(JSON.stringify(auszug)).not.toContain(fremdePerson.email ?? 'keine-adresse');
+		// Von der fremden Einladung und den fremden Codes steht keine Spur im Auszug: weder Hash noch
+		// Id noch die Zeitstempel; die Codes zaehlen auch nicht in die eigene Zahl.
+		const text = JSON.stringify(auszug);
+		for (const spur of [
+			einladung.tokenHash,
+			einladung.id,
+			'2030-02-03T04:05:06',
+			'2031-03-04T05:06:07',
+			...codeHashes,
+		]) {
+			expect(text).not.toContain(spur);
+		}
+		expect(auszug).toMatchObject({
+			wiederherstellungscodes: { eingerichtet: false, unbenutzt: 0 },
+			offeneEinladungen: [],
+		});
 	},
 	'GET /ansprechpartner': async (k) => {
 		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ansprechpartner`, { cookie });
@@ -549,9 +582,13 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Gegenprobe: In eigen geht es, und die Liste enthaelt dort niemanden aus fremd.
 		const r = await hole(k.eigen.slug, k.eigenesCookie);
 		expect(r.status).toBe(200);
-		const { ansprechpartner } = (await r.json()) as { ansprechpartner: { id: string }[] };
+		const text = await r.text();
+		const { ansprechpartner, kontakt } = JSON.parse(text) as { ansprechpartner: { id: string }[]; kontakt: string };
 		expect(ansprechpartner.length).toBeGreaterThan(0);
 		expect(ansprechpartner.map((a) => a.id)).not.toContain(k.fremdePersonId);
+		// Der Kontakt gehoert dem eigenen Verein; der des Nachbarn steht nirgends in der Antwort.
+		expect(kontakt).toBe('Kontakt von eigen');
+		expect(text).not.toContain('Kontakt von fremd');
 	},
 	// Der Hinweis liest AdminProtokoll mit dem schlichten PrismaClient (Plan-Entscheidung 2); gerade
 	// deshalb darf der Eintrag eines anderen Vereins nie durchkommen, auch nicht mit Namen.
@@ -609,8 +646,8 @@ describe('Mandanten-Test', () => {
 
 	beforeAll(async () => {
 		const [eigen, fremd, gesperrt] = await Promise.all([
-			legeVereinAn(prisma, { slug: 'mandant-eigen' }),
-			legeVereinAn(prisma, { slug: 'mandant-fremd' }),
+			legeVereinAn(prisma, { slug: 'mandant-eigen', kontakt: 'Kontakt von eigen' }),
+			legeVereinAn(prisma, { slug: 'mandant-fremd', kontakt: 'Kontakt von fremd' }),
 			legeVereinAn(prisma, { slug: 'mandant-gesperrt', status: 'GESPERRT' }),
 		]);
 		server = await starteTestServer(app);

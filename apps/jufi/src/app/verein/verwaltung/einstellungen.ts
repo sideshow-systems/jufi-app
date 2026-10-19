@@ -15,7 +15,7 @@ import { initialen, LOGO_MAX_BYTES, LOGO_ZU_GROSS } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
-import { farbeAngepasst, vereinsfarben } from '../../gestaltung/farben';
+import { vereinsfarben } from '../../gestaltung/farben';
 import { MeldungService } from '../../gestaltung/meldung';
 import { ThemaService } from '../../gestaltung/thema';
 import { KarteComponent } from '../../gestaltung/ui';
@@ -119,7 +119,9 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 									(input)="kontakt.set(wert($event))"
 								></textarea>
 							</label>
-							<p id="kontakt-hinweis" class="hinweis gedaempft klein">Wird Mitgliedern noch nicht angezeigt.</p>
+							<p id="kontakt-hinweis" class="hinweis gedaempft klein">
+								Steht auf der Startseite bei „Ansprechpartner“.
+							</p>
 							@if (fehlerBei('kontakt'); as text) {
 								<p id="kontakt-fehler" class="fehler" role="alert">{{ text }}</p>
 							}
@@ -150,6 +152,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 				<jf-karte>
 					<form aria-label="Vereinsfarbe" (submit)="speichereFarbe($event)">
 						<h2>Vereinsfarbe</h2>
+						<!-- Kein Hinweis, wenn die App den Ton anpasst: AA auf Weiss und AA auf der dunklen Karte schliessen sich aus, also erschiene er bei jeder Farbe. Verworfen: ein Hinweis nur bei starker Abweichung, denn der Schwellwert waere willkuerlich, und die beiden Muster zeigen den Ton ohnehin. -->
 						<div class="farbe">
 							<input
 								type="color"
@@ -172,16 +175,6 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 								>Dunkel</span
 							>
 						</div>
-						@if (angepasst().hell) {
-							<p id="farbe-hinweis-hell" class="gedaempft klein">
-								Für gute Lesbarkeit verwendet die App im hellen Modus einen angepassten Ton.
-							</p>
-						}
-						@if (angepasst().dunkel) {
-							<p id="farbe-hinweis-dunkel" class="gedaempft klein">
-								Für gute Lesbarkeit verwendet die App im dunklen Modus einen angepassten Ton.
-							</p>
-						}
 						<p id="farbe-hinweis" class="gedaempft klein">
 							Die Vorschau gilt sofort in der ganzen App, bis du die Seite verlässt oder speicherst.
 						</p>
@@ -377,22 +370,12 @@ export class EinstellungenComponent implements OnInit {
 	 */
 	protected readonly anzeigenameLaenge = computed(() => [...this.anzeigename().trim()].length);
 	/**
-	 * Was der Farbwaehler beschreibt: die Hinweise zum angepassten Ton, die Vorschau-Zeile und, solange er
-	 * steht, der Fehler. Ein Screenreader erfaehrt den angepassten Ton sonst nur, wenn er die Karte durchliest;
-	 * die Hinweise sind keine Live-Region, weil sie sich mit jedem Ziehen im Farbwaehler aendern koennen.
+	 * Was der Farbwaehler beschreibt: die Vorschau-Zeile und, solange er steht, der Fehler.
 	 */
 	protected readonly farbeBeschreibung = computed(() =>
-		[
-			this.angepasst().hell ? 'farbe-hinweis-hell' : null,
-			this.angepasst().dunkel ? 'farbe-hinweis-dunkel' : null,
-			'farbe-hinweis',
-			this.allgemeinerFehler('farbe') ? 'farbe-fehler' : null,
-		]
-			.filter((id) => id !== null)
-			.join(' '),
+		['farbe-hinweis', this.allgemeinerFehler('farbe') ? 'farbe-fehler' : null].filter((id) => id !== null).join(' '),
 	);
 	protected readonly satz = computed(() => vereinsfarben(this.farbe()));
-	protected readonly angepasst = computed(() => farbeAngepasst(this.farbe()));
 	protected readonly vereinGeaendert = computed(() => Object.keys(this.vereinAenderung()).length > 0);
 	protected readonly farbeGeaendert = computed(() => {
 		const g = this.gespeichert();

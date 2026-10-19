@@ -51,6 +51,16 @@ describe('Meine Daten herunterladen', () => {
 			where: { id: mutter.zugangId },
 			data: { totpAktivAm: new Date('2026-09-01T10:00:00.000Z'), totpGeheimnis: 'geheim-verschluesselt-xyz' },
 		});
+		// Drei Codes, einer davon verbraucht: "unbenutzt" zaehlt nur die offenen.
+		const codeHashes = [`code-${randomUUID()}`, `code-${randomUUID()}`, `code-${randomUUID()}`, `code-${randomUUID()}`];
+		await prisma.recoveryCode.createMany({
+			data: codeHashes.map((codeHash, i) => ({
+				vereinId: verein.id,
+				zugangId: mutter.zugangId,
+				codeHash,
+				verwendetAm: i === 0 ? new Date('2026-10-05T10:00:00.000Z') : null,
+			})),
+		});
 		await prisma.passkey.create({
 			data: {
 				vereinId: verein.id,
@@ -98,7 +108,7 @@ describe('Meine Daten herunterladen', () => {
 			},
 		});
 		const hole = (cookie?: string, slug = verein.slug) => sende(server.url, `/${slug}/api/v1/ich/daten`, { cookie });
-		return { verein, api, mutter, kind, zweiteSitzung, hole };
+		return { verein, api, mutter, kind, zweiteSitzung, codeHashes, hole };
 	}
 
 	it('Mutter: alle Felder sind befuellt und der Antwortkopf passt', async () => {
@@ -121,6 +131,9 @@ describe('Meine Daten herunterladen', () => {
 			email: expect.stringMatching(/^mara-.*@example\.test$/),
 			// Nur bei Jungfischern gibt es die Angabe; bei Erwachsenen ist sie keine Antwort "nein".
 			jugendsprecher: null,
+			// Wie jugendsprecher: Die Angaben zum Zugang und zur Volljaehrigkeit gibt es nur bei Jungfischern.
+			zugangErlaubt: null,
+			volljaehrigGeprueftAm: null,
 			rechte: ['MITGLIEDER'],
 			angelegtAm: expect.any(String),
 		});
@@ -128,19 +141,25 @@ describe('Meine Daten herunterladen', () => {
 			anmeldename: null,
 			passwortGesetzt: true,
 			totpAktiv: true,
+			totpAktivAm: '2026-09-01T10:00:00.000Z',
 			angelegtAm: expect.any(String),
 			letzteAnmeldungAm: '2026-10-18T22:30:00.000Z',
 		});
+		// Nur ob und wie viele, nie die Codes selbst.
+		expect(auszug.wiederherstellungscodes).toEqual({ eingerichtet: true, unbenutzt: 3 });
+		expect(auszug.offeneEinladungen).toEqual([]);
 		expect(auszug.passkeys).toEqual([
 			{ name: 'iPhone', angelegtAm: '2026-08-01T08:00:00.000Z', zuletztGenutztAm: '2026-10-01T08:00:00.000Z' },
 		]);
 		expect(auszug.sitzungen).toHaveLength(2);
 		expect(auszug.sitzungen).toContainEqual({
+			angelegtAm: expect.any(String),
 			zuletztGesehen: '2026-10-10T00:00:00.000Z',
 			ablauf: '2027-01-01T00:00:00.000Z',
 			geraet: 'iPhone',
 		});
 		expect(auszug.sitzungen).toContainEqual({
+			angelegtAm: '2026-10-18T22:30:00.000Z',
 			zuletztGesehen: '2026-10-18T22:30:00.000Z',
 			ablauf: expect.any(String),
 			geraet: null,
@@ -153,6 +172,10 @@ describe('Meine Daten herunterladen', () => {
 				beziehungFreitext: null,
 				erziehungsberechtigt: true,
 				rolle: 'kind',
+				angelegtAm: expect.any(String),
+				zugangErlaubt: true,
+				volljaehrigGeprueftAm: null,
+				offeneEinladungen: [],
 			},
 		]);
 		expect(auszug.untergruppen).toEqual([]);
@@ -175,6 +198,8 @@ describe('Meine Daten herunterladen', () => {
 			art: 'JUNGFISCHER',
 			geburtsdatum: '2015-05-05',
 			jugendsprecher: false,
+			zugangErlaubt: true,
+			volljaehrigGeprueftAm: null,
 			rechte: [],
 		});
 		expect(auszug.untergruppen).toEqual(['Forellen']);
@@ -186,6 +211,11 @@ describe('Meine Daten herunterladen', () => {
 				beziehungFreitext: null,
 				erziehungsberechtigt: true,
 				rolle: 'bezugsperson',
+				angelegtAm: expect.any(String),
+				// Zugang und Einladungen der Mutter gehen das Kind nichts an.
+				zugangErlaubt: null,
+				volljaehrigGeprueftAm: null,
+				offeneEinladungen: null,
 			},
 		]);
 		expect(auszug.einwilligungen).toEqual([
@@ -227,6 +257,183 @@ describe('Meine Daten herunterladen', () => {
 		expect(text).not.toContain(zeile.passkeys[0]?.credentialId as string);
 		// Das Cookie-Token ist der Klartext zum Hash der eigenen Sitzung und darf ebenso wenig auftauchen.
 		expect(text).not.toContain(f.mutter.cookie.split('=')[1] as string);
+	});
+
+	it('Wiederherstellungscodes: nur ob und wie viele, weder Code noch Hash', async () => {
+		const f = await neueFamilie();
+		const text = await (await f.hole(f.mutter.cookie)).text();
+		expect(JSON.parse(text).wiederherstellungscodes).toEqual({ eingerichtet: true, unbenutzt: 3 });
+		for (const hash of f.codeHashes) expect(text).not.toContain(hash);
+		expect(text).not.toContain('codeHash');
+		// Ohne Codes (Zugang ohne TOTP): eingerichtet false, nicht fehlend.
+		const kind = JSON.parse(await (await f.hole(f.kind.cookie)).text());
+		expect(kind.wiederherstellungscodes).toEqual({ eingerichtet: false, unbenutzt: 0 });
+	});
+
+	it('offene Einladungen: eigene und die der Kinder mit Erzeugung und Ablauf, nie Token oder Hash', async () => {
+		const f = await neueFamilie();
+		const mara = await prisma.einladung.create({
+			data: {
+				vereinId: f.verein.id,
+				personId: f.mutter.personId,
+				art: 'RESET',
+				tokenHash: `token-hash-${randomUUID()}`,
+				ablauf: new Date('2026-10-20T12:00:00.000Z'),
+				angelegtAm: new Date('2026-10-18T12:00:00.000Z'),
+			},
+		});
+		const kai = await prisma.einladung.create({
+			data: {
+				vereinId: f.verein.id,
+				personId: f.kind.personId,
+				art: 'EINLADUNG',
+				tokenHash: `token-hash-${randomUUID()}`,
+				ablauf: new Date('2026-10-25T12:00:00.000Z'),
+				angelegtAm: new Date('2026-10-17T12:00:00.000Z'),
+			},
+		});
+		// Nicht offen: eingeloest, abgelaufen. Beides gehoert nicht in "offen".
+		const unwichtig = await prisma.einladung.createManyAndReturn({
+			data: [
+				{
+					vereinId: f.verein.id,
+					personId: f.kind.personId,
+					art: 'RESET',
+					tokenHash: `token-hash-${randomUUID()}`,
+					ablauf: new Date('2026-10-30T12:00:00.000Z'),
+					eingeloestAm: new Date('2026-10-16T12:00:00.000Z'),
+				},
+				{
+					vereinId: f.verein.id,
+					personId: f.mutter.personId,
+					art: 'EINLADUNG',
+					tokenHash: `token-hash-${randomUUID()}`,
+					ablauf: new Date('2026-10-18T22:29:59.000Z'),
+				},
+			],
+		});
+		// Einladung einer fremden Person im selben Verein: gehoert nicht in diesen Auszug.
+		const fremd = await legeMitgliedAn(prisma, f.verein, { art: 'ERWACHSENER' });
+		const fremdEinladung = await prisma.einladung.create({
+			data: {
+				vereinId: f.verein.id,
+				personId: fremd.personId,
+				art: 'EINLADUNG',
+				tokenHash: `token-hash-${randomUUID()}`,
+				ablauf: new Date('2026-11-01T12:00:00.000Z'),
+				angelegtAm: new Date('2026-10-01T01:02:03.000Z'),
+			},
+		});
+
+		const text = await (await f.hole(f.mutter.cookie)).text();
+		const auszug = JSON.parse(text);
+		expect(auszug.offeneEinladungen).toEqual([
+			{ art: 'RESET', angelegtAm: '2026-10-18T12:00:00.000Z', ablauf: '2026-10-20T12:00:00.000Z' },
+		]);
+		expect(auszug.familie[0].offeneEinladungen).toEqual([
+			{ art: 'EINLADUNG', angelegtAm: '2026-10-17T12:00:00.000Z', ablauf: '2026-10-25T12:00:00.000Z' },
+		]);
+		for (const e of [mara, kai, fremdEinladung, ...unwichtig]) {
+			expect(text).not.toContain(e.tokenHash);
+			expect(text).not.toContain(e.id);
+		}
+		expect(text).not.toContain('tokenHash');
+		expect(text).not.toContain('2026-10-01T01:02:03');
+	});
+
+	it('Zugang gesperrt und Volljaehrigkeit geprueft: beim Kind und in der Familie der Mutter', async () => {
+		const f = await neueFamilie();
+		await prisma.person.update({
+			where: { id: f.kind.personId },
+			data: { zugangErlaubt: false, volljaehrigGeprueftAm: new Date('2026-10-12T08:00:00.000Z') },
+		});
+		// Die Sitzung des Kindes zaehlt bei gesperrtem Zugang nicht mehr; die Mutter sieht den Stand trotzdem.
+		const mutter = await (await f.hole(f.mutter.cookie)).json();
+		expect(mutter.familie[0]).toMatchObject({
+			rolle: 'kind',
+			zugangErlaubt: false,
+			volljaehrigGeprueftAm: '2026-10-12T08:00:00.000Z',
+		});
+		await prisma.person.update({ where: { id: f.kind.personId }, data: { zugangErlaubt: true } });
+		const kind = await (await f.hole(f.kind.cookie)).json();
+		expect(kind.person).toMatchObject({ zugangErlaubt: true, volljaehrigGeprueftAm: '2026-10-12T08:00:00.000Z' });
+	});
+
+	describe('Linkstand und Volljaehrigkeitspruefung des Kindes nur fuer Erziehungsberechtigte eines Minderjaehrigen', () => {
+		async function mitOffenerEinladungDesKindes(f: Awaited<ReturnType<typeof neueFamilie>>) {
+			await prisma.person.update({
+				where: { id: f.kind.personId },
+				data: { volljaehrigGeprueftAm: new Date('2026-10-12T08:00:00.000Z') },
+			});
+			await prisma.einladung.create({
+				data: {
+					vereinId: f.verein.id,
+					personId: f.kind.personId,
+					art: 'RESET',
+					tokenHash: `token-hash-${randomUUID()}`,
+					ablauf: new Date('2026-10-25T12:00:00.000Z'),
+					angelegtAm: new Date('2026-10-17T12:00:00.000Z'),
+				},
+			});
+		}
+
+		it('Grossmutter ohne Erziehungsberechtigung: beim Enkel null, der Zugangsstand bleibt', async () => {
+			const f = await neueFamilie();
+			await mitOffenerEinladungDesKindes(f);
+			const oma = await legeMitgliedAn(prisma, f.verein, { art: 'ERWACHSENER', vorname: 'Olga', nachname: 'Muster' });
+			await prisma.bezugsperson.create({
+				data: {
+					vereinId: f.verein.id,
+					erwachsenerId: oma.personId,
+					jungfischerId: f.kind.personId,
+					beziehung: 'GROSSMUTTER',
+					erziehungsberechtigt: false,
+				},
+			});
+			const text = await (await f.hole(oma.cookie)).text();
+			const auszug = JSON.parse(text);
+			expect(auszug.familie).toEqual([
+				expect.objectContaining({
+					rolle: 'kind',
+					zugangErlaubt: true,
+					volljaehrigGeprueftAm: null,
+					offeneEinladungen: null,
+				}),
+			]);
+			expect(text).not.toContain('2026-10-17T12:00:00');
+			expect(text).not.toContain('2026-10-12T08:00:00');
+		});
+
+		it('Mutter eines volljaehrigen Kindes: ebenfalls null', async () => {
+			const f = await neueFamilie();
+			await mitOffenerEinladungDesKindes(f);
+			// Am Berliner Abend des 18.10.2026 ist ein Kind mit Geburtstag 2008-10-18 gerade volljaehrig geworden.
+			await prisma.person.update({ where: { id: f.kind.personId }, data: { geburtsdatum: new Date('2008-10-18') } });
+			const auszug = await (await f.hole(f.mutter.cookie)).json();
+			expect(auszug.familie).toEqual([
+				expect.objectContaining({
+					rolle: 'kind',
+					zugangErlaubt: true,
+					volljaehrigGeprueftAm: null,
+					offeneEinladungen: null,
+				}),
+			]);
+		});
+
+		it('erziehungsberechtigte Mutter eines Minderjaehrigen sieht beides weiterhin', async () => {
+			const f = await neueFamilie();
+			await mitOffenerEinladungDesKindes(f);
+			const auszug = await (await f.hole(f.mutter.cookie)).json();
+			expect(auszug.familie).toEqual([
+				expect.objectContaining({
+					rolle: 'kind',
+					volljaehrigGeprueftAm: '2026-10-12T08:00:00.000Z',
+					offeneEinladungen: [
+						{ art: 'RESET', angelegtAm: '2026-10-17T12:00:00.000Z', ablauf: '2026-10-25T12:00:00.000Z' },
+					],
+				}),
+			]);
+		});
 	});
 
 	it('ein entferntes Familienmitglied fehlt', async () => {

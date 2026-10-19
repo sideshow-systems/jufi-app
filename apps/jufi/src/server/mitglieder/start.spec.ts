@@ -35,13 +35,16 @@ describe('Start: Ansprechpartner und Hinweise', () => {
 	});
 
 	/** Eigener Verein je Test: Rechte und Protokoll gehoeren dem Verein, also darf kein Test in einen anderen hineinreichen. */
-	async function neuerVerein() {
-		const verein = await legeVereinAn(prisma, { slug: `start-${randomUUID().slice(0, 8)}` });
+	async function neuerVerein(kontakt?: string) {
+		const verein = await legeVereinAn(prisma, { slug: `start-${randomUUID().slice(0, 8)}`, kontakt });
 		const api = (pfad: string) => `/${verein.slug}/api/v1${pfad}`;
 		const mitglied = (e: Parameters<typeof legeMitgliedAn>[2]) => legeMitgliedAn(prisma, verein, { jetzt, ...e });
 		const holeAnsprechpartner = async (cookie?: string) => {
 			const r = await sende(server.url, api('/ansprechpartner'), { cookie });
-			return { status: r.status, json: (await r.json()) as { ansprechpartner: Record<string, unknown>[] } };
+			return {
+				status: r.status,
+				json: (await r.json()) as { ansprechpartner: Record<string, unknown>[]; kontakt: string | null },
+			};
 		};
 		const holeHinweise = async (cookie?: string) => {
 			const r = await sende(server.url, api('/verwaltung/hinweise'), { cookie });
@@ -111,6 +114,34 @@ describe('Start: Ansprechpartner und Hinweise', () => {
 				'Meier Zoe',
 				'Zander Uwe',
 			]);
+		});
+
+		// Der Text steht in den Vereinseinstellungen (Feld Kontakt) und soll bei den Ansprechpartnern erscheinen.
+		it('liefert den Kontakttext des Vereins mit seinen Zeilenumbruechen', async () => {
+			const v = await neuerVerein('Fragen an die Jugendleitung:\njugend@example.org');
+			const kind = await v.mitglied({ art: 'JUNGFISCHER' });
+
+			const r = await v.holeAnsprechpartner(kind.cookie);
+			expect(r.status).toBe(200);
+			expect(r.json.kontakt).toBe('Fragen an die Jugendleitung:\njugend@example.org');
+			expect(Object.keys(r.json).sort()).toEqual(['ansprechpartner', 'kontakt']);
+		});
+
+		it('ohne Kontakttext ist kontakt null, nicht ein leerer Text und nicht abwesend', async () => {
+			const v = await neuerVerein();
+			const kind = await v.mitglied({ art: 'JUNGFISCHER' });
+
+			const r = await v.holeAnsprechpartner(kind.cookie);
+			expect(r.json.kontakt).toBeNull();
+			expect(r.json.ansprechpartner).toEqual([]);
+		});
+
+		it('der Kontakttext folgt einer Aenderung in den Einstellungen sofort', async () => {
+			const v = await neuerVerein('alt');
+			const kind = await v.mitglied({ art: 'JUNGFISCHER' });
+			expect((await v.holeAnsprechpartner(kind.cookie)).json.kontakt).toBe('alt');
+			await prisma.verein.update({ where: { id: v.verein.id }, data: { kontakt: 'neu' } });
+			expect((await v.holeAnsprechpartner(kind.cookie)).json.kontakt).toBe('neu');
 		});
 
 		it('ohne Sitzung 401', async () => {

@@ -6,7 +6,7 @@ import type { PrismaClient, VereinStatus } from '@jufi/db';
  */
 export function legeVereinAn(
 	prisma: PrismaClient,
-	daten: { slug: string; anzeigename?: string; farbe?: string; status?: VereinStatus },
+	daten: { slug: string; anzeigename?: string; farbe?: string; kontakt?: string; status?: VereinStatus },
 ) {
 	return prisma.verein.create({
 		data: {
@@ -14,6 +14,7 @@ export function legeVereinAn(
 			name: `Fischereiverein ${daten.slug}`,
 			anzeigename: daten.anzeigename ?? 'Jungfischer Test',
 			farbe: daten.farbe ?? '#0f766e',
+			kontakt: daten.kontakt,
 			status: daten.status ?? 'AKTIV',
 		},
 	});

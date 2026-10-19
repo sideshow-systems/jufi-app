@@ -115,15 +115,3 @@ export function vereinsfarben(hex: string): { hell: Akzentsatz; dunkel: Akzentsa
 	const farbe = normiert(hex);
 	return { hell: satz(farbe, 'hell'), dunkel: satz(farbe, 'dunkel') };
 }
-
-/**
- * Ob die App den Akzent fuer den Modus gegenueber der eingegebenen Farbe veraendert, damit er
- * lesbar bleibt. Die Einstellungen sagen das dem Verein, statt es still zu tun.
- * Verglichen wird mit der normalisierten Eingabe (Kleinbuchstaben, sechs Stellen): "#0F766E" und
- * "#0f766e" sind dieselbe Farbe, eine blosse Schreibweise ist keine Anpassung.
- */
-export function farbeAngepasst(hex: string): { hell: boolean; dunkel: boolean } {
-	const farbe = normiert(hex);
-	const satz = vereinsfarben(farbe);
-	return { hell: satz.hell.akzent !== farbe, dunkel: satz.dunkel.akzent !== farbe };
-}

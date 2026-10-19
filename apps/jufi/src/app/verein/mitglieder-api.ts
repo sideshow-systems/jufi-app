@@ -171,6 +171,12 @@ export interface Ansprechpartner {
 	nachname: string;
 }
 
+/** Antwort von GET /ansprechpartner: die Leitungen und der Freitext des Vereins (null ohne Angabe). */
+export interface AnsprechpartnerAntwort {
+	ansprechpartner: Ansprechpartner[];
+	kontakt: string | null;
+}
+
 /**
  * Ein Notfall-Link, den die Plattform fuer den Verein ausgestellt hat. Name und Zeitpunkt
  * genuegen der Verwaltung; die Person kann inzwischen entfernt sein, dann fehlt der Name.
@@ -412,7 +418,7 @@ export class MitgliederApi {
 	}
 
 	/** Fuer jede angemeldete Person lesbar, auch fuer Kinder: Sie sollen wissen, wen sie fragen koennen. */
-	ansprechpartner(slug: string): Observable<{ ansprechpartner: Ansprechpartner[] }> {
+	ansprechpartner(slug: string): Observable<AnsprechpartnerAntwort> {
 		return this.holen(slug, '/ansprechpartner');
 	}
 
