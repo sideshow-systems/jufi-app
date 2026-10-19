@@ -237,31 +237,30 @@ describe('Vereinseinstellungen', () => {
 			expect(dunkel.style.color).toBe(wie(satz.dunkel.aufAkzent));
 		});
 
-		it('sagt bei einem angepassten Ton, in welchem Modus die App ihn ändert', async () => {
+		// Die Muster zeigen den Ton, den die App wirklich nimmt; ein Satz darueber erschiene bei jeder Farbe
+		// (AA auf Weiss und AA auf der dunklen Karte schliessen sich aus) und sagte darum nichts.
+		it('schreibt keinen Hinweis zu angepassten Tönen, auch nicht bei Gelb', async () => {
 			const { harness, seite } = await oeffne();
 			tippe(seite, 'input[name="farbe"]', '#ffff00');
 			await stabil(harness);
-			expect(seite.textContent).toContain(
-				'Für gute Lesbarkeit verwendet die App im hellen Modus einen angepassten Ton.',
-			);
-			expect(seite.textContent).not.toContain('im dunklen Modus einen angepassten Ton');
-			// Keine Farbe trägt in beiden Modi (AA auf Weiß und auf dem dunklen Grund schließen sich aus). Das Blau
-			// trägt im hellen Modus, im dunklen wird es angepasst: Es steht nur der Satz zum dunklen Modus.
-			tippe(seite, 'input[name="farbe"]', vereinsfarben('#1d4ed8').hell.akzent);
-			await stabil(harness);
-			expect(seite.textContent).not.toContain('im hellen Modus einen angepassten Ton');
-			expect(seite.textContent).toContain(
-				'Für gute Lesbarkeit verwendet die App im dunklen Modus einen angepassten Ton.',
-			);
+			expect(seite.textContent).not.toContain('Lesbarkeit');
+			expect(seite.textContent).not.toContain('angepassten Ton');
+			expect(seite.querySelector('#farbe-hinweis-hell')).toBeNull();
+			expect(seite.querySelector('#farbe-hinweis-dunkel')).toBeNull();
+			// Hell und Dunkel zeigen den Ton selbst, der sich von der Eingabe unterscheiden darf.
+			const satz = vereinsfarben('#ffff00');
+			expect(feld(seite, '.muster.hell').textContent?.trim()).toBe('Hell');
+			expect(feld(seite, '.muster.dunkel').textContent?.trim()).toBe('Dunkel');
+			expect(satz.hell.akzent).not.toBe('#ffff00');
 		});
 
-		it('verknüpft Hinweise und Fehler mit dem Farbwähler', async () => {
+		it('verknüpft Vorschau-Hinweis und Fehler mit dem Farbwähler', async () => {
 			const { harness, seite, http } = await oeffne();
 			const waehler = feld<HTMLInputElement>(seite, 'input[name="farbe"]');
 			tippe(seite, 'input[name="farbe"]', '#ffff00');
 			await stabil(harness);
 			const beschreibung = waehler.getAttribute('aria-describedby') ?? '';
-			expect(beschreibung).toContain('farbe-hinweis-hell');
+			expect(beschreibung).toBe('farbe-hinweis');
 			expect(waehler.getAttribute('aria-invalid')).toBeNull();
 			speichern(seite, 'Vereinsfarbe').click();
 			http
