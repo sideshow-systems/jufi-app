@@ -528,6 +528,23 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	'POST /profil/totp/bestaetigen': (k) => profilOhneId(k, 'POST', '/profil/totp/bestaetigen'),
 	'GET /ich/daten': async (k) => {
 		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ich/daten`, { cookie });
+		// Eine eigene Person im Nachbarverein, damit der Fall keinen Stand der anderen Faelle veraendert:
+		// offene Einladung und Wiederherstellungscodes, die der Auszug aus eigen nicht kennen darf.
+		const nachbar = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
+		const einladung = await k.prisma.einladung.create({
+			data: {
+				vereinId: k.fremd.id,
+				personId: nachbar.personId,
+				art: 'RESET',
+				tokenHash: `einladung-${randomUUID()}`,
+				ablauf: new Date('2031-03-04T05:06:07.000Z'),
+				angelegtAm: new Date('2030-02-03T04:05:06.000Z'),
+			},
+		});
+		const codeHashes = [`code-${randomUUID()}`, `code-${randomUUID()}`];
+		await k.prisma.recoveryCode.createMany({
+			data: codeHashes.map((codeHash) => ({ vereinId: k.fremd.id, zugangId: nachbar.zugangId, codeHash })),
+		});
 		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
 		// Die Sitzung gilt nur im eigenen Verein: mit dem Slug von fremd kein Auszug, auch nicht der eigene.
 		const fremd = await hole(k.fremd.slug, k.eigenesCookie);
@@ -536,10 +553,26 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Gegenprobe: In eigen geht es, und der Auszug gehoert der Person der Sitzung.
 		const r = await hole(k.eigen.slug, k.eigenesCookie);
 		expect(r.status).toBe(200);
-		const auszug = (await r.json()) as { verein: unknown; zugang: unknown };
+		const auszug = (await r.json()) as { verein: unknown; zugang: unknown; offeneEinladungen: unknown };
 		expect(auszug.zugang).not.toBeNull();
 		const fremdePerson = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdePersonId } });
 		expect(JSON.stringify(auszug)).not.toContain(fremdePerson.email ?? 'keine-adresse');
+		// Von der fremden Einladung und den fremden Codes steht keine Spur im Auszug: weder Hash noch
+		// Id noch die Zeitstempel; die Codes zaehlen auch nicht in die eigene Zahl.
+		const text = JSON.stringify(auszug);
+		for (const spur of [
+			einladung.tokenHash,
+			einladung.id,
+			'2030-02-03T04:05:06',
+			'2031-03-04T05:06:07',
+			...codeHashes,
+		]) {
+			expect(text).not.toContain(spur);
+		}
+		expect(auszug).toMatchObject({
+			wiederherstellungscodes: { eingerichtet: false, unbenutzt: 0 },
+			offeneEinladungen: [],
+		});
 	},
 	'GET /ansprechpartner': async (k) => {
 		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/ansprechpartner`, { cookie });

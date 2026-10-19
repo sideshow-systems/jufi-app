@@ -214,6 +214,13 @@ describe('Vereinseinstellungen', () => {
 	});
 
 	describe('Vereinsfarbe', () => {
+		// jsdom und Browser normalisieren Farben unterschiedlich; ein Vergleich im Browserformat genuegt hier.
+		const wie = (hex: string) => {
+			const probe = document.createElement('span');
+			probe.style.color = hex;
+			return probe.style.color;
+		};
+
 		it('eine Farbänderung setzt die Farbe sofort in der ganzen App', async () => {
 			const { harness, seite } = await oeffne();
 			tippe(seite, 'input[name="farbe"]', '#e11d48');
@@ -231,12 +238,6 @@ describe('Vereinseinstellungen', () => {
 			const dunkel = feld<HTMLElement>(seite, '.muster.dunkel');
 			expect(hell.textContent?.trim()).toBe('Hell');
 			expect(dunkel.textContent?.trim()).toBe('Dunkel');
-			// jsdom und Browser normalisieren Farben unterschiedlich; ein Vergleich im Browserformat genuegt hier.
-			const wie = (hex: string) => {
-				const probe = document.createElement('span');
-				probe.style.color = hex;
-				return probe.style.color;
-			};
 			expect(hell.style.backgroundColor).toBe(wie(satz.hell.akzent));
 			expect(hell.style.color).toBe(wie(satz.hell.aufAkzent));
 			expect(dunkel.style.backgroundColor).toBe(wie(satz.dunkel.akzent));
@@ -253,11 +254,15 @@ describe('Vereinseinstellungen', () => {
 			expect(seite.textContent).not.toContain('angepassten Ton');
 			expect(seite.querySelector('#farbe-hinweis-hell')).toBeNull();
 			expect(seite.querySelector('#farbe-hinweis-dunkel')).toBeNull();
-			// Hell und Dunkel zeigen den Ton selbst, der sich von der Eingabe unterscheiden darf.
+			// Die Muster zeigen den Ton, den die App nimmt, und nicht das rohe Gelb der Eingabe. Gegen die
+			// Oberflaeche geprueft statt gegen die Farbfunktion allein: Die Texte "Hell" und "Dunkel" sagen
+			// nichts ueber den Ton.
 			const satz = vereinsfarben('#ffff00');
-			expect(feld(seite, '.muster.hell').textContent?.trim()).toBe('Hell');
-			expect(feld(seite, '.muster.dunkel').textContent?.trim()).toBe('Dunkel');
 			expect(satz.hell.akzent).not.toBe('#ffff00');
+			const hell = feld<HTMLElement>(seite, '.muster.hell');
+			expect(hell.style.backgroundColor).toBe(wie(satz.hell.akzent));
+			expect(hell.style.backgroundColor).not.toBe(wie('#ffff00'));
+			expect(feld<HTMLElement>(seite, '.muster.dunkel').style.backgroundColor).toBe(wie(satz.dunkel.akzent));
 		});
 
 		it('verknüpft Vorschau-Hinweis und Fehler mit dem Farbwähler', async () => {
