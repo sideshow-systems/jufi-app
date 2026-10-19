@@ -21,7 +21,7 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
 
 /**
  * Das eigene Profil: Name und Kennung zum Lesen, Passkeys, Passwort, zweiter
- * Faktor, Abmelden. Die Huelle (Kopf, Leiste) stellt MitgliederHuelle; die Seite hat kein eigenes main.
+ * Faktor, Ueberall abmelden. Die Huelle (Kopf, Leiste) stellt MitgliederHuelle; die Seite hat kein eigenes main.
  *
  * Nach jeder Aenderung wird der Stand neu geholt statt lokal nachgefuehrt: Der
  * Server entscheidet, was gilt (etwa dass andere Sitzungen nach einer
@@ -197,15 +197,16 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
 					<a class="knopf" [href]="'/' + slug() + '/api/v1/ich/daten'" download>Meine Daten herunterladen</a>
 				</jf-karte>
 
+				<!-- Das einfache Abmelden steht nur unter Mehr. Verworfen: auch hier, denn zwei Knoepfe fuer dasselbe lesen sich wie zwei verschiedene Dinge. -->
 				<jf-karte>
-					<h2>Abmelden</h2>
+					<h2>Überall abmelden</h2>
 					<p class="gedaempft klein">
-						„Überall abmelden“ beendet die Anmeldung auf allen deinen Geräten, auch auf diesem.
+						Beendet die Anmeldung auf allen deinen Geräten, auch auf diesem. Nur dieses Gerät meldest du unter „Mehr“
+						ab.
 					</p>
-					<div class="reihe">
-						<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden(false)">Abmelden</button>
-						<button type="button" class="knopf" [disabled]="laeuft()" (click)="abmelden(true)">Überall abmelden</button>
-					</div>
+					<button type="button" class="knopf" [disabled]="laeuft()" (click)="ueberallAbmelden()">
+						Überall abmelden
+					</button>
 					@if (abmeldefehler(); as text) {
 						<p class="fehler" role="alert">{{ text }}</p>
 					}
@@ -463,12 +464,12 @@ export class ProfilComponent implements OnInit {
 		void this.lade();
 	}
 
-	protected async abmelden(ueberall: boolean): Promise<void> {
+	protected async ueberallAbmelden(): Promise<void> {
 		if (this.laeuft()) return;
 		this.laeuft.set(true);
 		this.abmeldefehler.set(null);
 		try {
-			await this.sitzung.abmelden(this.slug(), ueberall);
+			await this.sitzung.abmelden(this.slug(), true);
 		} catch (ursache) {
 			// Die Sitzung steht dann vielleicht noch: Die Person soll es erfahren, statt auf einer toten Seite zu glauben, sie sei draussen.
 			this.abmeldefehler.set(fehlertext(alsApiFehler(ursache)));

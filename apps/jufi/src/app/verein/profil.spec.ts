@@ -299,28 +299,14 @@ describe('Profil', () => {
 	});
 
 	describe('Abmelden', () => {
-		it('Abmelden ruft die API und geht zur Anmeldung des Vereins', async () => {
+		// Abmelden auf diesem Geraet gibt es nur noch unter Mehr; zwei Knoepfe fuer dasselbe lasen sich
+		// im Profil wie zwei verschiedene Dinge. Ueberall abmelden bleibt, weil es sonst nirgends steht.
+		it('bietet kein Abmelden fuer dieses Geraet an, nur Ueberall abmelden', async () => {
 			await oeffne();
-			knopf(seite, 'Abmelden').click();
-			const anfrage = http.expectOne(`${API}/abmelden`);
-			expect(anfrage.request.method).toBe('POST');
-			anfrage.flush(null, { status: 204, statusText: 'No Content' });
-			await stabil();
-
-			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
-		});
-
-		// Die Sitzung ist dann ohnehin weg; ein Fehlertext waere falsch (gleiche Regel wie auf Mehr).
-		it('Abmelden bei 401 nicht angemeldet fuehrt zur Anmeldung und zeigt keinen Fehler', async () => {
-			await oeffne();
-			knopf(seite, 'Abmelden').click();
-			http
-				.expectOne(`${API}/abmelden`)
-				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
-			await stabil();
-
-			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
-			expect(seite.querySelector('[role="alert"]')).toBeNull();
+			const texte = [...seite.querySelectorAll('button')].map((b) => b.textContent?.trim());
+			expect(texte).not.toContain('Abmelden');
+			expect(texte).toContain('Überall abmelden');
+			expect(seite.textContent).not.toContain('Abmelden');
 		});
 
 		it('Ueberall abmelden ruft die API fuer alle Geraete und geht zur Anmeldung', async () => {
@@ -330,6 +316,19 @@ describe('Profil', () => {
 			await stabil();
 
 			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+		});
+
+		// Die Sitzung ist dann ohnehin weg; ein Fehlertext waere falsch (gleiche Regel wie auf Mehr).
+		it('Ueberall abmelden bei 401 nicht angemeldet fuehrt zur Anmeldung und zeigt keinen Fehler', async () => {
+			await oeffne();
+			knopf(seite, 'Überall abmelden').click();
+			http
+				.expectOne(`${API}/abmelden/alle`)
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+			await stabil();
+
+			expect(navigiert).toHaveBeenCalledWith('/demo/anmelden');
+			expect(seite.querySelector('[role="alert"]')).toBeNull();
 		});
 
 		it('scheitert das Abmelden am Netz, bleibt die Seite stehen und sagt es', async () => {

@@ -281,7 +281,7 @@ Unter `/<slug>/anmelden`:
 - Beide `HttpOnly`, `Secure`, `SameSite=Lax`; serverseitig in Postgres, nur der Hash des Tokens gespeichert.
 - 90 Tage mit Verlängerung, damit vor allem Kinder sich praktisch nie neu anmelden müssen.
 - Schreibende Anfragen prüfen zusätzlich den `Origin`-Header.
-- „Abmelden" beendet die Sitzung auf diesem Gerät, „Überall abmelden" im Profil alle Sitzungen des Zugangs.
+- „Abmelden" beendet die Sitzung auf diesem Gerät und steht nur unter „Mehr"; „Überall abmelden" im Profil beendet alle Sitzungen des Zugangs. Verworfen: „Abmelden" auch im Profil — zwei Knöpfe für dasselbe läsen sich dort wie zwei verschiedene Dinge.
 
 ### 4.6 Zugang entziehen
 
