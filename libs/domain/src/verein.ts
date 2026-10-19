@@ -66,7 +66,7 @@ export function pruefeVereinsname(s: string): boolean {
 	return laengeImBereich(s, 1, 120);
 }
 
-// Der Kontakt ist Freitext, den die Oberflaeche Mitgliedern noch nicht zeigt. Leer ist erlaubt
+// Der Kontakt ist Freitext, den die Startseite bei den Ansprechpartnern zeigt. Leer ist erlaubt
 // und wird beim Speichern zu null, damit "kein Kontakt" nur eine Darstellung hat.
 export const KONTAKT_MAX = 500;
 

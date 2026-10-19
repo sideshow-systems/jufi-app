@@ -80,6 +80,12 @@ describe('Vereinseinstellungen', () => {
 			expect(seite.textContent).toContain('7/24');
 		});
 
+		it('sagt beim Kontakt, wo Mitglieder ihn lesen', async () => {
+			const { seite } = await oeffne();
+			const hinweis = feld(seite, '#kontakt-hinweis').textContent?.trim();
+			expect(hinweis).toBe('Steht auf der Startseite bei „Ansprechpartner“.');
+		});
+
 		it('zählt den Anzeigenamen wie der Server: Codepoints des getrimmten Texts', async () => {
 			const { harness, seite } = await oeffne();
 			tippe(seite, 'input[name="anzeigename"]', '  Fischer  ');

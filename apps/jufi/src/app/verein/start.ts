@@ -172,13 +172,20 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 				} @else if (!ansprechpartnerRessource.hasValue()) {
 					<p class="gedaempft">Wird geladen …</p>
 				} @else {
-					<ul>
-						@for (a of ansprechpartner(); track a.id) {
-							<li>{{ a.vorname }} {{ a.nachname }}</li>
-						} @empty {
-							<li class="gedaempft">Noch niemand eingetragen.</li>
-						}
-					</ul>
+					@if (ansprechpartner().length > 0) {
+						<ul>
+							@for (a of ansprechpartner(); track a.id) {
+								<li>{{ a.vorname }} {{ a.nachname }}</li>
+							}
+						</ul>
+					}
+					<!-- Interpolation statt innerHTML: Der Text ist Freitext des Vereins und wird nie als Markup gelesen. -->
+					@if (kontakt(); as k) {
+						<p class="kontakt">{{ k }}</p>
+					}
+					@if (ansprechpartner().length === 0 && !kontakt()) {
+						<p class="gedaempft">Noch niemand eingetragen.</p>
+					}
 				}
 			</jf-karte>
 		</jf-abschnitt>
@@ -227,6 +234,7 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 		jf-karte p + p,
 		jf-karte p + ul,
 		jf-karte ul + a,
+		jf-karte ul + p,
 		jf-karte p + a,
 		jf-karte p + button {
 			margin-top: var(--a3);
@@ -239,6 +247,11 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 		}
 		li {
 			display: grid;
+			overflow-wrap: anywhere;
+		}
+		/* pre-line: Zeilenumbrueche des Freitexts bleiben, mehrfacher Leerraum faellt zusammen. */
+		.kontakt {
+			white-space: pre-line;
 			overflow-wrap: anywhere;
 		}
 		.verweis {
@@ -299,7 +312,9 @@ export class StartComponent {
 	});
 	protected readonly ansprechpartnerRessource = rxResource({
 		params: () => this.slug(),
-		stream: ({ params }) => this.mitglieder.ansprechpartner(params).pipe(map((a) => a.ansprechpartner)),
+		// Beides aus einer Antwort: Leitungen und Kontakttext erscheinen in einem Abschnitt und
+		// sollen zusammen laden oder zusammen scheitern, nicht halb gefuellt dastehen.
+		stream: ({ params }) => this.mitglieder.ansprechpartner(params),
 	});
 
 	private readonly kinderFehlerRoh = fehlerVon(this.kinderRessource);
@@ -321,7 +336,14 @@ export class StartComponent {
 	protected readonly neuAnsprechpartner = () => this.ansprechpartnerRessource.reload();
 
 	protected readonly kinder = computed<KindAnsicht[]>(() => wertVon(this.kinderRessource) ?? []);
-	protected readonly ansprechpartner = computed<Ansprechpartner[]>(() => wertVon(this.ansprechpartnerRessource) ?? []);
+	protected readonly ansprechpartner = computed<Ansprechpartner[]>(
+		() => wertVon(this.ansprechpartnerRessource)?.ansprechpartner ?? [],
+	);
+	/** Nur Leerraum zaehlt als leer: Der Server macht daraus beim Speichern null, aber die Anzeige verlaesst sich nicht darauf. */
+	protected readonly kontakt = computed(() => {
+		const text = wertVon(this.ansprechpartnerRessource)?.kontakt ?? null;
+		return text !== null && text.trim() !== '' ? text : null;
+	});
 	/** Erst da, wenn die Liste geladen ist: Sonst stuende kurz "Gerade wartet nichts" da. */
 	protected readonly warten = computed(() => {
 		const personen = wertVon(this.personenRessource);

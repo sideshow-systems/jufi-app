@@ -50,6 +50,8 @@ interface Aufbau {
 	ich?: { hatKinder?: boolean; person?: { rechte?: string[] } };
 	verein?: object | Error;
 	ansprechpartner?: Ansprechpartner[] | Error;
+	/** Freitext des Vereins aus den Einstellungen; ohne Angabe null wie bei einem Verein ohne Kontakt. */
+	kontakt?: string | null;
 	kinder?: KindAnsicht[] | Error;
 	personen?: PersonListe[] | Error;
 }
@@ -114,7 +116,7 @@ describe('Start', () => {
 	function toBody(a: Aufbau): object | Error {
 		return a.ansprechpartner instanceof Error
 			? a.ansprechpartner
-			: { ansprechpartner: a.ansprechpartner ?? ANSPRECHPARTNER };
+			: { ansprechpartner: a.ansprechpartner ?? ANSPRECHPARTNER, kontakt: a.kontakt ?? null };
 	}
 
 	const text = (e: HTMLElement) => e.textContent?.replace(/\s+/g, ' ') ?? '';
@@ -330,6 +332,73 @@ describe('Start', () => {
 			harness.detectChanges();
 
 			expect(text(abschnitt(seite, 'Ansprechpartner') as HTMLElement)).toContain('Gerda Bach');
+		});
+
+		describe('Kontakttext des Vereins', () => {
+			const kontaktElement = (seite: HTMLElement) =>
+				(abschnitt(seite, 'Ansprechpartner') as HTMLElement).querySelector<HTMLElement>('.kontakt');
+
+			it('steht unter der Liste, und Zeilenumbrueche bleiben erhalten', async () => {
+				const { seite } = await oeffneStart({ kontakt: 'Fragen an die Jugendleitung:\njugend@example.org' });
+
+				const bereich = abschnitt(seite, 'Ansprechpartner') as HTMLElement;
+				const kontakt = kontaktElement(seite);
+				expect(kontakt?.textContent).toBe('Fragen an die Jugendleitung:\njugend@example.org');
+				expect(getComputedStyle(kontakt as HTMLElement).whiteSpace).toBe('pre-line');
+				// Unter der Liste, nicht davor.
+				const liste = bereich.querySelector('ul') as HTMLElement;
+				expect(liste.compareDocumentPosition(kontakt as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+				expect(text(bereich)).not.toContain('Noch niemand eingetragen.');
+			});
+
+			it('zeigt Text als Text, nie als Markup', async () => {
+				const { seite } = await oeffneStart({ kontakt: '<b>fett</b> <img src=x onerror=alert(1)>' });
+
+				const kontakt = kontaktElement(seite) as HTMLElement;
+				expect(kontakt.textContent).toBe('<b>fett</b> <img src=x onerror=alert(1)>');
+				expect(kontakt.querySelector('b, img')).toBeNull();
+			});
+
+			it('blendet bei null nichts ein', async () => {
+				const { seite } = await oeffneStart({ kontakt: null });
+
+				expect(kontaktElement(seite)).toBeNull();
+				// Nur die Liste: kein Absatz fuer den Kontakt und keiner fuer den leeren Zustand.
+				const bereich = abschnitt(seite, 'Ansprechpartner') as HTMLElement;
+				expect(bereich.querySelectorAll('li')).toHaveLength(2);
+				expect(bereich.querySelector('p')).toBeNull();
+			});
+
+			it('blendet auch einen Text nur aus Leerraum aus', async () => {
+				const { seite } = await oeffneStart({ kontakt: '  \n ' });
+
+				expect(kontaktElement(seite)).toBeNull();
+			});
+
+			it('zeigt ohne Leitungen nur den Kontakt und nicht Noch niemand eingetragen', async () => {
+				const { seite } = await oeffneStart({ ansprechpartner: [], kontakt: 'Schreib an jugend@example.org' });
+
+				const bereich = abschnitt(seite, 'Ansprechpartner') as HTMLElement;
+				expect(kontaktElement(seite)?.textContent).toBe('Schreib an jugend@example.org');
+				expect(bereich.querySelector('li')).toBeNull();
+				expect(text(bereich)).not.toContain('Noch niemand eingetragen.');
+			});
+
+			it('sagt Noch niemand eingetragen nur, wenn Leitungen und Kontakt fehlen', async () => {
+				const { seite } = await oeffneStart({ ansprechpartner: [], kontakt: null });
+
+				expect(text(abschnitt(seite, 'Ansprechpartner') as HTMLElement)).toContain('Noch niemand eingetragen.');
+				expect(kontaktElement(seite)).toBeNull();
+			});
+
+			it('zeigt bei einem Fehler keinen Kontakttext, nur die Meldung', async () => {
+				const { seite } = await oeffneStart({ ansprechpartner: new Error('netz') });
+
+				expect(kontaktElement(seite)).toBeNull();
+				expect(text(abschnitt(seite, 'Ansprechpartner') as HTMLElement)).toContain(
+					'Keine Verbindung – nochmal versuchen',
+				);
+			});
 		});
 	});
 

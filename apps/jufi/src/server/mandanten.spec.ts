@@ -549,9 +549,13 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Gegenprobe: In eigen geht es, und die Liste enthaelt dort niemanden aus fremd.
 		const r = await hole(k.eigen.slug, k.eigenesCookie);
 		expect(r.status).toBe(200);
-		const { ansprechpartner } = (await r.json()) as { ansprechpartner: { id: string }[] };
+		const text = await r.text();
+		const { ansprechpartner, kontakt } = JSON.parse(text) as { ansprechpartner: { id: string }[]; kontakt: string };
 		expect(ansprechpartner.length).toBeGreaterThan(0);
 		expect(ansprechpartner.map((a) => a.id)).not.toContain(k.fremdePersonId);
+		// Der Kontakt gehoert dem eigenen Verein; der des Nachbarn steht nirgends in der Antwort.
+		expect(kontakt).toBe('Kontakt von eigen');
+		expect(text).not.toContain('Kontakt von fremd');
 	},
 	// Der Hinweis liest AdminProtokoll mit dem schlichten PrismaClient (Plan-Entscheidung 2); gerade
 	// deshalb darf der Eintrag eines anderen Vereins nie durchkommen, auch nicht mit Namen.
@@ -609,8 +613,8 @@ describe('Mandanten-Test', () => {
 
 	beforeAll(async () => {
 		const [eigen, fremd, gesperrt] = await Promise.all([
-			legeVereinAn(prisma, { slug: 'mandant-eigen' }),
-			legeVereinAn(prisma, { slug: 'mandant-fremd' }),
+			legeVereinAn(prisma, { slug: 'mandant-eigen', kontakt: 'Kontakt von eigen' }),
+			legeVereinAn(prisma, { slug: 'mandant-fremd', kontakt: 'Kontakt von fremd' }),
 			legeVereinAn(prisma, { slug: 'mandant-gesperrt', status: 'GESPERRT' }),
 		]);
 		server = await starteTestServer(app);

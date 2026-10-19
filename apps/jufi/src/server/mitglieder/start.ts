@@ -28,7 +28,7 @@ export function startRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' | '
 		'/ansprechpartner',
 		brauchtMitglied,
 		asynchron(async (_req, res) => {
-			const { db } = vereinsKontext(res);
+			const { verein, db } = vereinsKontext(res);
 			// Jede angemeldete Person darf das sehen, auch ein Kind: Es soll wissen, wen es fragen
 			// kann. Darum nur Id und Name, weder Rechte noch Adresse. Ohne MITGLIEDER-Recht
 			// reichte der Weg ueber /personen nicht, und eine eigene Kennzeichnung "Ansprechpartner"
@@ -40,7 +40,13 @@ export function startRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' | '
 			// Im Speicher statt orderBy: Die Reihenfolge soll deutsch sein (Umlaute) und nicht von der
 			// Sortierung abhaengen, mit der die Datenbank angelegt wurde.
 			personen.sort((a, b) => a.nachname.localeCompare(b.nachname, 'de') || a.vorname.localeCompare(b.vorname, 'de'));
-			res.json({ ansprechpartner: personen });
+			// Der Freitext aus den Einstellungen steht neben den Leitungen: Nicht jeder Verein hat eine
+			// Leitung, die man mit Namen nennen will, oder eine Adresse, die man dazuschreibt. Ueber db
+			// gelesen statt aus verein in res.locals, damit auch dieser Zugriff am Verein haengt.
+			// Verworfen: ein eigener Endpunkt, denn die Oberflaeche zeigt beides in einem Abschnitt und
+			// ein zweiter Aufruf liesse ihn halb geladen erscheinen.
+			const stamm = await db.verein.findUnique({ where: { id: verein.id }, select: { kontakt: true } });
+			res.json({ ansprechpartner: personen, kontakt: stamm?.kontakt ?? null });
 		}),
 	);
 
