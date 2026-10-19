@@ -359,6 +359,83 @@ describe('Meine Daten herunterladen', () => {
 		expect(kind.person).toMatchObject({ zugangErlaubt: true, volljaehrigGeprueftAm: '2026-10-12T08:00:00.000Z' });
 	});
 
+	describe('Linkstand und Volljaehrigkeitspruefung des Kindes nur fuer Erziehungsberechtigte eines Minderjaehrigen', () => {
+		async function mitOffenerEinladungDesKindes(f: Awaited<ReturnType<typeof neueFamilie>>) {
+			await prisma.person.update({
+				where: { id: f.kind.personId },
+				data: { volljaehrigGeprueftAm: new Date('2026-10-12T08:00:00.000Z') },
+			});
+			await prisma.einladung.create({
+				data: {
+					vereinId: f.verein.id,
+					personId: f.kind.personId,
+					art: 'RESET',
+					tokenHash: `token-hash-${randomUUID()}`,
+					ablauf: new Date('2026-10-25T12:00:00.000Z'),
+					angelegtAm: new Date('2026-10-17T12:00:00.000Z'),
+				},
+			});
+		}
+
+		it('Grossmutter ohne Erziehungsberechtigung: beim Enkel null, der Zugangsstand bleibt', async () => {
+			const f = await neueFamilie();
+			await mitOffenerEinladungDesKindes(f);
+			const oma = await legeMitgliedAn(prisma, f.verein, { art: 'ERWACHSENER', vorname: 'Olga', nachname: 'Muster' });
+			await prisma.bezugsperson.create({
+				data: {
+					vereinId: f.verein.id,
+					erwachsenerId: oma.personId,
+					jungfischerId: f.kind.personId,
+					beziehung: 'GROSSMUTTER',
+					erziehungsberechtigt: false,
+				},
+			});
+			const text = await (await f.hole(oma.cookie)).text();
+			const auszug = JSON.parse(text);
+			expect(auszug.familie).toEqual([
+				expect.objectContaining({
+					rolle: 'kind',
+					zugangErlaubt: true,
+					volljaehrigGeprueftAm: null,
+					offeneEinladungen: null,
+				}),
+			]);
+			expect(text).not.toContain('2026-10-17T12:00:00');
+			expect(text).not.toContain('2026-10-12T08:00:00');
+		});
+
+		it('Mutter eines volljaehrigen Kindes: ebenfalls null', async () => {
+			const f = await neueFamilie();
+			await mitOffenerEinladungDesKindes(f);
+			// Am Berliner Abend des 18.10.2026 ist ein Kind mit Geburtstag 2008-10-18 gerade volljaehrig geworden.
+			await prisma.person.update({ where: { id: f.kind.personId }, data: { geburtsdatum: new Date('2008-10-18') } });
+			const auszug = await (await f.hole(f.mutter.cookie)).json();
+			expect(auszug.familie).toEqual([
+				expect.objectContaining({
+					rolle: 'kind',
+					zugangErlaubt: true,
+					volljaehrigGeprueftAm: null,
+					offeneEinladungen: null,
+				}),
+			]);
+		});
+
+		it('erziehungsberechtigte Mutter eines Minderjaehrigen sieht beides weiterhin', async () => {
+			const f = await neueFamilie();
+			await mitOffenerEinladungDesKindes(f);
+			const auszug = await (await f.hole(f.mutter.cookie)).json();
+			expect(auszug.familie).toEqual([
+				expect.objectContaining({
+					rolle: 'kind',
+					volljaehrigGeprueftAm: '2026-10-12T08:00:00.000Z',
+					offeneEinladungen: [
+						{ art: 'RESET', angelegtAm: '2026-10-17T12:00:00.000Z', ablauf: '2026-10-25T12:00:00.000Z' },
+					],
+				}),
+			]);
+		});
+	});
+
 	it('ein entferntes Familienmitglied fehlt', async () => {
 		const f = await neueFamilie();
 		const zweites = await legeMitgliedAn(prisma, f.verein, { art: 'JUNGFISCHER', vorname: 'Lea', nachname: 'Muster' });

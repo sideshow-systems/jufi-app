@@ -1,4 +1,5 @@
 import { passkeyLabel } from '@jufi/auth';
+import { istErziehungsberechtigt } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
@@ -66,6 +67,10 @@ export interface Datenauszug {
 		angelegtAm: string;
 		/** Nur bei rolle kind; ueber eine Bezugsperson gibt der Auszug diese Angaben nicht her. */
 		zugangErlaubt: boolean | null;
+		/**
+		 * Nur bei rolle kind und nur, wenn die Person heute fuer das Kind erziehungsberechtigt ist
+		 * (Kind minderjaehrig, nicht entfernt); sonst null. Gilt ebenso fuer offeneEinladungen.
+		 */
 		volljaehrigGeprueftAm: string | null;
 		offeneEinladungen: OffeneEinladung[] | null;
 	}[];
@@ -147,7 +152,14 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 						erziehungsberechtigt: true,
 						erwachsener: { select: { vorname: true, nachname: true } },
 						jungfischer: {
-							select: { vorname: true, nachname: true, zugangErlaubt: true, volljaehrigGeprueftAm: true },
+							select: {
+								vorname: true,
+								nachname: true,
+								zugangErlaubt: true,
+								volljaehrigGeprueftAm: true,
+								geburtsdatum: true,
+								entferntAm: true,
+							},
 						},
 					},
 					orderBy: { angelegtAm: 'asc' },
@@ -175,7 +187,29 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 			// Nach den Bezuegen, weil die Kinder erst daraus hervorgehen. Offen heisst wie in der
 			// Verwaltung (admin/daten.ts): nicht eingeloest und nicht abgelaufen. Verworfen: auch
 			// eingeloeste und abgelaufene; sie sind erledigt und sagen der Person nichts mehr.
-			const kinderIds = bezuege.filter((b) => b.erwachsenerId === person.id).map((b) => b.jungfischerId);
+			//
+			// Linkstand und Volljaehrigkeitspruefung eines Kindes nur, wo die Person heute fuer das Kind
+			// einwilligen und den Zugang steuern darf: gleiche Linie wie /einladung/pruefen, das ein Kind
+			// sonst nicht nennt ("gaebe einen Namen preis"). Eine Grossmutter ohne Erziehungsberechtigung
+			// erfuehre sonst, wann dem Enkel ein Link erzeugt wurde; die Mutter eines Volljaehrigen
+			// duerfte den Zugang laut Spec 5.6 nicht mehr steuern und sieht den Linkstand auch in
+			// /meine-jungfischer nicht. Verworfen: jedem zugeordneten Erwachsenen alles zeigen, weil
+			// Zuordnung allein nur zum Handeln fuer das Kind berechtigt (darfFuerKindHandeln).
+			// zugangErlaubt bleibt fuer jedes zugeordnete Kind, das zeigt /meine-jungfischer ohnehin.
+			const steuertKind = (b: (typeof bezuege)[number]): boolean =>
+				b.erwachsenerId === person.id &&
+				istErziehungsberechtigt(
+					b,
+					{
+						id: b.jungfischerId,
+						art: 'JUNGFISCHER',
+						rechte: [],
+						geburtsdatum: b.jungfischer.geburtsdatum,
+						entferntAm: b.jungfischer.entferntAm,
+					},
+					zeit,
+				);
+			const kinderIds = bezuege.filter(steuertKind).map((b) => b.jungfischerId);
 			const einladungen = await db.einladung.findMany({
 				where: { personId: { in: [person.id, ...kinderIds] }, eingeloestAm: null, ablauf: { gt: zeit } },
 				select: { personId: true, art: true, angelegtAm: true, ablauf: true },
@@ -247,8 +281,9 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 						// Nur beim Kind: Zugang und Einladungen einer Bezugsperson gehen das Kind nichts an.
 						// null statt Weglassen, damit die Form fuer beide Richtungen gleich bleibt.
 						zugangErlaubt: istKind ? b.jungfischer.zugangErlaubt : null,
-						volljaehrigGeprueftAm: istKind ? iso(b.jungfischer.volljaehrigGeprueftAm) : null,
-						offeneEinladungen: istKind ? offeneEinladungen(b.jungfischerId) : null,
+						// Pruefung und Linkstand nur bei Erziehungsberechtigung eines Minderjaehrigen (siehe steuertKind).
+						volljaehrigGeprueftAm: steuertKind(b) ? iso(b.jungfischer.volljaehrigGeprueftAm) : null,
+						offeneEinladungen: steuertKind(b) ? offeneEinladungen(b.jungfischerId) : null,
 					};
 				}),
 				untergruppen: gruppen.map((g) => g.untergruppe.name).sort((a, b) => a.localeCompare(b, 'de')),
