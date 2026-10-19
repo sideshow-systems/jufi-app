@@ -281,7 +281,9 @@ describe('Vereinseinstellungen', () => {
 		expect(riesig.length).toBeLessThan(1024 * 1024);
 		expect((await v.lade(riesig)).status).toBe(413);
 		expect(await v.logo()).toBeNull();
-	});
+		// Das Bild mit 100 Megapixeln zu erzeugen und zu pruefen dauert unter der Last der parallelen Serverspecs
+		// laenger als die fuenf Sekunden von Vitest; ohne eigenes Limit scheiterte das Deployment-Tor zufaellig.
+	}, 30_000);
 
 	it('DELETE entfernt das Logo, auch ohne vorhandenes', async () => {
 		const v = await neuerVerein();
