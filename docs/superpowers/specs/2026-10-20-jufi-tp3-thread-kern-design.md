@@ -81,19 +81,24 @@ Alle Tabellen folgen TP2 3.1: Sie tragen `vereinId`, verweisen über zusammenges
 | `erstelltVonId`                               | Person; `null` nur beim Austausch, den das System anlegt                                                       |
 | `letzteAktivitaetAm`, `letzteAktivitaetStand` | Zeitpunkt und Änderungsstand der letzten Aktivität (Sortierung der Liste, 3.9)                                 |
 | `angelegtAm`, `geaendertAm`                   |                                                                                                                |
+| `bearbeitetStand`                             | Änderungsstand des letzten `POST`/`PUT` des Editors; `PUT` schickt ihn als `version` mit (4.1)                 |
 
 `ThreadUntergruppe (vereinId, threadId, untergruppeId)` hält die Auswahl. Wird eine Untergruppe gelöscht, fällt sie per Cascade aus der Auswahl. Bleibt bei `alleUntergruppen = false` keine übrig, sieht nur noch, wer Jugendleiter ist (3.1), und die Verwaltung zeigt am Thread „Keine Zielgruppe mehr“. Verworfen: das Löschen der Untergruppe verweigern, solange Threads sie nennen — eine aufgelöste Untergruppe würde sonst an alten, archivierten Threads hängen bleiben.
 
+**`bearbeitetStand` verhindert verlorene Änderungen.** Der Editor lädt den Thread mit diesem Stand als `version`; `PUT` schickt ihn zurück, und ein anderer Wert ergibt 409 `VERALTET` (4.4). Verworfen: `geaendertAm` als Version — `mitAenderung` setzt bei jeder Antwort `letzteAktivitaet*` (4.2), `@updatedAt` zöge mit, und jede Antwort machte den offenen Editor veraltet. Verworfen: keine Prüfung — zwei Geräte desselben Jugendleiters überschrieben sich still.
+
 ### 2.2 Module
 
-`ThreadModul (id, vereinId, threadId, typ, position, titel?)` mit `typ` `INFO`, `TERMIN`, `UMFRAGE`; Teilprojekt 4 ergänzt das Enum. Höchstens 20 Module je Thread; `position` ist in der Datenbank **nicht** eindeutig, sortiert wird nach `(position, id)`. Verworfen: ein eindeutiger Index — Umsortieren in einer Transaktion verletzte ihn zeilenweise; die Reihenfolge prüft die Domäne (der Editor). Dasselbe gilt für die `position` der Optionen.
+`ThreadModul (id, vereinId, threadId, typ, position, titel?)` mit `typ` `INFO`, `TERMIN`, `UMFRAGE`; Teilprojekt 4 ergänzt das Enum. Höchstens 20 Module je Thread, der Modultitel höchstens 80 Zeichen; `position` ist in der Datenbank **nicht** eindeutig, sortiert wird nach `(position, id)`. Verworfen: ein eindeutiger Index — Umsortieren in einer Transaktion verletzte ihn zeilenweise; die Reihenfolge prüft die Domäne (der Editor). Dasselbe gilt für die `position` der Optionen.
 
 Je Typ eine eigene Tabelle mit derselben `id` (1:1, Cascade). Verworfen: ein JSON-Feld je Modul — Regeln wie „eine Antwort pro Kind“ sollen in der Datenbank abgesichert sein (Rahmen 7.3).
 
-- **`InfoModul`**: `text` (Markdown-Teilmenge, 3.11), höchstens 10 000 Zeichen.
-- **`TerminModul`**: `startDatum` und `endDatum?` als `@db.Date`; `beginn?` und `ende?` als Text `HH:MM`; `ort?`, `treffpunkt?`. Datum und Zeit sind **Wandzeit in Europe/Berlin** (FAM 3.1); der Verein hat kein Zeitzonenfeld, solange alle Vereine in Deutschland sind. CHECK-Constraints: `endDatum >= startDatum`; bei gleichem Tag (oder ohne Enddatum) und gesetzten `beginn` und `ende` gilt `ende > beginn`. Ein Ende ohne Beginn ist erlaubt („Fr 23.10. – So 25.10. 12:00“, im Entwurf „bis 12:00“). Verworfen: „`ende` nur mit `beginn`“ — es verböte diese Anzeige. Verworfen: Zeitpunkte (`timestamptz`) — ein ganztägiger Termin hat keinen Zeitpunkt, und die Anzeige rechnete bei jeder Zeitumstellung um.
+- **`InfoModul`**: `text` (Markdown-Teilmenge, 3.11), mindestens ein Zeichen, höchstens 10 000 Zeichen.
+- **`TerminModul`**: `startDatum` und `endDatum?` als `@db.Date`; `beginn?` und `ende?` als Text `HH:MM`; `ort?`, `treffpunkt?` (je höchstens 200 Zeichen, per CHECK). Datum und Zeit sind **Wandzeit in Europe/Berlin** (FAM 3.1); der Verein hat kein Zeitzonenfeld, solange alle Vereine in Deutschland sind. CHECK-Constraints: `endDatum >= startDatum`; bei gleichem Tag (oder ohne Enddatum) und gesetzten `beginn` und `ende` gilt `ende > beginn`. Ein Ende ohne Beginn ist erlaubt („Fr 23.10. – So 25.10. 12:00“, im Entwurf „bis 12:00“). Verworfen: „`ende` nur mit `beginn`“ — es verböte diese Anzeige. Verworfen: Zeitpunkte (`timestamptz`) — ein ganztägiger Termin hat keinen Zeitpunkt, und die Anzeige rechnete bei jeder Zeitumstellung um.
 - **`UmfrageModul`**: `frage`, `einheit` (`JUNGFISCHER`, `ERWACHSENER`, `PERSON`), `mehrfach`, `teilnahme`, `vielleicht`, `frist?` (Zeitpunkt; die Server-Uhr entscheidet, Rahmen 9.3), `ergebnisse` (`ALLE`, `SUMME`, `JUGENDLEITER`). Ein Partial-Unique-Index über `(threadId) WHERE teilnahme` erlaubt höchstens eine Teilnahme-Umfrage je Thread; dafür trägt `UmfrageModul` `threadId` mit.
-- **`UmfrageOption`**: `umfrageId`, `text`, `position`, `schluessel`. Der Schlüssel bleibt beim Umbenennen und Umsortieren stabil, damit abgegebene Antworten an ihrer Option bleiben (Erkenntnis aus dem Entwurf). Bei der Teilnahme-Umfrage sind Optionen und Schlüssel fest: `dabei`, `vielleicht` (nur mit `vielleicht = true`), `abgesagt`.
+- **`UmfrageOption`**: `umfrageId`, `text`, `position`, `schluessel`. Der Schlüssel bleibt beim Umbenennen und Umsortieren stabil, damit abgegebene Antworten an ihrer Option bleiben (Erkenntnis aus dem Entwurf). **Neue Optionen bekommen ihren Schlüssel vom Server** (`o` und acht Zeichen aus `[a-z0-9]`, Zufall aus `crypto`); bestehende behalten ihren. Verworfen: den Schlüssel aus dem Text ableiten — ein Umbenennen vor dem ersten Speichern ergäbe zwei Schreibweisen für dieselbe Option. Bei der Teilnahme-Umfrage sind Optionen und Schlüssel fest: `dabei`, `vielleicht` (nur mit `vielleicht = true`), `abgesagt`.
+
+**Grenzen, die der Editor und `PUT`/`POST /threads` gemeinsam prüfen (Etappe 3).** Frage und Optionstext 1–200 Zeichen. Eine Umfrage ohne Teilnahme hat 2–20 Optionen mit verschiedenen Texten. Ein Datum muss ein Kalendertag sein (`2026-02-30` ist keins; verworfen: stilles Weiterrollen auf den 2. März). Eine Frist in der Vergangenheit ist erlaubt — nachgetragen wird auch nach einem Telefonat, und eine zu strenge Prüfung verböte genau das (3.3).
 
 ### 2.3 Antworten
 
@@ -111,6 +116,7 @@ Fällt eine Person aus der Zielgruppe (Zielgruppe oder Untergruppe geändert), b
 - Nachrichten: 1–2000 Zeichen Klartext; Links werden in der Anzeige erkannt.
 - Systemeinträge (`systemArt`): `VEROEFFENTLICHT`, `TERMIN_GEAENDERT`, `FRIST_GEAENDERT`, `MODUS_GEAENDERT`. `systemDaten` ist ein kleines JSON mit den Angaben für den Satz („Thomas K. hat den Termin auf Sa 24.10. verschoben“), `autorId` die handelnde Person. Die Sätze entstehen **beim Lesen** aus `systemArt` und `systemDaten`, nicht beim Schreiben (die Zeile speichert nur die Tatsache). Verworfen: den fertigen Satz speichern — Namen und Zeitangaben stünden dann für immer so, wie sie beim Schreiben waren, und der Wortlaut ließe sich nie ändern.
 - Die Formen von `systemDaten` legt Etappe 2 fest, Etappe 3 schreibt sie: `VEROEFFENTLICHT` `{}`; `TERMIN_GEAENDERT` `{ termin: TerminDaten }`; `FRIST_GEAENDERT` `{ frage: string; frist: string | null }` (ISO-Zeitpunkt; `null` = Frist aufgehoben); `MODUS_GEAENDERT` `{ modus: ThreadModus }`. Der Leser prüft die Daten feldweise: Was sich nicht lesen lässt, ergibt „… hat den Thread geändert“ statt eines Fehlers, denn ein kaputter Eintrag darf den Thread nicht unlesbar machen. Verworfen: unlesbare Daten als Fehler zu werfen — ein einziger beschädigter Eintrag sperrte den ganzen Verlauf. Eine Frist steht im Satz immer in der vollen Form „Do 22.10. 18:00“, weil der Satz stehen bleibt (6.3).
+- **Wann Etappe 3 sie schreibt:** nur bei **veröffentlichten** Threads, und je `PUT` höchstens ein `MODUS_GEAENDERT`; je bestehendem Termin-Modul mit geändertem `startDatum`, `endDatum`, `beginn` oder `ende` ein `TERMIN_GEAENDERT` mit dem **vollständigen** neuen `TerminDaten` (alle Felder, `null` ausgeschrieben); je bestehender Umfrage mit geänderter Frist ein `FRIST_GEAENDERT`. Neue oder entfernte Module erzeugen keinen. Verworfen: Einträge im Entwurf — niemand außer den Jugendleitern sieht ihn, und nach dem Veröffentlichen stünde eine Liste von Änderungen vor dem ersten Satz.
 - Löschen leert `text` und setzt `geloeschtAm`/`geloeschtVonId`; die Zeile bleibt („Nachricht gelöscht“ bzw. „Von einem Jugendleiter entfernt“). Die Änderung hat die Art `VERLAUF` und zählt damit als Aktivität des Threads. Verworfen: `GELOESCHT` — diese Art bedeutet „Objekt weg“ (2.6, 4.2), die Zeile bleibt aber stehen.
 - `stand` ist der Änderungsstand beim Anlegen (2.6) und trägt Zähler und „Neu“ (3.9).
 
@@ -123,7 +129,7 @@ Die Zeile entsteht beim ersten Setzen. Kommt der erste Aufruf mit `bereich = ueb
 ### 2.6 Änderungszähler
 
 - `Verein.aenderungsstand` (`Int`, Vorgabe 0) zählt die schreibenden Transaktionen im Verein: **ein Stand je Transaktion**, nicht je Zeile. Verworfen: `BigInt` — 2,1 Milliarden Änderungen je Verein werden nie erreicht, und `BigInt` bräche `JSON.stringify` an jeder API-Grenze.
-- `Aenderung (id, vereinId, stand, threadId?, art, objektId, urheberId?, angelegtAm)` mit eigener `id` und einem Index auf `(vereinId, stand)`; mehrere Zeilen einer Transaktion teilen sich den Stand. Verworfen: ein eindeutiges `(vereinId, stand)` — ein Verlaufseintrag braucht seinen Stand beim Anlegen, seine ID entsteht erst dabei, also bekommt die Arbeit der Transaktion den Stand vorab (4.2). Lückenlos bleibt der Zähler: Jede committete schreibende Transaktion hat genau einen Stand. `threadId` und `objektId` sind bewusst keine Fremdschlüssel, damit das Löschen eines Threads als Änderung erhalten bleibt. `art` z. B. `THREAD`, `MODUL`, `ANTWORT`, `VERLAUF`, `SICHTBARKEIT`, `GELOESCHT` (nicht für das Löschen einer Nachricht, 2.4). Keine Inhalte, nur Kennungen.
+- `Aenderung (id, vereinId, stand, threadId?, art, objektId, urheberId?, angelegtAm)` mit eigener `id` und einem Index auf `(vereinId, stand)`; mehrere Zeilen einer Transaktion teilen sich den Stand. Verworfen: ein eindeutiges `(vereinId, stand)` — ein Verlaufseintrag braucht seinen Stand beim Anlegen, seine ID entsteht erst dabei, also bekommt die Arbeit der Transaktion den Stand vorab (4.2). Lückenlos bleibt der Zähler: Jede committete schreibende Transaktion hat genau einen Stand. `threadId` und `objektId` sind bewusst keine Fremdschlüssel, damit das Löschen eines Threads als Änderung erhalten bleibt. `art` z. B. `THREAD`, `MODUL`, `ANTWORT`, `VERLAUF`, `SICHTBARKEIT`, `LISTE`, `GELOESCHT` (nicht für das Löschen einer Nachricht, 2.4). **`LISTE`** (Etappe 3) ist Anpinnen und Archivieren: Es steht wie `SICHTBARKEIT` und `GELOESCHT` in `OHNE_AKTIVITAET`, ist also keine Aktivität des Threads (4.2). Verworfen: `THREAD` — jedes Anpinnen schöbe den Thread in der Liste nach oben und hieße bei allen „Aushang geändert“. Das „Neu“-Kennzeichen (Etappe 4) lässt `LISTE` außen vor: `istNeu` bekommt die Änderungen ohne diese Art. Keine Inhalte, nur Kennungen.
 - Einträge älter als 90 Tage werden beim Start und danach täglich im App-Prozess gelöscht (ein `setInterval`, kein Cron). Ein Sync, der älter einsteigt, bekommt „vollständig neu laden“ (5.2).
 
 ---
@@ -192,7 +198,7 @@ Gespeichert wird immer `fuer` und `von`. In den **eigenen Antwortzeilen** sieht 
 
 Bearbeiten umfasst: Inhalt und Module ändern, Zielgruppe, Modus, Anpinnen, Archivieren und Wiederherstellen, fremde Nachrichten entfernen, Antworten nachtragen. Verworfen: Modus, Archiv und Moderation nur mit „Alle Threads bearbeiten“ (Rahmen 4.2 wörtlich) — wer einen Termin anlegt, soll ihn nach der Veranstaltung auch selbst auf „Nur Aushang“ stellen können.
 
-`darfLoeschen`: `darfBearbeiten`, der Thread ist nicht der Austausch, und es gibt weder Antworten noch Nachrichten (Systemeinträge zählen nicht).
+`darfLoeschen`: `darfBearbeiten`, der Thread ist nicht der Austausch, und es gibt weder Antworten noch nicht gelöschte Nachrichten (Systemeinträge zählen nicht, 3.6).
 
 `darfSchreiben(person, thread)`: sieht den Thread, Modus „Kommentare“ oder „Chat“, Thread nicht im Archiv.
 
@@ -204,7 +210,7 @@ Wer „Antworten im Detail“ hat oder den Thread bearbeiten darf, sieht in der 
 
 - **Entwurf**: `veroeffentlichtAm = null`. Nur Jugendleiter sehen ihn; Liste und Editor kennzeichnen ihn mit „Entwurf“. Antworten und Nachrichten sind im Entwurf nicht möglich.
 - **Veröffentlichen** setzt `veroeffentlichtAm`, schreibt den Systemeintrag `VEROEFFENTLICHT` und (ab Teilprojekt 5) löst den Push aus. Zurück in den Entwurf geht es nicht.
-- **Löschen** nur nach 3.5; endgültig, samt Modulen.
+- **Löschen** nur nach 3.5; endgültig, samt Modulen. **Löschbar heißt: keine Antwort und keine nicht gelöschte Nachricht.** Eine gelöschte Nachricht hat keinen Text mehr (2.4); zählte sie, machte ein zurückgezogener Kommentar den Thread für immer unlöschbar. Antworten zählen auch ohne Option, weil die Datenbank sie beim Löschen ohnehin verweigerte (3.14).
 - Verworfen: kein Entwurfszustand — ein halb fertiger Thread wäre sofort für alle sichtbar. Verworfen: Löschen auch mit Antworten — Familien verlören kommentarlos, was sie eingetragen haben; dafür gibt es das Archiv.
 
 ### 3.7 Archiv
@@ -265,6 +271,7 @@ Der Editor hat eine kleine Knopfleiste (B, I, Liste, Link). Verworfen: ein WYSIW
 - Ein Schalter am Umfrage-Modul, höchstens eine je Thread (2.2); die Einheit ist frei wählbar (3.2).
 - Feste Optionen „Dabei“, „Vielleicht“ (abschaltbar), „Abgesagt“.
 - **Nur „Dabei“ gilt als Teilnahme** — Grundlage für Mitfahrt und Zahlungspflicht in Teilprojekt 4 (Rahmen 6.4.1, 6.4.2) und für Termin-Erinnerungen in Teilprojekt 5. „Vielleicht“ gilt als beantwortet und erscheint nicht mehr unter „Braucht deine Antwort“.
+- Eine Teilnahme-Umfrage hat **nie Mehrfachauswahl**: „Dabei“, „Vielleicht“ und „Abgesagt“ schließen sich aus. Beim Einschalten der Teilnahme setzen Editor und `entwurfAus` `mehrfach: false`. Verworfen: den Schalter stehen lassen und erst beim Speichern ablehnen — der Jugendleiter müsste einen Haken suchen, den er nie gesetzt hat.
 - Eine neue Umfrage im Editor startet als Teilnahme-Umfrage „Kommst du mit?“, pro Jungfischer, Ergebnisse für alle (Entwurf).
 
 ### 3.13 Braucht deine Antwort
@@ -281,7 +288,11 @@ Liegen Antworten vor, verweigert der Server (409 mit Hinweis am Feld):
 
 Umbenennen und Umsortieren von Optionen, Frist und Ergebnis-Einstellung bleiben frei. Verworfen: Antworten bei solchen Änderungen still verwerfen.
 
-Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder das Modul noch der Thread: Die Datenbank verweigert es (der Fremdschlüssel von der Antwort auf die Umfrage ist `NoAction`, es gibt keinen Kaskadenweg zu den Antworten, 2.3). Verworfen: die Kaskade von der Umfrage zur Antwort zu lassen und allein auf die Sperre über die gewählte Option zu bauen — ob zuerst die Sperre oder die Kaskade greift, hängt von der Reihenfolge der Prüftrigger in Postgres ab; und ein aufgeschobener Fremdschlüssel (`DEFERRABLE INITIALLY DEFERRED`) — er prüfte erst nach der Kaskade und ließe Antworten kommentarlos verschwinden. Folge für Etappe 3: `PUT /threads/:id` antwortet mit 409, wenn es ein beantwortetes Umfrage-Modul entfernen würde.
+Gemeint sind Antworten **mit gewählter Option**; eine Antwort ohne Option sperrt diese drei Änderungen nicht (3.2: sie gilt als keine Antwort). Wird „Vielleicht“ aus einer Teilnahme-Umfrage entfernt, obwohl jemand es gewählt hat, steht der Konflikt am Feld `module.N.optionen` (wie bei jeder entfernten Option); verworfen: `module.N.vielleicht` — die Feldliste des Editors kennt das Feld nicht, und die Meldung stünde ohne Anker.
+
+**Der Editor zieht dieselben Grenzen wie der Server** (`umfrageSperre`): Einheit und Teilnahme sind erst gesperrt, wenn eine Antwort mit Option existiert; „Mehrfachauswahl“ erst, wenn sie genutzt wurde (eine Antwort mit mehreren Optionen); das Entfernen der ganzen Umfrage dagegen schon bei jeder Antwort, auch bei einer ohne Option, weil die Datenbank sie verweigert (unten). Verworfen: alles ab der ersten Antwort pauschal sperren — der Editor wäre strenger als der Server und verböte Änderungen, die dieser annähme.
+
+Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder das Modul noch der Thread: Die Datenbank verweigert es (der Fremdschlüssel von der Antwort auf die Umfrage ist `NoAction`, es gibt keinen Kaskadenweg zu den Antworten, 2.3). Verworfen: die Kaskade von der Umfrage zur Antwort zu lassen und allein auf die Sperre über die gewählte Option zu bauen — ob zuerst die Sperre oder die Kaskade greift, hängt von der Reihenfolge der Prüftrigger in Postgres ab; und ein aufgeschobener Fremdschlüssel (`DEFERRABLE INITIALLY DEFERRED`) — er prüfte erst nach der Kaskade und ließe Antworten kommentarlos verschwinden. Folge für Etappe 3: `PUT /threads/:id` antwortet mit 409 `BEANTWORTET`, wenn es ein beantwortetes Umfrage-Modul entfernen würde (4.4); eine Antwort ohne Option zählt hier mit, damit die Datenbank nie mit P2003 (und damit 404) antwortet.
 
 ---
 
@@ -307,17 +318,27 @@ Alle unter `/<slug>/api/v1`, in `vereinsApi`, mit `brauchtMitglied` und je einem
 | `PUT /threads/:id/archiv`, `PUT /threads/:id/angepinnt` |                                                                                                                                                                                                  |
 | `DELETE /threads/:id`                                   | nach 3.5                                                                                                                                                                                         |
 | `GET /threads/:id/antworten`                            | Antworten-Übersicht für die Verwaltung (wer was, wer fehlt)                                                                                                                                      |
+| `GET /verwaltung/threads`                               | Liste der Verwaltung (Etappe 3): alle Threads samt Entwürfen, Untergruppen, `darfErstellen`                                                                                                      |
+| `GET /threads/:id/bearbeitung`                          | der Thread in bearbeitbarer Form für den Editor (Etappe 3, `ThreadBearbeitung`)                                                                                                                  |
 | `GET /sync?seit=`                                       | 5.2                                                                                                                                                                                              |
 
 **Formen und Pfade der lesenden Routen (Etappe 2).** Die Antworttypen (`ThreadAnsicht`, `UmfrageAnsicht`, `VerlaufAnsicht`) stehen in `libs/domain` (`threads/ansicht.ts`, `threads/verlauf.ts`), und der Client nutzt dieselben. Verworfen: sie im Client nachzuschreiben (Muster `mitglieder-api.ts`) — bei einer Antwort dieser Größe liefen beide Seiten auseinander. Was eine Person sieht, baut dieselbe reine Funktion für alle Routen (`threadAnsicht`, `verlaufAnsicht`); der Server lädt nur.
 
-- `GET /threads/:id` liefert die `ThreadAnsicht`: Kopf, Module, je Umfrage die eigenen Antwortzeilen (mit eigenem Antwortrecht je Zeile) und die Ergebnisse nach 3.4, `schreibSperre`, den Zähler des Verlaufs und `stand`. Das Antwortrecht und die Löschberechtigung stehen an der Zeile beziehungsweise am Eintrag, nicht in einem Block „Rechte“; Rechte für Bearbeiten und Verwalten fehlen noch; Etappe 3 ergänzt sie, wenn der Editor sie braucht. Der `stand` ist der Vereinsstand, der **vor** den Thread-Daten gelesen wird: Unter READ COMMITTED ist, was danach geladen wird, mindestens so neu.
+- `GET /threads/:id` liefert die `ThreadAnsicht`: Kopf, Module, je Umfrage die eigenen Antwortzeilen (mit eigenem Antwortrecht je Zeile) und die Ergebnisse nach 3.4, `schreibSperre`, den Zähler des Verlaufs und `stand`. Das Antwortrecht und die Löschberechtigung stehen an der Zeile beziehungsweise am Eintrag, nicht in einem Block „Rechte“; Etappe 3 hat `darfBearbeiten` und `darfArchivieren` ergänzt (für „Bearbeiten“ und „Wiederherstellen“ im Kopf). Der `stand` ist der Vereinsstand, der **vor** den Thread-Daten gelesen wird: Unter READ COMMITTED ist, was danach geladen wird, mindestens so neu.
 - `GET /threads/:id/verlauf?vor=` liefert `{ eintraege, weitere }`. `vor` ist die ID des ältesten gezeigten Eintrags, geordnet wird nach `(stand, id)`, damit Einträge eines Standes eine feste Reihenfolge haben und an der Seitengrenze keiner fehlt oder doppelt kommt. Verworfen: `vor` als Änderungsstand — mehrere Einträge einer Transaktion teilen sich einen Stand. Ein `vor` aus einem anderen Thread oder ein unbekanntes ist 404, sonst ließe sich fremder Verlauf an einem eigenen Thread abzählen.
 - `POST /threads/:id/verlauf` antwortet `{ eintrag, stand }`, 201 beim Anlegen und 200 bei einer Wiederholung (4.2). `DELETE /verlauf/:eintragId` antwortet 204, auch beim zweiten Löschen derselben Nachricht (eine Wiederholung ist kein Verbot); wer nie löschen durfte, bekommt weiter 404 und erfährt nicht, dass die Nachricht schon weg ist. Die eigene Nachricht lässt sich auch im Archiv löschen.
 - `PUT /umfragen/:modulId/antworten/:fuerId` antwortet 200 mit `{ modul, stand }`: die Umfrage so, wie die Person sie jetzt sieht, und der Stand, bis zu dem sie geladen ist. Ein Info- oder Termin-Modul unter dieser ID ist „unbekannt“ (404); eine andere Antwort verriete, dass es unter der ID ein Modul gibt. Der Körper ist `{ optionIds, clientId }`; geprüft wird die Form (nicht leer, höchstens 20, Zeichenketten, ohne Doppelte) vor dem Thread, die Zugehörigkeit zur Umfrage erst nach der 404.
 - `PUT /threads/:id/gelesen` antwortet 204. Der Körper ist `{ bereich, bis }`, `bis` eine ganze Zahl ab 0 (ein Text wie `"5"` gilt nicht); sonst 400 ohne `feld`, geprüft vor dem Thread, damit die 400 über ihn nichts verrät. Der Client schickt den `stand` aus `GET /threads/:id` als `bis`; der Server speichert `max(alt, min(bis, aktueller Stand))`. Die Kappung auf den Vereinsstand verhindert, dass ein Client etwas als gelesen markiert, das es noch gar nicht gibt, der Höchstwert, dass ein langsames Gerät den Stand zurücksetzt. So markiert ein Öffnen nie etwas als gelesen, das der Client nicht geladen hat.
 
 `PUT /threads/:id` vergleicht Module und Optionen über ihre IDs und Schlüssel: Unveränderte bleiben, neue entstehen, fehlende werden gelöscht (soweit 3.14 es erlaubt). Termin-, Frist- und Modusänderungen erzeugen Systemeinträge (2.4).
+
+**Formen und Pfade der Verwaltungsrouten (Etappe 3).** Was ein Entwurf ist und was sich ändert, entscheiden `entwurf.ts` und `vergleich.ts` in `libs/domain`, die Antworttypen (`VerwaltungListe`, `ThreadBearbeitung`, `AntwortenUebersicht`) stehen in `threads/verwaltung.ts`; Client und Server nutzen dieselben.
+
+- **Zwei lesende Routen, die die erste Fassung der Tabelle nicht nannte.** Der Editor braucht den Thread in bearbeitbarer Form (Untergruppen-IDs, Options-Schlüssel, Frist als ISO, Sperren durch Antworten), und die Liste der Verwaltung braucht alle Threads samt Entwürfen, solange es `GET /threads` noch nicht gibt (Etappe 4). Verworfen: `GET /threads/:id` erweitern — die Ansicht ist die eines Mitglieds, und Schlüssel und Sperren gehören nicht in jede Mitgliederantwort.
+- `GET /verwaltung/threads` liefert `{ threads, untergruppen, darfErstellen }` für jeden Jugendleiter (sonst 404). Je Thread `VerwaltungThread`: Zielgruppe als Text, „Entwurf“, „Archiviert“, nächster Termin, `darfBearbeiten` und `darfAntwortenSehen` (`siehtAntworten`).
+- `GET /threads/:id/bearbeitung` liefert die `ThreadBearbeitung`: `version` (2.1), `entwurf`, `sperren` je Umfrage-Modul (3.14), `darfLoeschen`, `darfArchivieren`, Untergruppen. Wer den Thread nicht bearbeiten darf, bekommt 404 wie bei Unsichtbarem.
+- `POST /threads` (Körper `{ entwurf }`) antwortet 201, `PUT /threads/:id` (`{ version, entwurf }`), `POST …/veroeffentlichen`, `PUT …/archiv` (`{ archiviert }`) und `PUT …/angepinnt` (`{ angepinnt }`) antworten 200, jeweils mit der `ThreadBearbeitung` nach dem Schreiben; `DELETE /threads/:id` antwortet 204. Ist der gewünschte Zustand schon da (Doppelklick, zweites Gerät), antwortet die Route wie nach einem Erfolg, ohne Stand und ohne `Aenderung`. Verworfen: 409 — ein Fehler, wo das Ergebnis stimmt.
+- `GET /threads/:id/antworten` liefert die `AntwortenUebersicht` (mit `darfNachtragen`) nur, wenn die Person sie sehen darf (3.5), sonst 404.
 
 ### 4.2 Schreibpfad
 
@@ -328,6 +349,18 @@ Jede schreibende Route außer `gelesen` arbeitet in einer Transaktion über `mit
 3. Nach dem Commit das Ereignis an den Bus im Prozess melden (5.1).
 
 Jede Schreibroute prüft zuerst die Regeln aus Abschnitt 3 im Speicher.
+
+**Entschieden wird unter der Sperre (Etappe 3).** Alles, was „angenommen oder nicht“ lautet, prüft die Route **in** der Arbeit von `mitAenderung`, wenn die Vereinszeile schon gesperrt ist: `PUT`, Veröffentlichen, Archiv, Anpinnen und Löschen laden den Thread dort und prüfen Version (2.1), 3.14 und die Löschbarkeit (3.6); die Prüfung vorab im Speicher spart nur den Weg zur 404. Ebenso prüfen `POST /threads/:id/verlauf` und `PUT /umfragen/…/antworten` Schreibsperre, Gefragtsein und Frist dort noch einmal: Der Editor kann Modus, Zielgruppe, Archiv und Frist zwischen Prüfung und Schreiben ändern. Verworfen: einmal vorab laden und darauf entscheiden — die Löschbarkeit liefe gegen einen Stand, den eine gleichzeitige Antwort schon überholt hat, und die Fremdschlüssel ohne Kaskade meldeten sie erst als P2003 (und damit als 404).
+
+**Änderungsarten der Schreibrouten.**
+
+| Route                         | Arten                                                                                                                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /threads`               | `THREAD`; je Modul `MODUL`                                                                                                                                                                    |
+| `PUT /threads/:id`            | `THREAD`; je angelegtem, geändertem oder gelöschtem Modul `MODUL`; `SICHTBARKEIT`, wenn sich Rollenfilter oder Untergruppen eines veröffentlichten Threads ändern; je Systemeintrag `VERLAUF` |
+| `POST …/veroeffentlichen`     | `THREAD`, `SICHTBARKEIT`, `VERLAUF` (Systemeintrag `VEROEFFENTLICHT`)                                                                                                                         |
+| `PUT …/archiv`, `…/angepinnt` | `LISTE` (keine Aktivität, 2.6)                                                                                                                                                                |
+| `DELETE /threads/:id`         | `GELOESCHT`                                                                                                                                                                                   |
 
 **Ausnahme `PUT /threads/:id/gelesen`:** Es läuft ohne `mitAenderung`, ohne Änderungsstand und ohne `Aenderung`. Verworfen: es über `mitAenderung` zu schicken — jedes Öffnen schöbe den Thread in der Liste nach oben (`letzteAktivitaetAm`) und machte ihn für alle anderen „neu“ (3.9). Die Monotonie sichern bedingte Updates: `updateMany` mit `gelesenBis < neu` setzt nur hoch, zwei gleichzeitige Aufrufe enden beim größeren Wert, ohne zu lesen und zu schreiben. Die Zeile legt der erste Aufruf per `upsert` an; laufen zwei erste Aufrufe in den Unique-Index, genügt ein zweiter Durchlauf.
 
@@ -341,6 +374,7 @@ Jede Schreibroute prüft zuerst die Regeln aus Abschnitt 3 im Speicher.
 ### 4.3 Grenzen
 
 - Nachricht 1–2000 Zeichen, Info-Text 10 000, Titel 120, höchstens 20 Module und 20 Optionen. Die Nachricht wird ohne Leerraum an den Enden gespeichert und in Code-Points gezählt (wie `char_length` im CHECK); ein einzelnes Surrogat ohne Partner (JSON erlaubt `"\ud800"`) ist keine gültige Nachricht, weil es beim Schreiben als UTF-8 still zu U+FFFD würde. Verworfen: `text.length` — ein Emoji zählte doppelt, und die Grenze läge anders als die der Datenbank.
+- Etappe 3: Modultitel 80, Ort und Treffpunkt je 200 Zeichen, Frage und Optionstext 1–200, Info-Text mindestens 1 Zeichen; weitere Grenzen in 2.2.
 - `clientId` passt auf `^[A-Za-z0-9-]{1,100}$` (deckt `randomUUID` und `cuid`). Verworfen: jede Zeichenkette — sie landet im Unique-Index und in Fehlerberichten.
 - Höchstens 30 Nachrichten und 60 Antworten pro Minute und Person (Rate-Limit im Speicher wie bei der Anmeldung).
 - Anfragen höchstens 100 KB (TP2 8.5).
@@ -349,6 +383,16 @@ Jede Schreibroute prüft zuerst die Regeln aus Abschnitt 3 im Speicher.
 
 - 404 für alles Unsichtbare, Unbekannte und Nicht-Gefragte, nie 403 (Rahmen 8.3); die Antwort ist in allen Fällen byte-gleich, sonst verriete jede Abweichung, dass es das Objekt gibt. Der Client zeigt dazu „Nicht gefunden oder keine Berechtigung“.
 - 409 bei Konflikten aus 3.14 und doppelter Teilnahme-Umfrage, mit `feld`.
+- **Fehlerformen der Verwaltung (Etappe 3).** Ein ungültiger Entwurf ist 400 `{ fehler: <Satz>, feld }` mit dem **ersten** Fehler; der Client prüft vorher mit derselben Funktion (`entwurfFehler`) und zeigt alle. Konflikte sind 409 mit `code` und `feld`:
+  - `BEANTWORTET`: 3.14 und das Entfernen einer beantworteten Umfrage;
+  - `DOPPELTE_TEILNAHME`: eine zweite Teilnahme-Umfrage im Thread;
+  - `VERALTET`: `version` stimmt nicht mit `bearbeitetStand` überein (2.1);
+  - `AUSTAUSCH`: Zielgruppe, Module, Archiv oder Löschen am Austausch (8);
+  - `NICHT_LOESCHBAR`: 3.6;
+  - `KEINE_ZIELGRUPPE`: Veröffentlichen ohne Zielgruppe.
+
+  Wer den Thread nicht bearbeiten darf: 404 wie bei Unsichtbarem.
+
 - Schreiben in einem Entwurf, einem archivierten Thread oder im Modus „Nur Aushang“: 409 mit `code` `ENTWURF`, `ARCHIVIERT` beziehungsweise `NUR_AUSHANG`. Eine `clientId` einer fremden Zeile: 409 `CLIENT_ID_VERGEBEN` (4.2).
 - 410 `FRIST_ABGELAUFEN` („Frist abgelaufen“); nur für Antworten, die nicht nachtragen dürfen (3.3).
 - 400 mit `feld`. Vor dem Laden des Threads, aus dem Körper allein: leere, doppelte oder mehr als 20 Optionen, oder Einträge, die keine Zeichenkette sind → `feld: 'optionen'`; leere, zu lange oder ungültige Nachricht → `feld: 'text'`; fehlende oder unpassende `clientId` → `feld: 'clientId'`. Erst nach der 404, der Wiederholungssuche und den Sperren 409/410, weil sie die Umfrage brauchen: Optionen, die nicht zur Umfrage gehören (auch „Vielleicht“ bei abgeschaltetem Vielleicht), und mehrere Optionen bei `mehrfach = false` → ebenfalls `feld: 'optionen'` (sonst verriete die 400 die Optionen einer unsichtbaren Umfrage). `feld` heißt wie das Feld der Oberfläche (`optionen`, nicht `optionIds`): Der Client markiert damit die Auswahl, nicht ein Datenfeld.
@@ -428,14 +472,16 @@ Eingabefeld fest über der unteren Leiste, Absender nach 3.10, Systemeinträge g
 
 ### 6.6 Verwaltung
 
-- Neuer Punkt **Threads** in der Seitenleiste für alle Jugendleiter. Ohne „Threads erstellen“ und „Alle Threads bearbeiten“ ist die Liste nur lesbar.
+- Neuer Punkt **Threads** in der Seitenleiste für alle Jugendleiter. Ohne „Threads erstellen“ und „Alle Threads bearbeiten“ ist die Liste nur lesbar. Der Link „Antworten“ in der Liste erscheint nur mit dem Recht, die Antworten zu sehen (`darfAntwortenSehen` über `siehtAntworten`, 3.5); verworfen: ihn für jeden Thread mit Umfrage zu zeigen — wer nicht darf, landete auf einer 404-Seite.
 - **Editor** (Rahmen 5.1):
   - Links das Formular: Titel, Zielgruppe (Untergruppen „Alle“ oder Auswahl, Rollenfilter), Modus, „Mitglieder benachrichtigen“ (bis Teilprojekt 5 gesperrt mit Hinweis), Modulliste mit „Hoch“, „Runter“, „Entfernen“, „Modul hinzufügen“.
   - Rechts die Live-Vorschau im Handyrahmen mit hervorgehobenem Modul; unter 1024 px Breite umschaltbar statt daneben.
   - Knöpfe „Entwurf speichern“, „Veröffentlichen“ beziehungsweise „Speichern“, „Löschen“ (nur nach 3.5).
   - Fehler am Feld; eine leere Zielgruppe (Auswahl ohne Untergruppe) lässt sich nicht speichern.
-  - Der Editor bietet nur Einheiten an, die beim gewählten Rollenfilter jemanden fragen (3.2).
-- **Antworten-Übersicht** je Umfrage: je Option die Namen, „Noch offen“ mit Namen, je Zeile „Eintragen“ (Nachtragen), „Stand teilen“.
+  - Der Editor bietet nur Einheiten an, die beim gewählten Rollenfilter jemanden fragen (3.2). Passt die Einheit einer **ungesperrten** Umfrage nach einem Wechsel des Rollenfilters nicht mehr, stellt der Editor sie auf die erste passende um (`einheitenFuer`); eine neue Umfrage kennt den Rollenfilter beim Anlegen nicht. Verworfen: die Einheit stehen lassen und den Fehler erst beim Speichern zeigen — der Jugendleiter sähe eine Meldung zu einem Feld, das er nicht angefasst hat.
+  - Welche Felder gesperrt sind, wenn Antworten vorliegen, steht in 3.14; Teilnahme-Umfragen ohne „Vielleicht“ und ohne Mehrfachauswahl in 3.12.
+- **Antworten-Übersicht** je Umfrage: je Option die Namen, „Noch offen“ mit Namen, je Zeile „Eintragen“ (Nachtragen). „Stand teilen“ folgt mit Etappe 6 (Teilen-Text, 7.1); verworfen: einen vorläufigen Text bauen, den Etappe 6 ersetzt.
+  - **Nachtragen bei Mehrfachauswahl:** „Eintragen“ klappt die Optionen als Umschalter auf, vorbelegt mit der bisherigen Auswahl. Jeder Tipp speichert die **ganze neue Menge**; die letzte gewählte Option lässt sich nicht abwählen (eine Antwort ohne Option gilt als keine, 3.2). Verworfen: eine Option ersetzt die Auswahl — gespeicherte Antworten gingen dann still verloren. Verworfen: „Eintragen“ nur für offene Zeilen — eine Mehrfach-Antwort ließe sich dann nicht mehr ändern. Ohne Mehrfachauswahl ersetzt eine Option die bisherige.
 - Im Austausch-Thread sind Zielgruppe, Module, Löschen und Archivieren gesperrt (8).
 
 ### 6.7 Gestaltung und Messung
