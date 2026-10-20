@@ -34,8 +34,8 @@ interface Seite {
 	rolle: Rolle;
 	art: Art;
 	/**
-	 * Ohne fuehrenden Schraegstrich unterhalb der Wurzel; die Platzhalter :mia, :bowling und :austausch
-	 * stehen fuer die IDs und Thread-Segmente aus dem Ablauf. Eine Abfrage (?reiter=verlauf) gehoert zum Pfad.
+	 * Ohne fuehrenden Schraegstrich unterhalb der Wurzel; die Platzhalter :mia, :bowling, :bowlingId und
+	 * :austausch stehen fuer die IDs und Thread-Segmente aus dem Ablauf. Eine Abfrage (?reiter=verlauf) gehoert zum Pfad.
 	 */
 	pfad: string;
 	/** Die Seite zeigt den Verlauf mit festem Eingabefeld; gemessen wird, dass es nichts verdeckt und nichts davon verdeckt wird. */
@@ -55,6 +55,10 @@ const SEITEN: Seite[] = [
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/untergruppen` },
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/rechte` },
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/einstellungen` },
+	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/threads` },
+	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/threads/neu` },
+	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/threads/:bowlingId` },
+	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/threads/:bowlingId/antworten` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/meine-jungfischer` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/` },
@@ -76,7 +80,7 @@ function sitzung(rolle: Rolle): string | { cookies: []; origins: [] } {
 	return rolle === 'oeffentlich' ? { cookies: [], origins: [] } : join(ZUSTAND, `${rolle}.json`);
 }
 
-const PLATZHALTER = [':mia', ':bowling', ':austausch'] as const;
+const PLATZHALTER: readonly string[] = [':mia', ':bowling', ':bowlingId', ':austausch'];
 
 /**
  * Erst im Test gelesen, nicht beim Laden der Datei: Playwright laedt alle Testdateien schon vor dem
@@ -84,17 +88,17 @@ const PLATZHALTER = [':mia', ':bowling', ':austausch'] as const;
  */
 function adresse(pfad: string): string {
 	// Platzhalter mit Doppelpunkt wie in den Routen: Sie koennen in keinem echten Pfadteil vorkommen,
-	// anders als ein Teilstring wie /mia, der auch in /miami traefe.
-	const gesucht = PLATZHALTER.filter((p) => pfad.includes(p));
+	// anders als ein Teilstring wie /mia, der auch in /miami traefe. Ersetzt wird der ganze Platzhalter
+	// bis zum naechsten Nicht-Buchstaben: Mit includes und replace je Eintrag traefe :bowling auch den
+	// Anfang von :bowlingId und hinterliesse "<segment>Id", eine ID, die es nicht gibt.
+	const gesucht = pfad.match(/:[A-Za-z]+/g) ?? [];
 	if (gesucht.length === 0) return `/${pfad}`;
 	const ids = JSON.parse(readFileSync(join(ZUSTAND, 'ids.json'), 'utf8')) as Record<string, string>;
-	let ersetzt = pfad;
-	for (const platzhalter of gesucht) {
-		const id = ids[platzhalter.slice(1)];
+	return `/${pfad.replace(/:[A-Za-z]+/g, (platzhalter) => {
+		const id = PLATZHALTER.includes(platzhalter) ? ids[platzhalter.slice(1)] : undefined;
 		if (!id) throw new Error(`ids.json kennt ${platzhalter} nicht, lief der Ablauf?`);
-		ersetzt = ersetzt.replace(platzhalter, id);
-	}
-	return `/${ersetzt}`;
+		return id;
+	})}`;
 }
 
 /**
@@ -110,6 +114,9 @@ async function oeffne(page: Page, ziel: string): Promise<void> {
 	await expect(page).toHaveURL((url) => url.pathname.replace(/\/$/, '') === pfad.replace(/\/$/, ''));
 	await expect(page.locator('h1').first()).toBeVisible();
 	await expect(page.getByText(/Wird geladen|Lädt/)).toHaveCount(0);
+	// Eine falsche ID ergibt eine Seite mit h1 und ohne Ladehinweis, aber nicht die gemeinte: Ohne diese
+	// Pruefung vermaesse der Test still die Karte "Nicht gefunden" (so geschehen mit :bowling in :bowlingId).
+	await expect(page.getByRole('heading', { name: 'Nicht gefunden oder keine Berechtigung' })).toHaveCount(0);
 }
 
 for (const groesse of GROESSEN) {
@@ -187,7 +194,8 @@ test.describe('Verwaltungs-Huelle an der Bruchstelle', () => {
 			await page.getByRole('button', { name: 'Menü öffnen' }).click();
 			const navigation = page.getByRole('navigation', { name: 'Verwaltung' });
 			await expect(navigation).toBeVisible();
-			await expect(navigation.getByRole('link')).toHaveCount(5);
+			// Fuenf Punkte der Verwaltung (seit TP3 mit Threads) und der Weg zurueck in die App.
+			await expect(navigation.getByRole('link')).toHaveCount(6);
 			await expect(page.getByRole('button', { name: 'Menü schließen' })).toBeVisible();
 			expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
 			await keinWaagrechtesScrollen(page);
@@ -282,6 +290,73 @@ test.describe('Vereinseinstellungen', () => {
 					if (groesse.viewport.width < 768) {
 						const hoehe = (await datei.boundingBox())?.height ?? 0;
 						expect(hoehe, 'Datei-Feld als Tippflaeche').toBeGreaterThanOrEqual(44);
+					}
+				});
+			});
+		}
+	}
+});
+
+/**
+ * Der Thread-Editor (Spec 6.6): ab 1024 px Formular und Vorschau nebeneinander, darunter ein Umschalter
+ * und nur eines von beiden. Der Seitentest oben misst den Editor so, wie er geladen wird, also ohne
+ * gewaehltes Modul; hier kommen die Felder jedes Moduls und die Vorschau am Handy dazu. Waehlen und
+ * Umschalten aendern nichts am Thread, die Seite bleibt nur angesehen.
+ */
+test.describe('Thread-Editor', () => {
+	test.use({ storageState: sitzung('leitung') });
+
+	for (const groesse of GROESSEN) {
+		for (const schema of SCHEMATA) {
+			test.describe(`${groesse.name} ${schema}`, () => {
+				test.use({ viewport: groesse.viewport, colorScheme: schema });
+
+				test('Formular und Vorschau, jedes Modul ohne waagrechtes Scrollen', async ({ page }) => {
+					await oeffne(page, adresse(`${SLUG}/verwaltung/threads/:bowlingId`));
+					const handy = groesse.viewport.width < 768;
+					const formular = page.getByRole('group', { name: 'Thread', exact: true });
+					const vorschau = page.getByRole('region', { name: 'Vorschau am Handy' });
+					const umschalter = page.getByRole('group', { name: 'Ansicht' });
+
+					/** Nach jedem Schritt dasselbe: nichts ragt hinaus, und am Handy ist jede Tippflaeche gross genug. */
+					const pruefe = async (wo: string) => {
+						await keinWaagrechtesScrollen(page);
+						if (handy) expect(await tippflaechen(page), `Tippflaechen unter 44 px (${wo})`).toEqual([]);
+					};
+
+					if (handy) {
+						await expect(umschalter).toBeVisible();
+						await expect(formular).toBeVisible();
+						await expect(vorschau).toBeHidden();
+						await pruefe('Bearbeiten');
+						await umschalter.getByRole('button', { name: 'Vorschau' }).click();
+						await expect(vorschau).toBeVisible();
+						await expect(formular).toBeHidden();
+						await pruefe('Vorschau');
+						await umschalter.getByRole('button', { name: 'Bearbeiten' }).click();
+						await expect(formular).toBeVisible();
+					} else {
+						await expect(umschalter).toHaveCount(0);
+						await expect(formular).toBeVisible();
+						await expect(vorschau).toBeVisible();
+						const f = await formular.boundingBox();
+						const v = await vorschau.boundingBox();
+						if (!f || !v) throw new Error('Formular oder Vorschau ohne Box');
+						// Halbe Pixel aus gebrochenen Breiten sind keine Ueberlappung.
+						expect(
+							f.x + f.width,
+							`Formular endet bei ${f.x + f.width}, die Vorschau beginnt bei ${v.x}`,
+						).toBeLessThanOrEqual(v.x + 0.5);
+						await pruefe('ohne Modul');
+					}
+
+					// Die Felder stehen nur fuer das gewaehlte Modul; Bowling hat Info-Text, Termin und Umfrage.
+					const module = page.locator('ol.module button.waehlen');
+					await expect(module).toHaveCount(3);
+					for (let i = 0; i < 3; i++) {
+						await module.nth(i).click();
+						await expect(page.getByRole('heading', { name: `(Modul ${i + 1})` })).toBeVisible();
+						await pruefe(`Modul ${i + 1}`);
 					}
 				});
 			});
