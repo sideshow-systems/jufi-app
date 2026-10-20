@@ -218,6 +218,29 @@ grep -q 'Mail-Arbeiter gestartet' <<<"$APP_LOG" || fail 'Der Mail-Arbeiter ist n
 [[ "$(docker exec "$SMOKE_APP" id -u)" != '0' ]] || fail 'Der Container laeuft als root.'
 note "Docker-Healthcheck: healthy; Mail-Arbeiter gestartet; laeuft nicht als root; $(docker stats --no-stream --format '{{.MemUsage}}' "$SMOKE_APP" | cut -d/ -f1)im Leerlauf"
 
+# Schrift und Initialen-Icon. Lokal liefert macOS eine Schrift, im Image fehlte
+# sie womoeglich trotzdem, und der Fehler bliebe unsichtbar (Spec 6.4): sharp
+# zeichnet dann Kaestchen oder gar nichts, und kein Test schlaegt an. Deshalb
+# wird das Bild geprueft, das **das Image** erzeugt hat -- die Messung selbst
+# (Groesse, Buchstaben) laeuft hier auf dem Entwicklungsrechner, wo sharp steht.
+# fc-match ist die zweite Haelfte: Tofu hat Kontrast und besteht die Messung,
+# aber nur mit der richtigen Schrift ist es DejaVu Sans Bold und nicht ein Ersatz.
+FONT="$(docker exec "$SMOKE_APP" fc-match 'DejaVu Sans:bold' file 2>&1 || true)"
+grep -q 'DejaVuSans-Bold' <<<"$FONT" || fail "DejaVu Sans Bold fehlt im Image (apk add font-dejavu, Dockerfile): $FONT"
+# Der Demo-Verein hat kein Logo, also kommt das Icon aus den Initialen. Er wird
+# in der Wegwerf-Datenbank angelegt, die gleich weggeworfen wird.
+LOG="$(mktemp)"
+docker run --rm --network "$SMOKE_NET" "${SMOKE_ENV[@]}" "$IMAGE:$SHA" \
+	node apps/cli/dist/main.js demo einspielen >"$LOG" 2>&1 \
+	|| { tail -20 "$LOG" >&2; fail 'Der Demo-Verein liess sich im Image nicht anlegen.'; }
+rm -f "$LOG"
+for GROESSE in 192 512; do
+	curl -fsS -H "Host: $HOST" -H 'X-Forwarded-Proto: https' "$BASIS/demo/icon-$GROESSE.png" \
+		| node tools/pruefe-icon.mjs "$GROESSE" \
+		|| fail "Das Initialen-Icon ($GROESSE px) aus dem Image ist kaputt (Schrift? sharp?)."
+done
+note 'Initialen-Icon: DejaVu Sans Bold, 192 und 512 px, Buchstaben gezeichnet'
+
 # Und die CLI, die im selben Image daneben liegt. Sie ist ein eigenes Buendel mit
 # eigenen externen Paketen (tools/runtime-package.mjs) -- in HWYD ist genau das
 # durchgerutscht: der Rauchtest startete nur die App, und auf dem Server
