@@ -156,6 +156,8 @@ Entfernte Personen sind nie gefragt; ihre Antworten zählen nicht. Eine Antwort 
 
 `antwortZeilen(betrachter, umfrage, …)`: eine Zeile für sich selbst, wenn gefragt, und **eine Zeile je eigenem gefragten Kind**. Das gilt auch bei „pro Person“: Für ein Kind antwortet das Kind selbst oder seine Familie, unabhängig davon, ob es einen Zugang hat. Verworfen: „pro Person“ wörtlich als „jeder mit Zugang“ — Kinder ohne Zugang hätten dann keine Stimme.
 
+Ist ein Jugendleiter zugleich Bezugsperson eines Jugendsprechers, bekommt er im Austausch auch die Zeile für dieses Kind, und das Kind erscheint bei ihm unter „Braucht deine Antwort“ (Entscheidung des Eigentümers, 20.10.2026). FAM 2.3 schließt die Familie aus; er sieht den Thread aber als Jugendleiter, und für ein Kind darf seine Familie antworten. Verworfen: die Kindzeile im Austausch unterdrücken — dann gäbe es dort eine Ausnahme von der Regel „eine Zeile je eigenem gefragten Kind“, ohne dass sie etwas schützt.
+
 ### 3.3 Wer antworten darf
 
 `darfAntworten(person, fuer, umfrage, thread, jetzt)`:
