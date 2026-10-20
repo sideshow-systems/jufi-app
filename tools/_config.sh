@@ -38,19 +38,47 @@ fi
 : "${DB_SERVICE:=jufi-db}"
 : "${MIGRATE_SERVICE:=jufi-migrate}"
 : "${MAIL_SERVICE:=jufi-mailpit}"
+: "${REMOTE_TOOLS:=$REMOTE_DIR/jufi-tools}"
+: "${BACKUP_DIR:=$REMOTE_DIR/jufi-backups}"
 : "${IMAGE:=sideshowsystems/jufi}"
-: "${APP_URL:=https://app-test.jufi-app.de}"
+: "${APP_URL:=https://test.jufi-app.de}"
 
-# ssh mit ausdruecklichem Schluessel, damit der Deploy nicht davon abhaengt, was
-# im Agent gerade geladen ist. BatchMode: eine Passwortabfrage mitten im Deploy
+# ssh/scp mit ausdruecklichem Schluessel, damit der Deploy nicht davon abhaengt,
+# was im Agent gerade geladen ist. BatchMode: eine Passwortabfrage mitten im Deploy
 # soll scheitern statt haengen.
 SSH_OPTS=(-o BatchMode=yes)
 [[ -n "$SSH_KEY" ]] && SSH_OPTS+=(-i "${SSH_KEY/#\~/$HOME}")
 
 jufi_ssh() { ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "$@"; }
+jufi_scp() { scp "${SSH_OPTS[@]}" "$@"; }
 
 # Compose auf dem Server, immer mit Datei und immer aus dem richtigen Verzeichnis.
 remote_compose() { jufi_ssh "cd $REMOTE_DIR && docker compose -f $REMOTE_COMPOSE $*"; }
+
+# restic kennt nur RESTIC_REPOSITORY und RESTIC_PASSWORD. In der geteilten .env
+# tragen die Werte nach Regel 2 das Praefix JUFI_ -- unpraefixiert sicherte eine
+# zweite App mit restic in dieselbe Ablage.
+#
+# Verworfen: HWYDs Rueckfall auf ein schon gesetztes RESTIC_REPOSITORY. In einer
+# geteilten Umgebung hiesse das, dass JuFi stillschweigend in die Ablage einer
+# anderen App schriebe, sobald der eigene Name fehlt; leer ist die sicherere
+# Vorgabe, denn dann scheitert die Sicherung laut.
+#
+# Eine **Funktion** und keine Zuweisung, weil die .env des Servers erst *nach*
+# dieser Datei gelesen wird; eine Zuweisung hier waere immer leer.
+restic_env() {
+	RESTIC_REPOSITORY="${JUFI_RESTIC_REPOSITORY:-}"
+	RESTIC_PASSWORD="${JUFI_RESTIC_PASSWORD:-}"
+	export RESTIC_REPOSITORY RESTIC_PASSWORD
+}
+
+# Der Teil benutzer@wirt aus sftp:benutzer@wirt:pfad, fuer Vorpruefungen und
+# Meldungen. Nichts, wenn die Ablage kein SFTP ist.
+restic_sftp_host() {
+	[[ "${RESTIC_REPOSITORY:-}" == sftp:* ]] || return 0
+	local rest="${RESTIC_REPOSITORY#sftp:}"
+	printf '%s' "${rest%%:*}"
+}
 
 step() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
 fail() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
