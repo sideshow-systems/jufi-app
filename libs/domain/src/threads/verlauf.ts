@@ -1,6 +1,8 @@
 import { terminFehler, terminZeit, type TerminDaten } from '../module/termin/termin.js';
 import { fristZeitpunkt } from '../module/umfrage/umfrage.js';
-import type { ThreadModus } from './typen.js';
+import { absenderName, kurzname } from './namen.js';
+import { darfLoeschenNachricht } from './rechte.js';
+import type { ThreadKopf, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
 
 export const MODUS_TEXT: Readonly<Record<ThreadModus, string>> = {
 	AUSHANG: 'Nur Aushang',
@@ -129,4 +131,75 @@ export function linkTeile(text: string): TextTeil[] {
 	}
 	anhaengen(text.slice(ab));
 	return teile;
+}
+
+export interface VerlaufEintragDaten {
+	id: string;
+	art: 'NACHRICHT' | 'SYSTEM';
+	autorId: string | null;
+	text: string | null;
+	systemArt: SystemArt | null;
+	systemDaten: unknown;
+	stand: number;
+	angelegtAm: Date;
+	geloeschtAm: Date | null;
+	geloeschtVonId: string | null;
+}
+
+export interface VerlaufAnsicht {
+	id: string;
+	art: 'NACHRICHT' | 'SYSTEM';
+	text: string | null;
+	absender: string | null;
+	eigen: boolean;
+	angelegtAm: string;
+	stand: number;
+	geloescht: 'SELBST' | 'MODERATION' | null;
+	darfLoeschen: boolean;
+}
+
+// Im Satz steht der Handelnde als Satzanfang, deshalb gross; absenderName liefert das
+// kleingeschriebene Wort fuer die Zeile unter einer Nachricht. Wer nicht im Umfeld steht,
+// ist entfernt oder unbekannt und heisst fuer alle gleich.
+function handelnder(autorId: string | null, umfeld: Umfeld): string {
+	const autor = autorId === null ? undefined : umfeld.personen.get(autorId);
+	return autor ? kurzname(autor) : 'Ein ehemaliges Mitglied';
+}
+
+/**
+ * Eine Zeile des Verlaufs, wie die Person sie sieht. Der Text einer geloeschten
+ * Nachricht verlaesst die Funktion nie (null), die Zeile bleibt aber stehen und sagt,
+ * wer geloescht hat. Verworfen: den Text mitzuschicken und die Oberflaeche ausblenden
+ * zu lassen, weil er dann im Netz laege.
+ * "Selbst" heisst: Loescher und Autor sind dieselbe bekannte Person. Fehlt der Urheber
+ * der Loeschung, gilt Moderation, weil nur die einen Autor ohne Spur ueberschreiben kann.
+ */
+export function verlaufAnsicht(
+	ich: ThreadPerson,
+	kopf: ThreadKopf,
+	eintrag: VerlaufEintragDaten,
+	umfeld: Umfeld,
+): VerlaufAnsicht {
+	const nachricht = eintrag.art === 'NACHRICHT';
+	const geloescht = eintrag.geloeschtAm
+		? eintrag.geloeschtVonId !== null && eintrag.geloeschtVonId === eintrag.autorId
+			? 'SELBST'
+			: 'MODERATION'
+		: null;
+	let text: string | null;
+	if (nachricht) text = geloescht ? null : eintrag.text;
+	else if (eintrag.systemArt)
+		text = systemSatz(eintrag.systemArt, eintrag.systemDaten, handelnder(eintrag.autorId, umfeld));
+	else text = `${handelnder(eintrag.autorId, umfeld)} hat den Thread geändert`;
+	return {
+		id: eintrag.id,
+		art: eintrag.art,
+		text,
+		absender: nachricht ? absenderName(eintrag.autorId, umfeld) : null,
+		eigen: nachricht && eintrag.autorId === ich.id,
+		angelegtAm: eintrag.angelegtAm.toISOString(),
+		stand: eintrag.stand,
+		geloescht,
+		darfLoeschen: darfLoeschenNachricht(ich, eintrag, kopf),
+	};
 }

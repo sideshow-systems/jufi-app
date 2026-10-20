@@ -1,6 +1,13 @@
 import type { TerminDaten } from '../module/termin/termin.js';
 import type { ThreadKopf } from './typen.js';
-import { darfArchivieren, darfBearbeiten, darfLoeschen, darfLoeschenNachricht, darfSchreiben } from './rechte.js';
+import {
+	darfArchivieren,
+	darfBearbeiten,
+	darfLoeschen,
+	darfLoeschenNachricht,
+	darfSchreiben,
+	schreibSperre,
+} from './rechte.js';
 import { bowlingUmfeld, JETZT, kopf, MIA } from './testhilfe.js';
 
 const umfeld = bowlingUmfeld();
@@ -112,6 +119,33 @@ describe('darfSchreiben', () => {
 	it('verweigert, wer den Thread nicht sieht', () => {
 		expect(schreiben('peter', kopf({ alleUntergruppen: false, untergruppenIds: ['klein'] }))).toBe(false);
 		expect(schreiben('sandra', kopf({ rollenfilter: 'NUR_JUGENDLEITER' }))).toBe(false);
+	});
+});
+
+describe('schreibSperre', () => {
+	const sperre = (id: string, k: ThreadKopf = kopf(), termine: TerminDaten[] = []) =>
+		schreibSperre(person(id), k, umfeld, termine, JETZT);
+
+	it('nennt den Grund, der zuerst zutrifft', () => {
+		expect(sperre('sandra', kopf({ rollenfilter: 'NUR_JUGENDLEITER' }))).toBe('NICHT_GEFUNDEN');
+		expect(sperre('thomas', kopf({ veroeffentlichtAm: null }))).toBe('ENTWURF');
+		expect(sperre('thomas', kopf({ modus: 'AUSHANG' }))).toBe('NUR_AUSHANG');
+		expect(sperre('thomas', kopf({ archivModus: 'ARCHIVIERT' }))).toBe('ARCHIVIERT');
+		expect(sperre('sandra')).toBeNull();
+	});
+
+	it('gibt bei mehreren Gruenden den ersten', () => {
+		const alles = kopf({ veroeffentlichtAm: null, modus: 'AUSHANG', archivModus: 'ARCHIVIERT' });
+		expect(sperre('thomas', alles)).toBe('ENTWURF');
+		expect(sperre('thomas', kopf({ modus: 'AUSHANG', archivModus: 'ARCHIVIERT' }))).toBe('NUR_AUSHANG');
+		// Wer den Thread nicht sieht, erfaehrt auch von Entwurf und Aushang nichts.
+		expect(sperre('sandra', kopf({ rollenfilter: 'NUR_JUGENDLEITER', veroeffentlichtAm: null }))).toBe(
+			'NICHT_GEFUNDEN',
+		);
+	});
+
+	it('sperrt ueber den letzten Termin im Archiv', () => {
+		expect(sperre('sandra', kopf(), [alterTermin])).toBe('ARCHIVIERT');
 	});
 });
 

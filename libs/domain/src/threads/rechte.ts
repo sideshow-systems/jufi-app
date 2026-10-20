@@ -40,8 +40,28 @@ export function darfLoeschen(
 	);
 }
 
+export type SchreibSperre = 'NICHT_GEFUNDEN' | 'ENTWURF' | 'NUR_AUSHANG' | 'ARCHIVIERT';
+
 // Entwuerfe sind auch fuer Jugendleiter stumm (Spec 3.6), und im Archiv ist das
 // Schreiben gesperrt (3.7); wer bearbeiten darf, traegt dort nach, ohne zu schreiben.
+// Der Grund steht hier und nicht nur ein Ja/Nein, weil Server (404/409) und Oberflaeche
+// (Hinweis statt Eingabefeld) dieselbe Reihenfolge brauchen: wer den Thread nicht sieht,
+// erfaehrt nichts ueber Entwurf oder Modus. Verworfen: den Grund in Server und Client
+// je einzeln herleiten, weil beide Seiten dann auseinanderliefen.
+export function schreibSperre(
+	person: ThreadPerson,
+	kopf: ThreadKopf,
+	umfeld: Umfeld,
+	termine: readonly TerminDaten[],
+	jetzt: Date,
+): SchreibSperre | null {
+	if (!siehtThread(person, kopf, umfeld)) return 'NICHT_GEFUNDEN';
+	if (!kopf.veroeffentlichtAm) return 'ENTWURF';
+	if (kopf.modus === 'AUSHANG') return 'NUR_AUSHANG';
+	if (istArchiviert(kopf, termine, jetzt)) return 'ARCHIVIERT';
+	return null;
+}
+
 export function darfSchreiben(
 	person: ThreadPerson,
 	kopf: ThreadKopf,
@@ -49,10 +69,7 @@ export function darfSchreiben(
 	termine: readonly TerminDaten[],
 	jetzt: Date,
 ): boolean {
-	if (!siehtThread(person, kopf, umfeld)) return false;
-	if (!kopf.veroeffentlichtAm) return false;
-	if (kopf.modus === 'AUSHANG') return false;
-	return !istArchiviert(kopf, termine, jetzt);
+	return schreibSperre(person, kopf, umfeld, termine, jetzt) === null;
 }
 
 // Systemeintraege ("veroeffentlicht" usw.) sind Verlauf, keine Meinungsaeusserung, und

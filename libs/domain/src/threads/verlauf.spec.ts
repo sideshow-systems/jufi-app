@@ -1,5 +1,6 @@
 import { terminZeit, type TerminDaten } from '../module/termin/termin.js';
-import { linkTeile, MODUS_TEXT, systemSatz } from './verlauf.js';
+import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
+import { linkTeile, MODUS_TEXT, systemSatz, verlaufAnsicht, type VerlaufEintragDaten } from './verlauf.js';
 
 const termin: TerminDaten = {
 	modulId: 'm',
@@ -109,5 +110,105 @@ describe('linkTeile', () => {
 	it('gibt fremden Text unveraendert zurueck, er wird nie zu HTML', () => {
 		const text = '<script>alert(1)</script> <img src=x onerror=alert(1)>';
 		expect(linkTeile(text)).toEqual([{ art: 'text', text }]);
+	});
+});
+
+describe('verlaufAnsicht', () => {
+	const umfeld = bowlingUmfeld();
+	const person = (id: string) => umfeld.personen.get(id)!;
+	const eintrag = (daten: Partial<VerlaufEintragDaten> = {}): VerlaufEintragDaten => ({
+		id: 'e1',
+		art: 'NACHRICHT',
+		autorId: 'sandra',
+		text: 'Wir sind dabei',
+		systemArt: null,
+		systemDaten: null,
+		stand: 7,
+		angelegtAm: new Date('2026-10-22T08:30:00Z'),
+		geloeschtAm: null,
+		geloeschtVonId: null,
+		...daten,
+	});
+
+	it('zeigt Thomas die Nachricht Sandras mit Beziehung und Loeschrecht der Moderation', () => {
+		expect(verlaufAnsicht(person('thomas'), kopf(), eintrag(), umfeld)).toEqual({
+			id: 'e1',
+			art: 'NACHRICHT',
+			text: 'Wir sind dabei',
+			absender: 'Sandra M. (Mutter von Lena und Max)',
+			eigen: false,
+			angelegtAm: '2026-10-22T08:30:00.000Z',
+			stand: 7,
+			geloescht: null,
+			darfLoeschen: true,
+		});
+	});
+
+	it('kennzeichnet die eigene Nachricht und verweigert fremden Familien das Loeschen', () => {
+		const sandra = verlaufAnsicht(person('sandra'), kopf(), eintrag(), umfeld);
+		expect(sandra.eigen).toBe(true);
+		expect(sandra.darfLoeschen).toBe(true);
+		const hans = verlaufAnsicht(person('hans'), kopf(), eintrag(), umfeld);
+		expect(hans.eigen).toBe(false);
+		expect(hans.darfLoeschen).toBe(false);
+	});
+
+	it('nennt den Grund einer Loeschung und blendet den Text aus', () => {
+		const selbst = verlaufAnsicht(
+			person('hans'),
+			kopf(),
+			eintrag({ geloeschtAm: JETZT, geloeschtVonId: 'sandra' }),
+			umfeld,
+		);
+		expect(selbst).toMatchObject({ geloescht: 'SELBST', text: null, darfLoeschen: false });
+		const moderation = verlaufAnsicht(
+			person('thomas'),
+			kopf(),
+			eintrag({ geloeschtAm: JETZT, geloeschtVonId: 'thomas' }),
+			umfeld,
+		);
+		expect(moderation).toMatchObject({ geloescht: 'MODERATION', text: null, darfLoeschen: false });
+	});
+
+	it('liest eine Loeschung ohne bekannten Urheber als Moderation', () => {
+		const a = verlaufAnsicht(person('hans'), kopf(), eintrag({ geloeschtAm: JETZT, geloeschtVonId: null }), umfeld);
+		expect(a.geloescht).toBe('MODERATION');
+	});
+
+	it('macht aus einem Systemeintrag den Satz mit dem Kurznamen des Autors', () => {
+		const a = verlaufAnsicht(
+			person('sandra'),
+			kopf(),
+			eintrag({ art: 'SYSTEM', autorId: 'thomas', text: null, systemArt: 'VEROEFFENTLICHT', systemDaten: {} }),
+			umfeld,
+		);
+		expect(a).toMatchObject({
+			art: 'SYSTEM',
+			text: 'Thomas K. hat den Thread veröffentlicht',
+			absender: null,
+			eigen: false,
+			darfLoeschen: false,
+		});
+	});
+
+	it('schreibt fuer einen entfernten Autor "Ein ehemaliges Mitglied" mit grossem Anfang', () => {
+		const a = verlaufAnsicht(
+			person('sandra'),
+			kopf(),
+			eintrag({ art: 'SYSTEM', autorId: 'mia', text: null, systemArt: 'VEROEFFENTLICHT', systemDaten: {} }),
+			umfeld,
+		);
+		expect(a.text).toBe('Ein ehemaliges Mitglied hat den Thread veröffentlicht');
+		const ohneAutor = verlaufAnsicht(
+			person('sandra'),
+			kopf(),
+			eintrag({ art: 'SYSTEM', autorId: null, text: null, systemArt: 'VEROEFFENTLICHT', systemDaten: {} }),
+			umfeld,
+		);
+		expect(ohneAutor.text).toBe('Ein ehemaliges Mitglied hat den Thread veröffentlicht');
+	});
+
+	it('gibt den Zeitpunkt als ISO-Text', () => {
+		expect(verlaufAnsicht(person('thomas'), kopf(), eintrag(), umfeld).angelegtAm).toBe('2026-10-22T08:30:00.000Z');
 	});
 });
