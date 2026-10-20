@@ -593,13 +593,16 @@ model Thread {
   /// trotzdem durch (Begruendung bei Einwilligung).
   erstelltVonId         String?
   erstelltVon           Person?      @relation("ThreadErstelltVon", fields: [vereinId, erstelltVonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
-  /// Zeitpunkt und Aenderungsstand der letzten Aktivitaet: Sortierung der Liste
-  /// und Grundlage des Archivs. Als Spalten statt aus Verlauf und Modulen
-  /// berechnet, weil die Liste sonst bei jedem Aufruf alle Threads eines Vereins
-  /// durchsuchen muesste.
+  /// Zeitpunkt und Aenderungsstand der letzten Aktivitaet: Sortierung der Liste.
+  /// Das Archiv folgt dem letzten Termin, nicht dieser Spalte (Spec 3.7). Als
+  /// Spalten statt aus Verlauf und Modulen berechnet, weil die Liste sonst bei
+  /// jedem Aufruf alle Threads eines Vereins durchsuchen muesste.
   letzteAktivitaetAm    DateTime     @default(now())
   letzteAktivitaetStand Int          @default(0)
   angelegtAm            DateTime     @default(now())
+  /// Technischer Zeitstempel: @updatedAt springt bei jedem updateMany aus
+  /// mitAenderung (auch bei jeder Antwort und Nachricht) auf die Uhr des Prozesses.
+  /// Nicht "Kopf geaendert" -- dafuer gelten Verlauf und Aenderung.
   geaendertAm           DateTime     @default(now()) @updatedAt
 
   untergruppen ThreadUntergruppe[]
@@ -755,7 +758,15 @@ model UmfrageAntwort {
   vereinId    String
   verein      Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   umfrageId   String
-  umfrage     UmfrageModul @relation(fields: [vereinId, umfrageId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  /// NoAction statt Cascade: Von Thread, Modul oder Umfrage fuehrt kein Kaskadenweg
+  /// zu den Antworten, jede Antwort haelt ihre Umfrage fest (P2003) -- auch eine
+  /// ohne gewaehlte Option. Gewollt: Antworten gehen nie still verloren (Spec 3.14).
+  /// Verworfen: Cascade hier und die Sperre allein ueber UmfrageAntwortOption.option --
+  /// ob dann zuerst die Option (Fehler) oder die Antwort (still weg) kaskadiert,
+  /// haengt von der Reihenfolge der Prueftrigger in Postgres ab, und die kippt, wenn
+  /// eine spaetere Migration einen der Fremdschluessel neu anlegt. Das Loeschen eines
+  /// ganzen Vereins geht trotzdem durch, weil jede Tabelle direkt vom Verein kaskadiert.
+  umfrage     UmfrageModul @relation(fields: [vereinId, umfrageId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
   /// Fuer wen geantwortet wird (Jungfischer oder Erwachsener).
   fuerId      String
   fuer        Person       @relation("AntwortFuer", fields: [vereinId, fuerId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
@@ -786,15 +797,14 @@ model UmfrageAntwortOption {
   antwortId String
   antwort   UmfrageAntwort @relation(fields: [vereinId, umfrageId, antwortId], references: [vereinId, umfrageId, id], onDelete: Cascade, onUpdate: NoAction)
   optionId  String
-  /// NoAction statt Cascade: Eine beantwortete Option laesst sich nicht loeschen,
-  /// und damit auch keine beantwortete Umfrage, kein Modul und kein Thread mit
-  /// einer solchen Umfrage -- Postgres prueft den Verweis vor der Kaskade ueber
-  /// UmfrageAntwort (P2003). Gewollt: Antworten gehen nie still verloren (Spec
-  /// 3.14); Threads loescht man nur ohne Antworten (Spec 3.5). Zweiter Riegel
-  /// neben der Pruefung in der Domaene. Verworfen: DEFERRABLE INITIALLY DEFERRED --
-  /// die Pruefung liefe nach der Kaskade, und das Loeschen verwuerfe beantwortete
-  /// Umfragen kommentarlos. Das Loeschen eines ganzen Vereins geht trotzdem durch,
-  /// weil jede Tabelle direkt vom Verein kaskadiert.
+  /// NoAction statt Cascade: Eine gewaehlte Option laesst sich nicht loeschen
+  /// (P2003), solange eine Antwort sie nennt. Gewollt: Antworten gehen nie still
+  /// verloren (Spec 3.14). Das Verschwinden beantworteter Umfragen, Module und
+  /// Threads sperrt UmfrageAntwort.umfrage, ebenfalls NoAction -- dieser Riegel
+  /// haengt also nicht an der Reihenfolge der Kaskaden. Threads loescht man nur
+  /// ohne Antworten (Spec 3.5). Verworfen: DEFERRABLE INITIALLY DEFERRED -- die
+  /// Pruefung liefe nach der Kaskade, und das Loeschen verwuerfe beantwortete
+  /// Umfragen kommentarlos.
   option    UmfrageOption  @relation(fields: [vereinId, umfrageId, optionId], references: [vereinId, umfrageId, id], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([antwortId, optionId])

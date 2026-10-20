@@ -97,7 +97,7 @@ Je Typ eine eigene Tabelle mit derselben `id` (1:1, Cascade). Verworfen: ein JSO
 
 ### 2.3 Antworten
 
-`UmfrageAntwort (id, vereinId, umfrageId, fuerId, vonId, abgegebenAm, clientId)` mit eindeutigem `(umfrageId, fuerId)`: Eine neue Antwort überschreibt die alte (Upsert), es gilt die zuletzt abgegebene (Rahmen 6.3). `clientId` ist je Verein eindeutig und macht die Anfrage wiederholbar (Teilprojekt 5 schickt aus der Outbox). Die gewählten Optionen stehen in `UmfrageAntwortOption (antwortId, optionId)`. Der Fremdschlüssel auf die Option ist `NoAction`, nicht `Cascade`: Eine beantwortete Option lässt sich nicht löschen, und damit auch keine beantwortete Umfrage, kein Modul und kein Thread mit einer solchen Umfrage — Postgres prüft den Verweis vor der Kaskade (3.14). Antworten gehen so nie still verloren.
+`UmfrageAntwort (id, vereinId, umfrageId, fuerId, vonId, abgegebenAm, clientId)` mit eindeutigem `(umfrageId, fuerId)`: Eine neue Antwort überschreibt die alte (Upsert), es gilt die zuletzt abgegebene (Rahmen 6.3). `clientId` ist je Verein eindeutig und macht die Anfrage wiederholbar (Teilprojekt 5 schickt aus der Outbox). Die gewählten Optionen stehen in `UmfrageAntwortOption (antwortId, optionId)`. Die Fremdschlüssel von der Antwort auf die Umfrage und von der gewählten Option auf die Option sind `NoAction`, nicht `Cascade`: Von Thread, Modul oder Umfrage führt kein Kaskadenweg zu den Antworten, jede Antwort — auch eine ohne gewählte Option — sperrt das Löschen der Umfrage, des Moduls und des Threads, und eine gewählte Option lässt sich nicht löschen (3.14). Antworten gehen so nie still verloren, unabhängig von der Reihenfolge, in der Postgres Kaskaden und Prüfungen abarbeitet.
 
 Verworfen: jede Antwort als neue Zeile mit Historie — niemand braucht frühere Antworten, und „wer hat noch nicht geantwortet“ würde zur Gruppierung.
 
@@ -272,7 +272,7 @@ Liegen Antworten vor, verweigert der Server (409 mit Hinweis am Feld):
 
 Umbenennen und Umsortieren von Optionen, Frist und Ergebnis-Einstellung bleiben frei. Verworfen: Antworten bei solchen Änderungen still verwerfen.
 
-Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder das Modul noch der Thread: Die Datenbank verweigert es (der Fremdschlüssel von der gewählten Option ist `NoAction` und wird vor der Kaskade geprüft, 2.3). Verworfen: ein aufgeschobener Fremdschlüssel (`DEFERRABLE INITIALLY DEFERRED`) — er prüfte erst nach der Kaskade und ließe Antworten kommentarlos verschwinden. Folge für Etappe 2: `PUT /threads/:id` antwortet mit 409, wenn es ein beantwortetes Umfrage-Modul entfernen würde.
+Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder das Modul noch der Thread: Die Datenbank verweigert es (der Fremdschlüssel von der Antwort auf die Umfrage ist `NoAction`, es gibt keinen Kaskadenweg zu den Antworten, 2.3). Verworfen: die Kaskade von der Umfrage zur Antwort zu lassen und allein auf die Sperre über die gewählte Option zu bauen — ob zuerst die Sperre oder die Kaskade greift, hängt von der Reihenfolge der Prüftrigger in Postgres ab; und ein aufgeschobener Fremdschlüssel (`DEFERRABLE INITIALLY DEFERRED`) — er prüfte erst nach der Kaskade und ließe Antworten kommentarlos verschwinden. Folge für Etappe 2: `PUT /threads/:id` antwortet mit 409, wenn es ein beantwortetes Umfrage-Modul entfernen würde.
 
 ---
 

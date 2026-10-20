@@ -804,6 +804,23 @@ describe('Threads (TP3)', () => {
 		expect(await prisma.umfrageOption.count({ where: { umfrageId: unbeantwortet.id } })).toBe(0);
 	});
 
+	it('Umfrage mit einer Antwort ohne Optionen laesst sich ebenfalls nicht loeschen', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const kind = await jungfischer(a.id);
+		const t = await thread(a.id, leiter.id);
+		const u = await umfrage(a.id, t.id);
+		await option(a.id, u.id);
+		// Keine Option gewaehlt (Antwort "offen"): Es gibt keinen Verweis ueber die Option,
+		// die Antwort selbst muss den Schutz tragen.
+		const a1 = await antwort(a.id, u.id, kind.id, leiter.id);
+
+		expect(await fehlercode(prisma.umfrageModul.delete({ where: { id: u.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.threadModul.delete({ where: { id: u.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
+		expect(await prisma.umfrageAntwort.count({ where: { id: a1.id } })).toBe(1);
+	});
+
 	it('Positionen, Fragetext, Optionen und Info-Text ausserhalb der Grenzen abgelehnt', async () => {
 		const a = await verein();
 		const t = await thread(a.id, (await erwachsener(a.id)).id);

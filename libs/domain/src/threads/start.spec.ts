@@ -245,7 +245,9 @@ describe('ungeleseneNachrichten', () => {
 		autorId: string | null,
 		geloeschtAm: Date | null = null,
 		angelegtAm = '2026-10-21T10:00:00Z',
+		art: 'NACHRICHT' | 'SYSTEM' = 'NACHRICHT',
 	) => ({
+		art,
 		stand,
 		autorId,
 		angelegtAm: new Date(angelegtAm),
@@ -285,8 +287,11 @@ describe('ungeleseneNachrichten', () => {
 		).toBe(1);
 	});
 
-	it('zaehlt Systemeintraege ohne Autor als fremd', () => {
-		expect(ungeleseneNachrichten({ ...basis, nachrichten: [nachricht(4, null)] })).toBe(1);
+	it('zaehlt Systemeintraege nicht', () => {
+		// Z.B. TERMIN_GEAENDERT: ohne Autor, ueber dem Stand, nicht geloescht -- und doch keine Nachricht.
+		const system = nachricht(4, null, null, '2026-10-21T10:00:00Z', 'SYSTEM');
+		expect(ungeleseneNachrichten({ ...basis, nachrichten: [system] })).toBe(0);
+		expect(ungeleseneNachrichten({ ...basis, nachrichten: [system, nachricht(5, 'thomas')] })).toBe(1);
 	});
 });
 

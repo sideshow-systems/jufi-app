@@ -106,15 +106,26 @@ export interface NachrichtenEingabe {
 	personId: string;
 	zugangSeit: Date;
 	verlaufGelesenBis: number | null;
-	nachrichten: readonly { stand: number; autorId: string | null; angelegtAm: Date; geloeschtAm: Date | null }[];
+	nachrichten: readonly {
+		art: 'NACHRICHT' | 'SYSTEM';
+		stand: number;
+		autorId: string | null;
+		angelegtAm: Date;
+		geloeschtAm: Date | null;
+	}[];
 }
 
 // Spec 3.9, Zähler am Reiter "Verlauf": fremde, nicht gelöschte Nachrichten über dem
 // Stand. Ohne Stand zählen die ab dem Zugang, aus demselben Grund wie in istNeu.
+// Systemeinträge zählen nicht, auch ohne Autor nicht als "fremd": Ein verschobener
+// Termin in einem AUSHANG würde sonst "1 neuer Kommentar" zeigen, wo niemand
+// kommentieren kann. Verworfen: Systemeinträge mitzählen, weil sie ohne Autor "fremd"
+// sind — der Zähler soll ungelesene Beiträge anderer nennen, nicht jede Zeile im Verlauf.
 export function ungeleseneNachrichten(e: NachrichtenEingabe): number {
 	const seit = e.zugangSeit.getTime();
 	return e.nachrichten.filter(
 		(n) =>
+			n.art === 'NACHRICHT' &&
 			n.autorId !== e.personId &&
 			n.geloeschtAm === null &&
 			(e.verlaufGelesenBis !== null ? n.stand > e.verlaufGelesenBis : n.angelegtAm.getTime() >= seit),

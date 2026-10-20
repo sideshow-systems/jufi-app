@@ -10,8 +10,11 @@ export interface AenderungEingabe {
 
 /**
  * Aenderungen dieser Arten sind keine Aktivitaet im Thread: Ein geloeschter Thread
- * hat keine Zeile mehr, und eine neue Sichtbarkeit (Zielgruppe, Veroeffentlichung)
- * ist kein Beitrag, der den Thread in der Liste nach oben schieben soll.
+ * hat keine Zeile mehr, und eine neue Zielgruppe (SICHTBARKEIT, Etappe 5) ist kein
+ * Beitrag, der den Thread in der Liste nach oben schieben soll. Die Veroeffentlichung
+ * gehoert nicht hierher: Sie wird als THREAD gemeldet (der Verlaufseintrag dazu als
+ * VERLAUF) und schiebt den Thread nach oben, weil er fuer die Zielgruppe erst jetzt
+ * erscheint.
  */
 const OHNE_AKTIVITAET: readonly AenderungArt[] = ['GELOESCHT', 'SICHTBARKEIT'];
 
