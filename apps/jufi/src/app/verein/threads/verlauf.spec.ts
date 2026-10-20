@@ -221,6 +221,18 @@ describe('Verlauf', () => {
 			expect(el.querySelector('[role="alert"]')).toBeNull();
 		});
 
+		it('zeigt bei 404 Nicht gefunden oder keine Berechtigung statt des Servertextes', async () => {
+			zeige();
+			await vi.waitFor(() =>
+				http
+					.expectOne('/demo/api/v1/threads/ck1/verlauf')
+					.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' }),
+			);
+			await fertig();
+
+			expect(el.querySelector('[role="alert"]')?.textContent?.trim()).toBe('Nicht gefunden oder keine Berechtigung');
+		});
+
 		it('schickt bei abgelaufener Sitzung zur Anmeldung', async () => {
 			const navigieren = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
 			zeige();
@@ -327,6 +339,27 @@ describe('Verlauf', () => {
 	});
 
 	describe('Loeschen', () => {
+		it('nennt am Loeschen-Knopf den Absender, damit gleichlautende Knoepfe unterscheidbar sind', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Fremde', { darfLoeschen: true, absender: 'Lena M.' })]);
+
+			expect(knopf(zeilen()[0]!, 'Löschen').getAttribute('aria-label')).toBe('Nachricht von Lena M. löschen');
+		});
+
+		it('zeigt bei 404 am Loeschen Nicht gefunden oder keine Berechtigung', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Meine', { darfLoeschen: true, eigen: true })]);
+			knopf(zeilen()[0]!, 'Löschen').click();
+			fixture.detectChanges();
+			knopf(el.querySelector('[role="dialog"]')!, 'Löschen').click();
+			http
+				.expectOne('/demo/api/v1/verlauf/e1')
+				.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+			await fertig();
+
+			expect(el.querySelector('[role="alert"]')?.textContent?.trim()).toBe('Nicht gefunden oder keine Berechtigung');
+		});
+
 		it('bietet Loeschen nur, wo der Server darfLoeschen sagt', async () => {
 			zeige();
 			await ladeSeite([nachricht('e2', 'Meine', { darfLoeschen: true, eigen: true }), nachricht('e1', 'Fremde')]);
@@ -454,6 +487,18 @@ describe('Verlauf', () => {
 			expect(a.request.body.text).toBe('Per Enter');
 			a.flush({ eintrag: nachricht('e1', 'Per Enter', { eigen: true }), stand: 43 });
 			await fertig();
+		});
+
+		it('ignoriert Enter waehrend einer Eingabemethode, ohne es zu verwerfen', async () => {
+			zeige();
+			await ladeSeite([]);
+			tippe('Konnichiwa');
+			const enter = new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true });
+			feld().dispatchEvent(enter);
+
+			// Verwirft die Seite das Enter, kann die Eingabemethode ihre Umwandlung nicht bestaetigen.
+			expect(enter.defaultPrevented).toBe(false);
+			http.expectNone('/demo/api/v1/threads/ck1/verlauf');
 		});
 
 		it('schickt einen leeren Text nicht', async () => {

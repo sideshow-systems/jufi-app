@@ -334,7 +334,13 @@ describe('Thread-Seite', () => {
 			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
 
 			const reiter = Array.from(seite.querySelectorAll('nav.reiter a'));
-			expect(reiter.map((a) => a.textContent?.replace(/\s+/g, ' ').trim())).toEqual(['Übersicht', 'Verlauf 2']);
+			expect(reiter.map((a) => a.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+				'Übersicht',
+				'Verlauf 2 ungelesen',
+			]);
+			// Das Wort steht nur fuer Screenreader da; sichtbar bleibt die Zahl.
+			expect(reiter[1]?.querySelector('.zahl')?.textContent?.trim()).toBe('2');
+			expect(reiter[1]?.querySelector('.unsichtbar')?.textContent?.trim()).toBe('ungelesen');
 			expect(reiter[0]?.getAttribute('aria-current')).toBe('page');
 			expect(reiter[1]?.getAttribute('aria-current')).toBeNull();
 		});
@@ -348,7 +354,7 @@ describe('Thread-Seite', () => {
 			expect(seite.querySelector('nav.reiter .zahl')).toBeNull();
 		});
 
-		it('zeigt bei Nur Aushang ohne Eintraege keine Reiter', async () => {
+		it('zeigt bei Nur Aushang ohne Nachrichten keine Reiter', async () => {
 			const { seite } = await oeffne('/demo/t/ck1-bowling', {
 				id: 'ck1',
 				koerper: thread({ modus: 'AUSHANG', verlauf: { eintraege: 0, ungelesen: 0 } }),
@@ -357,7 +363,7 @@ describe('Thread-Seite', () => {
 			expect(seite.querySelector('nav.reiter')).toBeNull();
 		});
 
-		it('zeigt bei Nur Aushang mit alten Eintraegen die Reiter, damit sie lesbar bleiben', async () => {
+		it('zeigt bei Nur Aushang mit alten Nachrichten die Reiter, damit sie lesbar bleiben', async () => {
 			const { seite } = await oeffne('/demo/t/ck1-bowling', {
 				id: 'ck1',
 				koerper: thread({ modus: 'AUSHANG', verlauf: { eintraege: 2, ungelesen: 0 } }),

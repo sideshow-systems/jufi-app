@@ -253,9 +253,9 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		const zeileDu = kind.seite.locator('jf-umfrage-modul .zeile').filter({ hasText: 'Du' });
 		await expect(zeileDu).toContainText('✓ Dabei');
 		await expect(zeileDu).toContainText('eingetragen von Mutter Mara');
-		// Die Nachricht der Mutter ist fuer Mia ungelesen; der Zaehler am Reiter nennt sie.
+		// Die Nachricht der Mutter ist fuer Mia ungelesen; der Zaehler am Reiter nennt sie, fuer Screenreader mit dem Wort.
 		await expect(
-			kind.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: /^Verlauf\s*1$/ }),
+			kind.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: /^Verlauf\s*1\s*ungelesen$/ }),
 		).toBeVisible();
 		await kind.kontext.close();
 

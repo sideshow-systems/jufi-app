@@ -17,7 +17,7 @@ import { Router } from '@angular/router';
 import { linkTeile, type SchreibSperre, type TextTeil, type VerlaufAnsicht } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { BestaetigungComponent } from '../../admin/bestaetigung';
-import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
+import { type ApiFehler, alsApiFehler, fehlertextNichtGefunden } from '../../gemeinsam/api-fehler';
 import { zeitpunktBerlin } from '../../gestaltung/format';
 import { IconComponent } from '../../gestaltung/icon';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
@@ -70,7 +70,14 @@ const MAX_ZEICHEN = 2000;
 									<strong>{{ z.eintrag.eigen ? 'Du' : (z.eintrag.absender ?? 'Unbekannt') }}</strong>
 									<span class="gedaempft">{{ z.zeit }}</span>
 									@if (z.eintrag.darfLoeschen && z.eintrag.geloescht === null) {
-										<button type="button" class="knopf leise klein" (click)="frage.set(z.eintrag)">Löschen</button>
+										<button
+											type="button"
+											class="knopf leise klein"
+											[attr.aria-label]="'Nachricht von ' + (z.eintrag.absender ?? 'Unbekannt') + ' löschen'"
+											(click)="frage.set(z.eintrag)"
+										>
+											Löschen
+										</button>
 									}
 								</div>
 								@if (z.geloeschtText; as g) {
@@ -332,7 +339,7 @@ export class Verlauf {
 			if (lauf !== this.lauf) return;
 			const fehler = alsApiFehler(ursache);
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
-			this.ladefehler.set(fehlertext(fehler));
+			this.ladefehler.set(fehlertextNichtGefunden(fehler));
 			this.zustand.set('fehler');
 			return;
 		}
@@ -374,9 +381,10 @@ export class Verlauf {
 	}
 
 	protected async senden(ereignis: Event): Promise<void> {
-		ereignis.preventDefault();
 		// Enter waehrend einer Eingabemethode (Japanisch, Emoji-Auswahl) bestaetigt nur die Umwandlung.
+		// Vor preventDefault geprueft: Verwuerfe die Seite das Enter, bliebe die Umwandlung haengen.
 		if (ereignis instanceof KeyboardEvent && ereignis.isComposing) return;
+		ereignis.preventDefault();
 		const text = this.text().trim();
 		// Der zweite Tipp eines Doppeltipps kommt an, bevor der Knopf als gesperrt gezeichnet ist.
 		if (this.sendet() || text === '' || this.schreibSperre() !== null) return;
@@ -431,7 +439,7 @@ export class Verlauf {
 	private async zeigeFehler(
 		ursache: unknown,
 		ziel: { set(wert: string): void },
-		uebersetze: (fehler: ApiFehler) => string = fehlertext,
+		uebersetze: (fehler: ApiFehler) => string = fehlertextNichtGefunden,
 	): Promise<void> {
 		const fehler = alsApiFehler(ursache);
 		if (await beiAbgelaufenerSitzung(this.router, this.slug(), fehler)) return;
@@ -464,5 +472,5 @@ function textFehler(fehler: ApiFehler): string {
 	if (fehler.status === 400 && fehler.feld === 'text') {
 		return `Die Nachricht ist leer oder zu lang (höchstens ${MAX_ZEICHEN} Zeichen).`;
 	}
-	return fehlertext(fehler);
+	return fehlertextNichtGefunden(fehler);
 }

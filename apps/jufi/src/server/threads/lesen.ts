@@ -92,7 +92,10 @@ export async function ladeThreadAnsicht(
 			where: { personId_threadId: { personId: ich.id, threadId } },
 			select: { verlaufGelesenBis: true },
 		}),
-		db.verlaufEintrag.count({ where: { threadId } }),
+		// Nur Nachrichten, auch geloeschte: Der Reiter Verlauf haengt an diesem Wert. Verworfen: alle
+		// Eintraege zaehlen -- ab Etappe 3 schreibt jedes Veroeffentlichen einen Systemeintrag, und der
+		// Reiter erschiene bei jedem veroeffentlichten Aushang mit dem einen Satz "veroeffentlicht".
+		db.verlaufEintrag.count({ where: { threadId, art: 'NACHRICHT' } }),
 	]);
 	if (!geladen) return null;
 	const mich = umfeld.personen.get(ich.id);

@@ -197,12 +197,12 @@ describe('Thread lesen und Gelesen-Stand', () => {
 			expect(await max.json()).toEqual(NICHT_GEFUNDEN);
 		});
 
-		it('stand ist der Vereinsstand; verlauf zaehlt alle Eintraege und die fremden Nachrichten nach dem Gelesen-Stand', async () => {
+		it('stand ist der Vereinsstand; verlauf zaehlt die Nachrichten und die fremden Nachrichten nach dem Gelesen-Stand', async () => {
 			const s = await szenario();
 			const t = await s.bowling();
 			const nachZugang = new Date(ZUGANG.getTime() + TAG_MS);
 			const fremd1 = await s.schreibe(t.threadId, s.leiter.personId, nachZugang);
-			// Die eigene Nachricht zaehlt nie als ungelesen, wohl aber als Eintrag.
+			// Die eigene Nachricht zaehlt nie als ungelesen, wohl aber als Nachricht.
 			await s.schreibe(t.threadId, s.sandra.personId, nachZugang);
 
 			const ohneZeile = await s.holeAnsicht(t.threadId, s.sandra.cookie);
@@ -223,6 +223,38 @@ describe('Thread lesen und Gelesen-Stand', () => {
 
 			await s.schreibe(t.threadId, s.leiter.personId, nachZugang);
 			expect((await s.holeAnsicht(t.threadId, s.sandra.cookie)).verlauf).toEqual({ eintraege: 3, ungelesen: 1 });
+		});
+
+		it('verlauf.eintraege zaehlt nur Nachrichten, geloeschte eingeschlossen, keine Systemeintraege', async () => {
+			const s = await szenario();
+			const t = await s.bowling();
+			const nachZugang = new Date(ZUGANG.getTime() + TAG_MS);
+			await s.schreibe(t.threadId, s.leiter.personId, nachZugang);
+			await s.schreibe(t.threadId, s.leiter.personId, nachZugang);
+			const erste = await prisma.verlaufEintrag.findFirstOrThrow({ where: { threadId: t.threadId } });
+			await prisma.verlaufEintrag.update({
+				where: { id: erste.id },
+				data: { text: null, geloeschtAm: nachZugang, geloeschtVonId: s.leiter.personId },
+			});
+			// Das Veroeffentlichen schreibt ab Etappe 3 einen Systemeintrag: Zaehlte er mit, haette jeder
+			// veroeffentlichte Aushang einen Verlauf.
+			const { aenderungsstand } = await prisma.verein.update({
+				where: { id: s.verein.id },
+				data: { aenderungsstand: { increment: 1 } },
+				select: { aenderungsstand: true },
+			});
+			await prisma.verlaufEintrag.create({
+				data: {
+					vereinId: s.verein.id,
+					threadId: t.threadId,
+					art: 'SYSTEM',
+					systemArt: 'VEROEFFENTLICHT',
+					stand: aenderungsstand,
+					angelegtAm: nachZugang,
+				},
+			});
+
+			expect((await s.holeAnsicht(t.threadId, s.sandra.cookie)).verlauf.eintraege).toBe(2);
 		});
 
 		it('ohne Sitzung 401', async () => {

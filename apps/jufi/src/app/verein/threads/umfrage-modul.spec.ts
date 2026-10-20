@@ -185,6 +185,12 @@ describe('Umfrage-Modul', () => {
 			expect(zeileVon('Max').querySelector('jf-pille')?.textContent?.trim()).toBe('✗ Abgesagt');
 		});
 
+		it('nennt am ändern-Knopf die Person, damit gleichlautende Knoepfe unterscheidbar sind', () => {
+			zeige(umfrage({ zeilen: [zeile('k-lena', 'Lena', { optionIds: ['o-dabei'] })] }));
+
+			expect(knopf(zeileVon('Lena'), 'ändern').getAttribute('aria-label')).toBe('Antwort für Lena ändern');
+		});
+
 		it('ändern zeigt die Knoepfe wieder mit der bisherigen Antwort markiert', () => {
 			zeige(umfrage({ zeilen: [zeile('k-lena', 'Lena', { optionIds: ['o-abgesagt'] })] }));
 			knopf(zeileVon('Lena'), 'ändern').click();
@@ -312,6 +318,15 @@ describe('Umfrage-Modul', () => {
 
 			expect(el.querySelector('.frist')?.textContent?.trim()).toBe('Frist abgelaufen');
 			expect(knoepfe(zeileVon('Lena'))).toHaveLength(3);
+		});
+
+		it('zeigt bei 404 Nicht gefunden oder keine Berechtigung statt des Servertextes', async () => {
+			zeige();
+			knopf(zeileVon('Lena'), '✓ Dabei').click();
+			anfrage('k-lena').flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+			await fertig();
+
+			expect(el.querySelector('[role="alert"]')?.textContent?.trim()).toBe('Nicht gefunden oder keine Berechtigung');
 		});
 
 		it('zeigt bei 429 die Wartezeit und laesst wieder antworten', async () => {

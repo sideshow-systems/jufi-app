@@ -72,9 +72,17 @@ function utcStempel(d: Date): string {
 		.replace(/[-:]/g, '');
 }
 
-/** TEXT-Werte nach RFC 5545 3.3.11. */
+/**
+ * TEXT-Werte nach RFC 5545 3.3.11. Auch ein einzelnes CR wird zum Zeichenpaar Backslash-n: Manche Kalender-Parser trennen
+ * Zeilen an CR allein, ein Titel oder Ort mit CR schriebe sonst eine eigene Eigenschaftszeile.
+ * Verworfen: CR streichen -- ein Umbruch bliebe dann nicht als Umbruch erhalten.
+ */
 function text(s: string): string {
-	return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+	return s
+		.replace(/\\/g, '\\\\')
+		.replace(/;/g, '\\;')
+		.replace(/,/g, '\\,')
+		.replace(/\r\n|\r|\n/g, '\\n');
 }
 
 const UTF8 = new TextEncoder();

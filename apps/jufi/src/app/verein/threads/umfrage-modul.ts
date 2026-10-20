@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, input
 import { Router } from '@angular/router';
 import { type AuswertungsName, fristText, TEILNAHME_OPTIONEN, type UmfrageAnsicht } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
-import { alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
+import { alsApiFehler, fehlertextNichtGefunden } from '../../gemeinsam/api-fehler';
 import { PilleComponent } from '../../gestaltung/ui';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { ThreadApi } from './thread-api';
@@ -70,7 +70,13 @@ interface ErgebnisZeile {
 						<span class="antwort">
 							<jf-pille [art]="z.antwort.art">{{ z.antwort.text }}</jf-pille>
 							@if (z.bedienbar) {
-								<button type="button" class="knopf leise klein" [disabled]="sendet()" (click)="aendern(z)">
+								<button
+									type="button"
+									class="knopf leise klein"
+									[attr.aria-label]="'Antwort für ' + z.name + ' ändern'"
+									[disabled]="sendet()"
+									(click)="aendern(z)"
+								>
 									ändern
 								</button>
 							}
@@ -357,7 +363,7 @@ export class UmfrageModul {
 				this.aendert.set(null);
 				return;
 			}
-			this.fehler.set(fehlertext(fehler));
+			this.fehler.set(fehlertextNichtGefunden(fehler));
 		} finally {
 			this.sendet.set(false);
 		}

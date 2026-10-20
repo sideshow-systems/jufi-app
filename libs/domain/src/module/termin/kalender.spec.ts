@@ -127,6 +127,13 @@ describe('alsIcs', () => {
 		expect(ics).toContain('DESCRIPTION:Treffpunkt: Tor\\nEnde offen\\n' + LINK);
 	});
 
+	it('maskiert ein einzelnes CR wie einen Zeilenumbruch, damit keine eigene Eigenschaftszeile entsteht', () => {
+		const e = kalenderEintrag(termin({ beginn: '14:00', ort: 'a\rb' }), 'x\r\ny\rz', null, LINK);
+		const ics = alsIcs(e, 'mod1@jufi-app.de', jetzt).replace(/\r\n /g, '');
+		expect(ics).toContain('LOCATION:a\\nb\r\n');
+		expect(ics).toContain('SUMMARY:x\\ny\\nz\r\n');
+	});
+
 	it('laesst LOCATION ohne Ort weg', () => {
 		const e = kalenderEintrag(termin(), 'Bowling', null, LINK);
 		expect(alsIcs(e, 'mod1@jufi-app.de', jetzt)).not.toContain('LOCATION');

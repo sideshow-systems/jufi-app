@@ -74,6 +74,7 @@ export interface ThreadAnsicht {
 	archiviert: boolean;
 	stand: number;
 	schreibSperre: SchreibSperre | null;
+	/** eintraege zaehlt die Nachrichten (geloeschte eingeschlossen), keine Systemeintraege; der Name stammt aus der Wire-Form. */
 	verlauf: { eintraege: number; ungelesen: number };
 	module: ModulAnsicht[];
 }
@@ -84,6 +85,7 @@ export interface AnsichtEingabe {
 	module: readonly ModulDaten[];
 	umfeld: Umfeld;
 	stand: number;
+	/** Anzahl der Nachrichten, auch geloeschter; Systemeintraege zaehlen nicht (siehe lesen.ts). */
 	verlaufEintraege: number;
 	nachrichten: NachrichtenEingabe['nachrichten'];
 	zugangSeit: Date;

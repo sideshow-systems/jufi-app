@@ -86,6 +86,7 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 								Verlauf
 								@if (t.verlauf.ungelesen > 0) {
 									<span class="zahl">{{ t.verlauf.ungelesen }}</span>
+									<span class="unsichtbar"> ungelesen</span>
 								}
 							</a>
 						</nav>
@@ -257,9 +258,10 @@ export class ThreadSeite {
 	private readonly id = computed(() => idAusSegment(this.segment()));
 
 	/**
-	 * Reiter gibt es, wo es einen Verlauf gibt oder gab: Bei Nur Aushang ohne Eintraege waere der
-	 * Verlauf eine leere Seite. Mit alten Eintraegen bleibt er lesbar, auch wenn der Modus danach
-	 * auf Nur Aushang gestellt wurde.
+	 * Reiter gibt es, wo es einen Verlauf gibt oder gab: Bei Nur Aushang ohne Nachrichten waere der
+	 * Verlauf eine leere Seite. Mit alten Nachrichten bleibt er lesbar, auch wenn der Modus danach
+	 * auf Nur Aushang gestellt wurde. Der Server zaehlt nur Nachrichten; Systemeintraege wie
+	 * "veroeffentlicht" haetten sonst bei jedem Aushang einen Reiter erzwungen.
 	 */
 	protected readonly mitVerlauf = computed(() => {
 		const t = this.thread();
