@@ -33,6 +33,13 @@ const ZAEHLER_AB = 9000;
 // Abend vor dem Termin, und ein Wert, den das Feld zeigt, laesst sich ohnehin aendern.
 const FRIST_UHRZEIT = '18:00';
 
+// Ein Datum ist erst dann eine Frist, wenn es vollstaendig ist und ein sinnvolles Jahr hat:
+// Auf dem Weg zu 2026 meldet der Browser 0002, 0020 und 0202, und berlinZeitpunkt machte aus
+// 0002 das Jahr 1902.
+const TAG = /^\d{4}-\d{2}-\d{2}$/;
+const UHRZEIT = /^([01]\d|2[0-3]):[0-5]\d$/;
+const istPlausiblerTag = (tag: string): boolean => TAG.test(tag) && Number(tag.slice(0, 4)) >= 1000;
+
 const ZAHL = new Intl.NumberFormat('de-DE');
 
 // Die Optionen, mit denen eine frisch auf "ohne Teilnahme" gestellte Umfrage beginnt: zwei
@@ -405,6 +412,7 @@ const hakenVon = (e: Event): boolean => (e.target as HTMLInputElement).checked;
 								[attr.aria-invalid]="fehlerAn('frist') ? 'true' : null"
 								[attr.aria-describedby]="fehlerAn('frist') ? fehlerId('frist') : null"
 								(input)="fristTagSetzen(m, wert($event))"
+								(blur)="gleicheAb($event, fristTag())"
 							/>
 						</label>
 						<label class="feld">
@@ -416,7 +424,8 @@ const hakenVon = (e: Event): boolean => (e.target as HTMLInputElement).checked;
 								[disabled]="ohneFrist()"
 								[attr.aria-invalid]="fehlerAn('frist') ? 'true' : null"
 								[attr.aria-describedby]="fehlerAn('frist') ? fehlerId('frist') : null"
-								(input)="fristZeitSetzen(m, $event)"
+								(input)="fristZeitSetzen(m, wert($event))"
+								(blur)="gleicheAb($event, fristZeit())"
 							/>
 						</label>
 					</div>
@@ -581,14 +590,17 @@ export class ModulFelderComponent {
 	// Die Frist steht im Modul als UTC-ISO, im Formular als Berliner Tag und Uhrzeit. Lokal
 	// gehalten und aus dem Modul nachgefuehrt: Ein Datum ohne Uhrzeit oder umgekehrt ist noch
 	// kein Zeitpunkt und kaeme sonst nie ins Modul. linkedSignal statt effect, damit die
-	// Eingabe nicht eine Runde zu spaet zurueckspringt.
-	protected readonly ohneFrist = linkedSignal(() => this.umfrage()?.frist == null);
+	// Eingabe nicht eine Runde zu spaet zurueckspringt. Die Quelle ist der Frist-Wert, nicht
+	// das Modul: Jede andere Eingabe meldet ein neues Modulobjekt, und an dessen Identitaet
+	// gekoppelt wuerde sie den lokalen Stand (halbe Eingabe, abgewaehltes "ohne Frist") verwerfen.
+	private readonly frist = computed(() => this.umfrage()?.frist ?? null);
+	protected readonly ohneFrist = linkedSignal(() => this.frist() === null);
 	protected readonly fristTag = linkedSignal(() => {
-		const f = this.umfrage()?.frist;
+		const f = this.frist();
 		return f ? berlinerTag(new Date(f)) : '';
 	});
 	protected readonly fristZeit = linkedSignal(() => {
-		const f = this.umfrage()?.frist;
+		const f = this.frist();
 		return f ? berlinerUhrzeit(new Date(f)) : '';
 	});
 
@@ -662,8 +674,11 @@ export class ModulFelderComponent {
 		// Die Antworten einer Teilnahme sind fest (Spec 3.12), der Server setzt sie ohnehin;
 		// hier stehen sie schon, damit die Vorschau sie zeigt. Beim Abschalten beginnt die Liste
 		// mit zwei Antworten statt mit den festen Schluesseln, die nur eine Teilnahme haben darf.
+		// "Mehrfachauswahl" gibt es bei einer Teilnahme nicht und das Feld ist dann ausgeblendet:
+		// Ein stehengebliebenes true wuerde unsichtbar mitgespeichert.
 		this.umfrageSetzen(m, {
 			teilnahme: an,
+			...(an ? { mehrfach: false } : {}),
 			optionen: an ? this.teilnahmeAntworten(m.vielleicht) : AUSGANGSOPTIONEN(),
 		});
 	}
@@ -696,33 +711,34 @@ export class ModulFelderComponent {
 		this.umfrageSetzen(m, { optionen });
 	}
 
+	// Waehrend des Tippens meldet der Browser auch Zwischenstaende: '' bei einem geleerten
+	// Segment, "0002-10-22" auf dem Weg zu "2026-10-22". Beides ist keine Frist. Weder melden
+	// noch ins Feld zurueckschreiben (das binding nimmt dem Tippenden sonst das Segment unter
+	// den Fingern weg); abgeschaltet wird nur ueber "ohne Frist". Verworfen: (change) statt
+	// (input): Chrome meldet change auch fuer jedes gueltige Zwischenjahr und fuer ein
+	// geleertes Feld, es loeste also nichts. Beim Verlassen springt das Feld auf den Stand des
+	// Moduls zurueck (gleicheAb).
 	protected fristTagSetzen(m: UmfrageModul, tag: string): void {
+		if (!istPlausiblerTag(tag)) return;
 		this.fristTag.set(tag);
-		if (tag === '') {
-			// Kein Datum, keine Frist: Ein Zeitpunkt ohne Tag gibt es nicht.
-			this.fristZeit.set('');
-			this.ohneFrist.set(true);
-			this.umfrageSetzen(m, { frist: null });
-			return;
-		}
 		const zeit = this.fristZeit() || FRIST_UHRZEIT;
 		this.fristZeit.set(zeit);
 		this.ohneFrist.set(false);
 		this.umfrageSetzen(m, { frist: berlinZeitpunkt(tag, zeit).toISOString() });
 	}
 
-	protected fristZeitSetzen(m: UmfrageModul, e: Event): void {
-		const feld = e.target as HTMLInputElement;
-		// Eine geleerte Uhrzeit springt zurueck: Sonst stuende im Feld nichts, im Modul aber noch die alte.
-		if (feld.value === '') {
-			feld.value = this.fristZeit();
-			return;
-		}
-		this.fristZeit.set(feld.value);
+	protected fristZeitSetzen(m: UmfrageModul, wert: string): void {
+		if (!UHRZEIT.test(wert)) return;
+		this.fristZeit.set(wert);
 		const tag = this.fristTag();
 		// Ohne Datum merkt sich das Feld die Uhrzeit nur; das Datum macht sie zum Zeitpunkt.
 		if (tag === '') return;
-		this.umfrageSetzen(m, { frist: berlinZeitpunkt(tag, feld.value).toISOString() });
+		this.umfrageSetzen(m, { frist: berlinZeitpunkt(tag, wert).toISOString() });
+	}
+
+	protected gleicheAb(e: Event, stand: string): void {
+		const feld = e.target as HTMLInputElement;
+		if (feld.value !== stand) feld.value = stand;
 	}
 
 	protected ohneFristSetzen(m: UmfrageModul, ohne: boolean): void {

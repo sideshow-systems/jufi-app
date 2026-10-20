@@ -427,6 +427,26 @@ describe('entwurfAus', () => {
 		expect((r.entwurf.module[2] as Umfrage).optionen.map((o) => o.schluessel)).toEqual(['dabei', 'abgesagt']);
 	});
 
+	it('macht bei einer Teilnahme aus einer Mehrfachauswahl keine, bei einer Umfrage laesst es sie stehen', () => {
+		const k = koerper();
+		const u = (k['module'] as Record<string, unknown>[])[2];
+		u['mehrfach'] = true;
+		const teilnahme = entwurfAus(k);
+		if (!('entwurf' in teilnahme)) throw new Error('Fehler erwartet nicht');
+		expect((teilnahme.entwurf.module[2] as Umfrage).mehrfach).toBe(false);
+		u['teilnahme'] = false;
+		u['optionen'] = [{ text: 'Ja' }, { text: 'Nein' }];
+		const umfrage = entwurfAus(k);
+		if (!('entwurf' in umfrage)) throw new Error('Fehler erwartet nicht');
+		expect((umfrage.entwurf.module[2] as Umfrage).mehrfach).toBe(true);
+	});
+
+	it('liest mehrfach auch bei einer Teilnahme als Wahrheitswert', () => {
+		const k = koerper();
+		(k['module'] as Record<string, unknown>[])[2]['mehrfach'] = 'ja';
+		expect(entwurfAus(k)).toEqual(ungueltig('module.2.mehrfach'));
+	});
+
 	it('verlangt bei einer Umfrage ohne Teilnahme eine Liste von Optionen', () => {
 		const k = koerper();
 		const u = (k['module'] as Record<string, unknown>[])[2];

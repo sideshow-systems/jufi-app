@@ -175,12 +175,18 @@ function modul(w: unknown, i: number): ModulEntwurf {
 
 	const teilnahme = wahrheit(w['teilnahme'], f('teilnahme'));
 	const vielleicht = wahrheit(w['vielleicht'], f('vielleicht'));
+	// Eine Teilnahme ist eine Antwort aus dabei, vielleicht, abgesagt; "Mehrfachauswahl" gibt es
+	// dort nicht, der Editor blendet sie aus. Ein verstecktes true liesse die Teilnahme als
+	// Mehrfachauswahl speichern. Gelesen wird der Wert trotzdem, damit ein Nicht-Wahrheitswert
+	// weiter ungueltig ist. Verworfen: ein true bei Teilnahme abzulehnen, denn ein Client, der
+	// das Feld nicht kennt, soll daran nicht scheitern (wie bei den Optionen).
+	const mehrfach = wahrheit(w['mehrfach'], f('mehrfach'));
 	return {
 		typ,
 		...kopf,
 		frage: text(w['frage'], f('frage')),
 		einheit: wahl(w['einheit'], EINHEITEN, f('einheit')),
-		mehrfach: wahrheit(w['mehrfach'], f('mehrfach')),
+		mehrfach: teilnahme ? false : mehrfach,
 		teilnahme,
 		vielleicht,
 		frist: frist(w['frist'], f('frist')),

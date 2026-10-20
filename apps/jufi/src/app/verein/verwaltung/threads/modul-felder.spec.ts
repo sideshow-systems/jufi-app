@@ -168,10 +168,74 @@ describe('jf-modul-felder', () => {
 			expect(r.letzte()).toMatchObject({ frist: null });
 		});
 
-		it('ein geleertes Datum heisst: ohne Frist', () => {
-			const r = oeffne(umfrage({ frist: '2026-10-22T16:00:00.000Z' }));
+		const MIT_FRIST = '2026-10-22T16:00:00.000Z';
+
+		it('ein leeres Datumsfeld mitten im Tippen ist nicht "ohne Frist"', () => {
+			const r = oeffne(umfrage({ frist: MIT_FRIST }));
 			r.tippe('input[name="fristTag"]', '');
-			expect(r.letzte()).toMatchObject({ frist: null });
+			expect(r.gemeldet).toEqual([]);
+			expect(r.el('input[name="ohneFrist"]')?.checked).toBe(false);
+			expect(r.el('input[name="fristTag"]')?.disabled).toBe(false);
+			expect(r.el('input[name="fristZeit"]')?.value).toBe('18:00');
+		});
+
+		it('ein unfertiges Jahr wird weder gemeldet noch ins Feld zurueckgeschrieben', () => {
+			const r = oeffne(umfrage({ frist: MIT_FRIST }));
+			for (const roh of ['0002-10-22', '0020-10-22', '0202-10-22']) {
+				r.tippe('input[name="fristTag"]', roh);
+				expect(r.el('input[name="fristTag"]')?.value).toBe(roh);
+			}
+			expect(r.gemeldet).toEqual([]);
+			r.tippe('input[name="fristTag"]', '2027-10-22');
+			expect(r.letzte()).toMatchObject({ frist: '2027-10-22T16:00:00.000Z' });
+		});
+
+		it('ein unfertiges Feld springt erst beim Verlassen auf den Stand des Moduls zurueck', () => {
+			const r = oeffne(umfrage({ frist: MIT_FRIST }));
+			r.tippe('input[name="fristTag"]', '0002-10-22');
+			r.el('input[name="fristTag"]')?.dispatchEvent(new Event('blur'));
+			expect(r.el('input[name="fristTag"]')?.value).toBe('2026-10-22');
+			r.tippe('input[name="fristZeit"]', '');
+			expect(r.el('input[name="fristZeit"]')?.value).toBe('');
+			r.el('input[name="fristZeit"]')?.dispatchEvent(new Event('blur'));
+			expect(r.el('input[name="fristZeit"]')?.value).toBe('18:00');
+			expect(r.gemeldet).toEqual([]);
+		});
+
+		it('eine geleerte Uhrzeit aendert die Frist nicht', () => {
+			const r = oeffne(umfrage({ frist: MIT_FRIST }));
+			r.tippe('input[name="fristZeit"]', '');
+			expect(r.gemeldet).toEqual([]);
+			expect(r.el('input[name="ohneFrist"]')?.checked).toBe(false);
+		});
+
+		it('"ohne Frist" abwaehlen schaltet die Felder frei und das bleibt bei anderen Eingaben so', () => {
+			const r = oeffne(umfrage());
+			r.el('input[name="ohneFrist"]')?.click();
+			r.fixture.detectChanges();
+			expect(r.gemeldet).toEqual([]);
+			expect(r.el('input[name="fristTag"]')?.disabled).toBe(false);
+			r.tippe('input[name="frage"]', 'Wer kommt?');
+			expect(r.el('input[name="ohneFrist"]')?.checked).toBe(false);
+			expect(r.el('input[name="fristTag"]')?.disabled).toBe(false);
+		});
+
+		it('eine Uhrzeit ohne Datum bleibt bei anderen Eingaben stehen und gilt, sobald das Datum kommt', () => {
+			const r = oeffne(umfrage());
+			r.el('input[name="ohneFrist"]')?.click();
+			r.tippe('input[name="fristZeit"]', '09:30');
+			expect(r.gemeldet).toEqual([]);
+			r.tippe('input[name="frage"]', 'Wer kommt?');
+			expect(r.el('input[name="fristZeit"]')?.value).toBe('09:30');
+			r.tippe('input[name="fristTag"]', '2026-10-22');
+			expect(r.letzte()).toMatchObject({ frist: '2026-10-22T07:30:00.000Z' });
+		});
+
+		it('eine eingegebene Frist bleibt bei anderen Eingaben stehen', () => {
+			const r = oeffne(umfrage({ frist: MIT_FRIST }));
+			r.tippe('input[name="frage"]', 'Wer kommt?');
+			expect(r.el('input[name="fristTag"]')?.value).toBe('2026-10-22');
+			expect(r.el('input[name="ohneFrist"]')?.checked).toBe(false);
 		});
 
 		it('zeigt den Fehler an der Frist', () => {
@@ -365,6 +429,12 @@ describe('jf-modul-felder', () => {
 			const n = aus.letzte() as Umfrage;
 			expect(n.teilnahme).toBe(false);
 			expect(n.optionen.map((o) => o.schluessel)).toEqual([null, null]);
+		});
+
+		it('Teilnahme einschalten nimmt eine versteckte Mehrfachauswahl mit', () => {
+			const r = oeffne(umfrage({ mehrfach: true }));
+			r.el('input[name="teilnahme"]')?.click();
+			expect(r.letzte()).toMatchObject({ teilnahme: true, mehrfach: false });
 		});
 
 		it('"Vielleicht anbieten" ausschalten nimmt "Vielleicht" aus den Antworten', () => {
