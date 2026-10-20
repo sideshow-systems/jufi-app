@@ -129,6 +129,22 @@ describe('brauchtAntwort', () => {
 		expect(punkte(fuerSandra([klein]))).toEqual(['bowling/max']);
 	});
 
+	it('laesst die Antwort fuer ein nicht mehr gefragtes Kind unbeachtet', () => {
+		// Lena ist nicht in klein: ihre Antwort bleibt in der Datenbank, steht aber nicht
+		// als Zeile da und schliesst auch Max' Zeile nicht.
+		const klein = bowling(
+			{ antworten: [antwort('lena', 'sandra')] },
+			{ alleUntergruppen: false, untergruppenIds: ['klein'] },
+		);
+		expect(punkte(fuerSandra([klein]))).toEqual(['bowling/max']);
+	});
+
+	it('nennt bei leerer Zielgruppe niemanden, auch nicht den Jugendleiter', () => {
+		const leer = bowling({}, { alleUntergruppen: false, untergruppenIds: [] });
+		expect(fuerSandra([leer])).toEqual([]);
+		expect(brauchtAntwort(person('thomas'), [leer], umfeld, JETZT)).toEqual([]);
+	});
+
 	it('nennt nichts, wenn die Person den Thread nicht sieht', () => {
 		const nurJugendleiter = bowling({}, { rollenfilter: 'NUR_JUGENDLEITER' });
 		expect(fuerSandra([nurJugendleiter])).toEqual([]);

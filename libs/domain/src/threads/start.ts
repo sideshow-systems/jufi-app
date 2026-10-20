@@ -87,6 +87,9 @@ export interface NeuEingabe {
 // frisch eingeladene Familie sonst die ganze Vereinsgeschichte als neu vorfände.
 // Mit Gelesen-Stand zählt die Veröffentlichung nicht eigens: sie ist selbst eine
 // Änderung mit eigenem Stand.
+// Entwürfe werden hier nicht gefiltert: Aufrufer übergeben nur Threads, die die Person
+// sieht, und einen Entwurf sehen nur Jugendleiter, für die fremde Aktivität daran
+// berechtigt neu ist.
 export function istNeu(e: NeuEingabe): boolean {
 	const fremd = e.aenderungen.filter((a) => a.urheberId !== e.personId);
 	if (e.gelesenBis !== null) {
