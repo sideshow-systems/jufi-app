@@ -1,7 +1,7 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
-import type { AntwortenUebersicht, UmfrageUebersicht } from '@jufi/domain';
+import { type AntwortenUebersicht, fristText, type UmfrageUebersicht } from '@jufi/domain';
 import { adminTestAnbieter, knopf } from '../../../admin/test-hilfen';
 import { API, ichMit, oeffneAbgelaufen, oeffneSeite, stabil } from '../test-hilfen';
 
@@ -63,7 +63,7 @@ describe('Antworten-Uebersicht der Verwaltung', () => {
 		const { seite, namen } = await oeffne();
 		expect(seite.querySelector('h1')?.textContent).toContain('Bowling');
 		expect(seite.textContent).toContain('Kommst du mit?');
-		expect(seite.textContent).toMatch(/Frist|bis /);
+		expect(seite.textContent).toContain(fristText(new Date(BOWLING.frist!), new Date()));
 		expect(seite.querySelector('[data-gruppe="o-dabei"] h3')?.textContent?.trim()).toBe('✓ Dabei (2)');
 		expect(seite.querySelector('[data-gruppe="o-abgesagt"] h3')?.textContent?.trim()).toBe('✗ Abgesagt (1)');
 		expect(seite.querySelector('[data-gruppe="o-vielleicht"] h3')?.textContent?.trim()).toBe('? Vielleicht (0)');
@@ -147,28 +147,109 @@ describe('Antworten-Uebersicht der Verwaltung', () => {
 		expect(seite.querySelector('.optionen')).toBeNull();
 	});
 
-	it('schickt auch bei mehrfach nur die eine angetippte Option', async () => {
-		const mehrfach: UmfrageUebersicht = {
-			...BOWLING,
-			mehrfach: true,
-			teilnahme: false,
-			optionen: [
-				{ id: 'o-a', schluessel: 'a', text: 'Samstag' },
-				{ id: 'o-b', schluessel: 'b', text: 'Sonntag' },
-			],
-			zeilen: [{ fuerId: 'k-tom', name: 'Tom', optionIds: [], eingetragenVon: null }],
-			offen: 1,
-		};
-		const { harness, http, zeile } = await oeffne(uebersicht({ umfragen: [mehrfach] }));
-		knopf(zeile('Tom')!, 'Eintragen').click();
-		await stabil(harness);
-		knopf(zeile('Tom')!, 'Sonntag').click();
+	// Samstag, Sonntag, Montag; Tom hat Samstag und Sonntag, Eva nur Samstag, Ida noch nichts.
+	const MEHRFACH: UmfrageUebersicht = {
+		...BOWLING,
+		mehrfach: true,
+		teilnahme: false,
+		optionen: [
+			{ id: 'o-a', schluessel: 'a', text: 'Samstag' },
+			{ id: 'o-b', schluessel: 'b', text: 'Sonntag' },
+			{ id: 'o-c', schluessel: 'c', text: 'Montag' },
+		],
+		zeilen: [
+			{ fuerId: 'k-tom', name: 'Tom', optionIds: ['o-a', 'o-b'], eingetragenVon: null },
+			{ fuerId: 'k-eva', name: 'Eva', optionIds: ['o-a'], eingetragenVon: null },
+			{ fuerId: 'k-ida', name: 'Ida', optionIds: [], eingetragenVon: null },
+		],
+		offen: 1,
+	};
+
+	async function oeffneMehrfach(name: string) {
+		const r = await oeffne(uebersicht({ umfragen: [MEHRFACH] }));
+		const z = () => r.zeile(name)!;
+		knopf(z(), 'Eintragen').click();
+		await stabil(r.harness);
+		return { ...r, z, optionen: () => [...z().querySelectorAll<HTMLButtonElement>('.optionen button')] };
+	}
+
+	async function erwarteSpeichern(http: HttpTestingController, fuerId: string, optionIds: string[]) {
 		await vi.waitFor(() => {
-			const anfrage = http.expectOne(`${API}/umfragen/m-umfrage/antworten/k-tom`);
-			expect(anfrage.request.body).toMatchObject({ optionIds: ['o-b'] });
+			const anfrage = http.expectOne(`${API}/umfragen/m-umfrage/antworten/${fuerId}`);
+			expect(anfrage.request.body).toMatchObject({ optionIds });
 			anfrage.flush({ modul: {}, stand: 7 });
 		});
-		await vi.waitFor(() => http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [mehrfach] })));
+		await vi.waitFor(() => http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [MEHRFACH] })));
+	}
+
+	describe('bei Mehrfachauswahl', () => {
+		it('belegt die Umschalter mit der bisherigen Auswahl vor', async () => {
+			const { optionen } = await oeffneMehrfach('Tom');
+			expect(optionen().map((b) => [b.textContent?.trim(), b.getAttribute('aria-pressed')])).toEqual([
+				['Samstag', 'true'],
+				['Sonntag', 'true'],
+				['Montag', 'false'],
+			]);
+		});
+
+		it('behaelt beim Hinzufuegen die bisherige Auswahl und schickt alle drei', async () => {
+			const { harness, http, optionen } = await oeffneMehrfach('Tom');
+			optionen()[2]!.click();
+			await erwarteSpeichern(http, 'k-tom', ['o-a', 'o-b', 'o-c']);
+			await stabil(harness);
+		});
+
+		it('schickt beim Abwaehlen die uebrigen Optionen', async () => {
+			const { harness, http, optionen } = await oeffneMehrfach('Tom');
+			optionen()[0]!.click();
+			await erwarteSpeichern(http, 'k-tom', ['o-b']);
+			await stabil(harness);
+		});
+
+		it('laesst die einzige gewaehlte Option nicht abwaehlen und schickt nichts', async () => {
+			const { harness, optionen } = await oeffneMehrfach('Eva');
+			const samstag = optionen()[0]!;
+			expect(samstag.getAttribute('aria-pressed')).toBe('true');
+			expect(samstag.disabled).toBe(true);
+			samstag.click();
+			await stabil(harness);
+			// afterEach prueft per verify(), dass keine Anfrage offen ist.
+			expect(optionen()[1]!.disabled).toBe(false);
+		});
+
+		it('traegt bei einer Person ohne Antwort nur die angetippte Option ein', async () => {
+			const { harness, http, optionen } = await oeffneMehrfach('Ida');
+			expect(optionen().map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'false']);
+			optionen()[1]!.click();
+			await erwarteSpeichern(http, 'k-ida', ['o-b']);
+			await stabil(harness);
+		});
+	});
+
+	it('ohne Mehrfachauswahl ersetzt die angetippte Option die bisherige und hat keinen Umschalterzustand', async () => {
+		const { harness, http, zeile } = await oeffne();
+		knopf(zeile('Lena')!, 'Eintragen').click();
+		await stabil(harness);
+		expect(zeile('Lena')!.querySelector('.optionen button[aria-pressed]')).toBeNull();
+		knopf(zeile('Lena')!, '? Vielleicht').click();
+		await vi.waitFor(() => {
+			const anfrage = http.expectOne(`${API}/umfragen/m-umfrage/antworten/k-lena`);
+			expect(anfrage.request.body).toMatchObject({ optionIds: ['o-vielleicht'] });
+			anfrage.flush({ modul: {}, stand: 7 });
+		});
+		await vi.waitFor(() => http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht()));
+		await stabil(harness);
+	});
+
+	it('loest bei zwei schnellen Tipps nur eine Anfrage aus', async () => {
+		const { http, zeile, harness } = await oeffne();
+		knopf(zeile('Tom')!, 'Eintragen').click();
+		await stabil(harness);
+		// Beide Tipps vor dem naechsten Zeichnen: Der Knopf ist noch nicht als gesperrt gezeichnet.
+		knopf(zeile('Tom')!, '✓ Dabei').click();
+		knopf(zeile('Tom')!, '✗ Abgesagt').click();
+		await vi.waitFor(() => http.expectOne(`${API}/umfragen/m-umfrage/antworten/k-tom`).flush({ modul: {}, stand: 7 }));
+		await vi.waitFor(() => http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht()));
 		await stabil(harness);
 	});
 

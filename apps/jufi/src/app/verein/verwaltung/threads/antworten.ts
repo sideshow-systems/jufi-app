@@ -31,6 +31,8 @@ interface Person {
 	fuerId: string;
 	name: string;
 	eingetragenVon: string | null;
+	/** Die bisherige Auswahl der Person aus der Uebersicht; bei Mehrfachauswahl die Vorbelegung der Umschalter. */
+	optionIds: string[];
 }
 
 interface Gruppe {
@@ -59,9 +61,16 @@ interface UmfrageSicht {
  * doppelt zu pflegen. Danach laedt die Uebersicht neu, statt die Zeile selbst umzubauen: Gruppen,
  * Anzahlen, "Noch offen" und der Vermerk "eingetragen von" haengen alle an der Antwort des Servers.
  *
- * Bei Mehrfachauswahl gilt je Klick genau die angetippte Option (optionIds mit einem Eintrag) und
- * ersetzt, was vorher stand. Verworfen: Haken zum Mehrfachwaehlen auch hier; fuer ein Nachtragen
- * nach einem Telefonat genuegt die eine Option, und der Haken braeuchte einen zweiten Schritt.
+ * Ohne Mehrfachauswahl ersetzt die angetippte Option die bisherige. Mit Mehrfachauswahl sind die
+ * Optionen Umschalter, vorbelegt mit der bisherigen Auswahl (aus den Gruppen der Uebersicht
+ * abgeleitet: unter welchen Optionen die Person steht); ein Tipp schaltet eine Option um und
+ * speichert sofort die ganze neue Menge, denn der Server ersetzt immer die gesamte Auswahl.
+ * Verworfen: je Klick nur die angetippte Option schicken; wer A und B gewaehlt hatte, behielte
+ * nach dem Nachtragen von C nur C, und zurueck ginge es nicht. Verworfen: Umschalten und danach
+ * ein Speichern-Knopf; der zweite Schritt braeuchte Zustand, den die Uebersicht sonst nicht hat.
+ * Die letzte gewaehlte Option ist gesperrt (disabled): Eine leere Auswahl lehnt der Server mit 400
+ * ab, und ein Knopf, der nur einen Fehlertext erzeugt, ist schlechter als einer, der es gar nicht
+ * erst anbietet. aria-pressed bleibt true, damit der Zustand auch gesperrt lesbar ist.
  */
 @Component({
 	selector: 'jf-antworten-uebersicht',
@@ -87,7 +96,7 @@ interface UmfrageSicht {
 						<p class="gedaempft klein">{{ u.frist }}</p>
 					}
 					@if (u.mehrfach && darfNachtragen()) {
-						<p class="gedaempft klein">Mehrfachauswahl: Beim Eintragen gilt nur die gewählte Option.</p>
+						<p class="gedaempft klein">Mehrfachauswahl: Optionen ein- oder ausschalten, eine bleibt immer gewählt.</p>
 					}
 					@for (g of u.gruppen; track g.id) {
 						<section [attr.data-gruppe]="g.id">
@@ -118,8 +127,9 @@ interface UmfrageSicht {
 														<button
 															type="button"
 															class="knopf klein"
-															[disabled]="sendet()"
-															(click)="trageNach(u.modulId, p.fuerId, k.id)"
+															[attr.aria-pressed]="u.mehrfach ? p.optionIds.includes(k.id) : null"
+															[disabled]="sendet() || istLetzte(u, p, k.id)"
+															(click)="waehle(u, p, k.id)"
 														>
 															{{ k.text }}
 														</button>
@@ -204,6 +214,11 @@ interface UmfrageSicht {
 			gap: var(--a2);
 			padding: var(--a2) 0 var(--a3);
 		}
+		.optionen .knopf[aria-pressed='true'] {
+			background: var(--akzent);
+			border-color: var(--akzent);
+			color: var(--auf-akzent);
+		}
 		.fehler {
 			color: var(--fehler);
 		}
@@ -255,8 +270,28 @@ export class ThreadAntwortenComponent {
 		this.offeneZeile.set(this.offeneZeile() === schluessel ? null : schluessel);
 	}
 
+	/** Bei Mehrfachauswahl die einzige gewaehlte Option der Person; sie laesst sich nicht abwaehlen (siehe Klassenkommentar). */
+	protected istLetzte(u: UmfrageSicht, p: Person, optionId: string): boolean {
+		return u.mehrfach && p.optionIds.length === 1 && p.optionIds[0] === optionId;
+	}
+
+	protected waehle(u: UmfrageSicht, p: Person, optionId: string): void {
+		if (!u.mehrfach) {
+			void this.trageNach(u.modulId, p.fuerId, [optionId]);
+			return;
+		}
+		if (this.istLetzte(u, p, optionId)) return;
+		const neu = p.optionIds.includes(optionId) ? p.optionIds.filter((o) => o !== optionId) : [...p.optionIds, optionId];
+		// In der Reihenfolge der Umfrage, nicht der Klicks (wie in der Sicht der Familie).
+		void this.trageNach(
+			u.modulId,
+			p.fuerId,
+			u.knoepfe.map((k) => k.id).filter((id) => neu.includes(id)),
+		);
+	}
+
 	/** Eine neue clientId je Klick: Wiederholt das Netz die Anfrage, erkennt der Server sie. */
-	protected async trageNach(modulId: string, fuerId: string, optionId: string): Promise<void> {
+	private async trageNach(modulId: string, fuerId: string, optionIds: string[]): Promise<void> {
 		// Der zweite Tipp eines Doppeltipps kommt an, bevor der Knopf als gesperrt gezeichnet ist.
 		if (this.sendet()) return;
 		this.sendet.set(true);
@@ -264,7 +299,7 @@ export class ThreadAntwortenComponent {
 		try {
 			await firstValueFrom(
 				this.threadApi.antworte(this.slug(), modulId, fuerId, {
-					optionIds: [optionId],
+					optionIds,
 					clientId: crypto.randomUUID(),
 				}),
 			);
@@ -289,6 +324,7 @@ function sicht(u: UmfrageUebersicht): UmfrageSicht {
 		fuerId: z.fuerId,
 		name: z.name,
 		eingetragenVon: z.eingetragenVon,
+		optionIds: z.optionIds,
 	});
 	const gruppen: Gruppe[] = u.optionen.map((o) => ({
 		id: o.id,
