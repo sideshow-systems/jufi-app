@@ -49,3 +49,6 @@ apps/cli/dist/
 apps/jufi-e2e/.zustand/
 test-results/
 playwright-report/
+
+# Dumps, die tools/backup.sh vom Server holt.
+/backups/
