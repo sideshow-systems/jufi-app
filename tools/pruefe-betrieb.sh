@@ -12,7 +12,7 @@
 # Das Skript prueft **alles** durch und endet erst am Schluss mit Fehler, wenn
 # mindestens ein ✗ stand. Verworfen: Abbruch beim ersten ✗ (set -e). Nach einem
 # Deploy will man alle Befunde auf einmal sehen; bei einem Abbruch behebt man
-# einen, starte neu und stoesst auf den naechsten.
+# einen, startet neu und stoesst auf den naechsten.
 #
 # curl nie mit -k: eine Pruefung, die ein kaputtes Zertifikat durchwinkt, belegt
 # nichts ueber das, was Mitglieder im Browser sehen.
