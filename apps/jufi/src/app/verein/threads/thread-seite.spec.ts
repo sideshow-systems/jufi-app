@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting, type TestRequest } fro
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { type ModulAnsicht, type ThreadAnsicht, threadSegment } from '@jufi/domain';
+import { type ModulAnsicht, type ThreadAnsicht, threadSegment, type UmfrageAnsicht } from '@jufi/domain';
 import { routerFeatures, routes } from '../../app.routes';
 
 const VEREIN = { slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false, logoStand: null };
@@ -34,6 +34,26 @@ const MODULE: ModulAnsicht[] = [
 		},
 	},
 ];
+
+const UMFRAGE: UmfrageAnsicht = {
+	typ: 'UMFRAGE',
+	id: 'm3',
+	titel: null,
+	frage: 'Kommst du mit?',
+	einheit: 'JUNGFISCHER',
+	mehrfach: false,
+	teilnahme: true,
+	frist: null,
+	fristAbgelaufen: false,
+	optionen: [
+		{ id: 'o-dabei', schluessel: 'dabei', text: 'Dabei' },
+		{ id: 'o-abgesagt', schluessel: 'abgesagt', text: 'Abgesagt' },
+	],
+	zeilen: [
+		{ fuerId: 'k-lena', vorname: 'Lena', selbst: false, optionIds: [], eingetragenVon: null, darfAntworten: true },
+	],
+	ergebnis: null,
+};
 
 function thread(zusatz: Partial<ThreadAnsicht> = {}): ThreadAnsicht {
 	return {
@@ -405,6 +425,59 @@ describe('Thread-Seite', () => {
 			} finally {
 				vi.useRealTimers();
 			}
+		});
+
+		it('zeigt fuer einen unbekannten Modultyp eines neueren Servers einen Hinweis statt einer leeren Karte', async () => {
+			const fremd = { typ: 'FAHRT', id: 'm9', titel: 'Mitfahrt' } as unknown as ModulAnsicht;
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ module: [fremd] }) });
+
+			expect(text(seite.querySelector('jf-karte#modul-m9') as HTMLElement)).toContain(
+				'Dieser Inhalt lässt sich in dieser Version der App nicht anzeigen.',
+			);
+		});
+
+		it('setzt nach einer Antwort die neue Umfrage ein, ohne erneut zu scrollen oder den Stand zu melden', async () => {
+			const scrollen = vi.fn();
+			Element.prototype.scrollIntoView = scrollen;
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling/m/m3', {
+				id: 'ck1',
+				koerper: thread({ module: [...MODULE, UMFRAGE] }),
+			});
+			await vi.waitFor(() => expect(scrollen).toHaveBeenCalledTimes(1));
+
+			const dabei = Array.from(seite.querySelectorAll('#modul-m3 button')).find(
+				(b) => b.textContent?.trim() === '✓ Dabei',
+			) as HTMLButtonElement;
+			dabei.click();
+			const antwort = await vi.waitFor(() => http.expectOne('/demo/api/v1/umfragen/m3/antworten/k-lena'));
+			antwort.flush({
+				modul: { ...UMFRAGE, zeilen: [{ ...UMFRAGE.zeilen[0]!, optionIds: ['o-dabei'] }] },
+				stand: 43,
+			});
+			await beendeSeite(harness);
+			await new Promise((r) => setTimeout(r));
+			harness.detectChanges();
+
+			expect(seite.querySelector('#modul-m3 jf-pille')?.textContent?.trim()).toBe('✓ Dabei');
+			expect(scrollen).toHaveBeenCalledTimes(1);
+			// Ein zweites PUT gelesen waere eine offene Anfrage, und afterEach wuerde scheitern.
+		});
+
+		it('scrollt nach einem Wechsel in den Verlauf und zurueck nicht erneut', async () => {
+			const scrollen = vi.fn();
+			Element.prototype.scrollIntoView = scrollen;
+			const { harness } = await oeffne('/demo/t/ck1-bowling/m/m2', { id: 'ck1', koerper: thread() });
+			await vi.waitFor(() => expect(scrollen).toHaveBeenCalledTimes(1));
+
+			await router.navigateByUrl('/demo/t/ck1-bowling/m/m2?reiter=verlauf');
+			await beendeSeite(harness);
+			expect((harness.routeNativeElement as HTMLElement).querySelector('#verlauf')).not.toBeNull();
+			await router.navigateByUrl('/demo/t/ck1-bowling/m/m2');
+			await beendeSeite(harness);
+			await new Promise((r) => setTimeout(r));
+			harness.detectChanges();
+
+			expect(scrollen).toHaveBeenCalledTimes(1);
 		});
 
 		it('hebt nichts hervor, wenn das Modul im Thread fehlt', async () => {

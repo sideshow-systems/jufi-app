@@ -13,7 +13,7 @@ import {
 	untracked,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { idAusSegment, type ThreadAnsicht, threadSegment } from '@jufi/domain';
+import { idAusSegment, type ThreadAnsicht, threadSegment, type UmfrageAnsicht } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { IconComponent } from '../../gestaltung/icon';
@@ -101,10 +101,16 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 										<jf-info-modul [modul]="m" />
 									}
 									@case ('TERMIN') {
-										<jf-termin-modul [modul]="m" />
+										<jf-termin-modul [modul]="m" [thread]="t" [slug]="slug()" />
 									}
 									@case ('UMFRAGE') {
-										<jf-umfrage-modul [modul]="m" />
+										<jf-umfrage-modul [modul]="m" [slug]="slug()" (geaendert)="ersetzeModul($event)" />
+									}
+									@default {
+										<!-- Ein Modultyp, den erst ein neuerer Server kennt: lieber ein Hinweis als eine leere Karte. -->
+										<p class="gedaempft">
+											Dieser Inhalt lässt sich in dieser Version der App nicht anzeigen. Neu laden hilft meist.
+										</p>
 									}
 								}
 							</jf-karte>
@@ -255,6 +261,12 @@ export class ThreadSeite {
 	protected readonly zeigtVerlauf = computed(() => this.mitVerlauf() && this.reiter() === 'verlauf');
 
 	/**
+	 * Ob die Karten der Module gezeichnet sind. Eigene Berechnung fuer den Deep Link: Ein neuer
+	 * Thread-Wert nach einer Antwort aendert sie nicht, der Effekt laeuft dann gar nicht erst.
+	 */
+	private readonly moduleSichtbar = computed(() => this.thread() !== null && !this.zeigtVerlauf());
+
+	/**
 	 * Zaehlt die Ladevorgaenge; ein Ergebnis gilt nur, wenn seit seinem Start kein neuer begann.
 	 * Auch das Abbauen der Seite zaehlt weiter (Konstruktor): Eine Antwort, die erst nach dem Wechsel
 	 * auf eine andere Seite eintrifft, soll weder die Adresse zurueckschreiben noch mit der falschen
@@ -264,9 +276,23 @@ export class ThreadSeite {
 	private lauf = 0;
 	/** Die Ansicht, deren Stand schon als gelesen gemeldet ist; eine neu geladene meldet sich erneut. */
 	private gemeldet: ThreadAnsicht | null = null;
+	/**
+	 * Das Modul, zu dem der Deep Link schon gescrollt hat. Verworfen: sich allein auf
+	 * moduleSichtbar verlassen; nach einem Wechsel in den Verlauf und zurueck sprang die Seite
+	 * sonst erneut zur Karte, obwohl die Person laengst woanders liest.
+	 */
+	private gescrollt: string | null = null;
+	/**
+	 * Haengt an der Seite, nicht am Effekt: Liefe der Effekt waehrend der Hervorhebung erneut
+	 * (Reiterwechsel), raeumte er die Uhr ab, und die Karte bliebe hervorgehoben.
+	 */
+	private hervorUhr: ReturnType<typeof setTimeout> | undefined;
 
 	constructor() {
-		inject(DestroyRef).onDestroy(() => this.lauf++);
+		inject(DestroyRef).onDestroy(() => {
+			this.lauf++;
+			clearTimeout(this.hervorUhr);
+		});
 
 		effect(() => {
 			const slug = this.slug();
@@ -284,26 +310,24 @@ export class ThreadSeite {
 			untracked(() => void this.meldeGelesen(t));
 		});
 
-		// Deep Link auf ein Modul: hinscrollen und kurz hervorheben, sobald die Karte gezeichnet ist.
+		// Deep Link auf ein Modul: einmal hinscrollen und kurz hervorheben, sobald die Karte gezeichnet ist.
 		effect((aufraeumen) => {
 			const modulId = this.modulId();
-			if (!modulId || this.thread() === null || this.zeigtVerlauf()) return;
-			let aus: ReturnType<typeof setTimeout> | undefined;
+			if (!modulId || !this.moduleSichtbar() || modulId === this.gescrollt) return;
 			const ref = afterNextRender(
 				() => {
 					const karte = this.dokument.getElementById(`modul-${modulId}`);
 					if (!karte) return;
+					this.gescrollt = modulId;
 					const ruhig = this.dokument.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 					karte.scrollIntoView({ behavior: ruhig ? 'auto' : 'smooth', block: 'start' });
 					this.hervor.set(modulId);
-					aus = setTimeout(() => this.hervor.set(null), HERVOR_MS);
+					clearTimeout(this.hervorUhr);
+					this.hervorUhr = setTimeout(() => this.hervor.set(null), HERVOR_MS);
 				},
 				{ injector: this.injector },
 			);
-			aufraeumen(() => {
-				ref.destroy();
-				clearTimeout(aus);
-			});
+			aufraeumen(() => ref.destroy());
 		});
 	}
 
@@ -316,6 +340,8 @@ export class ThreadSeite {
 		this.thread.set(null);
 		this.fehler.set(null);
 		this.hervor.set(null);
+		clearTimeout(this.hervorUhr);
+		this.gescrollt = null;
 		// Ohne lesbare Id gibt es nichts zu fragen; dieselbe Antwort wie bei 404, ohne Anfrage.
 		if (id === null) {
 			this.zustand.set('nicht-gefunden');
@@ -355,6 +381,24 @@ export class ThreadSeite {
 			replaceUrl: true,
 			queryParamsHandling: 'preserve',
 		});
+	}
+
+	/**
+	 * Setzt die Umfrage nach einer Antwort als neues Modul ein, als neuer Thread-Wert, damit die
+	 * Seite neu zeichnet. Der Stand bleibt der geladene: Die Antwort meldet zwar den neuen
+	 * Vereinsstand, aber bis dorthin koennen andere am Thread geaendert haben, was die Seite nicht
+	 * geladen hat (Rahmen 1). Die eigene Antwort macht den Thread fuer die Person ohnehin nicht
+	 * "neu", eigene Aenderungen zaehlen dort nicht (Spec 3.9). Weil der Stand bleibt, gilt die
+	 * neue Ansicht als schon gemeldet; ein zweites PUT mit demselben Stand aenderte nichts.
+	 * Verworfen: den Thread neu laden; das kostete eine Anfrage je Tipp und setzte die Seite
+	 * waehrend des Ladens auf "Wird geladen".
+	 */
+	protected ersetzeModul(neu: UmfrageAnsicht): void {
+		const alt = this.thread();
+		if (alt === null) return;
+		const ersetzt: ThreadAnsicht = { ...alt, module: alt.module.map((m) => (m.id === neu.id ? neu : m)) };
+		if (this.gemeldet === alt) this.gemeldet = ersetzt;
+		this.thread.set(ersetzt);
 	}
 
 	/**
