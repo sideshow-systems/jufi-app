@@ -794,7 +794,7 @@ describe('Threads (TP3)', () => {
 		const unbeantwortet = await umfrage(a.id, t.id);
 		await option(a.id, unbeantwortet.id);
 
-		// Weder Umfrage noch Modul noch Thread: Die Option haelt die Antwort fest.
+		// Weder Umfrage noch Modul noch Thread: Die Antwort haelt ihre Umfrage fest (UmfrageAntwort.umfrage ist NoAction).
 		expect(await fehlercode(prisma.umfrageModul.delete({ where: { id: beantwortet.id } }))).toBe('P2003');
 		expect(await fehlercode(prisma.threadModul.delete({ where: { id: beantwortet.id } }))).toBe('P2003');
 		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');

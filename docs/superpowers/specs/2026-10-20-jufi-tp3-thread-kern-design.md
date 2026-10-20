@@ -232,7 +232,7 @@ Aus dem Entwurf übernommen und auf Europe/Berlin umgestellt (FAM 3.1, 3.2):
 ### 3.9 Neu und Zähler
 
 - `istNeu(thread, gelesenStand, person)`: Es gibt eine `Aenderung` des Threads mit `stand > gelesenBis` und `urheberId ≠ person` (nur fremde Aktivität, Erkenntnis aus dem Entwurf). Ohne Gelesen-Stand ist ein Thread neu, wenn er nach dem Einrichten des eigenen Zugangs veröffentlicht wurde oder seither fremde Aktivität hatte.
-- Zähler am Reiter „Verlauf“: fremde, nicht gelöschte Nachrichten mit `stand > verlaufGelesenBis`.
+- Zähler am Reiter „Verlauf“: fremde, nicht gelöschte Nachrichten (Art `NACHRICHT`, keine Systemeinträge) mit `stand > verlaufGelesenBis`. Verworfen: Systemeinträge mitzählen — ein verschobener Termin im Aushang hieße sonst „1 neuer Kommentar“, wo niemand kommentieren kann.
 - „Neu seit deinem letzten Besuch“ (6.1): die neuen Threads mit einer Kurzangabe („Neuer Thread“, „2 neue Kommentare“, „Aushang geändert“).
 - Öffnen eines Threads setzt `gelesenBis` auf den aktuellen Stand, Öffnen des Verlaufs zusätzlich `verlaufGelesenBis`.
 
