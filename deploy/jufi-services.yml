@@ -207,6 +207,6 @@ services:
       - 'traefik.http.routers.jufi-alt.middlewares=jufi-umzug'
 
 volumes:
-  # Die Mitgliederdaten. Eine Sicherung gibt es noch nicht (wie bei HWYD per
-  # restic ausser Haus) -- vor echten Daten nachziehen.
+  # Die Mitgliederdaten. Gesichert wird taeglich um 03:40 per restic ausser Haus
+  # (tools/backup.sh, eingerichtet mit tools/install-backup.sh, README Sicherung).
   jufi-pgdata:

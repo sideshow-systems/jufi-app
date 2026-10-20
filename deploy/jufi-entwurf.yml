@@ -11,7 +11,11 @@
 # Compose die anderen Apps an):
 #   docker compose up -d jufi-entwurf
 #
-# Die Regel hat `PathPrefix(/entwurf)`, wie Spec TP1 8.3 es vorsah. Bis Etappe 6
+# Die Regel hat `PathPrefix(/entwurf/)` und `Path(/entwurf)`. Ein blankes
+# `PathPrefix(/entwurf)` passte auch auf `/entwurfsgruppe` und schickte so einen Pfad
+# der App an den Entwurf; so trifft die Regel nur den Ordner und die Adresse ohne
+# Schraegstrich (die nginx im Image auf `/entwurf/` umleitet, nicht Traefik).
+# Spec TP1 8.3 sah ein einfaches `PathPrefix(/entwurf)` vor. Bis Etappe 6
 # lag hier die Abweichung, nur `Host(...)`, weil der Entwurf die Domain allein
 # hatte und `/` auf `/entwurf/` umleitete. Mit Etappe 6 gehoert die Wurzel der
 # echten App (jufi-services.yml); die Abweichung endet.
@@ -37,7 +41,7 @@ services:
     # Kein `ports:`. Erreichbar nur ueber Traefik.
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.jufi-entwurf.rule=Host(`test.jufi-app.de`) && PathPrefix(`/entwurf`)'
+      - 'traefik.http.routers.jufi-entwurf.rule=Host(`test.jufi-app.de`) && (PathPrefix(`/entwurf/`) || Path(`/entwurf`))'
       # Traefik terminiert TLS selbst per Let's Encrypt, wie bei HWYD.
       - 'traefik.http.routers.jufi-entwurf.entrypoints=websecure'
       - 'traefik.http.routers.jufi-entwurf.tls.certresolver=letsencrypt'
