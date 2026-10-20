@@ -52,6 +52,18 @@ export const VEREINS_MODELLE = [
 	'Einladung',
 	'Einwilligung',
 	'MailWarteschlange',
+	'Thread',
+	'ThreadUntergruppe',
+	'ThreadModul',
+	'InfoModul',
+	'TerminModul',
+	'UmfrageModul',
+	'UmfrageOption',
+	'UmfrageAntwort',
+	'UmfrageAntwortOption',
+	'VerlaufEintrag',
+	'GelesenStand',
+	'Aenderung',
 ] as const satisfies readonly Prisma.ModelName[];
 
 type VereinsModell = (typeof VEREINS_MODELLE)[number];
@@ -273,6 +285,13 @@ export type VereinDb = runtime.Types.Extensions.DynamicClientExtensionThis<
 	Prisma.TypeMapCb,
 	runtime.Types.Extensions.DefaultArgs
 >;
+
+/**
+ * Der Client, den `vereinDb(...).$transaction(async (tx) => ...)` dem Callback
+ * uebergibt. Aus der Callback-Ueberladung abgeleitet statt von Hand mit Omit
+ * nachgebaut, damit er mit Prismas Typ mitwaechst.
+ */
+export type VereinTx = Parameters<Parameters<VereinDb['$transaction']>[0]>[0];
 
 /**
  * Client fuer genau einen Verein. Daten der App laufen ausschliesslich hierueber

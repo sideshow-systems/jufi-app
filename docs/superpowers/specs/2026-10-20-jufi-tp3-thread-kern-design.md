@@ -86,18 +86,18 @@ Alle Tabellen folgen TP2 3.1: Sie tragen `vereinId`, verweisen über zusammenges
 
 ### 2.2 Module
 
-`ThreadModul (id, vereinId, threadId, typ, position, titel?)` mit `typ` `INFO`, `TERMIN`, `UMFRAGE`; Teilprojekt 4 ergänzt das Enum. Höchstens 20 Module je Thread; `position` ist je Thread eindeutig.
+`ThreadModul (id, vereinId, threadId, typ, position, titel?)` mit `typ` `INFO`, `TERMIN`, `UMFRAGE`; Teilprojekt 4 ergänzt das Enum. Höchstens 20 Module je Thread; `position` ist in der Datenbank **nicht** eindeutig, sortiert wird nach `(position, id)`. Verworfen: ein eindeutiger Index — Umsortieren in einer Transaktion verletzte ihn zeilenweise; die Reihenfolge prüft die Domäne (der Editor). Dasselbe gilt für die `position` der Optionen.
 
 Je Typ eine eigene Tabelle mit derselben `id` (1:1, Cascade). Verworfen: ein JSON-Feld je Modul — Regeln wie „eine Antwort pro Kind“ sollen in der Datenbank abgesichert sein (Rahmen 7.3).
 
 - **`InfoModul`**: `text` (Markdown-Teilmenge, 3.11), höchstens 10 000 Zeichen.
-- **`TerminModul`**: `startDatum` und `endDatum?` als `@db.Date`; `beginn?` und `ende?` als Text `HH:MM`; `ort?`, `treffpunkt?`. Datum und Zeit sind **Wandzeit in Europe/Berlin** (FAM 3.1); der Verein hat kein Zeitzonenfeld, solange alle Vereine in Deutschland sind. CHECK-Constraints: `endDatum >= startDatum`; bei gleichem Tag (oder ohne Enddatum) `ende > beginn`; `ende` nur mit `beginn`. Verworfen: Zeitpunkte (`timestamptz`) — ein ganztägiger Termin hat keinen Zeitpunkt, und die Anzeige rechnete bei jeder Zeitumstellung um.
+- **`TerminModul`**: `startDatum` und `endDatum?` als `@db.Date`; `beginn?` und `ende?` als Text `HH:MM`; `ort?`, `treffpunkt?`. Datum und Zeit sind **Wandzeit in Europe/Berlin** (FAM 3.1); der Verein hat kein Zeitzonenfeld, solange alle Vereine in Deutschland sind. CHECK-Constraints: `endDatum >= startDatum`; bei gleichem Tag (oder ohne Enddatum) und gesetzten `beginn` und `ende` gilt `ende > beginn`. Ein Ende ohne Beginn ist erlaubt („Fr 23.10. – So 25.10. 12:00“, im Entwurf „bis 12:00“). Verworfen: „`ende` nur mit `beginn`“ — es verböte diese Anzeige. Verworfen: Zeitpunkte (`timestamptz`) — ein ganztägiger Termin hat keinen Zeitpunkt, und die Anzeige rechnete bei jeder Zeitumstellung um.
 - **`UmfrageModul`**: `frage`, `einheit` (`JUNGFISCHER`, `ERWACHSENER`, `PERSON`), `mehrfach`, `teilnahme`, `vielleicht`, `frist?` (Zeitpunkt; die Server-Uhr entscheidet, Rahmen 9.3), `ergebnisse` (`ALLE`, `SUMME`, `JUGENDLEITER`). Ein Partial-Unique-Index über `(threadId) WHERE teilnahme` erlaubt höchstens eine Teilnahme-Umfrage je Thread; dafür trägt `UmfrageModul` `threadId` mit.
 - **`UmfrageOption`**: `umfrageId`, `text`, `position`, `schluessel`. Der Schlüssel bleibt beim Umbenennen und Umsortieren stabil, damit abgegebene Antworten an ihrer Option bleiben (Erkenntnis aus dem Entwurf). Bei der Teilnahme-Umfrage sind Optionen und Schlüssel fest: `dabei`, `vielleicht` (nur mit `vielleicht = true`), `abgesagt`.
 
 ### 2.3 Antworten
 
-`UmfrageAntwort (id, vereinId, umfrageId, fuerId, vonId, abgegebenAm, clientId)` mit eindeutigem `(umfrageId, fuerId)`: Eine neue Antwort überschreibt die alte (Upsert), es gilt die zuletzt abgegebene (Rahmen 6.3). `clientId` ist je Verein eindeutig und macht die Anfrage wiederholbar (Teilprojekt 5 schickt aus der Outbox). Die gewählten Optionen stehen in `UmfrageAntwortOption (antwortId, optionId)`.
+`UmfrageAntwort (id, vereinId, umfrageId, fuerId, vonId, abgegebenAm, clientId)` mit eindeutigem `(umfrageId, fuerId)`: Eine neue Antwort überschreibt die alte (Upsert), es gilt die zuletzt abgegebene (Rahmen 6.3). `clientId` ist je Verein eindeutig und macht die Anfrage wiederholbar (Teilprojekt 5 schickt aus der Outbox). Die gewählten Optionen stehen in `UmfrageAntwortOption (antwortId, optionId)`. Die Fremdschlüssel von der Antwort auf die Umfrage und von der gewählten Option auf die Option sind `NoAction`, nicht `Cascade`: Von Thread, Modul oder Umfrage führt kein Kaskadenweg zu den Antworten, jede Antwort — auch eine ohne gewählte Option — sperrt das Löschen der Umfrage, des Moduls und des Threads, und eine gewählte Option lässt sich nicht löschen (3.14). Antworten gehen so nie still verloren, unabhängig von der Reihenfolge, in der Postgres Kaskaden und Prüfungen abarbeitet.
 
 Verworfen: jede Antwort als neue Zeile mit Historie — niemand braucht frühere Antworten, und „wer hat noch nicht geantwortet“ würde zur Gruppierung.
 
@@ -119,8 +119,8 @@ Fällt eine Person aus der Zielgruppe (Zielgruppe oder Untergruppe geändert), b
 
 ### 2.6 Änderungszähler
 
-- `Verein.aenderungsstand` (BigInt, Vorgabe 0) zählt jede Änderung im Verein.
-- `Aenderung (vereinId, stand, threadId?, art, objektId, urheberId?, angelegtAm)` mit eindeutigem `(vereinId, stand)`. `threadId` und `objektId` sind bewusst keine Fremdschlüssel, damit das Löschen eines Threads als Änderung erhalten bleibt. `art` z. B. `THREAD`, `MODUL`, `ANTWORT`, `VERLAUF`, `SICHTBARKEIT`, `GELOESCHT`. Keine Inhalte, nur Kennungen.
+- `Verein.aenderungsstand` (`Int`, Vorgabe 0) zählt die schreibenden Transaktionen im Verein: **ein Stand je Transaktion**, nicht je Zeile. Verworfen: `BigInt` — 2,1 Milliarden Änderungen je Verein werden nie erreicht, und `BigInt` bräche `JSON.stringify` an jeder API-Grenze.
+- `Aenderung (id, vereinId, stand, threadId?, art, objektId, urheberId?, angelegtAm)` mit eigener `id` und einem Index auf `(vereinId, stand)`; mehrere Zeilen einer Transaktion teilen sich den Stand. Verworfen: ein eindeutiges `(vereinId, stand)` — ein Verlaufseintrag braucht seinen Stand beim Anlegen, seine ID entsteht erst dabei, also bekommt die Arbeit der Transaktion den Stand vorab (4.2). Lückenlos bleibt der Zähler: Jede committete schreibende Transaktion hat genau einen Stand. `threadId` und `objektId` sind bewusst keine Fremdschlüssel, damit das Löschen eines Threads als Änderung erhalten bleibt. `art` z. B. `THREAD`, `MODUL`, `ANTWORT`, `VERLAUF`, `SICHTBARKEIT`, `GELOESCHT`. Keine Inhalte, nur Kennungen.
 - Einträge älter als 90 Tage werden beim Start und danach täglich im App-Prozess gelöscht (ein `setInterval`, kein Cron). Ein Sync, der älter einsteigt, bekommt „vollständig neu laden“ (5.2).
 
 ---
@@ -152,7 +152,7 @@ Alle Regeln sind reine Funktionen in `libs/domain/src/threads/` und `libs/domain
 | Pro Erwachsenem | die Bezugspersonen der Kinder im Thread und alle Jugendleiter; bei „Nur Jugendleiter“ und „Jugendleiter + Jugendsprecher“ nur die Jugendleiter                               |
 | Pro Person      | beide Gruppen zusammen; bei „Nur Familie“ ohne die Kinder                                                                                                                    |
 
-Entfernte Personen sind nie gefragt; ihre Antworten zählen nicht.
+Entfernte Personen sind nie gefragt; ihre Antworten zählen nicht. Eine Antwort ohne jede Option gilt als keine Antwort: Die Person steht unter „Offen“ und bleibt in „Braucht deine Antwort“. Der Server verweigert leere Antworten ab Etappe 2; bis dahin darf eine verirrte Zeile niemanden aus „Offen“ verschwinden lassen, weil die Person sonst weder gezählt noch als fehlend genannt würde.
 
 `antwortZeilen(betrachter, umfrage, …)`: eine Zeile für sich selbst, wenn gefragt, und **eine Zeile je eigenem gefragten Kind**. Das gilt auch bei „pro Person“: Für ein Kind antwortet das Kind selbst oder seine Familie, unabhängig davon, ob es einen Zugang hat. Verworfen: „pro Person“ wörtlich als „jeder mit Zugang“ — Kinder ohne Zugang hätten dann keine Stimme.
 
@@ -162,7 +162,7 @@ Entfernte Personen sind nie gefragt; ihre Antworten zählen nicht.
 
 1. Wer den Thread nicht sieht: 404.
 2. Wer den Thread bearbeiten darf (3.5): für jede gefragte Person, **auch nach der Frist** — das Nachtragen telefonischer Zu- und Absagen.
-3. Sonst nur bis zur Frist (danach 410): für sich selbst, wenn gefragt, und als Bezugsperson für ein gefragtes Kind (`darfFuerKindHandeln`, unabhängig von Erziehungsberechtigung und Alter, TP2 5.6).
+3. Sonst nur bis zur Frist (danach 410; ab `jetzt >= frist` ist sie abgelaufen, „bis Do 18:00“ heißt: um 18:00:00 ist Schluss): für sich selbst, wenn gefragt, und als Bezugsperson für ein gefragtes Kind (`darfFuerKindHandeln`, unabhängig von Erziehungsberechtigung und Alter, TP2 5.6).
 
 Gespeichert wird immer `fuer` und `von`. In den **eigenen Antwortzeilen** sieht man, wer für einen eingetragen hat („von dir eingetragen“, „eingetragen von Mutter Sandra“, „eingetragen von Thomas K.“).
 
@@ -170,15 +170,16 @@ Gespeichert wird immer `fuer` und `von`. In den **eigenen Antwortzeilen** sieht 
 
 `ergebnisAnsicht(betrachter, umfrage, thread)` ergibt `NAMEN`, `SUMME` oder `NICHTS`:
 
-| Einstellung      | Mit „Antworten im Detail“ | Andere Jugendleiter | Familien und Jungfischer |
-| ---------------- | ------------------------- | ------------------- | ------------------------ |
-| Für alle         | Namen                     | Namen               | Namen                    |
-| Nur als Summe    | Namen                     | Summe               | Summe                    |
-| Nur Jugendleiter | Namen                     | Summe               | nichts                   |
+| Einstellung      | Mit „Antworten im Detail“ oder Bearbeitungsrecht | Andere Jugendleiter | Familien und Jungfischer |
+| ---------------- | ------------------------------------------------ | ------------------- | ------------------------ |
+| Für alle         | Namen                                            | Namen               | Namen                    |
+| Nur als Summe    | Namen                                            | Summe               | Summe                    |
+| Nur Jugendleiter | Namen                                            | Summe               | nichts                   |
 
 - **Namen** heißt: je Option die Beantworteten als Vorname und Initiale des Nachnamens („Lena M.“), dazu „Offen“ mit den Gefragten ohne Antwort. Verworfen: volle Nachnamen für alle — TP2 5.2 lässt Familien bewusst kein Mitgliederverzeichnis sehen; die Initiale reicht in einer Gruppe zum Erkennen.
 - Den Vermerk „eingetragen von …“ in der Ergebnisliste sehen nur Jugendleiter, und nur, wenn `von` ≠ `fuer`.
 - Die eigene Antwort sieht jeder immer.
+- Die Namen in den Ergebnissen sieht auch, wer den Thread bearbeiten darf (3.5), zusätzlich zu „Antworten im Detail“: Wer nachträgt (3.3), muss sehen, wer fehlt; die Verwaltung zeigt es ohnehin. Die Tabelle gilt entsprechend für diese Gruppe.
 
 ### 3.5 Rechte am Thread
 
@@ -222,7 +223,8 @@ Im Archiv lassen sich Threads lesen und durchsuchen; Antworten nach der Frist un
 Aus dem Entwurf übernommen und auf Europe/Berlin umgestellt (FAM 3.1, 3.2):
 
 - `terminZeit(termin)`: die Anzeigeformen aus FAM 3.1.
-- `terminFehler(termin)`: Ende vor Start, Endezeit vor Beginn am selben Tag, Endezeit ohne Beginn.
+- `terminFehler(termin)`: Ende vor Start, Endezeit vor Beginn am selben Tag. Eine Endezeit ohne Beginn ist erlaubt (2.2).
+- Wandzeit nach Zeitpunkt (`berlinZeitpunkt`): In der doppelten Stunde im Herbst gilt der frühere Zeitpunkt (Sommerzeit), eine Uhrzeit in der übersprungenen Stunde im Frühjahr rückt um eine Stunde vor (wie Temporal „compatible“). Verworfen: eine solche Uhrzeit ablehnen — der Editor kann sie nicht kennen, und die Ablehnung wäre unfreundlicher.
 - `naechsteTermine(termine, jetzt)`: laufende und künftige, sortiert nach Startdatum, dann Beginn, ganztägig zuerst; ein laufender mehrtägiger Termin bleibt bis zu seinem Ende.
 - `termineImMonat(termine, jahr, monat)`: auch Termine, die über die Monatsgrenze reichen.
 - Karten-Link für den Ort (`kartenLink(ort, geraet)`): auf iOS `maps://?q=`, auf Android `geo:0,0?q=`, sonst die Google-Maps-Suche. Das Gerät erkennt der Client am User-Agent; einen Fehlgriff fängt das ab, weil beide Handy-Schemata im Zweifel nichts tun und der Desktop-Link immer funktioniert. Nichts wird eingebettet; erst das Antippen überträgt den Ort.
@@ -230,7 +232,7 @@ Aus dem Entwurf übernommen und auf Europe/Berlin umgestellt (FAM 3.1, 3.2):
 ### 3.9 Neu und Zähler
 
 - `istNeu(thread, gelesenStand, person)`: Es gibt eine `Aenderung` des Threads mit `stand > gelesenBis` und `urheberId ≠ person` (nur fremde Aktivität, Erkenntnis aus dem Entwurf). Ohne Gelesen-Stand ist ein Thread neu, wenn er nach dem Einrichten des eigenen Zugangs veröffentlicht wurde oder seither fremde Aktivität hatte.
-- Zähler am Reiter „Verlauf“: fremde, nicht gelöschte Nachrichten mit `stand > verlaufGelesenBis`.
+- Zähler am Reiter „Verlauf“: fremde, nicht gelöschte Nachrichten (Art `NACHRICHT`, keine Systemeinträge) mit `stand > verlaufGelesenBis`. Verworfen: Systemeinträge mitzählen — ein verschobener Termin im Aushang hieße sonst „1 neuer Kommentar“, wo niemand kommentieren kann.
 - „Neu seit deinem letzten Besuch“ (6.1): die neuen Threads mit einer Kurzangabe („Neuer Thread“, „2 neue Kommentare“, „Aushang geändert“).
 - Öffnen eines Threads setzt `gelesenBis` auf den aktuellen Stand, Öffnen des Verlaufs zusätzlich `verlaufGelesenBis`.
 
@@ -270,6 +272,8 @@ Liegen Antworten vor, verweigert der Server (409 mit Hinweis am Feld):
 
 Umbenennen und Umsortieren von Optionen, Frist und Ergebnis-Einstellung bleiben frei. Verworfen: Antworten bei solchen Änderungen still verwerfen.
 
+Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder das Modul noch der Thread: Die Datenbank verweigert es (der Fremdschlüssel von der Antwort auf die Umfrage ist `NoAction`, es gibt keinen Kaskadenweg zu den Antworten, 2.3). Verworfen: die Kaskade von der Umfrage zur Antwort zu lassen und allein auf die Sperre über die gewählte Option zu bauen — ob zuerst die Sperre oder die Kaskade greift, hängt von der Reihenfolge der Prüftrigger in Postgres ab; und ein aufgeschobener Fremdschlüssel (`DEFERRABLE INITIALLY DEFERRED`) — er prüfte erst nach der Kaskade und ließe Antworten kommentarlos verschwinden. Folge für Etappe 2: `PUT /threads/:id` antwortet mit 409, wenn es ein beantwortetes Umfrage-Modul entfernen würde.
+
 ---
 
 ## 4. Server und API
@@ -300,10 +304,10 @@ Alle unter `/<slug>/api/v1`, in `vereinsApi`, mit `brauchtMitglied` und je einem
 
 ### 4.2 Schreibpfad
 
-Jede schreibende Route arbeitet in einer Transaktion über `mitAenderung(tx, verein, urheber, aenderungen)`:
+Jede schreibende Route arbeitet in einer Transaktion über `mitAenderung(tx, vereinId, urheberId, jetzt, arbeit)`. Es muss die **erste schreibende Anweisung** der Transaktion sein und setzt READ COMMITTED voraus (Postgres-Vorgabe; unter REPEATABLE READ oder SERIALIZABLE scheiterten gleichzeitige Schreiber mit 40001, statt zu warten):
 
-1. Vereinszeile sperren und `aenderungsstand` erhöhen (wie `sperreVereinszeile`, TP2; damit vergeben gleichzeitige Anfragen lückenlose, in Commit-Reihenfolge aufsteigende Stände). Verworfen: eine Postgres-Sequenz — sie vergibt Nummern vor dem Commit, und eine später committete kleinere Nummer überholte ein Sync, der die größere schon gesehen hat.
-2. `Aenderung`-Zeilen schreiben, `letzteAktivitaet` des Threads setzen.
+1. `aenderungsstand` um eins erhöhen; das UPDATE sperrt die Vereinszeile bis zum Commit (wie `sperreVereinszeile`, TP2; damit vergeben gleichzeitige Anfragen lückenlose, in Commit-Reihenfolge aufsteigende Stände, und eine zurückgerollte Transaktion verbraucht keinen). Der neue Stand geht an `arbeit(stand)`, **bevor** sie schreibt — ein Verlaufseintrag braucht seinen Stand beim Anlegen. Verworfen: eine Postgres-Sequenz — sie vergibt Nummern vor dem Commit, und eine später committete kleinere Nummer überholte ein Sync, der die größere schon gesehen hat.
+2. `arbeit` schreibt die Daten und gibt Ergebnis und `aenderungen` zurück (je Eintrag `threadId`, `art`, `objektId`); `mitAenderung` schreibt je Eintrag eine `Aenderung` mit dem Stand und setzt `letzteAktivitaetAm` und `letzteAktivitaetStand` der betroffenen Threads, **nicht** für `GELOESCHT` (die Zeile ist weg) und `SICHTBARKEIT` (eine neue Zielgruppe ist kein Beitrag, der den Thread in der Liste nach oben schieben soll).
 3. Nach dem Commit das Ereignis an den Bus im Prozess melden (5.1).
 
 Jede Schreibroute prüft zuerst die Regeln aus Abschnitt 3 im Speicher. Antworten und Nachrichten sind über `clientId` idempotent: Eine Wiederholung liefert das vorhandene Ergebnis.
@@ -509,17 +513,17 @@ Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kont
 
 Die Rahmen-Spezifikation ist an diesen Stellen nachgezogen:
 
-| Stelle              | Rahmen bisher                                          | Jetzt                                                                               |
-| ------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| 4.2 Rechte          | Modus, Archiv, Kommentare löschen nur „Alle Threads“   | Ersteller mit „Threads erstellen“ verwaltet eigene Threads ganz (3.5)               |
-| 5.3, 9.6, 11 Archiv | Archivierung per Cron in Teilprojekt 5                 | Regel zur Lesezeit in Teilprojekt 3, mit „aktiv halten“ (3.7)                       |
-| 6.1 Nur Aushang     | Reiter Verlauf entfällt                                | Verlauf bleibt lesbar, nur Schreiben endet (6.2)                                    |
-| 6.3 Pro Person      | jeder mit Zugang                                       | jedes Kind (über Familie) und jeder Erwachsene (3.2)                                |
-| 6.3, 6.4 Ergebnisse | „für alle / Summe / nur Jugendleiter“ ohne Namensregel | Namensregel nach 3.4; „eingetragen von“ in Ergebnissen nur für Jugendleiter         |
-| 6.4 Umfrage         | Teilnahme-Umfrage nicht definiert                      | 3.12                                                                                |
-| 6.7, 7.6 Vorschau   | immer Thread-Titel                                     | Titel nur bei veröffentlichten Familien-Threads (7.2)                               |
-| 7.5, 9.1 Echtzeit   | Abo je Thread, Lücken über Zählernummern               | Abo je Verein mit Prüfung je Signal, Lückenschluss nach Abbruch (5)                 |
-| 3.5 Austausch       | nicht automatisch archiviert, nicht löschbar           | zusätzlich nicht manuell archivierbar, Zielgruppe fest (8)                          |
-| neu                 | —                                                      | Entwurfszustand, Löschen nur ohne Antworten (3.6), Gelesen-Stand (2.5), Suche (6.5) |
+| Stelle              | Rahmen bisher                                          | Jetzt                                                                                          |
+| ------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| 4.2 Rechte          | Modus, Archiv, Kommentare löschen nur „Alle Threads“   | Ersteller mit „Threads erstellen“ verwaltet eigene Threads ganz (3.5)                          |
+| 5.3, 9.6, 11 Archiv | Archivierung per Cron in Teilprojekt 5                 | Regel zur Lesezeit in Teilprojekt 3, mit „aktiv halten“ (3.7)                                  |
+| 6.1 Nur Aushang     | Reiter Verlauf entfällt                                | Verlauf bleibt lesbar, nur Schreiben endet (6.2)                                               |
+| 6.3 Pro Person      | jeder mit Zugang                                       | jedes Kind (über Familie) und jeder Erwachsene (3.2)                                           |
+| 6.3, 6.4 Ergebnisse | „für alle / Summe / nur Jugendleiter“ ohne Namensregel | Namensregel nach 3.4, Namen auch mit Bearbeitungsrecht; „eingetragen von“ nur für Jugendleiter |
+| 6.4 Umfrage         | Teilnahme-Umfrage nicht definiert                      | 3.12                                                                                           |
+| 6.7, 7.6 Vorschau   | immer Thread-Titel                                     | Titel nur bei veröffentlichten Familien-Threads (7.2)                                          |
+| 7.5, 9.1 Echtzeit   | Abo je Thread, Lücken über Zählernummern               | Abo je Verein mit Prüfung je Signal, Lückenschluss nach Abbruch (5)                            |
+| 3.5 Austausch       | nicht automatisch archiviert, nicht löschbar           | zusätzlich nicht manuell archivierbar, Zielgruppe fest (8)                                     |
+| neu                 | —                                                      | Entwurfszustand, Löschen nur ohne Antworten (3.6), Gelesen-Stand (2.5), Suche (6.5)            |
 
 Der Entwurf bildet die UID eines Kalendereintrags (FAM 3.4) als `<slug>-<modulId>@jufi-app.de`; die echte App nimmt `<modulId>@jufi-app.de`, damit eine Slug-Korrektur (TP2) keine doppelten Einträge im Kalender erzeugt.

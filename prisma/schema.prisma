@@ -14,8 +14,9 @@
 // Prismas Vorgabe Cascade — ein update von Person.vereinId zoege Zugang, Passkeys
 // und Sitzungen still in einen anderen Verein mit.
 //
-// CHECK-Constraints bildet Prisma nicht ab; sie stehen von Hand am Ende der
-// Migrationen fundament und email_an_person (prisma/migrations/).
+// CHECK-Constraints und Partial-Unique-Indizes bildet Prisma nicht ab; sie stehen
+// von Hand am Ende der Migrationen fundament, email_an_person und threads
+// (prisma/migrations/).
 //
 // Hinweis: `prisma format` schreibt feste zwei Spaces und ist nicht
 // konfigurierbar — daher weicht diese Datei bewusst von der Tab-Regel ab.
@@ -90,44 +91,131 @@ enum AdminAktion {
   ERSTE_EINLADUNG_ERNEUERT
 }
 
+/// Der Jugendsprecher-Austausch ist der eine Thread je Verein, den das System
+/// anlegt (TP3-Spec 2.1); alle anderen legen Jugendleiter an.
+enum ThreadArt {
+  NORMAL
+  JUGENDSPRECHER_AUSTAUSCH
+}
+
+enum ThreadModus {
+  AUSHANG
+  KOMMENTARE
+  CHAT
+}
+
+enum Rollenfilter {
+  JUNGFISCHER_FAMILIE
+  NUR_FAMILIE
+  NUR_JUGENDLEITER
+  JUGENDLEITER_JUGENDSPRECHER
+}
+
+enum ArchivModus {
+  AUTOMATISCH
+  ARCHIVIERT
+  AKTIV_HALTEN
+}
+
+/// Teilprojekt 4 ergaenzt weitere Typen.
+enum ModulTyp {
+  INFO
+  TERMIN
+  UMFRAGE
+}
+
+enum AntwortEinheit {
+  JUNGFISCHER
+  ERWACHSENER
+  PERSON
+}
+
+enum ErgebnisSicht {
+  ALLE
+  SUMME
+  JUGENDLEITER
+}
+
+enum VerlaufArt {
+  NACHRICHT
+  SYSTEM
+}
+
+enum SystemArt {
+  VEROEFFENTLICHT
+  TERMIN_GEAENDERT
+  FRIST_GEAENDERT
+  MODUS_GEAENDERT
+}
+
+enum AenderungArt {
+  THREAD
+  MODUL
+  ANTWORT
+  VERLAUF
+  SICHTBARKEIT
+  GELOESCHT
+}
+
 // --- Verein -------------------------------------------------------------------
 
 model Verein {
-  id           String       @id @default(cuid())
+  id              String       @id @default(cuid())
   /// Kleinbuchstaben, Ziffern, Bindestriche, 3–30 Zeichen (CHECK verein_slug).
   /// Reservierte Slugs prueft libs/domain; die Liste waechst mit den Routen und
   /// gehoert deshalb nicht in einen CHECK.
-  slug         String       @unique
+  slug            String       @unique
   /// Offizieller Name, z.B. fuer Einwilligungstext, Kontakt, Fusszeile der Mails.
-  name         String
+  name            String
   /// Hoechstens 24 Zeichen (CHECK verein_anzeigename): Kopfzeile, Passkey-Name,
   /// Home-Bildschirm, Betreff der Mails.
-  anzeigename  String
+  anzeigename     String
   /// Vereinsfarbe als Hex-Wert; alles Weitere wird daraus abgeleitet.
-  farbe        String
+  farbe           String
   /// Freitext. Optional, weil "Verein anlegen" (Spec 7.3) ihn nicht abfragt.
-  kontakt      String?
-  status       VereinStatus @default(AKTIV)
-  angelegtAm   DateTime     @default(now())
+  kontakt         String?
+  status          VereinStatus @default(AKTIV)
+  angelegtAm      DateTime     @default(now())
   /// Zaehler nur zum Sperren: Wer ihn erhoeht, haelt die Vereinszeile bis zum Ende
   /// seiner Transaktion; parallele Anmeldungen und Einloesungen im selben Verein
   /// laufen dadurch nacheinander. Gewaehlt statt SELECT ... FOR UPDATE (Roh-SQL ist in
   /// vereinDb gesperrt) und statt Advisory Locks (haengen an Verbindungen, nicht an Zeilen).
-  sperrzaehler Int          @default(0)
+  sperrzaehler    Int          @default(0)
+  /// Zaehler der Aenderungen im Verein (TP3-Spec 2.6). Jede schreibende
+  /// Transaktion erhoeht ihn genau einmal und haelt dadurch die Vereinszeile bis
+  /// zum Ende: Gleichzeitige Schreiber vergeben nacheinander lueckenlose Staende,
+  /// und eine zurueckgerollte Transaktion verbraucht keinen. Ein Stand je
+  /// Transaktion, nicht je Zeile, damit eine Arbeit (Verlaufseintrag plus
+  /// Thread-Aktivitaet) einen gemeinsamen Stand traegt. Int statt BigInt: 2,1
+  /// Milliarden Aenderungen je Verein werden nie erreicht, und BigInt braeche
+  /// JSON.stringify an jeder API-Grenze.
+  aenderungsstand Int          @default(0)
 
-  logo                  VereinLogo?
-  personen              Person[]
-  bezugspersonen        Bezugsperson[]
-  untergruppen          Untergruppe[]
-  untergruppeMitglieder UntergruppeMitglied[]
-  zugaenge              Zugang[]
-  passkeys              Passkey[]
-  recoveryCodes         RecoveryCode[]
-  sessions              Session[]
-  webauthnChallenges    WebauthnChallenge[]
-  einladungen           Einladung[]
-  einwilligungen        Einwilligung[]
-  mails                 MailWarteschlange[]
+  logo                   VereinLogo?
+  personen               Person[]
+  bezugspersonen         Bezugsperson[]
+  untergruppen           Untergruppe[]
+  untergruppeMitglieder  UntergruppeMitglied[]
+  zugaenge               Zugang[]
+  passkeys               Passkey[]
+  recoveryCodes          RecoveryCode[]
+  sessions               Session[]
+  webauthnChallenges     WebauthnChallenge[]
+  einladungen            Einladung[]
+  einwilligungen         Einwilligung[]
+  mails                  MailWarteschlange[]
+  threads                Thread[]
+  threadUntergruppen     ThreadUntergruppe[]
+  threadModule           ThreadModul[]
+  infoModule             InfoModul[]
+  terminModule           TerminModul[]
+  umfrageModule          UmfrageModul[]
+  umfrageOptionen        UmfrageOption[]
+  umfrageAntworten       UmfrageAntwort[]
+  umfrageAntwortOptionen UmfrageAntwortOption[]
+  verlauf                VerlaufEintrag[]
+  gelesenStaende         GelesenStand[]
+  aenderungen            Aenderung[]
 }
 
 /// Eigene Tabelle, damit nicht jede Vereinsabfrage das Bild mitlaedt. Verworfen:
@@ -194,6 +282,12 @@ model Person {
   einwilligungenAlsJungfischer Einwilligung[]        @relation("EinwilligungJungfischer")
   erteilteEinwilligungen       Einwilligung[]        @relation("EinwilligungErteiltVon")
   webauthnChallenges           WebauthnChallenge[]
+  erstellteThreads             Thread[]              @relation("ThreadErstelltVon")
+  antwortenFuer                UmfrageAntwort[]      @relation("AntwortFuer")
+  antwortenVon                 UmfrageAntwort[]      @relation("AntwortVon")
+  verlaufAlsAutor              VerlaufEintrag[]      @relation("VerlaufAutor")
+  verlaufGeloescht             VerlaufEintrag[]      @relation("VerlaufGeloeschtVon")
+  gelesenStaende               GelesenStand[]
 
   /// Ziel der zusammengesetzten Fremdschluessel (Spec 3.1).
   @@unique([vereinId, id])
@@ -233,6 +327,7 @@ model Untergruppe {
   angelegtAm DateTime @default(now())
 
   mitglieder UntergruppeMitglied[]
+  threads    ThreadUntergruppe[]
 
   @@unique([vereinId, name])
   @@unique([vereinId, id])
@@ -466,6 +561,329 @@ model MailWarteschlange {
 
   @@index([gesendetAm, naechsterVersuch])
   @@index([vereinId, bezug])
+}
+
+// --- Threads (TP3, Spec Thread-Kern 2) -----------------------------------------
+//
+// Dieselbe Mandantentrennung wie oben: vereinId in jeder Tabelle, Verweise als
+// zusammengesetzte Fremdschluessel mit onUpdate: NoAction. CHECKs und die
+// Partial-Unique-Indizes stehen von Hand in der Migration threads.
+
+/// Ein Thread ist Aushang, Kommentarbereich oder Chat (modus) und sammelt Module.
+/// Zielgruppe sind rollenfilter und Untergruppen (ThreadUntergruppe).
+model Thread {
+  id                    String       @id @default(cuid())
+  vereinId              String
+  verein                Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  art                   ThreadArt    @default(NORMAL)
+  /// 1-120 Zeichen ohne Rand (CHECK thread_titel).
+  titel                 String
+  modus                 ThreadModus
+  rollenfilter          Rollenfilter
+  /// true = "Alle"; sonst gelten die Eintraege in ThreadUntergruppe.
+  alleUntergruppen      Boolean      @default(true)
+  /// Oben in der Liste, nie automatisch archiviert.
+  angepinnt             Boolean      @default(false)
+  archivModus           ArchivModus  @default(AUTOMATISCH)
+  /// null = Entwurf.
+  veroeffentlichtAm     DateTime?
+  /// null nur beim Austausch, den das System anlegt (CHECK thread_ersteller).
+  /// NoAction statt Cascade: Entfernt wird eine Person per Grabstein, nicht hart
+  /// (Spec 5.8); ihre Threads bleiben. Das Loeschen eines ganzen Vereins geht
+  /// trotzdem durch (Begruendung bei Einwilligung).
+  erstelltVonId         String?
+  erstelltVon           Person?      @relation("ThreadErstelltVon", fields: [vereinId, erstelltVonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Zeitpunkt und Aenderungsstand der letzten Aktivitaet: Sortierung der Liste.
+  /// Das Archiv folgt dem letzten Termin, nicht dieser Spalte (Spec 3.7). Als
+  /// Spalten statt aus Verlauf und Modulen berechnet, weil die Liste sonst bei
+  /// jedem Aufruf alle Threads eines Vereins durchsuchen muesste.
+  letzteAktivitaetAm    DateTime     @default(now())
+  letzteAktivitaetStand Int          @default(0)
+  angelegtAm            DateTime     @default(now())
+  /// Technischer Zeitstempel: @updatedAt springt bei jedem updateMany aus
+  /// mitAenderung (auch bei jeder Antwort und Nachricht) auf die Uhr des Prozesses.
+  /// Nicht "Kopf geaendert" -- dafuer gelten Verlauf und Aenderung.
+  geaendertAm           DateTime     @default(now()) @updatedAt
+
+  untergruppen ThreadUntergruppe[]
+  module       ThreadModul[]
+  verlauf      VerlaufEintrag[]
+  gelesen      GelesenStand[]
+
+  /// Ziel der zusammengesetzten Fremdschluessel.
+  @@unique([vereinId, id])
+  @@index([vereinId, letzteAktivitaetAm])
+}
+
+/// Die Auswahl bei alleUntergruppen = false. Wird eine Untergruppe geloescht,
+/// faellt sie per Cascade aus der Auswahl; bleibt keine uebrig, sieht nur noch,
+/// wer Jugendleiter ist. Verworfen: das Loeschen der Untergruppe verweigern,
+/// solange Threads sie nennen -- eine aufgeloeste Untergruppe haengte sonst an
+/// alten, archivierten Threads.
+model ThreadUntergruppe {
+  vereinId      String
+  verein        Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  threadId      String
+  thread        Thread      @relation(fields: [vereinId, threadId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  untergruppeId String
+  untergruppe   Untergruppe @relation(fields: [vereinId, untergruppeId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([threadId, untergruppeId])
+  @@index([vereinId, untergruppeId])
+}
+
+/// Kopfzeile eines Moduls; je Typ haengt eine Tabelle mit derselben id daran
+/// (InfoModul, TerminModul, UmfrageModul). Verworfen: ein JSON-Feld je Modul --
+/// Regeln wie "eine Antwort pro Kind" sollen in der Datenbank abgesichert sein.
+///
+/// position ist nicht eindeutig: Beim Umsortieren in einer Transaktion verletzte
+/// ein eindeutiger Index zeilenweise. Sortiert wird nach (position, id); den
+/// Editor prueft die Domaene.
+model ThreadModul {
+  id       String   @id @default(cuid())
+  vereinId String
+  verein   Verein   @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  threadId String
+  thread   Thread   @relation(fields: [vereinId, threadId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  typ      ModulTyp
+  /// Mindestens 0 (CHECK modul_position).
+  position Int
+  titel    String?
+
+  info    InfoModul?
+  termin  TerminModul?
+  umfrage UmfrageModul?
+
+  @@unique([vereinId, id])
+  /// Ziel des Fremdschluessels von UmfrageModul: So stimmt dessen threadId immer
+  /// mit dem Thread des Moduls ueberein.
+  @@unique([vereinId, id, threadId])
+  @@index([vereinId, threadId])
+}
+
+model InfoModul {
+  /// Dieselbe id wie das ThreadModul.
+  id       String      @id
+  vereinId String
+  verein   Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modul    ThreadModul @relation(fields: [vereinId, id], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  /// Markdown-Teilmenge, hoechstens 10000 Zeichen (CHECK info_text).
+  text     String
+
+  /// Prisma verlangt fuer die 1:1-Relation einen Schluessel genau ueber deren Felder.
+  @@unique([vereinId, id])
+}
+
+/// Datum und Uhrzeit sind Wandzeit in Europe/Berlin; der Verein hat kein
+/// Zeitzonenfeld, solange alle Vereine in Deutschland sind. Verworfen:
+/// Zeitpunkte (timestamptz) -- ein ganztaegiger Termin hat keinen Zeitpunkt, und
+/// die Anzeige rechnete bei jeder Zeitumstellung um.
+model TerminModul {
+  id         String      @id
+  vereinId   String
+  verein     Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modul      ThreadModul @relation(fields: [vereinId, id], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  startDatum DateTime    @db.Date
+  /// Nicht vor startDatum (CHECK termin_reihenfolge).
+  endDatum   DateTime?   @db.Date
+  /// HH:MM (CHECK termin_uhrzeit). Ein Ende ohne Beginn ist erlaubt ("bis 12:00").
+  beginn     String?
+  ende       String?
+  ort        String?
+  treffpunkt String?
+
+  @@unique([vereinId, id])
+  @@index([vereinId, startDatum])
+}
+
+model UmfrageModul {
+  id         String         @id
+  vereinId   String
+  verein     Verein         @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  /// Traegt den Thread mit, damit ein Partial-Unique-Index hoechstens eine
+  /// Teilnahme-Umfrage je Thread erlaubt (umfrage_eine_teilnahme, Migration threads).
+  threadId   String
+  modul      ThreadModul    @relation(fields: [vereinId, id, threadId], references: [vereinId, id, threadId], onDelete: Cascade, onUpdate: NoAction)
+  /// 1-200 Zeichen nach Abzug des Rands (CHECK umfrage_frage).
+  frage      String
+  einheit    AntwortEinheit
+  mehrfach   Boolean        @default(false)
+  teilnahme  Boolean        @default(false)
+  vielleicht Boolean        @default(true)
+  /// Ab jetzt >= frist ist die Frist abgelaufen; die Server-Uhr entscheidet.
+  frist      DateTime?
+  ergebnisse ErgebnisSicht  @default(ALLE)
+
+  optionen  UmfrageOption[]
+  antworten UmfrageAntwort[]
+
+  @@unique([vereinId, id])
+  /// Prisma verlangt fuer die 1:1-Relation zum Modul einen Schluessel genau ueber
+  /// deren Felder.
+  @@unique([vereinId, id, threadId])
+}
+
+model UmfrageOption {
+  id         String       @id @default(cuid())
+  vereinId   String
+  verein     Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  umfrageId  String
+  umfrage    UmfrageModul @relation(fields: [vereinId, umfrageId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  /// 1-200 Zeichen nach Abzug des Rands (CHECK option_text).
+  text       String
+  /// Mindestens 0 (CHECK option_position); nicht eindeutig, wie bei ThreadModul.
+  position   Int
+  /// Bleibt beim Umbenennen und Umsortieren stabil, damit abgegebene Antworten an
+  /// ihrer Option bleiben. Bei der Teilnahme-Umfrage fest: dabei, vielleicht,
+  /// abgesagt (CHECK option_schluessel).
+  schluessel String
+
+  antworten UmfrageAntwortOption[]
+
+  @@unique([umfrageId, schluessel])
+  /// Ziel des Fremdschluessels von UmfrageAntwortOption: Eine Antwort kann nur
+  /// Optionen ihrer eigenen Umfrage waehlen.
+  @@unique([vereinId, umfrageId, id])
+}
+
+/// Eine Antwort je Person und Umfrage; eine neue ueberschreibt die alte (Upsert).
+/// Verworfen: jede Antwort als neue Zeile -- niemand braucht frueher abgegebene,
+/// und "wer hat noch nicht geantwortet" wuerde zur Gruppierung.
+///
+/// Beide Personen-Relationen ohne Kaskade (Begruendung bei Einwilligung): Das
+/// harte Loeschen einer Person mit Antwort wird abgelehnt; entfernt wird per
+/// Grabstein.
+model UmfrageAntwort {
+  id          String       @id @default(cuid())
+  vereinId    String
+  verein      Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  umfrageId   String
+  /// NoAction statt Cascade: Von Thread, Modul oder Umfrage fuehrt kein Kaskadenweg
+  /// zu den Antworten, jede Antwort haelt ihre Umfrage fest (P2003) -- auch eine
+  /// ohne gewaehlte Option. Gewollt: Antworten gehen nie still verloren (Spec 3.14).
+  /// Verworfen: Cascade hier und die Sperre allein ueber UmfrageAntwortOption.option --
+  /// ob dann zuerst die Option (Fehler) oder die Antwort (still weg) kaskadiert,
+  /// haengt von der Reihenfolge der Prueftrigger in Postgres ab, und die kippt, wenn
+  /// eine spaetere Migration einen der Fremdschluessel neu anlegt. Das Loeschen eines
+  /// ganzen Vereins geht trotzdem durch, weil jede Tabelle direkt vom Verein kaskadiert.
+  umfrage     UmfrageModul @relation(fields: [vereinId, umfrageId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Fuer wen geantwortet wird (Jungfischer oder Erwachsener).
+  fuerId      String
+  fuer        Person       @relation("AntwortFuer", fields: [vereinId, fuerId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Wer die Antwort abgegeben hat.
+  vonId       String
+  von         Person       @relation("AntwortVon", fields: [vereinId, vonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  abgegebenAm DateTime
+  /// Je Verein eindeutig: Macht die Anfrage wiederholbar, wenn die Outbox des
+  /// Clients sie ein zweites Mal schickt.
+  clientId    String
+
+  optionen UmfrageAntwortOption[]
+
+  @@unique([umfrageId, fuerId])
+  @@unique([vereinId, clientId])
+  /// Ziel des Fremdschluessels von UmfrageAntwortOption.
+  @@unique([vereinId, umfrageId, id])
+  @@index([vereinId, fuerId])
+  @@index([vereinId, vonId])
+}
+
+/// Die gewaehlten Optionen einer Antwort. umfrageId steht mit, damit beide
+/// Fremdschluessel dieselbe Umfrage erzwingen.
+model UmfrageAntwortOption {
+  vereinId  String
+  verein    Verein         @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  umfrageId String
+  antwortId String
+  antwort   UmfrageAntwort @relation(fields: [vereinId, umfrageId, antwortId], references: [vereinId, umfrageId, id], onDelete: Cascade, onUpdate: NoAction)
+  optionId  String
+  /// NoAction statt Cascade: Eine gewaehlte Option laesst sich nicht loeschen
+  /// (P2003), solange eine Antwort sie nennt. Gewollt: Antworten gehen nie still
+  /// verloren (Spec 3.14). Das Verschwinden beantworteter Umfragen, Module und
+  /// Threads sperrt UmfrageAntwort.umfrage, ebenfalls NoAction -- dieser Riegel
+  /// haengt also nicht an der Reihenfolge der Kaskaden. Threads loescht man nur
+  /// ohne Antworten (Spec 3.5). Verworfen: DEFERRABLE INITIALLY DEFERRED -- die
+  /// Pruefung liefe nach der Kaskade, und das Loeschen verwuerfe beantwortete
+  /// Umfragen kommentarlos.
+  option    UmfrageOption  @relation(fields: [vereinId, umfrageId, optionId], references: [vereinId, umfrageId, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([antwortId, optionId])
+}
+
+/// Nachrichten und Systemeintraege eines Threads. Loeschen leert den Text und
+/// setzt geloeschtAm/geloeschtVonId; die Zeile bleibt ("Nachricht geloescht").
+/// Die CHECKs verlauf_* halten die beiden Arten auseinander.
+model VerlaufEintrag {
+  id             String     @id @default(cuid())
+  vereinId       String
+  verein         Verein     @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  threadId       String
+  thread         Thread     @relation(fields: [vereinId, threadId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  art            VerlaufArt
+  /// Bei Nachrichten der Verfasser, bei Systemeintraegen die handelnde Person.
+  /// Ohne Kaskade: entfernt wird per Grabstein.
+  autorId        String?
+  autor          Person?    @relation("VerlaufAutor", fields: [vereinId, autorId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// 1-2000 Zeichen Klartext (CHECK verlauf_text); null bei Systemeintraegen und
+  /// geloeschten Nachrichten.
+  text           String?
+  systemArt      SystemArt?
+  /// Kleines JSON mit den Angaben fuer den Satz des Systemeintrags.
+  systemDaten    Json?
+  /// Aenderungsstand beim Anlegen; traegt Zaehler und "Neu".
+  stand          Int
+  angelegtAm     DateTime   @default(now())
+  geloeschtAm    DateTime?
+  geloeschtVonId String?
+  geloeschtVon   Person?    @relation("VerlaufGeloeschtVon", fields: [vereinId, geloeschtVonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Je Verein eindeutig, macht das Senden wiederholbar; null bei Systemeintraegen.
+  clientId       String?
+
+  @@unique([vereinId, clientId])
+  @@index([vereinId, threadId, stand])
+}
+
+/// Bis wohin eine Person einen Thread gesehen hat. Zwei Staende, damit der Zaehler
+/// am Reiter "Verlauf" nicht verschwindet, nur weil jemand die Uebersicht geoeffnet
+/// hat. Verworfen: Lesestand im Browser -- auf jedem Geraet waere alles wieder
+/// neu, und nach dem Abmelden ginge er verloren.
+model GelesenStand {
+  vereinId          String
+  verein            Verein   @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  personId          String
+  person            Person   @relation(fields: [vereinId, personId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  threadId          String
+  thread            Thread   @relation(fields: [vereinId, threadId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  gelesenBis        Int
+  verlaufGelesenBis Int
+  gelesenAm         DateTime
+
+  @@id([personId, threadId])
+  @@index([vereinId, threadId])
+}
+
+/// Protokoll der Aenderungen im Verein (nur Kennungen, keine Inhalte), aus dem
+/// ein Client mit "seit Stand n" nachlaedt. Eine Zeile je betroffenem Objekt;
+/// mehrere teilen sich den Stand ihrer Transaktion, darum eine eigene id und ein
+/// Index auf (vereinId, stand) statt eines eindeutigen Paars.
+///
+/// threadId, objektId und urheberId ohne Fremdschluessel: Das Loeschen eines
+/// Threads oder einer Person muss als Aenderung erhalten bleiben, sonst erfuehre
+/// ein Client nie davon. Eintraege aelter als 90 Tage raeumt der App-Prozess auf.
+model Aenderung {
+  id         String       @id @default(cuid())
+  vereinId   String
+  verein     Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  stand      Int
+  threadId   String?
+  art        AenderungArt
+  objektId   String
+  urheberId  String?
+  angelegtAm DateTime     @default(now())
+
+  @@index([vereinId, stand])
+  @@index([vereinId, threadId, stand])
+  @@index([angelegtAm])
 }
 
 // --- Plattform-Admin ----------------------------------------------------------

@@ -1,4 +1,4 @@
-import { Recht, type Beziehung, type PrismaClient } from '@jufi/db';
+import { austauschAnlegen, Recht, type Beziehung, type PrismaClient } from '@jufi/db';
 import { DEMO_SLUG, EINWILLIGUNG_TEXT_VERSION } from '@jufi/domain';
 import { CliFehler } from './fehler.js';
 
@@ -95,6 +95,9 @@ export async function demoEinspielen(
 				// Text steht in den Vereinseinstellungen im Feld Kontakt; Mitglieder lesen ihn auf der
 				// Startseite bei Ansprechpartner. Bewusst kein Logo, damit die Demo das Initialen-Icon vorfuehrt.
 				kontakt: 'Fragen an die Jugendleitung: jugend@example.org',
+				// Das Loeschen oben nimmt den alten Austausch per Cascade mit, ein zweites Einspielen
+				// findet also keinen vor und legt ihn neu an (sonst griffe thread_ein_austausch).
+				threads: { create: austauschAnlegen(jetzt) },
 			},
 		});
 		const vereinId = verein.id;
