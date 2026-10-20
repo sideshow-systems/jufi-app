@@ -104,7 +104,7 @@ Jugendsprecher sind Jungfischer, die von den übrigen Jungfischern gewählt werd
 - `jugendsprecher` ist ein Merkmal am Jungfischer. Setzen und entfernen darf, wer „Mitglieder verwalten" hat. Die Wahl findet außerhalb der App statt; eine Amtszeit wird nicht gespeichert.
 - Für den Austausch gibt es den Rollenfilter **„Jugendleiter + Jugendsprecher"** (6.2). **Die Familie sieht diese Threads nicht**: Jugendliche sollen dort offen für die Gruppe sprechen können. Verworfen: die Familie liest mit (Jugendsprecher reden dann vorsichtiger) oder sieht alles wie sonst (dann ist es kein Austausch nur zwischen den beiden Gruppen).
 - **Schutzregeln** nach dem Vorbild von Kinderschutzkonzepten: nur Gruppen-Threads, nie ein Zweiergespräch zwischen einem Erwachsenen und einem Kind; alle Jugendleiter lesen mit; unter „Meine Jungfischer" steht für die Familie „Lena ist Jugendsprecherin und nimmt am Austausch mit den Jugendleitern teil."
-- Jeder Verein hat einen angepinnten Thread **„Jugendsprecher-Austausch"** im Modus „Offener Chat" mit diesem Filter. Er entsteht beim Anlegen des Vereins, wird nie automatisch archiviert und lässt sich nicht löschen. Weitere Themen-Threads legen Jugendleiter über den normalen Editor an. Jugendsprecher bekommen keine Rechte zum Anlegen. Verworfen: ein eingeschränktes Recht „Threads erstellen" für Jugendsprecher (erstes Recht für Jungfischer, Sonderfall in Rechtemodell und Editor).
+- Jeder Verein hat einen angepinnten Thread **„Jugendsprecher-Austausch"** im Modus „Offener Chat" mit diesem Filter. Er entsteht beim Anlegen des Vereins, wird nie archiviert, weder automatisch noch von Hand, und lässt sich nicht löschen; seine Zielgruppe ist fest (TP3-Spec 8). Weitere Themen-Threads legen Jugendleiter über den normalen Editor an. Jugendsprecher bekommen keine Rechte zum Anlegen. Verworfen: ein eingeschränktes Recht „Threads erstellen" für Jugendsprecher (erstes Recht für Jungfischer, Sonderfall in Rechtemodell und Editor).
 - Wer kein Jugendsprecher mehr ist, für den sind diese Threads samt Verlauf „nicht gefunden" (404).
 
 ---
@@ -127,15 +127,15 @@ Verworfen: Magic Links als einziger Weg (Kinder ohne E-Mail fallen heraus; der W
 
 Intern gibt es nur **Einzelrechte**. Rollen sind **Vorlagen**, die die Häkchen vorbelegen; danach ist jedes Recht pro Person änderbar. Neue Rechte lassen sich so ergänzen, ohne Rollen umzubauen.
 
-| Recht                           | Umfasst                                                                                         |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Mitglieder verwalten            | Personen anlegen, einladen, Familien verknüpfen, Jugendsprecher festlegen, Untergruppen pflegen |
-| Threads erstellen               | Threads anlegen, Module hinzufügen, eigene Threads bearbeiten                                   |
-| Alle Threads bearbeiten         | fremde Threads ändern, archivieren, Modus umstellen, Kommentare löschen                         |
-| Globale Dokumente verwalten     | Dokumente hochladen, ersetzen, Kategorien pflegen                                               |
-| Antworten im Detail sehen       | sehen, wer was geantwortet hat; ohne dieses Recht nur Summen                                    |
-| Jugendleiter & Rechte verwalten | weitere Jugendleiter anlegen und Rechte vergeben                                                |
-| Vereinseinstellungen            | Name, Logo, Farben, Kontaktdaten des Vereins                                                    |
+| Recht                           | Umfasst                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Mitglieder verwalten            | Personen anlegen, einladen, Familien verknüpfen, Jugendsprecher festlegen, Untergruppen pflegen                           |
+| Threads erstellen               | Threads anlegen; eigene Threads ganz verwalten (ändern, archivieren, Modus, Kommentare löschen, nachtragen; TP3-Spec 3.5) |
+| Alle Threads bearbeiten         | dasselbe an fremden Threads und am Jugendsprecher-Austausch                                                               |
+| Globale Dokumente verwalten     | Dokumente hochladen, ersetzen, Kategorien pflegen                                                                         |
+| Antworten im Detail sehen       | sehen, wer was geantwortet hat, unabhängig von der Ergebnis-Einstellung der Umfrage (TP3-Spec 3.4)                        |
+| Jugendleiter & Rechte verwalten | weitere Jugendleiter anlegen und Rechte vergeben                                                                          |
+| Vereinseinstellungen            | Name, Logo, Farben, Kontaktdaten des Vereins                                                                              |
 
 Rollen-Vorlagen:
 
@@ -182,7 +182,7 @@ Die genaue Gestaltung wird im klickbaren Entwurf (Teilprojekt 1) ausgearbeitet.
 
 - Thread-Liste: angepinnte Threads oben, dann aktive nach letzter Aktivität.
 - **Termine** zeigt alle Termine aus Termin-Modulen als **Kalenderansicht**.
-- Ein Thread mit Termin wird **eine Woche nach dem letzten Tag seines letzten Termins** automatisch archiviert. Jugendleiter können manuell archivieren und wiederherstellen. Archivierte Threads bleiben les- und durchsuchbar.
+- Ein Thread mit Termin wird **eine Woche nach dem letzten Tag seines letzten Termins** automatisch archiviert. Wer den Thread bearbeiten darf, kann manuell archivieren und wiederherstellen. Archivierte Threads bleiben les- und durchsuchbar. Die Regel wird beim Lesen berechnet, nicht per Cron (TP3-Spec 3.7).
 
 ### 5.4 URL-Schema
 
@@ -213,11 +213,11 @@ Ein umbenannter Thread bleibt unter seinem alten Link erreichbar, weil nur die I
 
 Jeder Thread hat denselben Aufbau mit zwei **Reitern**: **Übersicht** zeigt den **Aushang** aus Modulen in fester, vom Jugendleiter bestimmter Reihenfolge; **Verlauf** zeigt Nachrichten, Kommentare und Systemereignisse und trägt einen Zähler für Neues. Verworfen: eine durchgehende Seite mit Verlauf unter dem Aushang — bei vielen Modulen läge der Verlauf weit unten, und der Aushang soll als „aktueller Stand" ungestört bleiben. Der **Modus** legt fest, wer im Verlauf schreiben darf:
 
-| Modus                | Verlauf                                         |
-| -------------------- | ----------------------------------------------- |
-| Nur Aushang          | niemand schreibt; der Reiter „Verlauf" entfällt |
-| Aushang + Kommentare | alle Leser kommentieren                         |
-| Offener Chat         | alle Leser schreiben frei                       |
+| Modus                | Verlauf                                                                                                   |
+| -------------------- | --------------------------------------------------------------------------------------------------------- |
+| Nur Aushang          | niemand schreibt; ein vorhandener Verlauf bleibt lesbar, ohne Einträge entfällt der Reiter (TP3-Spec 6.2) |
+| Aushang + Kommentare | alle Leser kommentieren                                                                                   |
+| Offener Chat         | alle Leser schreiben frei                                                                                 |
 
 Der Modus ist jederzeit änderbar, etwa von „Offener Chat" auf „Nur Aushang" nach der Veranstaltung. Ein einheitlicher Aufbau statt dreier Seitentypen hält die Oberfläche für alle Modi gleich.
 
@@ -240,11 +240,11 @@ Feste Regeln: Bezugspersonen sehen alles, was ihre Kinder sehen, **außer Thread
 
 Jedes Modul, auf das man antwortet (Umfrage, Helferliste, Fahrgemeinschaft), hat eine Antwort-Einheit. Das Kosten-Modul gilt immer pro Jungfischer und hat einen eigenen Status-Ablauf (6.4.2).
 
-| Antwort-Einheit | Beispiel                  | Wer antwortet                                                        |
-| --------------- | ------------------------- | -------------------------------------------------------------------- |
-| Pro Jungfischer | „Kommst du zum Bowling?"  | der Jungfischer selbst **oder** seine Familie; eine Antwort pro Kind |
-| Pro Erwachsenem | „Wer bringt Kuchen?"      | jede Bezugsperson und jeder Jugendleiter für sich                    |
-| Pro Person      | „Welche Pizza wollt ihr?" | jeder mit Zugang, Kinder und Erwachsene                              |
+| Antwort-Einheit | Beispiel                  | Wer antwortet                                                                            |
+| --------------- | ------------------------- | ---------------------------------------------------------------------------------------- |
+| Pro Jungfischer | „Kommst du zum Bowling?"  | der Jungfischer selbst **oder** seine Familie; eine Antwort pro Kind                     |
+| Pro Erwachsenem | „Wer bringt Kuchen?"      | jede Bezugsperson und jeder Jugendleiter für sich                                        |
+| Pro Person      | „Welche Pizza wollt ihr?" | jedes Kind (selbst oder über seine Familie) und jeder Erwachsene für sich (TP3-Spec 3.2) |
 
 Eine Antwort-Einheit „pro Familie" ist ausdrücklich nicht vorgesehen.
 
@@ -254,16 +254,16 @@ Bei „pro Jungfischer" speichert jede Antwort, **für wen** und **von wem** sie
 
 Alle acht gehören zu Version 1:
 
-| Modul                   | Zweck                                                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Info-Text               | Formatierter Text                                                                                                                                                   |
-| Termin                  | Startdatum, optional Enddatum, Beginn- und Endezeit (6.4.3); Ort mit Karten-Link, Treffpunkt; „In Kalender eintragen". Speist Kalender, Dashboard und Archiv-Regel. |
-| Umfrage                 | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter             |
-| Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht.                                    |
-| Fahrgemeinschaft        | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1)                                               |
-| Kosten                  | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2)                                                                                   |
-| Dateien                 | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter.                                                                                             |
-| Fotos                   | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen.                                                                  |
+| Modul                   | Zweck                                                                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Info-Text               | Formatierter Text                                                                                                                                                                                                        |
+| Termin                  | Startdatum, optional Enddatum, Beginn- und Endezeit (6.4.3); Ort mit Karten-Link, Treffpunkt; „In Kalender eintragen". Speist Kalender, Dashboard und Archiv-Regel.                                                      |
+| Umfrage                 | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter; höchstens eine Teilnahme-Umfrage je Thread (TP3-Spec 3.4, 3.12) |
+| Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht.                                                                                         |
+| Fahrgemeinschaft        | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1)                                                                                                    |
+| Kosten                  | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2)                                                                                                                                        |
+| Dateien                 | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter.                                                                                                                                                  |
+| Fotos                   | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen.                                                                                                                       |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Fangbuch/Ergebnisse, Wettbewerbe.
 
@@ -309,14 +309,15 @@ Beispiel:
 
 ```
 🎳 *Bowling am 10.10.2026* – Stand Fr 18:30
-✅ Dabei (9): Max, Lena, Tim, …
+✅ Dabei (9): Max M., Lena M., Tim S., …
+🤔 Vielleicht (1): Mia K.
 ❌ Abgesagt (3): …
-❓ Offen (4): Jonas, Mia, …
+❓ Offen (4): Jonas K., …
 🚗 Fahrer: Fam. Huber (3 Plätze), Fam. Maier (2)
-👉 Antworten: https://jufi-app.de/glonntal/t/42-bowling-am-10-10
+👉 Antworten: https://jufi-app.de/glonntal/t/ck…-bowling-am-10-10
 ```
 
-**Link-Vorschau**: Für Thread-Links liefert der Server Open-Graph-Tags mit **Thread-Titel und Vereinslogo**, ohne Inhalte. Wer einen Link zugespielt bekommt, sieht also nur den Titel. Das ist bewusst so entschieden.
+**Link-Vorschau**: Für Links auf veröffentlichte Threads, die Familien sehen („Jungfischer + Familie", „Nur Familie"), liefert der Server Open-Graph-Tags mit **Thread-Titel und Vereinslogo**, ohne Inhalte. Alle anderen Threads und unbekannte Links bekommen dieselbe neutrale Vorschau mit dem Vereinsnamen; Thread-IDs sind nicht erratbar (TP3-Spec 7.2). Der Teilen-Text zeigt nur, was der Teilende selbst sehen darf.
 
 Fotos und Galerien sind nie öffentlich teilbar.
 
@@ -403,8 +404,8 @@ Jede Anfrage an `/<slug>/api/v1/…`:
 ### 7.5 Echtzeit
 
 - Ein WebSocket pro Client und Verein unter `/<slug>/ws`, angemeldet über das Session-Cookie beim Upgrade.
-- Der Client abonniert Threads; der Server lässt nur Abos auf sichtbare Threads zu.
-- Der Server schickt in der Regel nur **Signale** („Modul 7 hat sich geändert", mit Zählernummer aus 9.1). Der Client lädt per REST nach. Damit gibt es eine einzige Datenquelle und keine zweite Rechteprüfung für Inhalte im Socket. Chatnachrichten werden direkt mit Inhalt geschickt.
+- Der Socket bekommt Signale zu allen Threads des Vereins, die die Person sieht; der Server prüft die Sichtbarkeit je Signal (TP3-Spec 5.1). Verworfen: Abos je Thread, weil Liste, Start und Neu-Punkt ohnehin alle sichtbaren Threads brauchen.
+- Der Server schickt in der Regel nur **Signale** („Modul 7 hat sich geändert", mit Zählerstand aus 9.1). Der Client lädt per REST nach. Damit gibt es eine einzige Datenquelle und keine zweite Rechteprüfung für Inhalte im Socket. Chatnachrichten werden direkt mit Inhalt geschickt.
 - Verteilung über einen Speicher-Bus im Prozess. Redis ist nicht nötig, solange es ein Prozess ist.
 - Live aktualisiert werden Verlauf, Umfrageergebnisse, Helferlisten, Fahrgemeinschaften und die „Neu"-Markierungen.
 
@@ -412,7 +413,7 @@ Jede Anfrage an `/<slug>/api/v1/…`:
 
 - Express erzeugt `/<slug>/manifest.webmanifest` dynamisch: Name, Icons aus dem Vereinslogo, `start_url` und `scope` = `/<slug>/`.
 - Ein Service Worker für die ganze Domain.
-- Für `/<slug>/t/…` schreibt Express Open-Graph-Tags (Thread-Titel, Vereinslogo) in die HTML-Hülle (6.7).
+- Für `/<slug>/t/…` schreibt Express Open-Graph-Tags (Thread-Titel nur bei Familien-Threads, Vereinslogo) in die HTML-Hülle (6.7).
 
 ### 7.7 Dateien
 
@@ -461,7 +462,7 @@ Sicherheits-Header und Content-Security-Policy, Größengrenzen für Anfragen, P
 
 Jede Änderung in einem Verein erhöht einen fortlaufenden Zähler und wird in `Aenderung` vermerkt. Der Client fragt `/<slug>/api/v1/sync?seit=<zähler>` und erhält, was sich seither geändert hat **und was er sehen darf**.
 
-Derselbe Mechanismus dient drei Zwecken: App-Start, Rückkehr ins Netz und Lückenschluss nach einem WebSocket-Abbruch (fehlt eine Zählernummer in den Signalen, holt der Client per Sync nach).
+Derselbe Mechanismus dient drei Zwecken: App-Start, Rückkehr ins Netz und Lückenschluss nach einem WebSocket-Abbruch. Fehlende Nummern in den Signalen sind kein Lückenzeichen, weil der Server unsichtbare Threads herausfiltert; nachgeholt wird nach jedem Wiederverbinden (TP3-Spec 5.2).
 
 ### 9.2 Offline lesen
 
@@ -510,7 +511,7 @@ Offline möglich: Antworten auf Umfragen, Eintragen in Helferlisten und Fahrgeme
 
 ### 9.6 Zeitgesteuerte Aufgaben
 
-`node-cron` im App-Prozess: Fristen-Erinnerungen, Termin-Erinnerungen, Archivierung (5.3), Versand der Mail-Warteschlange, Aufräumen abgelaufener Einladungen und Sessions.
+`node-cron` im App-Prozess: Fristen-Erinnerungen, Termin-Erinnerungen, Versand der Mail-Warteschlange, Aufräumen abgelaufener Einladungen und Sessions. Die Archivierung braucht keinen Cron; sie wird beim Lesen berechnet (5.3).
 
 ---
 
@@ -541,15 +542,15 @@ Täglich Datenbank-Dump **und** Upload-Volume per restic in ein zweites Hetzner-
 
 Jedes Teilprojekt bekommt eine eigene Spezifikation, einen eigenen Plan und eine eigene Umsetzung, in dieser Reihenfolge:
 
-| #   | Teilprojekt                    | Inhalt                                                                                                                                                                                                                | Ergebnis                                             |
-| --- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 1   | Klickbarer Entwurf             | Nx-Grundgerüst; `apps/entwurf` mit Beispieldaten im Speicher, ohne Backend (12)                                                                                                                                       | Durchklickbarer Entwurf auf der Testdomain           |
-| 2   | Fundament                      | Server, Datenbank, Mandanten, Plattform-Admin, Personen, Bezugspersonen, Jugendsprecher, Untergruppen, Einladung und Anmeldung, Rechte, beide Hüllen, Docker, Deploy, Sicherung                                       | Einladen, anmelden, Mitglieder pflegen               |
-| 3   | Thread-Kern                    | Threads, Zielgruppen, Modi, Verlauf; Module Info-Text, Termin, Umfrage; Dashboard, Thread-Liste, Kalender, „In Kalender eintragen", Jugendsprecher-Austausch; Änderungszähler und WebSocket; Teilen und Link-Vorschau | Bowling-Szenario ohne Fahrgemeinschaft durchspielbar |
-| 4   | Weitere Module und Medien      | Helferliste, Fahrgemeinschaft, Kosten, Dateien, Fotos mit Upload-Verarbeitung; Medienbereich; globale Dokumente                                                                                                       | Alle acht Kernmodule                                 |
-| 5   | Offline und Benachrichtigungen | Lokaler Speicher, Outbox, Dokumente offline; Push, E-Mail-Ersatz, Erinnerungen, Archivierung, Kalender-Abo                                                                                                            | Bereit für den Pilotbetrieb                          |
-| 6   | Live-Gang                      | Eigene VM, `jufi-app.de`, Rechtstexte, AV-Vertrag, Umzug                                                                                                                                                              | Offen für weitere Vereine                            |
-| 7   | Abrechnung                     | Tarife, Testzeitraum, Rechnungen, Sperre bei Nichtzahlung (16)                                                                                                                                                        | Vereine zahlen für die Nutzung                       |
+| #   | Teilprojekt                    | Inhalt                                                                                                                                                                                                                                         | Ergebnis                                             |
+| --- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 1   | Klickbarer Entwurf             | Nx-Grundgerüst; `apps/entwurf` mit Beispieldaten im Speicher, ohne Backend (12)                                                                                                                                                                | Durchklickbarer Entwurf auf der Testdomain           |
+| 2   | Fundament                      | Server, Datenbank, Mandanten, Plattform-Admin, Personen, Bezugspersonen, Jugendsprecher, Untergruppen, Einladung und Anmeldung, Rechte, beide Hüllen, Docker, Deploy, Sicherung                                                                | Einladen, anmelden, Mitglieder pflegen               |
+| 3   | Thread-Kern                    | Threads, Zielgruppen, Modi, Verlauf; Module Info-Text, Termin, Umfrage; Dashboard, Thread-Liste, Kalender, „In Kalender eintragen", Jugendsprecher-Austausch; Änderungszähler und WebSocket; Teilen und Link-Vorschau; Archiv-Regel (TP3-Spec) | Bowling-Szenario ohne Fahrgemeinschaft durchspielbar |
+| 4   | Weitere Module und Medien      | Helferliste, Fahrgemeinschaft, Kosten, Dateien, Fotos mit Upload-Verarbeitung; Medienbereich; globale Dokumente                                                                                                                                | Alle acht Kernmodule                                 |
+| 5   | Offline und Benachrichtigungen | Lokaler Speicher, Outbox, Dokumente offline; Push, E-Mail-Ersatz, Erinnerungen, Kalender-Abo                                                                                                                                                   | Bereit für den Pilotbetrieb                          |
+| 6   | Live-Gang                      | Eigene VM, `jufi-app.de`, Rechtstexte, AV-Vertrag, Umzug                                                                                                                                                                                       | Offen für weitere Vereine                            |
+| 7   | Abrechnung                     | Tarife, Testzeitraum, Rechnungen, Sperre bei Nichtzahlung (16)                                                                                                                                                                                 | Vereine zahlen für die Nutzung                       |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Capacitor-Apps.
 
@@ -599,7 +600,7 @@ Diese Punkte sind bewusst nicht hier entschieden, sondern gehören in die genann
 | Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen       | 2 (entschieden: TP2-Spec 5.6 und 5.8) |
 | Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar    | 4                                     |
 | Länge des offline gehaltenen Verlaufs pro Thread                               | 5                                     |
-| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5                                     |
+| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5 (Teilnahme-Umfrage: TP3-Spec 3.12)  |
 
 Die Gestaltung von Dashboard und Kalender, der Ablauf der Fahrgemeinschaft und das Kosten-Modul sind inzwischen entschieden (5.1.1, 6.4.1, 6.4.2); Feinheiten zeigen sich im Entwurf.
 
