@@ -9,8 +9,12 @@ import { ThreadApi } from './thread-api';
 
 type PillenArt = 'ok' | 'offen' | 'neutral';
 
-/** Zeichen und Pillenfarbe der Teilnahme-Optionen (Spec 6.3: "✓ Dabei", "? Vielleicht", "✗ Abgesagt"). */
-const TEILNAHME_ZEICHEN: Record<string, { zeichen: string; art: PillenArt }> = {
+/**
+ * Zeichen und Pillenfarbe der Teilnahme-Optionen (Spec 6.3: "✓ Dabei", "? Vielleicht", "✗ Abgesagt").
+ * Exportiert fuer die Antworten-Uebersicht der Verwaltung: Dieselbe Option soll dort dasselbe
+ * Zeichen tragen wie in der Sicht der Familie; eine Kopie liefe beim naechsten Zeichen auseinander.
+ */
+export const TEILNAHME_ZEICHEN: Record<string, { zeichen: string; art: PillenArt }> = {
 	dabei: { zeichen: '✓', art: 'ok' },
 	vielleicht: { zeichen: '?', art: 'neutral' },
 	abgesagt: { zeichen: '✗', art: 'offen' },
@@ -384,7 +388,8 @@ export class UmfrageModul {
 	}
 }
 
-function teilnahmeText(schluessel: string, text: string): string {
+/** Siehe TEILNAHME_ZEICHEN: ebenfalls fuer die Antworten-Uebersicht, damit der Text der Knoepfe derselbe ist. */
+export function teilnahmeText(schluessel: string, text: string): string {
 	const zeichen = TEILNAHME_ZEICHEN[schluessel]?.zeichen;
 	const fest = TEILNAHME_OPTIONEN.find((o) => o.schluessel === schluessel)?.text ?? text;
 	return zeichen ? `${zeichen} ${fest}` : text;

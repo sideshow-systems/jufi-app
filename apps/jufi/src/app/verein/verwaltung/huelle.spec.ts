@@ -293,7 +293,9 @@ describe('Verwaltungs-Huelle', () => {
 	});
 
 	it('macht auf threads/:id/antworten den Punkt Threads aktiv', async () => {
-		const { seite } = await oeffneSeite('/demo/verwaltung/threads/t1/antworten', ichMit(['MITGLIEDER']), []);
+		const { seite } = await oeffneSeite('/demo/verwaltung/threads/t1/antworten', ichMit(['MITGLIEDER']), [
+			['/threads/t1/antworten', { threadId: 't1', segment: 't1-x', titel: 'X', darfNachtragen: false, umfragen: [] }],
+		]);
 
 		const aktiv = [...seite.querySelectorAll('nav a[aria-current="page"]')].map((a) => a.textContent?.trim());
 		expect(aktiv).toEqual(['Threads']);
