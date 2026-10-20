@@ -15,6 +15,7 @@ import { untergruppenRouten } from './mitglieder/untergruppen.js';
 import { einladenRouten, zugangRouten } from './mitglieder/zugang.js';
 import { zugangVerlorenRouten } from './mitglieder/zugang-verloren.js';
 import { routenAus } from './routen.js';
+import { threadRouten } from './threads/routen.js';
 import { einstellungenRouten } from './verein/einstellungen.js';
 
 /** Was vereinAusSlug in res.locals ablegt; die Endpunkte lesen es ueber vereinsKontext. */
@@ -138,6 +139,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	zugangVerlorenRouten(router, deps);
 	einstellungenRouten(router, deps);
 	startRouten(router, deps);
+	threadRouten(router, deps);
 
 	return router;
 }
