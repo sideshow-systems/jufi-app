@@ -175,6 +175,10 @@ Einmalig von Hand auf dem Server (das Skript legt dort nichts an, es prüft nur)
 3. Die Variablen aus [`deploy/env.jufi.example`](deploy/env.jufi.example) in der dortigen `.env` **auf dem Server
    erzeugen** (Befehl steht in der Datei). `JUFI_TOTP_ENC_KEY` zusätzlich in den Passwortmanager.
 
+4. `bash tools/install-backup.sh` ausführen: ohne `jufi-tools/backup.sh` auf dem Server bricht Tor 5 ab (Abschnitt „Sicherung“).
+   Bei einer Neuinstallation, in der `jufi-db` noch nie lief, `--no-run` anhängen: der Probelauf braucht eine laufende
+   Datenbank, und die entsteht erst mit dem ersten `pnpm run deploy:app`. Danach den Aufruf ohne `--no-run` wiederholen.
+
 Lokal: `.env.deploy` wie beim Entwurf, Docker und die Entwicklungsdatenbank (`pnpm run db:up`, für die Tests).
 
 ```bash
@@ -192,7 +196,8 @@ Die Tore im Einzelnen: 1 sauberer Stand, 2 Format, Tests und Typen, 3 Image baue
 Initialen-Icon: `fc-match` muss DejaVu Sans Bold im Image finden, und das ausgelieferte Icon in 192 und 512 px muss
 Buchstaben zeigen, `tools/pruefe-icon.mjs`). Bis hier läuft auch `--dry-run`. Weiter: 5 Vorbedingungen auf dem Server
 (Dienste, `JUFI_`-Variablen, **Sicherungsskript `jufi-tools/backup.sh`**), 5b Dump vor der Migration (ohne restic, **vor**
-dem Übertragen, damit ein gescheiterter Dump den Server unberührt lässt), 6 Übertragen und Ausrollen, 7 Nachprüfen.
+dem Übertragen, damit ein gescheiterter Dump den Server unberührt lässt; gibt es einen Container von `jufi-db`, der nicht
+läuft, bricht der Deploy ab, nur ohne Container gilt es als erstes Ausrollen), 6 Übertragen und Ausrollen, 7 Nachprüfen.
 Fehlt `jufi-tools` auf dem Server, bricht Tor 5 ab und verweist auf `tools/install-backup.sh`.
 
 **Erster Admin** — die CLI liegt im Image, `BASIS_URL` kommt aus der Umgebung des Dienstes:
@@ -220,8 +225,10 @@ Die Postgres-Datenbank (`jufi-db`) ist das einzige Exemplar der Vereinsdaten. De
 03:40** (HWYD sichert um 03:20) `jufi-tools/backup.sh --local` aus `/etc/cron.d/jufi-backup`:
 
 1. `pg_dump -Fc` nach `/home/paperless/paperless-ngx/jufi-backups/jufi-<Zeit>.dump`.
-2. Den Dump **prüfen** (`pg_restore --list`, mindestens eine Tabelle mit Daten). Ein ungültiger Dump wird gelöscht, es
-   bleibt nie eine halbe Datei liegen.
+2. Den Dump **prüfen** (`pg_restore --list`, mindestens eine Tabelle mit Daten). Geschrieben wird erst nach
+   `jufi-<Zeit>.dump.part` und nach bestandener Prüfung umbenannt; ein ungültiger oder abgebrochener Dump hinterlässt nie
+   ein `jufi-*.dump`. Die Dumps sind nur für den Besitzer lesbar (`umask 077`), denn sie enthalten Klartext-Daten von
+   Kindern.
 3. Lokale Dumps nach 30 Tagen löschen (`LOCAL_KEEP_DAYS`).
 4. Verschlüsselt mit restic nach außen schieben (zweites Hetzner-Konto, SFTP, eigenes Repository, Tag `jufi-db`),
    prüfen, dass der Snapshot den Dump in voller Größe enthält, und erst dann aufräumen: 7 tägliche, 4 wöchentliche und
@@ -361,7 +368,7 @@ Der Rest ist Handarbeit und Serverarbeit. **Nichts davon läuft ohne das Wort de
 **A. Vom Eigentümer vorzubereiten (außerhalb des Repos):**
 
 1. Zweites Hetzner-Konto (SFTP, ohne Shell) und ein SSH-Schlüssel **ohne Passphrase** für root auf dem Server; `JUFI_RESTIC_REPOSITORY=sftp:benutzer@wirt:jufi-backup` und ein **neues** `JUFI_RESTIC_PASSWORD` (nicht das von HWYD) in die `.env` auf dem Server, das Passwort zusätzlich in den Passwortmanager. Ohne dieses Passwort ist die Ablage nicht lesbar.
-2. Hetzner-Postfach `app@jufi-app.de` samt SMTP-Zugang; SPF, DKIM und DMARC für `jufi-app.de` bei Hetzner. `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` **noch nicht** in die `.env`; das ist Schritt 10.
+2. Hetzner-Postfach `app@jufi-app.de` samt SMTP-Zugang; SPF, DKIM und DMARC für `jufi-app.de` bei Hetzner. `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` **noch nicht** in die `.env`; das ist Schritt 11.
 3. DNS: `test.jufi-app.de` zeigt schon auf den Server; `app-test.jufi-app.de` bleibt, bis die Umleitung geprüft ist.
 4. Impressum, Datenschutzerklärung und Wortlaut des Einwilligungstexts (Spec 8.6), außerdem die Entscheidung zu I2 aus Etappe 4.
 
@@ -372,8 +379,9 @@ Der Rest ist Handarbeit und Serverarbeit. **Nichts davon läuft ohne das Wort de
 7. Restore-Probe auf dem Server aus dem neuesten Snapshot (Befehl am Ende der Ausgabe von Schritt 6). Erwartet: jede Tabelle hat dieselbe Zeilenzahl wie die Quelle.
 8. `bash tools/deploy-entwurf.sh` (zuerst), danach `pnpm run deploy:app` (Dump vor der Migration erscheint als Tor 5b).
 9. `bash tools/pruefe-betrieb.sh --slug <slug des Vereins> --mail jufi-app.de --dkim-selector <selektor von Hetzner>` — Erwartet: nur ✓, auch für `app-test` → 301.
-10. Mail umschalten: die vier `JUFI_SMTP_*`-Zeilen in die `.env`, `docker compose up -d jufi` auf dem Server, dann vom Entwicklungsrechner `ssh <server> 'cd /home/paperless/paperless-ngx && docker compose exec -T jufi node --input-type=module - <eigene Adresse>' < tools/mail-testen.mjs` (die Datei liegt weder im Image noch auf dem Server); in der empfangenen Mail „Originalnachricht anzeigen“: `spf=pass`, `dkim=pass`, `dmarc=pass`.
-11. `bash tools/pruefe-texte.sh` — muss leer sein (Exit 0).
-12. Erst jetzt die drei Jugendleiter einladen (Spec 1.2).
+10. Rückfall-Probe, solange noch nichts Echtes auf dem Server liegt: `bash tools/rollback.sh --list`, dann `bash tools/rollback.sh <SHA des zuletzt vor Etappe 6 ausgerollten Stands>` (steht in der Liste von `--list`; das Image muss als Tag auf dem Server liegen). Zwischen Etappe 5 und 6 gibt es keine Migration, der Rückfall ist gefahrlos. Erwartet: `/healthz` meldet den Ziel-Commit. Danach erneut `pnpm run deploy:app`, damit der Server wieder auf dem Stand von Etappe 6 läuft.
+11. Mail umschalten: die vier `JUFI_SMTP_*`-Zeilen in die `.env`, `docker compose up -d jufi` auf dem Server, dann vom Entwicklungsrechner `ssh <server> 'cd /home/paperless/paperless-ngx && docker compose exec -T jufi node --input-type=module - <eigene Adresse>' < tools/mail-testen.mjs` (die Datei liegt weder im Image noch auf dem Server); in der empfangenen Mail „Originalnachricht anzeigen“: `spf=pass`, `dkim=pass`, `dmarc=pass`.
+12. `bash tools/pruefe-texte.sh` — muss leer sein (Exit 0).
+13. Erst jetzt die drei Jugendleiter einladen (Spec 1.2).
 
 **Danach, vierteljährlich:** Restore-Probe (README), und gelegentlich `tail -20 /var/log/jufi-backup.log`.

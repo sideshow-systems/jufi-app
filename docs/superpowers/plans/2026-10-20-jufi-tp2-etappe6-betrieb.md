@@ -395,7 +395,7 @@ Der Rest ist Handarbeit und Serverarbeit. **Nichts davon läuft ohne das Wort de
 **A. Vom Eigentümer vorzubereiten (außerhalb des Repos):**
 
 1. Zweites Hetzner-Konto (SFTP, ohne Shell) und ein SSH-Schlüssel **ohne Passphrase** für root auf dem Server; `JUFI_RESTIC_REPOSITORY=sftp:benutzer@wirt:jufi-backup` und ein **neues** `JUFI_RESTIC_PASSWORD` (nicht das von HWYD) in die `.env` auf dem Server, das Passwort zusätzlich in den Passwortmanager. Ohne dieses Passwort ist die Ablage nicht lesbar.
-2. Hetzner-Postfach `app@jufi-app.de` samt SMTP-Zugang; SPF, DKIM und DMARC für `jufi-app.de` bei Hetzner. `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` **noch nicht** in die `.env`; das ist Schritt 10.
+2. Hetzner-Postfach `app@jufi-app.de` samt SMTP-Zugang; SPF, DKIM und DMARC für `jufi-app.de` bei Hetzner. `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` **noch nicht** in die `.env`; das ist Schritt 11.
 3. DNS: `test.jufi-app.de` zeigt schon auf den Server; `app-test.jufi-app.de` bleibt, bis die Umleitung geprüft ist.
 4. Impressum, Datenschutzerklärung und Wortlaut des Einwilligungstexts (Spec 8.6), außerdem die Entscheidung zu I2 aus Etappe 4.
 
@@ -406,14 +406,15 @@ Der Rest ist Handarbeit und Serverarbeit. **Nichts davon läuft ohne das Wort de
 7. Restore-Probe auf dem Server aus dem neuesten Snapshot (Befehl am Ende der Ausgabe von Schritt 6). Erwartet: jede Tabelle hat dieselbe Zeilenzahl wie die Quelle.
 8. `bash tools/deploy-entwurf.sh` (zuerst), danach `pnpm run deploy:app` (Dump vor der Migration erscheint als Tor 5b).
 9. `bash tools/pruefe-betrieb.sh --slug <slug des Vereins> --mail jufi-app.de --dkim-selector <selektor von Hetzner>` — Erwartet: nur ✓, auch für `app-test` → 301.
-10. Mail umschalten: die vier `JUFI_SMTP_*`-Zeilen in die `.env`, `docker compose up -d jufi` auf dem Server, dann vom Entwicklungsrechner `ssh <server> 'cd /home/paperless/paperless-ngx && docker compose exec -T jufi node --input-type=module - <eigene Adresse>' < tools/mail-testen.mjs` (die Datei liegt weder im Image noch auf dem Server); in der empfangenen Mail „Originalnachricht anzeigen“: `spf=pass`, `dkim=pass`, `dmarc=pass`.
-11. `bash tools/pruefe-texte.sh` — muss leer sein (Exit 0).
-12. Erst jetzt die drei Jugendleiter einladen (Spec 1.2).
+10. Rückfall-Probe, solange noch nichts Echtes auf dem Server liegt: `bash tools/rollback.sh --list`, dann `bash tools/rollback.sh <SHA des zuletzt vor Etappe 6 ausgerollten Stands>` (steht in der Liste von `--list`; das Image muss als Tag auf dem Server liegen). Zwischen Etappe 5 und 6 gibt es keine Migration, der Rückfall ist gefahrlos. Erwartet: `/healthz` meldet den Ziel-Commit. Danach erneut `pnpm run deploy:app`, damit der Server wieder auf dem Stand von Etappe 6 läuft.
+11. Mail umschalten: die vier `JUFI_SMTP_*`-Zeilen in die `.env`, `docker compose up -d jufi` auf dem Server, dann vom Entwicklungsrechner `ssh <server> 'cd /home/paperless/paperless-ngx && docker compose exec -T jufi node --input-type=module - <eigene Adresse>' < tools/mail-testen.mjs` (die Datei liegt weder im Image noch auf dem Server); in der empfangenen Mail „Originalnachricht anzeigen“: `spf=pass`, `dkim=pass`, `dmarc=pass`.
+12. `bash tools/pruefe-texte.sh` — muss leer sein (Exit 0).
+13. Erst jetzt die drei Jugendleiter einladen (Spec 1.2).
 
 **Danach, vierteljährlich:** Restore-Probe (README), und gelegentlich `tail -20 /var/log/jufi-backup.log`.
 
 ## Self-Review
 
-- **Spec-Abdeckung:** 1.1 Punkt 5 (täglich verschlüsselt außer Haus, Probe gelaufen): Tasks 2 bis 4, Abnahme 6/7. 1.2 (Einladung erst nach Etappe 6): Tasks 9, 10, Abnahme 12. 2.3 (Domains, Entwurf `PathPrefix`, Plattformseite): Tasks 8, 9. 6.4 (Icon prüfen): Tasks 6, 9. 8.1 (Dienste, `jufi-services.yml`, nur eigene Dienstnamen): Task 7 und 8, Global Constraints. 8.2 (Dump vor Migration, `rollback.sh`, Version): Task 5; `deploy:app` mit eigenem Namen besteht schon. 8.3 (03:40, restic, 7/4/6, Protokoll, SSH-Vorprüfung, `restore-test.sh`): Tasks 2 bis 4. 8.4 (Mail, SPF/DKIM/DMARC prüfen): Tasks 7, 9. 8.5 (Header): bleibt, wird in Task 9 mitgeprüft. 8.6 (Texte): Task 10. Lücke bewusst: Der Mail-Arbeiter mit Wiederholungen besteht seit Etappe 3, hier ändert sich nur der Transport über die Umgebung.
+- **Spec-Abdeckung:** 1.1 Punkt 5 (täglich verschlüsselt außer Haus, Probe gelaufen): Tasks 2 bis 4, Abnahme 6/7. 1.2 (Einladung erst nach Etappe 6): Tasks 9, 10, Abnahme 13. 2.3 (Domains, Entwurf `PathPrefix`, Plattformseite): Tasks 8, 9. 6.4 (Icon prüfen): Tasks 6, 9. 8.1 (Dienste, `jufi-services.yml`, nur eigene Dienstnamen): Task 7 und 8, Global Constraints. 8.2 (Dump vor Migration, `rollback.sh`, Version): Task 5; `deploy:app` mit eigenem Namen besteht schon. 8.3 (03:40, restic, 7/4/6, Protokoll, SSH-Vorprüfung, `restore-test.sh`): Tasks 2 bis 4. 8.4 (Mail, SPF/DKIM/DMARC prüfen): Tasks 7, 9. 8.5 (Header): bleibt, wird in Task 9 mitgeprüft. 8.6 (Texte): Task 10. Lücke bewusst: Der Mail-Arbeiter mit Wiederholungen besteht seit Etappe 3, hier ändert sich nur der Transport über die Umgebung.
 - **Typ- und Namenskonsistenz:** `restic_env`, `restic_sftp_host`, `REMOTE_TOOLS`, `BACKUP_DIR`, `jufi_scp` (Task 1) werden in den Tasks 2 bis 5 genau so benutzt. Dumps heißen überall `jufi-*.dump`, der Tag `jufi-db`, der Cron `/etc/cron.d/jufi-backup`, das Protokoll `/var/log/jufi-backup.log`. Die Probe-Container heißen `jufi-probe-*` und `jufi-restore-probe-*`.
 - **Verhältnis:** Das Spec-Kapitel 8 ist rund 55 Zeilen, der Plan setzt es in elf Tasks um, weil jede Fehlerkante (halber Dump, falsche Zeilenzahl, leerer Snapshot) einen Beweis braucht. Code steht nur dort, wo Signatur und Verhalten nicht reichen.
