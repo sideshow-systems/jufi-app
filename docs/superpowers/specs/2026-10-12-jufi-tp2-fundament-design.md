@@ -1,6 +1,6 @@
 # JuFi App — Teilprojekt 2: Fundament
 
-Stand: 18.10.2026 · Ergebnis des Brainstormings vom 13.10.2026, nachgezogen mit Etappe 5 · Status: zur Freigabe
+Stand: 18.10.2026 · Ergebnis des Brainstormings vom 13.10.2026, nachgezogen mit Etappe 5, nachgezogen mit Etappe 6 · Status: zur Freigabe
 
 Teilprojekt 2 baut die echte App bis zu dem Punkt, an dem ein Verein **einladen, anmelden und Mitglieder pflegen** kann (Rahmen-Spezifikation `2026-10-11-jufi-rahmen-design.md`, Abschnitt 11). Threads, Module, Medien, Offline-Betrieb und Push folgen in den Teilprojekten 3 bis 5.
 
@@ -94,7 +94,10 @@ Was eine Person nicht sehen darf, ist für sie „nicht gefunden" (404 statt 403
 - **Test**: `https://test.jufi-app.de` auf der bestehenden VM. Die frühere Testdomain `jufi-app.sideshow-systems.de` leitet dauerhaft (301) dorthin um, mit Pfad und Abfrage.
 - **Live**: `https://www.jufi-app.de` auf eigener VM (Teilprojekt 6). Der Umzug ist reine Konfiguration (Basis-URL, `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGIN`).
 - **Bis zur ersten Auslieferung der App** (Etappe 6) gehört die ganze Testdomain dem Entwurf, und nginx im Entwurf leitet `/` auf `/entwurf/` um.
-- **Ab Etappe 6** bekommt der Entwurf in Traefik `Host(test.jufi-app.de) && PathPrefix(/entwurf)`, und seine Umleitung von `/` entfällt. Alles andere geht an die App. Traefik bevorzugt die längere Regel von selbst.
+- **Ab Etappe 6** bekommt der Entwurf in Traefik `Host(test.jufi-app.de) && PathPrefix(/entwurf)`, und seine Umleitung von `/` entfällt. Alles andere geht an die App. Traefik bevorzugt die längere Regel von selbst; eine ausdrückliche `priority` gibt es nicht. Das Entwurf-Image liefert auf `/` nichts mehr aus (die nginx-Willkommensseite ist entfernt, die Antwort ist 403/404).
+- **Die App zieht von `app-test.jufi-app.de` auf `test.jufi-app.de`** (Etappe 6). `app-test` war die Zwischenlösung und leitet danach dauerhaft (301, mit Pfad und Abfrage) um, wie `jufi-app.sideshow-systems.de` beim Entwurf; die Umleitung entfällt, sobald `app-test` aus dem DNS genommen wird.
+- **Reihenfolge beim Ausrollen:** erst der Entwurf (`PathPrefix`), dann die App (`Host`). Zöge die App zuerst um, hätten beide Router bis zum Entwurf-Deploy dieselbe Regel und damit dieselbe Priorität. Andersherum ist `/` für wenige Sekunden unbedient, und auf einer Testumgebung ohne Nutzer ist das der kleinere Preis.
+- **Folgen für alte Links:** Ein alter Link auf die Wurzel von `jufi-app.sideshow-systems.de` landet jetzt in der App statt im Entwurf; Links der Form `/entwurf/…` bleiben im Entwurf. Passkeys, die unter `app-test` eingerichtet wurden, gelten nicht mehr (die `rpId` ist die Domain); Passwort und TOTP bleiben. Betroffen sind nur Testzugänge.
 - `/` ist eine kleine **Plattformseite**: was die JuFi App ist, ein Link zum Entwurf, Impressum und Datenschutz. **Sie listet keine Vereine auf**, sonst verriete sie, wer die Plattform nutzt.
 - `/impressum` und `/datenschutz` sind statische Seiten der Plattform, gerendert aus Markdown-Dateien im Repo.
 - **Passkeys** gelten für `test.jufi-app.de`, nicht für `jufi-app.de`: Test und Live bleiben getrennt, ein Testzugang bedeutet live nichts.
@@ -102,7 +105,9 @@ Was eine Person nicht sehen darf, ist für sie „nicht gefunden" (404 statt 403
 Verworfen:
 
 - **App unter eigenem Pfad** (`/app/<slug>/`): widerspricht dem URL-Schema, und beim Umzug brächen Links.
-- **Eigene Subdomain für die App**: ein weiteres Zertifikat, ohne Gewinn bei den Passkeys.
+- **Eigene Subdomain für die App**: ein weiteres Zertifikat, ohne Gewinn bei den Passkeys. (Etappe 6 hat `app-test` deshalb wieder aufgegeben.)
+- **Beide Domains parallel bedienen** (Etappe 6): Eine App hat nur eine `rpId`, die zweite Domain bekäme also nie funktionierende Passkeys.
+- **Die App zuerst umziehen** (Etappe 6): siehe Reihenfolge oben.
 
 ### 2.4 URLs in Teilprojekt 2
 
@@ -397,7 +402,7 @@ Aus dem Entwurf kopiert (2.1): Grundcharakter „Am Wasser", Vereinsfarbe als ei
 - Manifest je Verein: `name` = Anzeigename, `start_url` = `/<slug>/`, `scope` = `/<slug>` (ohne Schrägstrich am Ende: Nach der Manifest-Spec liegt eine Adresse im Scope, wenn ihr Pfad mit dem des Scopes beginnt, und die App navigiert zu `/<slug>`, weil Angular den Schrägstrich am Ende wegnormalisiert. Damit liegt formal auch `/<slug>-xyz/` im Scope, was harmlos ist. Verworfen: alle Links auf `/<slug>/` umbauen — das liefe gegen den Router), `theme_color` aus der Vereinsfarbe, `background_color` die feste helle Seitenfläche.
 - **Der Manifest-Link steht zur Laufzeit im `<head>`**, zusammen mit `apple-touch-icon` und `theme-color`; `VereinKontext` setzt ihn und nimmt ihn beim Wechsel zu einem anderen Verein, zur Plattform oder zu einem unbekannten Verein wieder heraus. Verworfen: der Server schreibt den Link in `index.html`. Die App rendert nur im Client (`app.routes.server.ts`), und `AngularNodeAppEngine` liefert für jeden Pfad dieselbe Datei aus. Chrome wertet einen nachträglich gesetzten Manifest-Link aus, und iOS liest ihn erst beim „Zum Home-Bildschirm".
 - **Manifest, Icons und Logo sind ohne Anmeldung abrufbar.** Browser laden das Manifest ohne Cookies, und die Anmeldeseite soll das Logo zeigen. Anzeigename und Farbe gibt `GET /verein` schon ohne Anmeldung preis. Ein gesperrter oder unbekannter Verein bleibt 404. Verworfen: Manifest, Icons und Logo nur mit Sitzung — das Manifest käme dann nie an, und die Anmeldeseite zeigte kein Logo. Die Antworten tragen `Cache-Control: no-cache` und einen ETag, die Logo-Adresse hängt `?v=` an, damit nach einer Änderung kein altes Icon aus dem Cache kommt.
-- Icons 192 und 512 px, beim Hochladen des Logos mit `sharp` erzeugt (3.2). Ohne Logo zeigt das Icon die Initialen (`initialen(anzeigename)`) auf `vereinsfarben(farbe).hell.akzent` in `aufAkzent`. Die Schrift ist DejaVu Sans Bold; das Image bringt sie über `apk add font-dejavu` mit. Verworfen: eine Schriftdatei im Repo. Preis der gewählten Lösung: Lokal liefert macOS eine Schrift, im Image könnte sie trotzdem fehlen, und der Fehler bliebe unsichtbar; deshalb prüft Etappe 6 das Icon auf dem Server.
+- Icons 192 und 512 px, beim Hochladen des Logos mit `sharp` erzeugt (3.2). Ohne Logo zeigt das Icon die Initialen (`initialen(anzeigename)`) auf `vereinsfarben(farbe).hell.akzent` in `aufAkzent`. Die Schrift ist DejaVu Sans Bold; das Image bringt sie über `apk add font-dejavu` mit. Verworfen: eine Schriftdatei im Repo. Preis der gewählten Lösung: Lokal liefert macOS eine Schrift, im Image könnte sie trotzdem fehlen, und der Fehler bliebe unsichtbar; deshalb prüft Etappe 6 das Icon schon im Rauchtest des Images (`tools/deploy.sh`, Tor 4): `fc-match` muss DejaVu Sans Bold finden, und das vom Image ausgelieferte Icon (192 und 512 px, Demo-Verein ohne Logo) muss Buchstaben zeigen und keine einfarbige Fläche (`tools/pruefe-icon.mjs`). Beides braucht es: Kästchen statt Buchstaben haben Kontrast und bestehen die Messung, nur die richtige Schrift schließt sie aus. Verworfen: die Prüfung erst auf dem Server; das Image ist dasselbe, und der Rauchtest läuft vor dem Ausrollen. Verworfen: ein Vergleich mit einem Referenzbild, der bei jeder Schrift- oder Farbänderung bräche. Auf der Live-Adresse prüft `tools/pruefe-betrieb.sh` Manifest und Icons des Vereins noch einmal.
 - Service Worker und Offline-Betrieb erst in TP5. Zum Home-Bildschirm hinzufügen klappt auf iOS und Android auch ohne; TP2 hat damit schon Icon und Namen.
 
 ### 6.5 Fehler
@@ -462,6 +467,8 @@ In der gemeinsamen Compose-Datei (`/home/paperless/paperless-ngx/docker-compose.
 | `jufi-migrate` | `prisma migrate deploy`; `jufi` startet erst nach erfolgreichem Ende                                          | –                 |
 | `jufi`         | Node mit Angular und Express, `--max-old-space-size=256`; Healthcheck `/healthz` prüft Node und Datenbank     | `mem_limit: 384m` |
 
+**Nachgezogen mit Etappe 6:** Dazu kommt `jufi-mailpit` (`axllent/mailpit:v1.21`, nur an `127.0.0.1:8025` des Servers gebunden). Es bleibt als **umschaltbare Voreinstellung** bis zur Live-VM (Teilprojekt 6): Ohne `JUFI_SMTP_HOST` fängt Mailpit alle Mails ab, siehe 8.4. Verworfen: Mailpit jetzt entfernen; dann wäre der erste Fehler im SMTP-Zugang ein Ausfall der Einladungen. Auf dem Server liegen die Sicherungsskripte unter `/home/paperless/paperless-ngx/jufi-tools` (`tools/install-backup.sh` legt sie dort ab) und die Dumps unter `/home/paperless/paperless-ngx/jufi-backups`.
+
 Der Server hat 3,7 GB ohne Swap, davon am 12.10.2026 rund 2,2 GB verfügbar. Mit dem Entwurf liegen die Grenzen von JuFi bei etwa 670 MB.
 
 **Umgebungsvariablen** mit Präfix `JUFI_` in der `.env` neben der Compose-Datei: Datenbank-URL, Basis-URL, `WEBAUTHN_RP_ID=test.jufi-app.de`, `WEBAUTHN_ORIGIN`, SMTP-Zugang, Absender `app@jufi-app.de`, Antwortadresse `kontakt@jufi-app.de`, Betreff-Präfix `[Test] `. Das SMTP-Passwort steht **nur** in dieser Datei. Ein Start ohne vollständige Werte bricht mit Meldung ab (`env-check`).
@@ -470,6 +477,8 @@ Der Server hat 3,7 GB ohne Swap, davon am 12.10.2026 rund 2,2 GB verfügbar. Mit
 
 - `tools/deploy.sh` nach hwyd-Muster, streng sequenziell mit Toren: sauberer Stand → Prettier, Tests, Typprüfung → Image für arm64 bauen → Rauchtest mit Wegwerf-Postgres → **Dump vor der Migration** → Übertragung per SSH → `jufi-migrate`, dann `jufi` → Nachprüfung, dass `/healthz` die neue Version meldet.
 - `tools/rollback.sh` schaltet auf das vorige Image zurück. Migrationen laufen nur vorwärts und werden so geschrieben, dass die vorige Version damit noch läuft; Migrationen mit Datenerhalt von Hand.
+- **Nachgezogen mit Etappe 6, Dump:** Der Dump vor der Migration ist Tor 5b und läuft **vor** dem Übertragen, ohne restic (`backup.sh --local --no-restic`). Scheitert er, ist auf dem Server noch nichts verändert. Verworfen: der Dump nach dem Ausrollen; dann läuft die Migration schon, und der Dump zeigte den Stand danach. Verworfen: restic im Deploy; ein Deploy soll nicht an der Erreichbarkeit des zweiten Kontos hängen, die Kopie außer Haus macht der nächtliche Lauf. Läuft `jufi-db` noch nicht (erstes Ausrollen), entfällt der Dump. Fehlen die Sicherungsskripte auf dem Server, bricht schon Tor 5 ab und verweist auf `tools/install-backup.sh`.
+- **Nachgezogen mit Etappe 6, Rückfall:** `tools/rollback.sh [<sha>]` setzt `JUFI_IMAGE_TAG` zurück (ohne SHA: der Commit vor `HEAD`) und prüft danach `/healthz` auf den Commit. `--list` zeigt die Tags auf dem Server. Der **Migrationswächter** vergleicht `prisma/migrations` zwischen Ziel und `HEAD` und bricht vor dem ersten SSH-Aufruf ab, wenn sie sich unterscheiden; `--trotz-migration` übergeht das auf eigene Verantwortung, sonst gilt der Dump aus `jufi-backups`. Verworfen: ein Rückfall ohne Wächter; dann entscheidet im Notfall niemand, ob das alte Image mit dem neuen Schema läuft. Verworfen: `docker pull` als Ausweg wie in HWYD; JuFi hat keine Registry, nur übertragene Tags.
 - Versionsnummer in `package.json`.
 - Aufruf als `pnpm run deploy`-Skript mit eigenem Namen (z. B. `deploy:jufi`), nie `pnpm deploy`.
 
@@ -481,6 +490,14 @@ Der Server hat 3,7 GB ohne Swap, davon am 12.10.2026 rund 2,2 GB verfügbar. Mit
 - `tools/restore-test.sh` spielt den letzten Stand in eine Wegwerf-Postgres und vergleicht Zeilenzahlen je Tabelle mit dem Dump. Teil der Abnahme von Etappe 6, danach vierteljährlich.
 - Protokoll unter `/var/log/jufi-backup.log`; das Skript prüft vorher SSH-Schlüssel und `known_hosts` für root und schreibt, was fehlt.
 
+**Nachgezogen mit Etappe 6:**
+
+- **Aufbewahrung wie beschlossen** (7/4/6, nicht die 12 Monate von HWYD). `restic forget` gruppiert nach `host,tags`; nach dem Standard `host,paths` bildete jeder Snapshot eine eigene Gruppe, weil der Pfad des Dumps bei jedem Lauf ein anderer ist, und nichts würde je aufgeräumt. Aufgeräumt wird erst nach der Snapshot-Prüfung (der Snapshot muss den Dump in voller Größe enthalten), damit ein misslungener Lauf nie den letzten guten Stand wegräumt. Lokale Dumps bleiben 30 Tage (`LOCAL_KEEP_DAYS`), unabhängig von restic. Verworfen: eine zweite, kürzere lokale Aufbewahrung, sobald die Ablage außer Haus steht; sie schnitte am ersten erfolgreichen Lauf die lokalen Dumps zusammen, bevor jemand einen Restore aus der neuen Ablage geprobt hat.
+- **Die Vorprüfung nutzt `sftp -b /dev/null`**, nicht `ssh … true`: Ein Ziel ohne Shell (das zweite Hetzner-Konto) antwortet auf `ssh … true` mit Fehler, obwohl restic dort tadellos sichert.
+- **Die Probe läuft von Hand, vierteljährlich** (Januar, April, Juli, Oktober), nicht per Cron. Ein nächtliches Wegwerf-Postgres neben paperless und HWYD (3,7 GB, kein Swap) und ein Ergebnis in einer Protokolldatei, die niemand liest, wären kein Gewinn. Die Probe bekommt `--memory 256m`.
+- **`restic_env` kennt nur `JUFI_RESTIC_*`.** Die `.env` ist mit den anderen Apps geteilt; ein Rückfall auf ein blankes `RESTIC_REPOSITORY` (wie in HWYD) ließe JuFi still in die Ablage einer anderen App schreiben. Leer ist die sicherere Vorgabe, denn dann scheitert die Sicherung laut. Ohne Repository macht der Lauf nur den geprüften Dump und sagt, dass keine Kopie außer Haus entsteht.
+- **Einrichten** geschieht mit `tools/install-backup.sh` (Skripte nach `jufi-tools`, Cron nach `/etc/cron.d/jufi-backup`, restic bei Bedarf installieren, Probelauf mit restic). Es ist bewusst kein Teil von `deploy.sh`: Ein Deploy läuft oft und fällt auch mal an einem Tor aus, dann wäre unklar, ob der Zeitplan steht.
+
 ### 8.4 Mail
 
 - SMTP über Hetzner, `nodemailer`. Absender `app@jufi-app.de`, Antwort an `kontakt@jufi-app.de`, im Test mit Betreff-Präfix `[Test] `.
@@ -488,6 +505,12 @@ Der Server hat 3,7 GB ohne Swap, davon am 12.10.2026 rund 2,2 GB verfügbar. Mit
 - Mails in TP2: Einladung (optional) und Reset. Den Einrichtungslink des Admins gibt nur die Kommandozeile aus.
 - Lokal fängt Mailpit alle Mails ab.
 - SPF, DKIM und DMARC für `jufi-app.de` richtet der Eigentümer bei Hetzner ein; Etappe 6 prüft sie.
+
+**Nachgezogen mit Etappe 6:**
+
+- **Ein Schalter:** `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` in der `.env`. Ist der Host leer oder fehlt er, geht alles an `jufi-mailpit:1025` (`:-` greift auch bei einem **leeren** Wert; die Form ohne Doppelpunkt ließe `JUFI_SMTP_HOST=` aus der Vorlage als leeren Host durch). Ein Deploy ändert das Verhalten nie von selbst. Verworfen: je eine Datei für Test und echt; ein einzelner Wert lässt keinen Teststand versehentlich an echte Mitglieder schreiben. Port 465 ist implizites TLS, auf 587 handelt nodemailer STARTTLS aus. Ein `$` im Passwort muss in der `.env` als `$$` stehen.
+- **`tools/mail-testen.mjs <adresse>`** schickt eine Testmail mit der Umgebung der App und gibt nur Message-ID und Host aus. Verworfen: eine eigene Konfiguration für das Skript; die Probe soll prüfen, was die App sieht.
+- **DNS-Prüfung:** `tools/pruefe-betrieb.sh --mail jufi-app.de --dkim-selector <name>` fragt SPF, DMARC und DKIM über 1.1.1.1 ab. Ob der Empfänger die Mail wirklich als echt wertet, zeigt erst „Originalnachricht anzeigen“ (`spf=pass`, `dkim=pass`, `dmarc=pass`); das ersetzt kein DNS-Skript.
 
 ### 8.5 Härtung
 
@@ -502,6 +525,8 @@ Vor der Einladung der echten Jugendleiter:
 
 - Impressum und Datenschutzerklärung der Plattform (Markdown; die Gliederung steht in `apps/jufi/src/rechtstexte/`, der Inhalt kommt vom Eigentümer, 6.6). **Offen:** Beide Dateien enthalten bisher nur Platzhalter in eckigen Klammern und sind ohne Anmeldung erreichbar; vor einem öffentlichen Betrieb muss der Eigentümer sie füllen.
 - Einwilligungstext Fassung 1 für Art. 8 DSGVO; die Fassung wird mit jeder Einwilligung gespeichert. **Offen:** Der Text in Fassung 1 ist ein Platzhalter; den Wortlaut liefert der Eigentümer, bevor echte Familien einwilligen.
+
+**Nachgezogen mit Etappe 6:** `tools/pruefe-texte.sh` listet, was in beiden Rechtstexten und im Einwilligungstext noch Platzhalter ist, und endet mit Fehler, solange etwas offen ist. Es ist Teil der Abnahme und **kein** Tor von `deploy.sh`: Die Testumgebung darf mit Platzhaltern laufen, nur die Einladung echter Jugendleiter muss warten. Verworfen: ein Tor im Deploy; es blockierte jeden Test-Deploy wegen Texten, die nur der Eigentümer liefern kann. Zur Abnahme gehört außerdem `tools/pruefe-betrieb.sh` (Health, Routing, Umzug, Kopf, Manifest und Icons, Mail-DNS), nur lesend.
 
 ---
 
