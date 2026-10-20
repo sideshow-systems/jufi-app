@@ -37,8 +37,12 @@ export class ThreadAbbruch extends Error {
 /**
  * Ende einer Wiederholung (gleiche clientId, gleicher Absender): Die Arbeit in
  * mitAenderung wirft sie, damit auch der gerade vergebene Stand zurueckgerollt wird;
- * die Route liefert das vorhandene Ergebnis. Verworfen: die clientId vor der
+ * die Route liefert das vorhandene Ergebnis. Verworfen: die clientId nur vor der
  * Transaktion suchen -- zwei gleichzeitige Anfragen liefen beide an der Suche vorbei.
+ *
+ * DELETE /verlauf/:eintragId nutzt sie ohne clientId: Findet das Loeschen unter der
+ * Sperre nichts mehr, war ein gleichzeitiges Loeschen schneller; die Wiederholung rollt
+ * den Stand zurueck, und die Route antwortet trotzdem 204 (vorhanden ist dann null).
  */
 export class Wiederholung<T> extends Error {
 	constructor(readonly vorhanden: T) {

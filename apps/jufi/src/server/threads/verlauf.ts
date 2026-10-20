@@ -57,10 +57,21 @@ const SPERRE_ANTWORT: Record<'ENTWURF' | 'NUR_AUSHANG' | 'ARCHIVIERT', Antwortko
 };
 
 /**
+ * Ein einzelnes UTF-16-Surrogat ohne Partner. Im u-Modus verbindet der Ausdruck gueltige
+ * Paare zu einem Code-Point, uebrig bleiben nur die verwaisten Haelften. Verworfen:
+ * String.prototype.isWellFormed -- gleichwertig, aber erst ES2024, und das Projekt
+ * uebersetzt gegen die Typen von ES2022.
+ */
+const EINZELNES_SURROGAT = /\p{Cs}/u;
+
+/**
  * Text und clientId einer neuen Nachricht, oder das Feld, an dem es scheitert. Gezaehlt
  * wird in Code-Points wie char_length im CHECK verlauf_text, gespeichert ohne Leerraum an
  * den Enden. Verworfen: text.length -- ein Emoji zaehlte doppelt, und 1500 Emoji stiessen
  * an eine Grenze, die die Datenbank gar nicht zieht.
+ *
+ * Ein verwaistes Surrogat (JSON erlaubt "\ud800") ist kein Zeichen: Beim Schreiben als
+ * UTF-8 wuerde es still zu U+FFFD, gespeichert stuende also etwas anderes als gesendet.
  */
 function liesNachricht(body: unknown): { text: string; clientId: string } | { feld: string } {
 	const { text, clientId } = (typeof body === 'object' && body !== null ? body : {}) as {
@@ -69,7 +80,7 @@ function liesNachricht(body: unknown): { text: string; clientId: string } | { fe
 	};
 	const gekuerzt = typeof text === 'string' ? text.trim() : '';
 	const zeichen = [...gekuerzt].length;
-	if (zeichen < 1 || zeichen > MAX_ZEICHEN) return { feld: 'text' };
+	if (zeichen < 1 || zeichen > MAX_ZEICHEN || EINZELNES_SURROGAT.test(gekuerzt)) return { feld: 'text' };
 	const id = liesClientId(clientId);
 	if (id === null) return { feld: 'clientId' };
 	return { text: gekuerzt, clientId: id };
@@ -178,19 +189,29 @@ export function verlaufRouten(router: Router, deps: VolleAppDeps): void {
 				zeit,
 			);
 			if (sperre === 'NICHT_GEFUNDEN') return void res.status(404).json(NICHT_GEFUNDEN);
-			if (sperre) return void res.status(409).json(SPERRE_ANTWORT[sperre]);
 
 			const antwort = (e: Eintrag) => ({ eintrag: verlaufAnsicht(u.mich, u.thread.kopf, e, u.umfeld), stand: e.stand });
 			const suche = () => db.verlaufEintrag.findFirst({ where: { clientId: eingabe.clientId }, select: AUSWAHL });
 
+			// Vorab ohne Transaktion: die haeufigste Wiederholung (das Netz brach nach dem
+			// Commit ab) kostet so weder Sperre noch Stand. Entscheidend ist erst die Suche
+			// unter der Sperre (Entscheidung 2), denn zwei gleichzeitige Anfragen laufen beide
+			// an dieser vorbei. Sie steht nach der 404, damit eine fremde clientId nichts ueber
+			// einen unsichtbaren Thread verraet, aber vor Entwurf, Modus und Archiv: Eine
+			// gespeicherte Nachricht, deren Rueckmeldung unterwegs verloren ging, wird sonst zur
+			// 409, wenn die Outbox sie nach dem Archivieren wiederholt, und der Client haelt sie
+			// fuer gescheitert. Verworfen: die Suche erst hinter den 409 -- dann scheiterte genau die
+			// Wiederholung, fuer die es die clientId gibt.
+			const vorab = await suche();
+			if (vorab) {
+				const ende = urteil(vorab, person.id, threadId);
+				if (ende instanceof Wiederholung) return void res.status(200).json(antwort(vorab));
+				return void antworteThreadFehler(res, ende);
+			}
+			if (sperre) return void res.status(409).json(SPERRE_ANTWORT[sperre]);
+
 			let fehler: unknown;
 			try {
-				// Vorab ohne Transaktion: die haeufigste Wiederholung (das Netz brach nach dem
-				// Commit ab) kostet so weder Sperre noch Stand. Entscheidend ist erst die Suche
-				// unter der Sperre (Entscheidung 2), denn zwei gleichzeitige Anfragen laufen beide
-				// an dieser vorbei.
-				const vorab = await suche();
-				if (vorab) throw urteil(vorab, person.id, threadId);
 				const { ergebnis } = await db.$transaction((tx) =>
 					mitAenderung(tx, verein.id, person.id, zeit, async (stand) => {
 						const vorhanden = await tx.verlaufEintrag.findFirst({

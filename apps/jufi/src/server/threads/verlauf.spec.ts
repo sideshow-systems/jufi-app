@@ -265,6 +265,7 @@ describe('Verlauf lesen, schreiben und loeschen', () => {
 			['clientId mit Leerzeichen', { text: 'Hallo', clientId: 'a b' }, 'clientId'],
 			['clientId zu lang', { text: 'Hallo', clientId: 'a'.repeat(101) }, 'clientId'],
 			['clientId leer', { text: 'Hallo', clientId: '' }, 'clientId'],
+			['einzelnes Surrogat', { text: 'Hallo \ud800', clientId: 'c-1' }, 'text'],
 		])('%s: 400 mit feld, ohne Zeile und ohne Stand', async (_name, body, feld) => {
 			const s = await szenario();
 			const t = await s.thread();
@@ -330,6 +331,23 @@ describe('Verlauf lesen, schreiben und loeschen', () => {
 			expect(await zweite.json()).toEqual(a);
 			expect(await s.zeilen(t.threadId)).toBe(1);
 			expect(await s.stand()).toBe(vorher + 1);
+		});
+
+		it('gespeichert, dann archiviert, dieselbe clientId wiederholt: 200 statt 409, eine Zeile, kein Stand', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const body = { text: 'Antwort ging verloren', clientId: 'archiv-1' };
+			const erste = await s.schreibe(t.threadId, body, s.sandra.cookie);
+			expect(erste.status).toBe(201);
+			await prisma.thread.update({ where: { id: t.threadId }, data: { archivModus: 'ARCHIVIERT' } });
+			const vorher = await s.stand();
+
+			const zweite = await s.schreibe(t.threadId, body, s.sandra.cookie);
+
+			expect(zweite.status).toBe(200);
+			expect(await zweite.json()).toEqual(await erste.json());
+			expect(await s.zeilen(t.threadId)).toBe(1);
+			expect(await s.stand()).toBe(vorher);
 		});
 
 		it('dieselbe clientId zweimal gleichzeitig: ein 201 und ein 200, eine Zeile, ein Stand', async () => {
