@@ -5,3 +5,4 @@ export * from './namen.js';
 export * from './archiv.js';
 export * from './rechte.js';
 export * from './antworten.js';
+export * from './start.js';
