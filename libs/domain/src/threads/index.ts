@@ -10,3 +10,4 @@ export * from './pfad.js';
 export * from './verlauf.js';
 export * from './ansicht.js';
 export * from './entwurf.js';
+export * from './vergleich.js';
