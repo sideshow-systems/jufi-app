@@ -124,7 +124,8 @@ curl -fsS "$BASIS/entwurf/glonntal/t/2-bowling" | grep -qE "$BASE_HREF" \
 # noch um, kaeme die Umleitung dem App-Router in die Quere, falls Traefik die
 # Wurzel je an den Entwurf gaebe.
 KOPF="$(curl -sS -o /dev/null -D - "$BASIS/")"
-head -1 <<<"$KOPF" | grep -q ' 404' || fail "/ antwortet nicht mit 404: $KOPF"
+# 403 statt 404: nginx listet das Wurzelverzeichnis ohne index.html nicht auf.
+head -1 <<<"$KOPF" | grep -qE ' (403|404)' || fail "/ liefert weder 403 noch 404: $KOPF"
 ! grep -qi '^location:' <<<"$KOPF" || fail "/ leitet noch um: $KOPF"
 KOPF="$(curl -fsS -o /dev/null -D - "$BASIS/entwurf/")"
 grep -qi '^cache-control: no-cache' <<<"$KOPF" || fail 'index.html ohne Cache-Control: no-cache.'
@@ -135,7 +136,7 @@ MAIN="$(curl -fsS "$BASIS/entwurf/" | grep -oE 'main-[A-Z0-9]{8}\.js' | head -1)
 [[ -n "$MAIN" ]] || fail 'Kein main-<hash>.js in der index.html gefunden.'
 curl -fsS -o /dev/null -D - "$BASIS/entwurf/$MAIN" | grep -qi '^cache-control: .*immutable' \
 	|| fail "$MAIN wird nicht dauerhaft gecacht."
-note "/ → 404 ohne Umleitung, tiefe Links → index.html, Cache- und Sicherheits-Header stimmen"
+note "/ → keine Umleitung, nichts ausgeliefert, tiefe Links → index.html, Cache- und Sicherheits-Header stimmen"
 docker rm -f "$SMOKE" >/dev/null
 trap - EXIT INT TERM
 
