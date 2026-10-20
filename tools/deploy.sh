@@ -211,9 +211,35 @@ for _ in $(seq 1 40); do
 	sleep 1
 done
 [[ "$STATUS" == 'healthy' ]] || fail "Docker-Healthcheck meldet '$STATUS' statt healthy."
-docker logs "$SMOKE_APP" 2>&1 | grep -q 'Mail-Arbeiter gestartet' || fail 'Der Mail-Arbeiter ist nicht gestartet.'
+# Erst in eine Variable: grep -q beendet sich beim ersten Treffer, docker logs
+# bekommt SIGPIPE, und pipefail machte daraus (141) einen falschen Fehlschlag.
+APP_LOG="$(docker logs "$SMOKE_APP" 2>&1)"
+grep -q 'Mail-Arbeiter gestartet' <<<"$APP_LOG" || fail 'Der Mail-Arbeiter ist nicht gestartet.'
 [[ "$(docker exec "$SMOKE_APP" id -u)" != '0' ]] || fail 'Der Container laeuft als root.'
 note "Docker-Healthcheck: healthy; Mail-Arbeiter gestartet; laeuft nicht als root; $(docker stats --no-stream --format '{{.MemUsage}}' "$SMOKE_APP" | cut -d/ -f1)im Leerlauf"
+
+# Schrift und Initialen-Icon. Lokal liefert macOS eine Schrift, im Image fehlte
+# sie womoeglich trotzdem, und der Fehler bliebe unsichtbar (Spec 6.4): sharp
+# zeichnet dann Kaestchen oder gar nichts, und kein Test schlaegt an. Deshalb
+# wird das Bild geprueft, das **das Image** erzeugt hat -- die Messung selbst
+# (Groesse, Buchstaben) laeuft hier auf dem Entwicklungsrechner, wo sharp steht.
+# fc-match ist die zweite Haelfte: Tofu hat Kontrast und besteht die Messung,
+# aber nur mit der richtigen Schrift ist es DejaVu Sans Bold und nicht ein Ersatz.
+FONT="$(docker exec "$SMOKE_APP" fc-match 'DejaVu Sans:bold' file 2>&1 || true)"
+grep -q 'DejaVuSans-Bold' <<<"$FONT" || fail "DejaVu Sans Bold fehlt im Image (apk add font-dejavu, Dockerfile): $FONT"
+# Der Demo-Verein hat kein Logo, also kommt das Icon aus den Initialen. Er wird
+# in der Wegwerf-Datenbank angelegt, die gleich weggeworfen wird.
+LOG="$(mktemp)"
+docker run --rm --network "$SMOKE_NET" "${SMOKE_ENV[@]}" "$IMAGE:$SHA" \
+	node apps/cli/dist/main.js demo einspielen >"$LOG" 2>&1 \
+	|| { tail -20 "$LOG" >&2; fail 'Der Demo-Verein liess sich im Image nicht anlegen.'; }
+rm -f "$LOG"
+for GROESSE in 192 512; do
+	curl -fsS -H "Host: $HOST" -H 'X-Forwarded-Proto: https' "$BASIS/demo/icon-$GROESSE.png" \
+		| node tools/pruefe-icon.mjs "$GROESSE" \
+		|| fail "Das Initialen-Icon ($GROESSE px) aus dem Image ist kaputt (Schrift? sharp?)."
+done
+note 'Initialen-Icon: DejaVu Sans Bold, 192 und 512 px, Buchstaben gezeichnet'
 
 # Und die CLI, die im selben Image daneben liegt. Sie ist ein eigenes Buendel mit
 # eigenen externen Paketen (tools/runtime-package.mjs) -- in HWYD ist genau das
@@ -256,6 +282,39 @@ FEHLT="$(jufi_ssh "cd $REMOTE_DIR && for v in JUFI_POSTGRES_USER JUFI_POSTGRES_P
 	|| fail "Die .env in $REMOTE_DIR ist nicht lesbar."
 [[ -z "$FEHLT" ]] || fail "In $REMOTE_DIR/.env fehlen oder sind leer: $(tr '\n' ' ' <<<"$FEHLT")(Vorlage: deploy/env.jufi.example)"
 note "Dienste $DB_SERVICE, $MIGRATE_SERVICE, $MAIL_SERVICE, $APP_SERVICE und alle JUFI_-Variablen vorhanden"
+# Ohne Sicherungsskript auf dem Server gaebe es gleich keinen Dump vor der
+# Migration. Das faellt hier auf, vor dem Uebertragen, und nicht mittendrin.
+jufi_ssh "test -x $REMOTE_TOOLS/backup.sh" \
+	|| fail 'Kein Deploy ohne Sicherung: tools/install-backup.sh ausfuehren.'
+note "Sicherungsskript $REMOTE_TOOLS/backup.sh ausfuehrbar"
+
+# --- Tor 5b: Dump vor der Migration --------------------------------------------
+# Spec 8.2. Bewusst **vor** dem Uebertragen und nicht danach: ein gescheiterter
+# Dump bricht ab, bevor irgendetwas auf dem Server veraendert wurde (weder Image
+# noch JUFI_IMAGE_TAG). Nach dem Ausrollen laeuft die Migration schon, und der
+# Dump zeigte den Stand danach -- der Zweck, der Stand davor, waere verfehlt.
+# Ohne restic (--no-restic): die Kopie ausser Haus macht der naechtliche Lauf; ein
+# Deploy soll nicht an der Erreichbarkeit des zweiten Kontos haengen.
+step 'Tor 5b: Dump vor der Migration'
+# Die Entscheidung steht in db_vorzustand (_config.sh, geprobt mit
+# tools/probe-deploy-tor.sh). Nur "kein Container" ist ein erstes Ausrollen; ein
+# vorhandener, nicht laufender Container hat Daten und braucht erst den Start.
+DB_ZUSTAND="$(db_vorzustand)" \
+	|| fail 'Zustand von '"$DB_SERVICE"' nicht abfragbar -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
+case "$DB_ZUSTAND" in
+	laeuft)
+		jufi_ssh "$REMOTE_TOOLS/backup.sh --local --no-restic" \
+			|| fail 'Dump gescheitert -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
+		note 'Dump gezogen (lokal auf dem Server, ohne restic)'
+		;;
+	steht)
+		fail "Datenbank laeuft nicht -- kein Deploy ohne Sicherung. Naechster Schritt: auf dem Server $DB_SERVICE starten (docker compose up -d $DB_SERVICE in $REMOTE_DIR), dann den Deploy erneut. Auf dem Server wurde nichts veraendert."
+		;;
+	*)
+		# Allererstes Ausrollen: es gibt noch nichts zu sichern.
+		note "Kein Container von $DB_SERVICE (erstes Ausrollen) -- kein Dump noetig"
+		;;
+esac
 
 # --- Tor 6: Uebertragen und Ausrollen ------------------------------------------
 step "Tor 6: Image per SSH uebertragen ($IMAGE:$SHA)"
@@ -312,7 +371,6 @@ else
 fi
 
 printf '\n\033[32m✓ Ausgerollt: %s (%s)\033[0m\n' "$SHA" "$VERSION"
-# Kein rollback.sh wie in HWYD: Migrationen laufen nur vorwaerts, und ob ein
-# altes Image mit dem neuen Schema zurechtkommt, entscheidet ein Mensch, kein Skript.
-note "Rueckfall (nur ohne Migration dazwischen): auf dem Server JUFI_IMAGE_TAG in $REMOTE_DIR/.env"
-note "auf den vorigen SHA setzen, dann: docker compose -f $REMOTE_COMPOSE up -d $APP_SERVICE"
+# Die Rueckfallzeile nennt das Skript, nicht die Handarbeit: es prueft vorher, ob
+# die Migrationen gleich sind und das Image auf dem Server liegt.
+note "Rueckfall: tools/rollback.sh (--list zeigt die Tags; bricht ab, wenn sich Migrationen unterscheiden)"

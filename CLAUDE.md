@@ -10,7 +10,8 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 - Etappe 3 ist da: Mitglieder nehmen Einladungen an und melden sich unter `/<slug>/anmelden` an (Passkey, Passwort, TOTP, „Passwort vergessen?"). Mails fängt lokal Mailpit ab (http://localhost:8025, braucht `pnpm run db:up`).
 - Etappe 4 ist da: Mitglieder pflegen (Personen, Familie, Untergruppen, Rechte, Einwilligung, „Meine Jungfischer"). Der Demo-Verein (`pnpm run demo`) bringt dafür Untergruppen, Familien, ein Kind ohne Einwilligung und eines, das morgen volljährig wird.
 - Etappe 5 ist da: Oberflächen, PWA-Manifest, Rechtstexte (nur Platzhalter, README „Rechtstexte“) und Ende-zu-Ende-Test. `pnpm run e2e` braucht `pnpm run db:up`, baut selbst, läuft nicht in `pnpm test`; einmalig `pnpm exec playwright install chromium`, Port 4210 muss frei sein.
-- Deployment der echten App: `pnpm run deploy:app` nach https://app-test.jufi-app.de (README, „Deployment der echten App“). Erster Admin dort: `docker compose exec jufi node apps/cli/dist/main.js admin anlegen <name>`; Mails per `ssh -L 8025:127.0.0.1:8025`.
+- Etappe 6 ist da: Sicherung (täglich 03:40, restic), Restore-Probe, Rückfall, echter Mailversand per Schalter, App auf test.jufi-app.de. Offen bis zur Einladung der Jugendleiter: Rechtstexte und Einwilligungstext (`tools/pruefe-texte.sh`).
+- Deployment der echten App: `pnpm run deploy:app` nach https://test.jufi-app.de (`app-test` leitet nur noch um; README, „Deployment der echten App“). Erster Admin dort: `docker compose exec jufi node apps/cli/dist/main.js admin anlegen <name>`; Mails per `ssh -L 8025:127.0.0.1:8025`.
 - Ersten Admin lokal anlegen: `pnpm run cli admin anlegen <name>` gibt den Einrichtungslink aus (braucht `BASIS_URL` in der `.env`).
 - Nach dem Klonen und nach jeder Schemaänderung `pnpm run db:generate` — der Prisma-Client liegt nicht im Repo.
 - Tests brauchen laufendes Postgres: erst `pnpm run db:up`. Jedes Projekt hat seine Testdatenbank `jufi_test_<projekt>`.
@@ -48,6 +49,8 @@ Die **Begründungen** stehen in den Spezifikationen unter `docs/superpowers/spec
 
 - **`pnpm run deploy:entwurf`, nie `pnpm deploy`.** Letzteres ist pnpms eingebautes Workspace-Deploy.
 - **`pnpm run deploy:app`, nie `pnpm deploy`.** Gleicher Grund. Probelauf: `pnpm run deploy:app --dry-run` (braucht `pnpm run db:up` und Docker).
+- **Vor jedem Deploy der echten App liegt auf dem Server `jufi-tools`** (`tools/install-backup.sh`), sonst bricht Tor 5 ab.
+- **`restic_env` kennt nur `JUFI_RESTIC_*`.**
 - **`apps/jufi/src/server.ts` läuft auch beim Bau** — Angular führt sie zur Routenextraktion in einem Worker-Thread aus. Alles mit Umgebung, Datenbank oder Nebenwirkung gehört in `betriebsApp()` (nur im Hauptthread), sonst scheitert der Docker-Bau, der weder `.env` noch Datenbank hat.
 - **Neue Domain der App** braucht einen Eintrag in `security.allowedHosts` (`apps/jufi/project.json`) und damit ein neues Image; sonst antwortet jede Seite mit 400, während `/healthz` grün bleibt.
 - **Entscheidungen über Vereinsdaten, die „angenommen oder nicht" lauten** (Einlösen, Erneuern, Notfall-Link, Slug-Korrektur), beginnen mit `sperreVereinszeile`. Ohne diese Sperre überholen sich zwei gleichzeitige Anfragen.

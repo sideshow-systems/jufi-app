@@ -1,0 +1,30 @@
+# Taegliche Sicherung der JuFi-Datenbank. Muster: ../hwyd/deploy/hwyd-backup.cron.
+#
+# Einrichten geschieht vom Entwicklungsrechner; von Hand als root auf dem Server:
+#   install -m 644 -o root -g root \
+#     /home/paperless/paperless-ngx/jufi-tools/jufi-backup.cron \
+#     /etc/cron.d/jufi-backup
+#
+# 03:40 und nicht 03:20: HWYD sichert um 03:20 auf demselben Server. Zwei Dumps
+# gleichzeitig kaemen sich bei Platte und Datenbank-Containern in die Quere, und
+# ein Fehlschlag soll im Protokoll einer App eindeutig der einen zuzuordnen sein.
+#
+# Was der Lauf tut: Dump ziehen, Dump mit `pg_restore --list` **pruefen** (ein
+# unlesbarer Dump ist kein Backup), verschluesselt per restic ausser Haus
+# schieben, alte Snapshots aufraeumen. Ohne `JUFI_RESTIC_REPOSITORY` in der .env
+# endet er nach dem geprueften Dump -- dann liegt die Historie nur auf diesem
+# Server, und das schuetzt gegen eine kaputte Migration, nicht gegen
+# Hardwareverlust.
+#
+# **Zwei Dinge muessen fuer root stimmen, sonst scheitert der Lauf nachts still:**
+# ein SSH-Schluessel ohne Passphrase (Cron hat keinen Agenten) und der
+# Wirtsschluessel des Ziels in /root/.ssh/known_hosts (sonst "Host key
+# verification failed"). `backup.sh` prueft beides vorher und schreibt in dieselbe
+# Protokolldatei, welche der beiden fehlt.
+#
+# Das Protokoll ist die einzige Spur, die dieser Lauf hinterlaesst -- also
+# gelegentlich hineinsehen:
+#   tail -20 /var/log/jufi-backup.log
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+40 3 * * * root /home/paperless/paperless-ngx/jufi-tools/backup.sh --local >>/var/log/jufi-backup.log 2>&1

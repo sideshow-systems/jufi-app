@@ -15,6 +15,13 @@ LABEL org.opencontainers.image.title="jufi-entwurf" \
 COPY deploy/nginx-entwurf.conf /etc/nginx/conf.d/default.conf
 COPY deploy/nginx-sicherheit.conf /etc/nginx/sicherheit.conf
 COPY dist/apps/entwurf/browser /usr/share/nginx/html/entwurf
+# nginx:alpine bringt eine Willkommensseite als index.html mit, und die
+# Wurzel / lieferte sie mit 200. Seit Etappe 6 gehoert / der echten App; der
+# Entwurf soll dort nichts ausliefern (nginx antwortet ohne index.html 403,
+# das Verzeichnis darf nicht aufgelistet werden; Gegenprobe im Rauchtest von
+# tools/deploy-entwurf.sh). Verworfen: ein location-Block mit return 404 in
+# der nginx-Konfiguration -- eine Regel mehr, wo das Entfernen der Datei genuegt.
+RUN rm -f /usr/share/nginx/html/index.html /usr/share/nginx/html/50x.html
 
 # busybox-wget steckt in alpine; Traefik nimmt den Dienst erst bei "healthy" auf.
 # In der Startphase jede Sekunde pruefen: sonst wartet Traefik nach jedem

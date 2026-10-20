@@ -93,8 +93,10 @@ services:
   # Docker-Netz unter dem Dienstnamen. Ohne Volume: die Mails sind nach einem
   # Neustart weg, und das ist fuer eine Mail-Falle richtig so.
   #
-  # Kommt echter Versand, faellt dieser Dienst weg, und SMTP_* der App zeigen auf
-  # den echten Server (dann ohne MAIL_BETREFF_PRAEFIX).
+  # Echter Versand wird ueber JUFI_SMTP_* in der .env geschaltet; dieser Dienst
+  # bleibt dann trotzdem stehen (die App haengt per depends_on an ihm) und
+  # bleibt ungenutzt. MAIL_BETREFF_PRAEFIX bleibt fest '[Test] ', solange die
+  # App in der Testumgebung (test.jufi-app.de) laeuft.
   jufi-mailpit:
     image: axllent/mailpit:v1.21
     restart: unless-stopped
@@ -119,15 +121,27 @@ services:
       # Ursprung fuer die Origin-Pruefung schreibender Anfragen (server/ursprung.ts)
       # und fuer Links in Mails und aus der CLI. Reiner Ursprung, ohne Schraegstrich
       # am Ende -- sonst bricht die Startpruefung ab (libs/auth env-check).
-      BASIS_URL: https://app-test.jufi-app.de
+      BASIS_URL: https://test.jufi-app.de
       # Passkeys. Hier ausdruecklich gesetzt und nicht aus dem Host-Header
       # abgeleitet: ein Schluessel haengt an dieser Domain, und das soll nicht von
       # einem Header abhaengen. Aendert sich die Domain, sind alle Passkeys
       # wertlos und muessen neu eingerichtet werden -- Passwort und TOTP bleiben.
-      WEBAUTHN_RP_ID: app-test.jufi-app.de
-      WEBAUTHN_ORIGIN: https://app-test.jufi-app.de
-      SMTP_HOST: jufi-mailpit
-      SMTP_PORT: '1025'
+      # Genau das ist der Preis des Umzugs von app-test auf test (Etappe 6,
+      # Entscheidung 1): Passkeys, die unter app-test eingerichtet wurden, gelten
+      # hier nicht mehr. Hingenommen, weil es nur Testkonten sind.
+      WEBAUTHN_RP_ID: test.jufi-app.de
+      WEBAUTHN_ORIGIN: https://test.jufi-app.de
+      # Mail-Schalter: ohne Eintrag in der `.env` bleibt es bei der Mail-Falle.
+      # `:-` greift auch bei einem **leeren** Wert -- `JUFI_SMTP_HOST=` aus der
+      # Vorlage (deploy/env.jufi.example) bedeutet also Mailpit und kein
+      # leerer Host. Verworfen: die Form ohne Doppelpunkt (`${X-...}`), denn die
+      # nimmt eine leere, aber gesetzte Vorlagenzeile als Wert und bricht den Start.
+      # `jufi-mailpit` bleibt unter depends_on, auch bei echtem Versand: so
+      # reicht das Umschalten per .env, ohne den Block umzubauen.
+      SMTP_HOST: ${JUFI_SMTP_HOST:-jufi-mailpit}
+      SMTP_PORT: ${JUFI_SMTP_PORT:-1025}
+      SMTP_USER: ${JUFI_SMTP_USER:-}
+      SMTP_PASS: ${JUFI_SMTP_PASS:-}
       MAIL_ABSENDER: app@jufi-app.de
       MAIL_ANTWORT: kontakt@jufi-app.de
       # Damit eine Mail aus der Testumgebung nie wie eine echte aussieht.
@@ -161,7 +175,11 @@ services:
     # Kein `ports:`. Erreichbar nur ueber Traefik.
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.jufi.rule=Host(`app-test.jufi-app.de`)'
+      # Die App liegt auf der Wurzel von test.jufi-app.de; der Entwurf teilt sich
+      # die Domain unter /entwurf (jufi-entwurf.yml). Die Reihenfolge entscheidet
+      # Traefik nach Regellaenge, und die PathPrefix-Regel des Entwurfs ist
+      # laenger -- sie gewinnt, die App bekommt alles uebrige (Entscheidung 9).
+      - 'traefik.http.routers.jufi.rule=Host(`test.jufi-app.de`)'
       # Traefik terminiert TLS selbst per Let's Encrypt, wie bei HWYD und dem
       # Entwurf. Deshalb **kein** Middleware-Label, das X-Forwarded-Proto setzt:
       # Traefik setzt den Header von sich aus richtig, weil es das TLS-Ende ist,
@@ -173,8 +191,22 @@ services:
       # Node -- und fuer alle Dienste gleich.
       - 'traefik.http.middlewares.jufi-compress.compress=true'
       - 'traefik.http.routers.jufi.middlewares=jufi-compress'
+      # Alte Adresse: nur noch Umleitung, Pfad und Abfrage bleiben erhalten, damit
+      # verschickte Einladungs- und Zuruecksetzen-Links weiter fuehren. Passkeys
+      # lassen sich nicht mitnehmen (siehe WEBAUTHN_RP_ID). Verworfen: beide
+      # Domains parallel bedienen -- eine Sitzung und ein Passkey haengen je an
+      # einer Domain, die Mitglieder haetten zwei Staende. Die Umleitung entfaellt,
+      # sobald app-test aus dem DNS genommen wird.
+      - 'traefik.http.routers.jufi-alt.rule=Host(`app-test.jufi-app.de`)'
+      - 'traefik.http.routers.jufi-alt.entrypoints=websecure'
+      - 'traefik.http.routers.jufi-alt.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.jufi-alt.service=jufi'
+      - 'traefik.http.middlewares.jufi-umzug.redirectregex.regex=^https://app-test\.jufi-app\.de/(.*)'
+      - 'traefik.http.middlewares.jufi-umzug.redirectregex.replacement=https://test.jufi-app.de/$${1}'
+      - 'traefik.http.middlewares.jufi-umzug.redirectregex.permanent=true'
+      - 'traefik.http.routers.jufi-alt.middlewares=jufi-umzug'
 
 volumes:
-  # Die Mitgliederdaten. Eine Sicherung gibt es noch nicht (wie bei HWYD per
-  # restic ausser Haus) -- vor echten Daten nachziehen.
+  # Die Mitgliederdaten. Gesichert wird taeglich um 03:40 per restic ausser Haus
+  # (tools/backup.sh, eingerichtet mit tools/install-backup.sh, README Sicherung).
   jufi-pgdata:
