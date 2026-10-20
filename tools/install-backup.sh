@@ -45,8 +45,13 @@ done
 # Der Cron-Eintrag liegt in /etc/cron.d und gehoert root. Wer hier nicht root
 # ist, merkt das besser jetzt als nach dem Kopieren.
 if [[ "$WITH_CRON" -eq 1 && "${SSH_TARGET%%@*}" != 'root' ]]; then
-	fail "Cron einrichten braucht root ($SSH_TARGET ist es nicht). Mit --no-cron nur die Skripte auffrischen."
+	fail "Cron einrichten braucht root ($SSH_TARGET ist es nicht; SSH_TARGET muss die Form root@host haben). Oder mit --no-cron nur die Skripte auffrischen."
 fi
+
+# Erst erreichbar?, dann alles andere. Sonst erschiene ein SSH-Ausfall weiter
+# unten als "restic fehlt" oder "Variablen fehlen" und sendete auf falsche Faehrte.
+step "Verbindung zu $SSH_TARGET"
+jufi_ssh true || fail "Server nicht erreichbar ($SSH_TARGET). SSH_TARGET und SSH_KEY in .env.deploy pruefen und per ssh von Hand anmelden."
 
 FILES=(tools/_config.sh tools/backup.sh tools/restore-test.sh deploy/jufi-backup.cron)
 for f in "${FILES[@]}"; do
@@ -63,10 +68,10 @@ for f in "${FILES[@]}"; do note "$f"; done
 if [[ "$DRY_RUN" -eq 1 ]]; then
 	note '(--dry-run: nichts kopiert)'
 else
-	jufi_ssh "mkdir -p $REMOTE_TOOLS" || fail "$REMOTE_TOOLS liess sich nicht anlegen."
-	jufi_scp "${FILES[@]}" "$SSH_TARGET:$REMOTE_TOOLS/" >/dev/null || fail 'Kopieren gescheitert.'
+	jufi_ssh "mkdir -p $REMOTE_TOOLS" || fail "$REMOTE_TOOLS liess sich nicht anlegen. Schreibrechte von $SSH_TARGET auf $REMOTE_DIR pruefen."
+	jufi_scp "${FILES[@]}" "$SSH_TARGET:$REMOTE_TOOLS/" >/dev/null || fail 'Kopieren gescheitert. Plattenplatz und Schreibrechte in '"$REMOTE_TOOLS"' pruefen, dann erneut aufrufen.'
 	jufi_ssh "chmod 755 $REMOTE_TOOLS/backup.sh $REMOTE_TOOLS/restore-test.sh && chmod 644 $REMOTE_TOOLS/_config.sh $REMOTE_TOOLS/jufi-backup.cron" \
-		|| fail 'Rechte liessen sich nicht setzen.'
+		|| fail "Rechte liessen sich nicht setzen. In $REMOTE_TOOLS pruefen, wem die Dateien gehoeren, dann erneut aufrufen."
 fi
 
 # --- Voraussetzungen ----------------------------------------------------------
@@ -82,14 +87,20 @@ else
 	note 'restic fehlt -- wird installiert'
 	jufi_ssh 'apt-get update -qq && apt-get install -y -qq restic' >/dev/null \
 		|| fail 'apt-get install restic ist gescheitert. Von Hand nachziehen.'
+	jufi_ssh 'command -v restic >/dev/null 2>&1' \
+		|| fail 'restic ist nach der Installation nicht auffindbar. Auf dem Server apt-get install restic von Hand pruefen.'
 	note "restic: $(jufi_ssh 'restic version' | head -1)"
 fi
 
 # Die Werte selbst haben hier nichts zu suchen -- gefragt ist nur, **ob** sie
 # stehen. Ein Passwortsatz, der durch eine Ausgabe laeuft, ist keiner mehr.
-# `grep -c` meldet bei 0 Treffern Exit 1, daher das `|| echo 0`.
-REPO_SET="$(jufi_ssh "grep -c '^JUFI_RESTIC_REPOSITORY=.' $REMOTE_DIR/.env" 2>/dev/null || echo 0)"
-PASS_SET="$(jufi_ssh "grep -c '^JUFI_RESTIC_PASSWORD=.' $REMOTE_DIR/.env" 2>/dev/null || echo 0)"
+# `grep -c` meldet bei 0 Treffern Exit 1 *und* gibt "0" aus; `|| echo 0` machte
+# daraus "0\n0" und einen Syntaxfehler im Vergleich. Bei unlesbarer .env bleibt
+# die Ausgabe leer, dafuer der Vorgabewert.
+REPO_SET="$(jufi_ssh "grep -c '^JUFI_RESTIC_REPOSITORY=.' $REMOTE_DIR/.env" 2>/dev/null || true)"
+PASS_SET="$(jufi_ssh "grep -c '^JUFI_RESTIC_PASSWORD=.' $REMOTE_DIR/.env" 2>/dev/null || true)"
+REPO_SET="${REPO_SET:-0}"
+PASS_SET="${PASS_SET:-0}"
 if [[ "$REPO_SET" -ge 1 && "$PASS_SET" -ge 1 ]]; then
 	note 'JUFI_RESTIC_REPOSITORY und JUFI_RESTIC_PASSWORD stehen in der .env'
 else
@@ -117,11 +128,13 @@ fi
 
 if [[ "$WITH_RUN" -eq 1 && "$DRY_RUN" -eq 0 ]]; then
 	step 'Probelauf: backup.sh --local'
-	jufi_ssh "$REMOTE_TOOLS/backup.sh --local" || fail 'Der Probelauf ist gescheitert -- siehe Meldung oben.'
+	jufi_ssh "$REMOTE_TOOLS/backup.sh --local" || fail 'Der Probelauf ist gescheitert -- siehe Meldung oben. Ursache beheben und tools/install-backup.sh erneut aufrufen.'
 fi
 
 step 'Fertig'
-note 'Naechster Lauf: 03:40 (Serverzeit), Protokoll in /var/log/jufi-backup.log'
+if [[ "$WITH_CRON" -eq 1 && "$DRY_RUN" -eq 0 ]]; then
+	note 'Naechster Lauf: 03:40 (Serverzeit), Protokoll in /var/log/jufi-backup.log'
+fi
 # Nicht `--source remote`: das braucht SSH_TARGET aus .env.deploy, und die gibt es
 # auf dem Server nicht. Dort ist die Quelle der Dienst neben uns.
 note 'Restore-Probe aus dem neuesten Snapshot, auf dem Server:'
