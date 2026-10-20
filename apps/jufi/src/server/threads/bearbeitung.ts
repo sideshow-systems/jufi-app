@@ -10,6 +10,7 @@ import {
 	threadSegment,
 	umfrageSperre,
 	type ThreadBearbeitung,
+	type ThreadDaten,
 	type ThreadPerson,
 	type Umfeld,
 } from '@jufi/domain';
@@ -26,6 +27,24 @@ export async function ladeUntergruppen(db: VereinDb | VereinTx): Promise<{ id: s
 }
 
 /**
+ * Was einen Thread unloeschbar macht (Plan-Entscheidung 9): jede Antwortzeile, auch eine
+ * ohne Option, und von den Nachrichten nur die nicht geloeschten; eine geloeschte hat keinen
+ * Text mehr, und Systemeintraege sind Verlauf, keine Meinungsaeusserung. Die Antworten sind
+ * mit dem Thread schon geladen (`daten`), die Nachrichten kommen aus einer eigenen Zaehlung.
+ * Eine Stelle fuer beides: darfLoeschen der Bearbeitung und DELETE zaehlen so dasselbe.
+ */
+export async function loeschZaehler(
+	db: VereinDb | VereinTx,
+	daten: ThreadDaten,
+): Promise<{ antworten: number; nachrichten: number }> {
+	const nachrichten = await db.verlaufEintrag.count({
+		where: { threadId: daten.kopf.id, art: 'NACHRICHT', geloeschtAm: null },
+	});
+	const antworten = daten.umfragen.reduce((summe, u) => summe + u.antworten.length, 0);
+	return { antworten, nachrichten };
+}
+
+/**
  * Der Thread in bearbeitbarer Form, oder null: unbekannt, nicht sichtbar und nicht
  * bearbeitbar sind dieselbe Antwort (Rahmen-Spec 8), die Route macht daraus die 404.
  * Verworfen: fuer Leser ohne Bearbeitungsrecht eine schreibgeschuetzte Fassung --
@@ -37,10 +56,7 @@ export async function ladeUntergruppen(db: VereinDb | VereinTx): Promise<{ id: s
  * und Loeschbarkeit auf. `umfeld` und `ich` kommen vom Aufrufer und stammen aus demselben
  * Ladevorgang, damit die Rechte nicht aus zwei Staenden zusammengesetzt werden.
  *
- * Geloescht werden darf nur ein leerer Thread (Entscheidung 9): jede Antwortzeile zaehlt, auch
- * eine ohne Option, und von den Nachrichten nur die nicht geloeschten; eine geloeschte hat
- * keinen Text mehr, und Systemeintraege sind Verlauf, keine Meinungsaeusserung. Die Antworten
- * sind mit dem Thread schon geladen, die Nachrichten kommen aus einer eigenen Zaehlung.
+ * Geloescht werden darf nur ein leerer Thread; gezaehlt wird in loeschZaehler.
  *
  * Die Version wird VOR dem Inhalt gelesen, wie ladeVereinsstand vor den Daten: Unter READ
  * COMMITTED ist alles, was danach geladen wird, mindestens so neu wie die Version. Committet
@@ -67,13 +83,8 @@ export async function ladeBearbeitung(
 	const { kopf, module } = geladen;
 	if (!siehtThread(ich, kopf, umfeld) || !darfBearbeiten(ich, kopf)) return null;
 
-	const [nachrichten, untergruppen] = await Promise.all([
-		db.verlaufEintrag.count({ where: { threadId, art: 'NACHRICHT', geloeschtAm: null } }),
-		ladeUntergruppen(db),
-	]);
-
 	const daten = threadDatenAus(kopf, module);
-	const antworten = daten.umfragen.reduce((summe, u) => summe + u.antworten.length, 0);
+	const [zaehler, untergruppen] = await Promise.all([loeschZaehler(db, daten), ladeUntergruppen(db)]);
 	return {
 		id: kopf.id,
 		segment: threadSegment(kopf.id, kopf.titel),
@@ -82,7 +93,7 @@ export async function ladeBearbeitung(
 		veroeffentlicht: kopf.veroeffentlichtAm !== null,
 		angepinnt: kopf.angepinnt,
 		archiviert: istArchiviert(kopf, daten.termine, jetzt),
-		darfLoeschen: darfLoeschen(ich, kopf, { antworten, nachrichten }),
+		darfLoeschen: darfLoeschen(ich, kopf, zaehler),
 		darfArchivieren: darfArchivieren(ich, kopf),
 		entwurf: entwurfAusThread(kopf, module),
 		sperren: Object.fromEntries(daten.umfragen.map((u) => [u.modulId, umfrageSperre(u)])),

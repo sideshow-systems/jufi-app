@@ -82,7 +82,7 @@ function darfErstellen(p: ThreadPerson): boolean {
  * Verworfen: ladeThreadUmfeld unter der Sperre -- alle Personen und Zuordnungen des Vereins
  * lesen, waehrend jede andere Schreibroute wartet.
  */
-async function ichUnterSperre(tx: VereinTx, personId: string): Promise<ThreadPerson | null> {
+export async function ichUnterSperre(tx: VereinTx, personId: string): Promise<ThreadPerson | null> {
 	return tx.person.findFirst({ where: { id: personId, entferntAm: null } });
 }
 

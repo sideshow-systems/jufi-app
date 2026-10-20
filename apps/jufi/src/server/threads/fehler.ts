@@ -36,6 +36,15 @@ export const DOPPELTE_TEILNAHME: Antwortkoerper = {
 	fehler: 'Es gibt schon eine Teilnahme-Umfrage.',
 	code: 'DOPPELTE_TEILNAHME',
 };
+export const NICHT_LOESCHBAR: Antwortkoerper = {
+	fehler: 'Der Thread hat Antworten oder Nachrichten und lässt sich nicht löschen. Archiviere ihn stattdessen.',
+	code: 'NICHT_LOESCHBAR',
+};
+/** Das Feld "zielgruppe" haengt der Aufrufer an (amFeld), wie bei den Konflikten des Editors. */
+export const KEINE_ZIELGRUPPE: Antwortkoerper = {
+	fehler: 'Der Thread hat keine Zielgruppe mehr. Bitte zuerst eine Untergruppe wählen.',
+	code: 'KEINE_ZIELGRUPPE',
+};
 
 /**
  * Ein Konflikt an einem Feld des Editors: Code aus der Konstante, Feld und (wenn da) Satz

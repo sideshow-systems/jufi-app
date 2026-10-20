@@ -589,6 +589,77 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await ersetze(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
 		expect(await fremdeThreads(k)).toEqual(vorher);
 	},
+	'POST /threads/:id/veroeffentlichen': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const veroeffentliche = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/veroeffentlichen`, { methode: 'POST', cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await veroeffentliche(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await veroeffentliche(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await veroeffentliche(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Entwurf des Leiters laesst sich veroeffentlichen, das Recht fehlt also nicht.
+		const entwurf = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			veroeffentlicht: false,
+		});
+		expect((await veroeffentliche(k.eigen.slug, entwurf.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'PUT /threads/:id/archiv': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const archiviere = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/archiv`, {
+				methode: 'PUT',
+				body: { archiviert: true },
+				cookie,
+			});
+		const fremder = k.fremderThread.threadId;
+		expect((await archiviere(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await archiviere(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await archiviere(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters laesst sich archivieren, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await archiviere(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'PUT /threads/:id/angepinnt': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const pinne = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/angepinnt`, {
+				methode: 'PUT',
+				body: { angepinnt: true },
+				cookie,
+			});
+		const fremder = k.fremderThread.threadId;
+		expect((await pinne(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await pinne(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await pinne(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters laesst sich anpinnen, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await pinne(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'DELETE /threads/:id': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const loesche = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}`, { methode: 'DELETE', cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await loesche(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await loesche(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await loesche(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener leerer Thread des Leiters laesst sich loeschen, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await loesche(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(204);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
 	'DELETE /verlauf/:eintragId': async (k) => {
 		const vorher = await fremderVerlauf(k);
 		const loesche = (slug: string, cookie?: string) =>
