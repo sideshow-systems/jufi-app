@@ -4,6 +4,7 @@ import {
 	ChangeDetectionStrategy,
 	Component,
 	computed,
+	DestroyRef,
 	effect,
 	inject,
 	Injector,
@@ -253,12 +254,20 @@ export class ThreadSeite {
 	});
 	protected readonly zeigtVerlauf = computed(() => this.mitVerlauf() && this.reiter() === 'verlauf');
 
-	/** Zaehlt die Ladevorgaenge; ein Ergebnis gilt nur, wenn seit seinem Start kein neuer begann. */
+	/**
+	 * Zaehlt die Ladevorgaenge; ein Ergebnis gilt nur, wenn seit seinem Start kein neuer begann.
+	 * Auch das Abbauen der Seite zaehlt weiter (Konstruktor): Eine Antwort, die erst nach dem Wechsel
+	 * auf eine andere Seite eintrifft, soll weder die Adresse zurueckschreiben noch mit der falschen
+	 * Seite als weiter zur Anmeldung schicken. Verworfen: die Anfrage abbrechen (takeUntilDestroyed),
+	 * denn der Zaehler schuetzt auch die Nachlaeufer nach dem await.
+	 */
 	private lauf = 0;
 	/** Die Ansicht, deren Stand schon als gelesen gemeldet ist; eine neu geladene meldet sich erneut. */
 	private gemeldet: ThreadAnsicht | null = null;
 
 	constructor() {
+		inject(DestroyRef).onDestroy(() => this.lauf++);
+
 		effect(() => {
 			const slug = this.slug();
 			const id = this.id();

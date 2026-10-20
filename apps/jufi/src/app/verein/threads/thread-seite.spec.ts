@@ -1,5 +1,5 @@
 import { provideHttpClient, withFetch } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
@@ -250,6 +250,39 @@ describe('Thread-Seite', () => {
 			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
 
 			expect(seite.querySelector('a[aria-label^="Zurück"]')?.getAttribute('href')).toBe('/demo');
+		});
+	});
+
+	describe('Seite verlassen', () => {
+		/** Oeffnet den Thread, laesst die Anfrage offen und geht auf die Mehr-Seite, bevor sie beantwortet ist. */
+		async function verlasseVorAntwort(url: string): Promise<{ offen: TestRequest; harness: RouterTestingHarness }> {
+			const harness = await RouterTestingHarness.create();
+			const navigation = harness.navigateByUrl(url);
+			await vi.waitFor(() => http.expectOne('/demo/api/v1/ich').flush(ICH));
+			await navigation;
+			const offen = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1'));
+			await router.navigateByUrl('/demo/mehr');
+			expect(router.url).toBe('/demo/mehr');
+			return { offen, harness };
+		}
+
+		it('schreibt bei einer spaeten Antwort mit veraltetem Segment die Adresse nicht zurueck', async () => {
+			const navigieren = vi.spyOn(Router.prototype, 'navigate');
+			const { offen, harness } = await verlasseVorAntwort('/demo/t/ck1-kegeln');
+			offen.flush(thread());
+			await beendeSeite(harness);
+
+			expect(router.url).toBe('/demo/mehr');
+			expect(navigieren).not.toHaveBeenCalled();
+			// Auch kein Gelesen-Stand fuer eine Seite, die nicht mehr da ist (afterEach prueft offene Anfragen).
+		});
+
+		it('schickt bei einem spaeten 401 nicht mit der neuen Seite als weiter zur Anmeldung', async () => {
+			const { offen, harness } = await verlasseVorAntwort('/demo/t/ck1-bowling');
+			offen.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+			await beendeSeite(harness);
+
+			expect(router.url).toBe('/demo/mehr');
 		});
 	});
 
