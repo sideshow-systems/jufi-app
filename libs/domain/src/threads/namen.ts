@@ -3,7 +3,8 @@ import { istJugendleiter } from '../rechte.js';
 import type { Bezug, ThreadPerson, Umfeld } from './typen.js';
 import { bezuegeVon } from './umfeld.js';
 
-const EHEMALIG = 'ehemaliges Mitglied';
+// Exportiert, damit die Ergebnisliste der Umfragen dasselbe Wort fuer Entfernte nimmt.
+export const EHEMALIGES_MITGLIED = 'ehemaliges Mitglied';
 
 // Die Woerter stehen hier und nicht nur in apps/jufi (verwaltung/texte.ts), weil die
 // Domaene nichts aus den Apps importieren darf. ANDERE nimmt den Freitext; ohne ihn
@@ -46,7 +47,7 @@ function kinderListe(vornamen: readonly string[]): string {
 // den Grund verraet.
 export function absenderName(autorId: string | null, umfeld: Umfeld): string {
 	const autor = autorId === null ? undefined : umfeld.personen.get(autorId);
-	if (!autor) return EHEMALIG;
+	if (!autor) return EHEMALIGES_MITGLIED;
 	if (istJugendleiter(autor)) return `${kurzname(autor)} (Jugendleiter)`;
 	if (autor.art === 'JUNGFISCHER') return kurzname(autor);
 	const bezuege = bezuegeVon(umfeld, autor.id);
