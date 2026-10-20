@@ -1,6 +1,6 @@
 # JuFi App — Teilprojekt 2: Fundament
 
-Stand: 18.10.2026 · Ergebnis des Brainstormings vom 13.10.2026, nachgezogen mit Etappe 5, nachgezogen mit Etappe 6 · Status: zur Freigabe
+Stand: 18.10.2026 · Ergebnis des Brainstormings vom 13.10.2026, nachgezogen mit Etappe 5 und 6 · Status: zur Freigabe
 
 Teilprojekt 2 baut die echte App bis zu dem Punkt, an dem ein Verein **einladen, anmelden und Mitglieder pflegen** kann (Rahmen-Spezifikation `2026-10-11-jufi-rahmen-design.md`, Abschnitt 11). Threads, Module, Medien, Offline-Betrieb und Push folgen in den Teilprojekten 3 bis 5.
 

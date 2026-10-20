@@ -361,7 +361,7 @@ Der Rest ist Handarbeit und Serverarbeit. **Nichts davon läuft ohne das Wort de
 **A. Vom Eigentümer vorzubereiten (außerhalb des Repos):**
 
 1. Zweites Hetzner-Konto (SFTP, ohne Shell) und ein SSH-Schlüssel **ohne Passphrase** für root auf dem Server; `JUFI_RESTIC_REPOSITORY=sftp:benutzer@wirt:jufi-backup` und ein **neues** `JUFI_RESTIC_PASSWORD` (nicht das von HWYD) in die `.env` auf dem Server, das Passwort zusätzlich in den Passwortmanager. Ohne dieses Passwort ist die Ablage nicht lesbar.
-2. Hetzner-Postfach `app@jufi-app.de` samt SMTP-Zugang; SPF, DKIM und DMARC für `jufi-app.de` bei Hetzner. `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` **noch nicht** in die `.env`; das ist Schritt 9.
+2. Hetzner-Postfach `app@jufi-app.de` samt SMTP-Zugang; SPF, DKIM und DMARC für `jufi-app.de` bei Hetzner. `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` **noch nicht** in die `.env`; das ist Schritt 10.
 3. DNS: `test.jufi-app.de` zeigt schon auf den Server; `app-test.jufi-app.de` bleibt, bis die Umleitung geprüft ist.
 4. Impressum, Datenschutzerklärung und Wortlaut des Einwilligungstexts (Spec 8.6), außerdem die Entscheidung zu I2 aus Etappe 4.
 
@@ -372,7 +372,7 @@ Der Rest ist Handarbeit und Serverarbeit. **Nichts davon läuft ohne das Wort de
 7. Restore-Probe auf dem Server aus dem neuesten Snapshot (Befehl am Ende der Ausgabe von Schritt 6). Erwartet: jede Tabelle hat dieselbe Zeilenzahl wie die Quelle.
 8. `bash tools/deploy-entwurf.sh` (zuerst), danach `pnpm run deploy:app` (Dump vor der Migration erscheint als Tor 5b).
 9. `bash tools/pruefe-betrieb.sh --slug <slug des Vereins> --mail jufi-app.de --dkim-selector <selektor von Hetzner>` — Erwartet: nur ✓, auch für `app-test` → 301.
-10. Mail umschalten: die vier `JUFI_SMTP_*`-Zeilen in die `.env`, `docker compose up -d jufi`, dann `docker compose exec -T jufi node --input-type=module - <eigene Adresse> < tools/mail-testen.mjs`; in der empfangenen Mail „Originalnachricht anzeigen“: `spf=pass`, `dkim=pass`, `dmarc=pass`.
+10. Mail umschalten: die vier `JUFI_SMTP_*`-Zeilen in die `.env`, `docker compose up -d jufi` auf dem Server, dann vom Entwicklungsrechner `ssh <server> 'cd /home/paperless/paperless-ngx && docker compose exec -T jufi node --input-type=module - <eigene Adresse>' < tools/mail-testen.mjs` (die Datei liegt weder im Image noch auf dem Server); in der empfangenen Mail „Originalnachricht anzeigen“: `spf=pass`, `dkim=pass`, `dmarc=pass`.
 11. `bash tools/pruefe-texte.sh` — muss leer sein (Exit 0).
 12. Erst jetzt die drei Jugendleiter einladen (Spec 1.2).
 

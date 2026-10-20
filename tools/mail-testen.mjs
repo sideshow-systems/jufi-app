@@ -7,7 +7,7 @@
 //
 // Im Container, wo die Werte schon in der Umgebung stehen (die Datei liegt nicht
 // im Image, daher ueber stdin):
-//   docker compose -f docker-compose.yml exec -T jufi node --input-type=module - <adresse> < tools/mail-testen.mjs
+//   ssh <server> 'cd /home/paperless/paperless-ngx && docker compose exec -T jufi node --input-type=module - <adresse>' < tools/mail-testen.mjs
 //
 // Gelesen wird ausschliesslich process.env, Namen wie in apps/jufi (SMTP_HOST,
 // SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_ABSENDER, MAIL_ANTWORT,
