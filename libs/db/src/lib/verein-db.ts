@@ -287,6 +287,13 @@ export type VereinDb = runtime.Types.Extensions.DynamicClientExtensionThis<
 >;
 
 /**
+ * Der Client, den `vereinDb(...).$transaction(async (tx) => ...)` dem Callback
+ * uebergibt. Aus der Callback-Ueberladung abgeleitet statt von Hand mit Omit
+ * nachgebaut, damit er mit Prismas Typ mitwaechst.
+ */
+export type VereinTx = Parameters<Parameters<VereinDb['$transaction']>[0]>[0];
+
+/**
  * Client fuer genau einen Verein. Daten der App laufen ausschliesslich hierueber
  * (Rahmen-Spec 7.4); der ungebundene PrismaClient bleibt Kommandozeile und
  * Plattform-Admin vorbehalten.
