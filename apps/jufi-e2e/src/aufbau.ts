@@ -59,6 +59,8 @@ export default async function aufbau(): Promise<() => Promise<void>> {
 		const link = await legeAdminAn(umgebung);
 		await pruefeServerDatenbank(link);
 		process.env['E2E_ADMIN_LINK'] = link;
+		// Fuer threads.ts im Worker: Der Ablauf legt Threads direkt in dieser Datenbank an.
+		process.env['E2E_DATABASE_URL'] = datenbankUrl;
 	} catch (fehler) {
 		await beende(server, serverBeenden);
 		throw fehler;

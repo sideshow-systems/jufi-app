@@ -77,6 +77,40 @@ export async function leisteVerdecktNichts(page: Page): Promise<void> {
 }
 
 /**
+ * Der Verlauf eines Threads: Das Eingabefeld sitzt fest ueber der unteren Leiste und die letzte
+ * Nachricht muss nach dem Scrollen ans Seitenende ueber ihm enden. Beides gemessen statt aus dem CSS
+ * gerechnet (56 px Leiste, 72 px Abstandhalter): Eine Rechnung sagt nichts ueber die Aussparung am
+ * Geraet und nichts darueber, ob eine andere Regel dazwischenkommt. Ohne Nachricht gaebe es nichts zu
+ * messen; das ist ein Fehler der Testdaten, kein Erfolg.
+ */
+export async function verlaufUeberLeiste(page: Page): Promise<void> {
+	const m = await page.evaluate(() => {
+		window.scrollTo(0, document.documentElement.scrollHeight);
+		const eingabe = document.querySelector('jf-verlauf form.eingabe');
+		const nachrichten = document.querySelectorAll('jf-verlauf ol > li');
+		const leiste = document.querySelector('jf-mitglieder-huelle > .leiste');
+		if (!eingabe || !leiste) throw new Error('kein Eingabefeld des Verlaufs oder keine .leiste auf der Seite');
+		const letzte = nachrichten[nachrichten.length - 1];
+		if (!letzte || letzte.classList.contains('leer')) throw new Error('Verlauf ohne Nachricht');
+		return {
+			eingabeOben: eingabe.getBoundingClientRect().top,
+			eingabeUnten: eingabe.getBoundingClientRect().bottom,
+			leisteOben: leiste.getBoundingClientRect().top,
+			nachrichtUnten: letzte.getBoundingClientRect().bottom,
+		};
+	});
+	// Halbe Pixel aus gebrochenen Hoehen sind keine Ueberdeckung.
+	expect(
+		m.eingabeUnten,
+		`Eingabefeld endet bei ${m.eingabeUnten}, die Leiste beginnt bei ${m.leisteOben}`,
+	).toBeLessThanOrEqual(m.leisteOben + 0.5);
+	expect(
+		m.nachrichtUnten,
+		`letzte Nachricht endet bei ${m.nachrichtUnten}, das Eingabefeld beginnt bei ${m.eingabeOben}`,
+	).toBeLessThanOrEqual(m.eingabeOben + 0.5);
+}
+
+/**
  * Abstand von der Unterkante der Menuezeile (aside) zur Oberkante des Inhalts in der Verwaltungs-Huelle.
  * Die Luecke aus Task 12 entstand nur, wenn der Inhalt kuerzer als der Bildschirm ist: Dann verteilte das
  * Grid den Freiraum seiner min-height auf beide Zeilen. Gemessen wird deshalb auf jeder Verwaltungsseite,

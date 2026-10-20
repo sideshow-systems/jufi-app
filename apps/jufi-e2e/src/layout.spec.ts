@@ -7,13 +7,14 @@ import {
 	keinWaagrechtesScrollen,
 	leisteVerdecktNichts,
 	lesbar,
+	verlaufUeberLeiste,
 	seitenGrund,
 	tippflaechen,
 } from './messen';
 
 /**
  * Layouts gemessen: jede Seite bei 375 x 812 (Handy) und 1280 x 800 (Verwaltung am Desktop), hell und
- * dunkel. Die Sitzungen und Mias ID legt der Ablauf in ZUSTAND ab (Projekt ablauf, von dem dieses
+ * dunkel. Die Sitzungen und die IDs (Mia, Bowling, Austausch) legt der Ablauf in ZUSTAND ab (Projekt ablauf, von dem dieses
  * abhaengt); gemessen wird also an genau dem Verein, den der Ablauf aufgebaut hat. Alle Daten erfunden.
  *
  * Die Seiten werden nur angesehen, nie veraendert: Jeder Test bekommt einen frischen Kontext mit der
@@ -32,8 +33,13 @@ type Art = 'oeffentlich' | 'mitglied' | 'verwaltung';
 interface Seite {
 	rolle: Rolle;
 	art: Art;
-	/** Ohne fuehrenden Schraegstrich unterhalb der Wurzel; der Platzhalter :mia steht fuer Mias ID aus dem Ablauf. */
+	/**
+	 * Ohne fuehrenden Schraegstrich unterhalb der Wurzel; die Platzhalter :mia, :bowling und :austausch
+	 * stehen fuer die IDs und Thread-Segmente aus dem Ablauf. Eine Abfrage (?reiter=verlauf) gehoert zum Pfad.
+	 */
 	pfad: string;
+	/** Die Seite zeigt den Verlauf mit festem Eingabefeld; gemessen wird, dass es nichts verdeckt und nichts davon verdeckt wird. */
+	verlauf?: true;
 }
 
 const SEITEN: Seite[] = [
@@ -52,6 +58,10 @@ const SEITEN: Seite[] = [
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/meine-jungfischer` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/` },
+	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/t/:bowling` },
+	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/t/:bowling` },
+	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/t/:bowling?reiter=verlauf`, verlauf: true },
+	{ rolle: 'leitung', art: 'mitglied', pfad: `${SLUG}/t/:austausch?reiter=verlauf`, verlauf: true },
 ];
 
 const GROESSEN = [
@@ -66,16 +76,25 @@ function sitzung(rolle: Rolle): string | { cookies: []; origins: [] } {
 	return rolle === 'oeffentlich' ? { cookies: [], origins: [] } : join(ZUSTAND, `${rolle}.json`);
 }
 
+const PLATZHALTER = [':mia', ':bowling', ':austausch'] as const;
+
 /**
  * Erst im Test gelesen, nicht beim Laden der Datei: Playwright laedt alle Testdateien schon vor dem
  * ersten Projekt, und dann hat der Ablauf ids.json noch nicht geschrieben.
  */
 function adresse(pfad: string): string {
-	// Ein Platzhalter mit Doppelpunkt wie in den Routen: Er kann in keinem echten Pfadteil vorkommen,
+	// Platzhalter mit Doppelpunkt wie in den Routen: Sie koennen in keinem echten Pfadteil vorkommen,
 	// anders als ein Teilstring wie /mia, der auch in /miami traefe.
-	if (!pfad.includes(':mia')) return `/${pfad}`;
-	const ids = JSON.parse(readFileSync(join(ZUSTAND, 'ids.json'), 'utf8')) as { mia: string };
-	return `/${pfad.replace(':mia', ids.mia)}`;
+	const gesucht = PLATZHALTER.filter((p) => pfad.includes(p));
+	if (gesucht.length === 0) return `/${pfad}`;
+	const ids = JSON.parse(readFileSync(join(ZUSTAND, 'ids.json'), 'utf8')) as Record<string, string>;
+	let ersetzt = pfad;
+	for (const platzhalter of gesucht) {
+		const id = ids[platzhalter.slice(1)];
+		if (!id) throw new Error(`ids.json kennt ${platzhalter} nicht, lief der Ablauf?`);
+		ersetzt = ersetzt.replace(platzhalter, id);
+	}
+	return `/${ersetzt}`;
 }
 
 /**
@@ -86,7 +105,9 @@ function adresse(pfad: string): string {
 async function oeffne(page: Page, ziel: string): Promise<void> {
 	await page.goto(ziel);
 	await page.waitForLoadState('networkidle');
-	await expect(page).toHaveURL((url) => url.pathname.replace(/\/$/, '') === ziel.replace(/\/$/, ''));
+	// Nur der Pfad: Die Abfrage (?reiter=verlauf) gehoert zum Ziel, die Seite darf sie behalten.
+	const pfad = ziel.split('?')[0];
+	await expect(page).toHaveURL((url) => url.pathname.replace(/\/$/, '') === pfad.replace(/\/$/, ''));
 	await expect(page.locator('h1').first()).toBeVisible();
 	await expect(page.getByText(/Wird geladen|Lädt/)).toHaveCount(0);
 }
@@ -109,6 +130,7 @@ for (const groesse of GROESSEN) {
 
 						if (handy) expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
 						if (seite.art === 'mitglied') await leisteVerdecktNichts(page);
+						if (seite.verlauf) await verlaufUeberLeiste(page);
 
 						if (seite.art === 'verwaltung') {
 							const seitenleiste = page.locator('aside');

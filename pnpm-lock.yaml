@@ -180,6 +180,9 @@ importers:
       '@jufi/db':
         specifier: workspace:*
         version: link:../../libs/db
+      '@jufi/domain':
+        specifier: workspace:*
+        version: link:../../libs/domain
 
   libs/auth:
     dependencies:
