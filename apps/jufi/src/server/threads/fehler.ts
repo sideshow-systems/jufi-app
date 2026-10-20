@@ -20,6 +20,31 @@ export const FRIST_ABGELAUFEN: Antwortkoerper = { fehler: 'Frist abgelaufen', co
 /** Bewusst nichtssagend: Wem die clientId gehoert, darf der Anfragende nicht erfahren. */
 export const CLIENT_ID_VERGEBEN: Antwortkoerper = { fehler: 'Ungültige Anfrage', code: 'CLIENT_ID_VERGEBEN' };
 
+// Konflikte der Verwaltung (Plan-Entscheidung 7). BEANTWORTET und DOPPELTE_TEILNAHME gehen
+// mit dem Satz und dem Feld des Feldfehlers hinaus (amFeld), der Text hier ist nur der
+// Rueckfall; AUSTAUSCH bekommt sein Feld ebenfalls dort.
+export const VERALTET: Antwortkoerper = {
+	fehler: 'Der Thread wurde inzwischen geändert. Bitte neu laden.',
+	code: 'VERALTET',
+};
+export const AUSTAUSCH: Antwortkoerper = {
+	fehler: 'Am Jugendsprecher-Austausch lassen sich nur Titel, Modus und Anpinnen ändern.',
+	code: 'AUSTAUSCH',
+};
+export const BEANTWORTET: Antwortkoerper = { fehler: 'Darauf hat schon jemand geantwortet.', code: 'BEANTWORTET' };
+export const DOPPELTE_TEILNAHME: Antwortkoerper = {
+	fehler: 'Es gibt schon eine Teilnahme-Umfrage.',
+	code: 'DOPPELTE_TEILNAHME',
+};
+
+/**
+ * Ein Konflikt an einem Feld des Editors: Code aus der Konstante, Feld und (wenn da) Satz
+ * aus dem Feldfehler, damit der Client die Meldung an das Eingabefeld haengen kann.
+ */
+export function amFeld(konflikt: Antwortkoerper, f: { feld: string; text?: string }): Antwortkoerper {
+	return { ...konflikt, fehler: f.text ?? konflikt.fehler, feld: f.feld };
+}
+
 /**
  * Ende einer Entscheidung innerhalb der Transaktion, geworfen statt zurueckgegeben:
  * Sie rollt die Transaktion mit zurueck, und mit ihr den Aenderungsstand, den

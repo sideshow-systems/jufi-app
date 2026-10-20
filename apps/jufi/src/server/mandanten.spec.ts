@@ -136,6 +136,28 @@ async function eigenerThread(k: Kontext): Promise<string> {
 	return (await legeThreadAn(k.prisma, k.eigen, new Date(), { titel: 'Eigener Thread' })).threadId;
 }
 
+/** Ein gueltiger Thread-Entwurf mit einer Info, fuer die Untergruppen-IDs, die ein Fall pruefen will. */
+function mandantEntwurf(untergruppenIds: string[]) {
+	return {
+		titel: 'Mandant',
+		modus: 'KOMMENTARE',
+		rollenfilter: 'JUNGFISCHER_FAMILIE',
+		alleUntergruppen: untergruppenIds.length === 0,
+		untergruppenIds,
+		module: [{ typ: 'INFO', id: null, titel: null, text: 'Hallo' }],
+	};
+}
+
+/** Alles, was Anlegen oder Ersetzen eines Threads in fremd veraendern koennte. */
+async function fremdeThreads(k: Kontext) {
+	return {
+		threads: await k.prisma.thread.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
+		module: await k.prisma.threadModul.count({ where: { vereinId: k.fremd.id } }),
+		zuordnungen: await k.prisma.threadUntergruppe.count({ where: { vereinId: k.fremd.id } }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
 /**
  * Jede Vereins-Route braucht hier einen Fall (Spec 9). Kommt eine Route
  * hinzu, scheitert der erste Test, bis der Fall eingetragen ist.
@@ -529,6 +551,43 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
 		// Gegenprobe: "Antworten im Detail" genuegt an einem eigenen Thread, das Recht fehlt also nicht.
 		expect((await hole(k.eigen.slug, await eigenerThread(k), k.eigenerLeiter)).status).toBe(200);
+	},
+	'POST /threads': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const lege = (slug: string, untergruppenIds: string[], cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads`, {
+				methode: 'POST',
+				body: { entwurf: mandantEntwurf(untergruppenIds) },
+				cookie,
+			});
+		expect((await lege(k.gesperrt.slug, [], k.eigenerLeiter)).status).toBe(404);
+		expect((await lege(k.fremd.slug, [], k.eigenerLeiter)).status).toBe(401);
+		// Die Untergruppe aus fremd gibt es in eigen nicht: 400 am Feld, nicht 404 aus einem P2003.
+		const r = await lege(k.eigen.slug, [k.fremdeGruppeId], k.eigenerLeiter);
+		expect(r.status).toBe(400);
+		expect(await r.json()).toEqual({ fehler: 'Diese Untergruppe gibt es nicht mehr.', feld: 'zielgruppe' });
+		// Gegenprobe: Mit dem Recht entsteht in eigen ein Thread, das Recht fehlt also nicht.
+		expect((await lege(k.eigen.slug, [], k.eigenerLeiter)).status).toBe(201);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'PUT /threads/:id': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const ersetze = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}`, {
+				methode: 'PUT',
+				body: { version: 0, entwurf: mandantEntwurf([]) },
+				cookie,
+			});
+		const fremder = k.fremderThread.threadId;
+		expect((await ersetze(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await ersetze(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await ersetze(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters laesst sich ersetzen, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await ersetze(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
 	},
 	'DELETE /verlauf/:eintragId': async (k) => {
 		const vorher = await fremderVerlauf(k);
