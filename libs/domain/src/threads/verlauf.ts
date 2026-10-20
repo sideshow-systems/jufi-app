@@ -1,5 +1,6 @@
 import { terminFehler, terminZeit, type TerminDaten } from '../module/termin/termin.js';
 import { fristZeitpunkt } from '../module/umfrage/umfrage.js';
+import { istKalendertag } from '../zeit.js';
 import { absenderName, kurzname } from './namen.js';
 import { darfLoeschenNachricht } from './rechte.js';
 import type { ThreadKopf, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
@@ -12,8 +13,6 @@ export const MODUS_TEXT: Readonly<Record<ThreadModus, string>> = {
 
 export type SystemArt = 'VEROEFFENTLICHT' | 'TERMIN_GEAENDERT' | 'FRIST_GEAENDERT' | 'MODUS_GEAENDERT';
 
-const TAG = /^\d{4}-\d{2}-\d{2}$/;
-
 function zeichenkette(wert: unknown): wert is string {
 	return typeof wert === 'string';
 }
@@ -23,14 +22,7 @@ function zeichenketteOderNull(wert: unknown): wert is string | null {
 }
 
 function istTag(wert: unknown): wert is string {
-	return zeichenkette(wert) && TAG.test(wert) && kalendertagGibtEs(wert);
-}
-
-// 2026-02-31 passt auf die Form, ist aber kein Tag; Date.UTC rollt ihn still in den Maerz.
-function kalendertagGibtEs(tag: string): boolean {
-	const [j, m, t] = tag.split('-').map(Number);
-	const d = new Date(Date.UTC(j, m - 1, t));
-	return d.getUTCFullYear() === j && d.getUTCMonth() === m - 1 && d.getUTCDate() === t;
+	return zeichenkette(wert) && istKalendertag(wert);
 }
 
 /**

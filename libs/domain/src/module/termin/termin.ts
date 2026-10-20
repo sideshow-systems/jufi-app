@@ -1,4 +1,4 @@
-import { berlinZeitpunkt, tagPlus } from '../../zeit.js';
+import { berlinZeitpunkt, istKalendertag, tagPlus } from '../../zeit.js';
 
 /**
  * Form und Anzeige eines Termins (Spec 2026-10-12, 3.1 und 3.2): Startdatum
@@ -67,9 +67,14 @@ export function terminZeit(t: TerminDaten): string {
  * selben Tag ist auch Gleichheit einer, ein Termin ohne Dauer ist ein
  * Eingabefehler. Ein Ende ohne Beginn ist erlaubt ("bis 12:00"), es gibt nichts
  * zu vergleichen. Die Uhrzeit wird vor dem Vergleich geprueft, weil
- * Zeichenketten wie "25:00" sonst scheinbar vernuenftig sortieren.
+ * Zeichenketten wie "25:00" sonst scheinbar vernuenftig sortieren. Noch davor
+ * kommt der Kalendertag: Mit "2026-02-30" ist jeder Vergleich von Tagen
+ * bedeutungslos, und die Datenbank wuerde ihn still in den Maerz rollen.
  */
 export function terminFehler(t: TerminDaten): string | null {
+	for (const tag of [t.startDatum, t.endDatum]) {
+		if (tag !== null && !istKalendertag(tag)) return 'Bitte ein gültiges Datum.';
+	}
 	if (t.endDatum && t.endDatum < t.startDatum) return 'Das Enddatum liegt vor dem Startdatum.';
 	for (const zeit of [t.beginn, t.ende]) {
 		if (zeit !== null && !UHRZEIT.test(zeit)) return 'Uhrzeit bitte als HH:MM.';

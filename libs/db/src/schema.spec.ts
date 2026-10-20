@@ -728,6 +728,37 @@ describe('Threads (TP3)', () => {
 		);
 	});
 
+	it('Modultitel bis 80 Zeichen, Ort und Treffpunkt bis 200 Zeichen', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const tag = new Date('2026-10-24');
+
+		const gut = await prisma.threadModul.create({
+			data: { vereinId: a.id, threadId: t.id, typ: 'INFO', position: 0, titel: 'x'.repeat(80) },
+		});
+		expect(gut.titel).toHaveLength(80);
+		expect(
+			await fehlertext(
+				prisma.threadModul.create({
+					data: { vereinId: a.id, threadId: t.id, typ: 'INFO', position: 1, titel: 'x'.repeat(81) },
+				}),
+			),
+		).toContain('modul_titel');
+		expect(
+			await fehlertext(
+				prisma.threadModul.create({
+					data: { vereinId: a.id, threadId: t.id, typ: 'INFO', position: 2, titel: '' },
+				}),
+			),
+		).toContain('modul_titel');
+
+		await termin(a.id, t.id, { startDatum: tag, ort: 'o'.repeat(200), treffpunkt: 'p'.repeat(200) });
+		expect(await fehlertext(termin(a.id, t.id, { startDatum: tag, ort: 'o'.repeat(201) }))).toContain('termin_ort');
+		expect(await fehlertext(termin(a.id, t.id, { startDatum: tag, treffpunkt: 'p'.repeat(201) }))).toContain(
+			'termin_treffpunkt',
+		);
+	});
+
 	it('Termin: mehrtaegig 17:00-12:00 und Ende ohne Beginn erlaubt', async () => {
 		const a = await verein();
 		const t = await thread(a.id, (await erwachsener(a.id)).id);

@@ -155,6 +155,8 @@ enum AenderungArt {
   VERLAUF
   SICHTBARKEIT
   GELOESCHT
+  /// Anpinnen und Archivieren: aendert die Liste, ist aber keine Aktivitaet im Thread.
+  LISTE
 }
 
 // --- Verein -------------------------------------------------------------------
@@ -599,6 +601,10 @@ model Thread {
   /// jedem Aufruf alle Threads eines Vereins durchsuchen muesste.
   letzteAktivitaetAm    DateTime     @default(now())
   letzteAktivitaetStand Int          @default(0)
+  /// Stand des letzten Anlegens oder Speicherns im Editor; PUT schickt ihn als
+  /// Version mit. Eigene Spalte statt geaendertAm, weil @updatedAt bei jeder
+  /// Antwort springt und den offenen Editor jedes Mal veraltet machte.
+  bearbeitetStand       Int          @default(0)
   angelegtAm            DateTime     @default(now())
   /// Technischer Zeitstempel: @updatedAt springt bei jedem updateMany aus
   /// mitAenderung (auch bei jeder Antwort und Nachricht) auf die Uhr des Prozesses.
