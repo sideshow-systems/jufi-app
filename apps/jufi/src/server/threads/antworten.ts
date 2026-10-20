@@ -1,5 +1,5 @@
-import { mitAenderung } from '@jufi/db';
-import { darfAntworten, umfrageAnsicht, type ModulDaten, type UmfrageAnsicht } from '@jufi/domain';
+import { mitAenderung, type AenderungEingabe, type VereinTx } from '@jufi/db';
+import { darfAntworten, umfrageAnsicht, type ModulDaten, type UmfrageAnsicht, type UmfrageDaten } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
@@ -79,6 +79,76 @@ function urteil(
 	return dieselbe ? new Wiederholung(null) : new ThreadAbbruch(409, CLIENT_ID_VERGEBEN);
 }
 
+/**
+ * Ob die IDs zur Umfrage passen: Eine ID einer anderen Umfrage, auch "vielleicht" bei
+ * abgeschaltetem Vielleicht, steht nicht in ihren Optionen, und mehrere gehen nur bei
+ * "mehrfach". Die Datenbank faende das ueber den Fremdschluessel auch, aber erst als P2003
+ * und damit als 404. Eine Stelle fuer die Pruefung vor und in der Transaktion.
+ */
+function passtZurUmfrage(umfrage: UmfrageDaten, optionIds: readonly string[]): boolean {
+	const optionen = new Set(umfrage.optionen.map((o) => o.id));
+	return optionIds.every((id) => optionen.has(id)) && (umfrage.mehrfach || optionIds.length <= 1);
+}
+
+/**
+ * Die Arbeit des Antwortens, innerhalb von mitAenderung (die Vereinszeile ist dann gesperrt).
+ * Reihenfolge wie bei schreibeNachricht (verlauf.ts): erst die clientId (eine Wiederholung
+ * bleibt 200, auch nach der Frist, Spec 4.2), dann Thread, Umfrage und Umfeld neu laden und
+ * die Pruefungen der Route wiederholen, dann schreiben. Der Editor kann zwischen Pruefung
+ * und Schreiben Zielgruppe, Einheit, Optionen, Frist und Archiv aendern und Familien und
+ * Untergruppen verschieben sich in der Verwaltung; ob die Person noch fuer das Kind
+ * antworten darf, entscheidet darfAntworten auf dem neuen Stand (Plan-Entscheidung 3).
+ * Verworfen: nur die Person unter der Sperre laden -- "ist fuerId noch gefragt" haengt an
+ * Zuordnungen und Untergruppen, nicht nur an den Rechten der Person. Preis: das ganze Umfeld
+ * des Vereins unter der Sperre, wie bei schreibeNachricht.
+ *
+ * Die Optionen werden gegen die frisch geladene Umfrage geprueft: Eine Option, die der
+ * Editor inzwischen entfernte, waere sonst ein P2003 und damit eine 404 statt einer 400.
+ * Fehler werden geworfen, damit mitAenderung den Stand zurueckrollt.
+ */
+export async function schreibeAntwort(
+	tx: VereinTx,
+	eingabe: {
+		personId: string;
+		threadId: string;
+		modulId: string;
+		fuerId: string;
+		optionIds: readonly string[];
+		clientId: string;
+		zeit: Date;
+	},
+	stand: number,
+): Promise<{ ergebnis: null; aenderungen: readonly AenderungEingabe[] }> {
+	const { personId, threadId, modulId, fuerId, optionIds, clientId, zeit } = eingabe;
+	const vorhanden = await tx.umfrageAntwort.findFirst({ where: { clientId }, select: AUSWAHL });
+	if (vorhanden) throw urteil(vorhanden, personId, modulId, fuerId);
+
+	const [umfeld, thread] = await Promise.all([ladeThreadUmfeld(tx), ladeThread(tx, threadId)]);
+	const mich = umfeld.personen.get(personId);
+	const modul = thread?.module.find((m): m is Umfrage => m.typ === 'UMFRAGE' && m.id === modulId);
+	if (!thread || !mich || !modul) throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
+	const erlaubnis = darfAntworten(mich, fuerId, modul.umfrage, thread.kopf, umfeld, zeit);
+	if (erlaubnis === 'NICHT_GEFUNDEN') throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
+	if (erlaubnis === 'ENTWURF') throw new ThreadAbbruch(409, ENTWURF);
+	if (erlaubnis === 'FRIST_ABGELAUFEN') throw new ThreadAbbruch(410, FRIST_ABGELAUFEN);
+	if (!passtZurUmfrage(modul.umfrage, optionIds)) throw new ThreadAbbruch(400, ungueltigesFeld('optionen'));
+
+	// Eine Zeile je Gefragtem: Wer zuletzt antwortet, gilt, auch wenn es eine andere
+	// Bezugsperson ist (die Zeile nennt dann sie). Die Optionen werden ersetzt statt
+	// abgeglichen -- bei hoechstens 20 Optionen ist das einfacher und genauso korrekt.
+	const antwort = await tx.umfrageAntwort.upsert({
+		where: { umfrageId_fuerId: { umfrageId: modulId, fuerId } },
+		create: { umfrageId: modulId, fuerId, vonId: personId, abgegebenAm: zeit, clientId },
+		update: { vonId: personId, abgegebenAm: zeit, clientId },
+		select: { id: true },
+	});
+	await tx.umfrageAntwortOption.deleteMany({ where: { antwortId: antwort.id } });
+	await tx.umfrageAntwortOption.createMany({
+		data: optionIds.map((optionId) => ({ umfrageId: modulId, antwortId: antwort.id, optionId })),
+	});
+	return { ergebnis: null, aenderungen: [{ threadId, art: 'ANTWORT' as const, objektId: antwort.id }] };
+}
+
 /** PUT /umfragen/:modulId/antworten/:fuerId. */
 export function antwortenRouten(router: Router, deps: VolleAppDeps): void {
 	const { jetzt, antwortenFenster } = deps;
@@ -147,41 +217,27 @@ export function antwortenRouten(router: Router, deps: VolleAppDeps): void {
 			if (erlaubnis === 'ENTWURF') return void res.status(409).json(ENTWURF);
 			if (erlaubnis === 'FRIST_ABGELAUFEN') return void res.status(410).json(FRIST_ABGELAUFEN);
 
-			// Gegen die Umfrage: Eine ID einer anderen Umfrage, auch "vielleicht" bei
-			// abgeschaltetem Vielleicht, steht nicht in ihren Optionen. Die Datenbank faende das
-			// ueber den Fremdschluessel auch, aber erst als P2003 und damit als 404.
-			const optionen = new Set(modul.umfrage.optionen.map((o) => o.id));
-			if (
-				!eingabe.optionIds.every((id) => optionen.has(id)) ||
-				(!modul.umfrage.mehrfach && eingabe.optionIds.length > 1)
-			) {
+			if (!passtZurUmfrage(modul.umfrage, eingabe.optionIds))
 				return void res.status(400).json(ungueltigesFeld('optionen'));
-			}
 
 			let fehler: unknown;
 			try {
 				const { stand } = await db.$transaction((tx) =>
-					mitAenderung(tx, verein.id, person.id, zeit, async () => {
-						const vorhanden = await tx.umfrageAntwort.findFirst({
-							where: { clientId: eingabe.clientId },
-							select: AUSWAHL,
-						});
-						if (vorhanden) throw urteil(vorhanden, person.id, modulId, fuerId);
-						// Eine Zeile je Gefragtem: Wer zuletzt antwortet, gilt, auch wenn es eine andere
-						// Bezugsperson ist (die Zeile nennt dann sie). Die Optionen werden ersetzt statt
-						// abgeglichen -- bei hoechstens 20 Optionen ist das einfacher und genauso korrekt.
-						const antwort = await tx.umfrageAntwort.upsert({
-							where: { umfrageId_fuerId: { umfrageId: modulId, fuerId } },
-							create: { umfrageId: modulId, fuerId, vonId: person.id, abgegebenAm: zeit, clientId: eingabe.clientId },
-							update: { vonId: person.id, abgegebenAm: zeit, clientId: eingabe.clientId },
-							select: { id: true },
-						});
-						await tx.umfrageAntwortOption.deleteMany({ where: { antwortId: antwort.id } });
-						await tx.umfrageAntwortOption.createMany({
-							data: eingabe.optionIds.map((optionId) => ({ umfrageId: modulId, antwortId: antwort.id, optionId })),
-						});
-						return { ergebnis: null, aenderungen: [{ threadId, art: 'ANTWORT' as const, objektId: antwort.id }] };
-					}),
+					mitAenderung(tx, verein.id, person.id, zeit, (stand) =>
+						schreibeAntwort(
+							tx,
+							{
+								personId: person.id,
+								threadId,
+								modulId,
+								fuerId,
+								optionIds: eingabe.optionIds,
+								clientId: eingabe.clientId,
+								zeit,
+							},
+							stand,
+						),
+					),
 				);
 				return void res.status(200).json(await ansicht(stand));
 			} catch (error) {

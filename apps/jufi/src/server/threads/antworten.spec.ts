@@ -1,4 +1,4 @@
-import { createPrismaClientFromEnv } from '@jufi/db';
+import { createPrismaClientFromEnv, mitAenderung, vereinDb } from '@jufi/db';
 import type { ThreadAnsicht, UmfrageAnsicht } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -6,7 +6,9 @@ import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
+import { ThreadAbbruch, Wiederholung } from './fehler.js';
 import { Fensterzaehler } from './fenster.js';
+import { schreibeAntwort } from './antworten.js';
 import { legeThreadAn, ordneZu, type TestModul } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
@@ -459,6 +461,151 @@ describe('PUT /umfragen/:modulId/antworten/:fuerId', () => {
 		expect(zeilen).toHaveLength(1);
 		expect(zeilen[0]?.optionen).toHaveLength(1);
 		expect(await s.stand()).toBe(vorher + 2);
+	});
+
+	/**
+	 * Die Arbeit der Route unter der Sperre, direkt aufgerufen, nachdem der Test die Umfrage
+	 * oder den Thread in der Datenbank geaendert hat (der Editor zwischen Pruefung und
+	 * Schreiben). Verworfen: ein Testhaken in deps -- Produktionscode nur fuer den Test.
+	 */
+	describe('schreibeAntwort unter der Sperre', () => {
+		type Szenario = Awaited<ReturnType<typeof szenario>>;
+
+		function schreibeDirekt(
+			s: Szenario,
+			u: { threadId: string; modulId: string },
+			fuerId: string,
+			optionIds: string[],
+			clientId: string = randomUUID(),
+			personId = s.sandra.personId,
+		) {
+			return vereinDb(prisma, s.verein.id).$transaction((tx) =>
+				mitAenderung(tx, s.verein.id, personId, JETZT, (stand) =>
+					schreibeAntwort(
+						tx,
+						{ personId, threadId: u.threadId, modulId: u.modulId, fuerId, optionIds, clientId, zeit: JETZT },
+						stand,
+					),
+				),
+			);
+		}
+
+		/** Erwartet den Abbruch, und dass weder Antwort noch Stand uebrig bleiben. */
+		async function erwarteAbbruch(
+			s: Szenario,
+			u: { threadId: string; modulId: string; o: Record<string, string> },
+			fuerId: string,
+			status: number,
+			antwort: object,
+			optionIds = [u.o['dabei'] as string],
+		) {
+			const vorher = await s.stand();
+			const fehler = await schreibeDirekt(s, u, fuerId, optionIds).catch((e: unknown) => e);
+			expect(fehler).toBeInstanceOf(ThreadAbbruch);
+			expect(fehler).toMatchObject({ status, antwort: expect.objectContaining(antwort) });
+			expect(await s.zeilen()).toHaveLength(0);
+			expect(await s.stand()).toBe(vorher);
+		}
+
+		it('ohne Aenderung dazwischen schreibt sie die Antwort mit dem Stand der Transaktion', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			const vorher = await s.stand();
+
+			const { stand, aenderungen } = await schreibeDirekt(s, u, s.max.personId, [u.o['dabei'] as string]);
+
+			expect(stand).toBe(vorher + 1);
+			const zeilen = await s.zeilen();
+			expect(zeilen).toHaveLength(1);
+			expect(aenderungen).toEqual([{ threadId: u.threadId, art: 'ANTWORT', objektId: zeilen[0]?.id }]);
+		});
+
+		it('Frist inzwischen abgelaufen: 410 FRIST_ABGELAUFEN, nichts geschrieben, kein Stand', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.umfrageModul.update({ where: { id: u.modulId }, data: { frist: new Date(JETZT.getTime() - 1000) } });
+			await erwarteAbbruch(s, u, s.max.personId, 410, { code: 'FRIST_ABGELAUFEN' });
+		});
+
+		it('Thomas darf nach der Frist weiter nachtragen: die Wiederpruefung ist dieselbe Regel', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.umfrageModul.update({ where: { id: u.modulId }, data: { frist: new Date(JETZT.getTime() - 1000) } });
+
+			await schreibeDirekt(s, u, s.max.personId, [u.o['dabei'] as string], randomUUID(), s.thomas.personId);
+
+			expect(await s.zeilen()).toHaveLength(1);
+		});
+
+		it('Thread inzwischen ein Entwurf: fuer Sandra 404, fuer Thomas 409 ENTWURF', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.thread.update({ where: { id: u.threadId }, data: { veroeffentlichtAm: null } });
+
+			await erwarteAbbruch(s, u, s.max.personId, 404, { fehler: 'nicht gefunden' });
+			const fehler = await schreibeDirekt(
+				s,
+				u,
+				s.max.personId,
+				[u.o['dabei'] as string],
+				randomUUID(),
+				s.thomas.personId,
+			).catch((e: unknown) => e);
+			expect(fehler).toMatchObject({ status: 409, antwort: expect.objectContaining({ code: 'ENTWURF' }) });
+			expect(await s.zeilen()).toHaveLength(0);
+		});
+
+		it('Einheit inzwischen "Pro Erwachsenem": Max ist nicht mehr gefragt, 404', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.umfrageModul.update({ where: { id: u.modulId }, data: { einheit: 'ERWACHSENER' } });
+			await erwarteAbbruch(s, u, s.max.personId, 404, { fehler: 'nicht gefunden' });
+		});
+
+		it('Zielgruppe inzwischen nur Jugendleiter: Sandra sieht den Thread nicht mehr, 404', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.thread.update({ where: { id: u.threadId }, data: { rollenfilter: 'NUR_JUGENDLEITER' } });
+			await erwarteAbbruch(s, u, s.max.personId, 404, { fehler: 'nicht gefunden' });
+		});
+
+		it('Zuordnung inzwischen geloest: Sandra ist nicht mehr fuer Max zustaendig, 404', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.bezugsperson.deleteMany({
+				where: { erwachsenerId: s.sandra.personId, jungfischerId: s.max.personId },
+			});
+			await erwarteAbbruch(s, u, s.max.personId, 404, { fehler: 'nicht gefunden' });
+		});
+
+		it('Option inzwischen entfernt: 400 optionen statt eines Fremdschluesselfehlers', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.umfrageOption.delete({ where: { id: u.o['vielleicht'] as string } });
+			await erwarteAbbruch(s, u, s.max.personId, 400, { feld: 'optionen' }, [u.o['vielleicht'] as string]);
+		});
+
+		it('Umfrage inzwischen geloescht: 404', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await prisma.threadModul.delete({ where: { id: u.modulId } });
+			await erwarteAbbruch(s, u, s.max.personId, 404, { fehler: 'nicht gefunden' });
+		});
+
+		it('dieselbe clientId nach der Frist bleibt eine Wiederholung, keine 410 (Spec 4.2)', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			await schreibeDirekt(s, u, s.max.personId, [u.o['dabei'] as string], 'wieder-1');
+			await prisma.umfrageModul.update({ where: { id: u.modulId }, data: { frist: new Date(JETZT.getTime() - 1000) } });
+			const vorher = await s.stand();
+
+			const fehler = await schreibeDirekt(s, u, s.max.personId, [u.o['dabei'] as string], 'wieder-1').catch(
+				(e: unknown) => e,
+			);
+
+			expect(fehler).toBeInstanceOf(Wiederholung);
+			expect(await s.stand()).toBe(vorher);
+		});
 	});
 
 	it('mehr als zwei Antworten im engen Fenster: die dritte ist 429 mit wartenSekunden', async () => {

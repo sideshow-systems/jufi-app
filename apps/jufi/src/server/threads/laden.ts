@@ -16,8 +16,12 @@ import { ladeUmfeld } from '../mitglieder/verwaltung.js';
  * ThreadPerson und Bezug, es braucht also keine Umwandlung; baueUmfeld laesst Entfernte
  * samt ihren Zuordnungen und Mitgliedschaften weg. Verworfen: ladeUmfeld nachbauen --
  * zwei Stellen, die entscheiden, wer "im Verein" ist, laufen auseinander.
+ *
+ * Nimmt auch die Transaktion einer Schreibroute: Nachrichten und Antworten entscheiden unter
+ * der Sperre noch einmal, ob die Person im Thread schreiben darf bzw. gefragt ist, und das
+ * haengt an Familie, Untergruppen und Jugendsprecher-Merkmal (Plan-Entscheidung 3).
  */
-export async function ladeThreadUmfeld(db: VereinDb): Promise<Umfeld> {
+export async function ladeThreadUmfeld(db: VereinDb | VereinTx): Promise<Umfeld> {
 	const [{ personen, zuordnungen }, mitgliedschaften] = await Promise.all([
 		ladeUmfeld(db),
 		db.untergruppeMitglied.findMany({ select: { personId: true, untergruppeId: true } }),
