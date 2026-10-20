@@ -115,6 +115,12 @@ describe('eingetragenVon', () => {
 		expect(eingetragenVon('hans', 'max', 'sandra', umfeld)).toBe('eingetragen von Großvater Hans');
 	});
 
+	// Entscheidung R9: Die Zuordnung entscheidet, nicht die Rolle; auch ein Jugendleiter,
+	// der dem Kind zugeordnet ist, erscheint mit seiner Beziehung.
+	it('nennt einen zugeordneten Jugendleiter mit Beziehung', () => {
+		expect(eingetragenVon('thomas', 'jonas', 'sandra', umfeld)).toBe('eingetragen von Vater Thomas');
+	});
+
 	it('nennt Nicht-Zugeordnete beim Kurznamen', () => {
 		expect(eingetragenVon('thomas', 'max', 'sandra', umfeld)).toBe('eingetragen von Thomas K.');
 	});

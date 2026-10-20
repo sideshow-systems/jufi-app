@@ -8,7 +8,9 @@ import { nachVorname } from './umfeld.js';
 // (alleUntergruppen false ohne Untergruppe, etwa nach dem Loeschen der letzten): dann
 // ist niemand gefragt, und der Thread bleibt fuer Jugendleiter sichtbar. Verworfen:
 // eine leere Auswahl als "alle" zu lesen, weil ein Thread dann nach dem Loeschen einer
-// Untergruppe ploetzlich allen Familien erschiene.
+// Untergruppe ploetzlich allen Familien erschiene. "Alle Untergruppen" meint dagegen alle
+// Jungfischer, auch die ohne jede Untergruppe (Tim): sonst fehlte ein Kind, das nur noch
+// nicht eingeteilt ist, und mit ihm seine Familie.
 export function kinderImThread(kopf: ThreadKopf, umfeld: Umfeld): ThreadPerson[] {
 	if (kopf.rollenfilter === 'NUR_JUGENDLEITER') return [];
 	const jungfischer = [...umfeld.personen.values()].filter((p) => p.art === 'JUNGFISCHER');
@@ -29,6 +31,9 @@ export function kinderImThread(kopf: ThreadKopf, umfeld: Umfeld): ThreadPerson[]
 // (nicht 403, Rahmen-Spec 8), damit niemand erfaehrt, dass es den Thread gibt.
 // Entfernte sehen nichts, auch wenn sie noch Rechte tragen: sie koennen sich nicht mehr
 // anmelden, und ein uebrig gebliebener Eintrag soll nichts oeffnen.
+// art, rechte und entferntAm werden aus dem uebergebenen Objekt gelesen, nicht im Umfeld
+// nachgeschlagen: Aufrufer muessen die Person aus demselben Ladevorgang wie das Umfeld
+// nehmen, sonst sieht ein veraltetes Objekt mit Rechten weiterhin alles.
 export function siehtThread(person: ThreadPerson, kopf: ThreadKopf, umfeld: Umfeld): boolean {
 	if (person.entferntAm) return false;
 	if (istJugendleiter(person)) return true;
