@@ -112,6 +112,16 @@ export const routes: Routes = [
 						path: 'profil',
 						loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
 					},
+					// Spec 6.2: zwei Routen statt einer optionalen Endung, weil die Segmente des Router-Pfads nicht
+					// optional sein koennen; beide laden dieselbe Seite, die Eingaenge kommen aus den Parametern.
+					{
+						path: 't/:segment',
+						loadComponent: () => import('./verein/threads/thread-seite').then((m) => m.ThreadSeite),
+					},
+					{
+						path: 't/:segment/m/:modulId',
+						loadComponent: () => import('./verein/threads/thread-seite').then((m) => m.ThreadSeite),
+					},
 					// Spec 2.4: meine-jungfischer statt jungfischer. Der alte Pfad war nie ausgeliefert, darum keine Weiterleitung.
 					{
 						path: 'meine-jungfischer',

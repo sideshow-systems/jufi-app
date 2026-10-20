@@ -72,6 +72,16 @@ export function fehlertext(fehler: ApiFehler): string {
 }
 
 /**
+ * Wie fehlertext, nur 404 als der eine Satz fuer unbekannt und unsichtbar (Rahmen-Spec 8; der
+ * Servertext "nicht gefunden" verriete den Unterschied nicht, saehe aber anders aus als die
+ * Thread-Seite). Eigener Helfer statt Aenderung an fehlertext: Dort bedeutet 404 je nach Seite
+ * etwas anderes (etwa ein unbekannter Verein in der Plattform-Verwaltung).
+ */
+export function fehlertextNichtGefunden(fehler: ApiFehler): string {
+	return fehler.status === 404 ? 'Nicht gefunden oder keine Berechtigung' : fehlertext(fehler);
+}
+
+/**
  * Was eine Ressource im Fehlerfall geworfen hat, als ApiFehler. Angular verpackt alles, was
  * kein Error ist, in einen Error mit dem Original als cause; der ApiFehler steckt dort.
  */

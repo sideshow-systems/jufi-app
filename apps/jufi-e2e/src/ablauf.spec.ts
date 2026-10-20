@@ -1,7 +1,8 @@
 import { type Browser, type BrowserContext, expect, type Locator, type Page, test } from '@playwright/test';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
+import { legeE2eThreadAn, personIdMitMail } from './threads';
 
 /**
  * Der Weg aus Spec 9 von Anfang bis Ende: Der Admin legt den Verein an, die Leitung
@@ -43,6 +44,12 @@ async function linkAusEinladung(bereich: Locator | Page): Promise<string> {
 
 function hauptnavigation(seite: Page): Locator {
 	return seite.getByRole('navigation', { name: 'Hauptnavigation' });
+}
+
+/** Ein Kontext mit der gespeicherten Sitzung der Rolle, wie ihn auch das Projekt layout benutzt. */
+async function ausSitzung(browser: Browser, rolle: string): Promise<{ kontext: BrowserContext; seite: Page }> {
+	const kontext = await browser.newContext({ storageState: join(ZUSTAND, `${rolle}.json`) });
+	return { kontext, seite: await kontext.newPage() };
 }
 
 async function speichereSitzung(kontext: BrowserContext, rolle: string): Promise<void> {
@@ -211,6 +218,53 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 
 		await speichereSitzung(kontext, 'kind');
 		await kontext.close();
+	});
+
+	test('Mutter antwortet fuer Mia und schreibt im Verlauf, Mia und Leitung sehen es', async ({ browser }) => {
+		const leitungId = await personIdMitMail(SLUG, LEITUNG_MAIL);
+		const { bowling, austausch } = await legeE2eThreadAn(SLUG, leitungId, new Date());
+		const ids = JSON.parse(await readFile(join(ZUSTAND, 'ids.json'), 'utf8')) as Record<string, string>;
+		await writeFile(join(ZUSTAND, 'ids.json'), JSON.stringify({ ...ids, bowling, austausch }, null, '\t'));
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		// Die Zeile der Umfrage fuer Mia, nicht irgendein Text mit ihrem Namen.
+		const zeileMia = mutter.seite.locator('jf-umfrage-modul .zeile').filter({ hasText: 'Mia' });
+		await expect(zeileMia).toBeVisible();
+		await zeileMia.getByRole('button', { name: '✓ Dabei' }).click();
+		await expect(zeileMia).toContainText('von dir eingetragen');
+		await expect(zeileMia.getByRole('button', { name: '✓ Dabei' })).toHaveCount(0);
+
+		await mutter.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: 'Verlauf' }).click();
+		await mutter.seite.getByLabel('Nachricht schreiben').fill('Wo genau ist der Treffpunkt?');
+		await mutter.seite.getByRole('button', { name: 'Senden' }).click();
+		const nachricht = mutter.seite.getByRole('listitem').filter({ hasText: 'Wo genau ist der Treffpunkt?' });
+		await expect(nachricht).toBeVisible();
+		await expect(nachricht).toContainText('Du');
+
+		// Ein Jugendleiter-Thread ist fuer die Mutter nicht da, nicht verboten (Rahmen-Spec 8).
+		await mutter.seite.goto(`/${SLUG}/t/${austausch}`);
+		await expect(mutter.seite.getByRole('heading', { name: 'Nicht gefunden oder keine Berechtigung' })).toBeVisible();
+		await mutter.kontext.close();
+
+		const kind = await ausSitzung(browser, 'kind');
+		await kind.seite.goto(`/${SLUG}/t/${bowling}`);
+		const zeileDu = kind.seite.locator('jf-umfrage-modul .zeile').filter({ hasText: 'Du' });
+		await expect(zeileDu).toContainText('✓ Dabei');
+		await expect(zeileDu).toContainText('eingetragen von Mutter Mara');
+		// Die Nachricht der Mutter ist fuer Mia ungelesen; der Zaehler am Reiter nennt sie, fuer Screenreader mit dem Wort.
+		await expect(
+			kind.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: /^Verlauf\s*1\s*ungelesen$/ }),
+		).toBeVisible();
+		await kind.kontext.close();
+
+		const leitung = await ausSitzung(browser, 'leitung');
+		await leitung.seite.goto(`/${SLUG}/t/${austausch}`);
+		await expect(leitung.seite.getByRole('heading', { name: 'Jugendsprecher-Austausch', level: 1 })).toBeVisible();
+		await leitung.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: 'Verlauf' }).click();
+		await expect(leitung.seite.getByLabel('Nachricht schreiben')).toBeVisible();
+		await leitung.kontext.close();
 	});
 
 	test('Ohne Sitzung fuehrt die Anmeldung zur aufgerufenen Seite zurueck', async ({ browser }) => {

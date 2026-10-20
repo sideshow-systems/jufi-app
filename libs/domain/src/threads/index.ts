@@ -6,3 +6,6 @@ export * from './archiv.js';
 export * from './rechte.js';
 export * from './antworten.js';
 export * from './start.js';
+export * from './pfad.js';
+export * from './verlauf.js';
+export * from './ansicht.js';

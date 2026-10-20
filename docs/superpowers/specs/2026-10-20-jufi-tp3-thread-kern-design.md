@@ -109,18 +109,21 @@ Fällt eine Person aus der Zielgruppe (Zielgruppe oder Untergruppe geändert), b
 
 - `art`: `NACHRICHT` oder `SYSTEM`.
 - Nachrichten: 1–2000 Zeichen Klartext; Links werden in der Anzeige erkannt.
-- Systemeinträge (`systemArt`): `VEROEFFENTLICHT`, `TERMIN_GEAENDERT`, `FRIST_GEAENDERT`, `MODUS_GEAENDERT`. `systemDaten` ist ein kleines JSON mit den Angaben für den Satz („Thomas K. hat den Termin auf Sa 24.10. verschoben“), `autorId` die handelnde Person.
-- Löschen leert `text` und setzt `geloeschtAm`/`geloeschtVonId`; die Zeile bleibt („Nachricht gelöscht“ bzw. „Von einem Jugendleiter entfernt“).
+- Systemeinträge (`systemArt`): `VEROEFFENTLICHT`, `TERMIN_GEAENDERT`, `FRIST_GEAENDERT`, `MODUS_GEAENDERT`. `systemDaten` ist ein kleines JSON mit den Angaben für den Satz („Thomas K. hat den Termin auf Sa 24.10. verschoben“), `autorId` die handelnde Person. Die Sätze entstehen **beim Lesen** aus `systemArt` und `systemDaten`, nicht beim Schreiben (die Zeile speichert nur die Tatsache). Verworfen: den fertigen Satz speichern — Namen und Zeitangaben stünden dann für immer so, wie sie beim Schreiben waren, und der Wortlaut ließe sich nie ändern.
+- Die Formen von `systemDaten` legt Etappe 2 fest, Etappe 3 schreibt sie: `VEROEFFENTLICHT` `{}`; `TERMIN_GEAENDERT` `{ termin: TerminDaten }`; `FRIST_GEAENDERT` `{ frage: string; frist: string | null }` (ISO-Zeitpunkt; `null` = Frist aufgehoben); `MODUS_GEAENDERT` `{ modus: ThreadModus }`. Der Leser prüft die Daten feldweise: Was sich nicht lesen lässt, ergibt „… hat den Thread geändert“ statt eines Fehlers, denn ein kaputter Eintrag darf den Thread nicht unlesbar machen. Verworfen: unlesbare Daten als Fehler zu werfen — ein einziger beschädigter Eintrag sperrte den ganzen Verlauf. Eine Frist steht im Satz immer in der vollen Form „Do 22.10. 18:00“, weil der Satz stehen bleibt (6.3).
+- Löschen leert `text` und setzt `geloeschtAm`/`geloeschtVonId`; die Zeile bleibt („Nachricht gelöscht“ bzw. „Von einem Jugendleiter entfernt“). Die Änderung hat die Art `VERLAUF` und zählt damit als Aktivität des Threads. Verworfen: `GELOESCHT` — diese Art bedeutet „Objekt weg“ (2.6, 4.2), die Zeile bleibt aber stehen.
 - `stand` ist der Änderungsstand beim Anlegen (2.6) und trägt Zähler und „Neu“ (3.9).
 
 ### 2.5 Gelesen-Stand
 
 `GelesenStand (vereinId, personId, threadId, gelesenBis, verlaufGelesenBis, gelesenAm)`, eindeutig je Person und Thread. `gelesenBis` ist der Änderungsstand, bis zu dem die Person den Thread gesehen hat (gleich welcher Reiter); `verlaufGelesenBis` der Stand, bis zu dem sie den Verlauf gesehen hat. Getrennt, damit der Zähler am Reiter „Verlauf“ nicht verschwindet, nur weil jemand die Übersicht geöffnet hat. Verworfen: Lesestand im Browser — auf jedem Gerät wäre alles wieder neu, und nach dem Abmelden ginge er verloren.
 
+Die Zeile entsteht beim ersten Setzen. Kommt der erste Aufruf mit `bereich = uebersicht`, steht `verlaufGelesenBis` auf dem höchsten Stand der Verlaufseinträge, die vor dem Zugang der Person angelegt wurden (`angelegtAm < zugangSeit`), sonst auf 0; `uebersicht` fasst das Feld danach nie mehr an — wer nur die Karten gesehen hat, hat den Verlauf nicht gelesen. Verworfen: pauschal 0 — sobald die Zeile da ist, zählt der Zähler nach Stand statt nach Zugangszeit, und alte Nachrichten vor dem Zugang zählten sonst als ungelesen.
+
 ### 2.6 Änderungszähler
 
 - `Verein.aenderungsstand` (`Int`, Vorgabe 0) zählt die schreibenden Transaktionen im Verein: **ein Stand je Transaktion**, nicht je Zeile. Verworfen: `BigInt` — 2,1 Milliarden Änderungen je Verein werden nie erreicht, und `BigInt` bräche `JSON.stringify` an jeder API-Grenze.
-- `Aenderung (id, vereinId, stand, threadId?, art, objektId, urheberId?, angelegtAm)` mit eigener `id` und einem Index auf `(vereinId, stand)`; mehrere Zeilen einer Transaktion teilen sich den Stand. Verworfen: ein eindeutiges `(vereinId, stand)` — ein Verlaufseintrag braucht seinen Stand beim Anlegen, seine ID entsteht erst dabei, also bekommt die Arbeit der Transaktion den Stand vorab (4.2). Lückenlos bleibt der Zähler: Jede committete schreibende Transaktion hat genau einen Stand. `threadId` und `objektId` sind bewusst keine Fremdschlüssel, damit das Löschen eines Threads als Änderung erhalten bleibt. `art` z. B. `THREAD`, `MODUL`, `ANTWORT`, `VERLAUF`, `SICHTBARKEIT`, `GELOESCHT`. Keine Inhalte, nur Kennungen.
+- `Aenderung (id, vereinId, stand, threadId?, art, objektId, urheberId?, angelegtAm)` mit eigener `id` und einem Index auf `(vereinId, stand)`; mehrere Zeilen einer Transaktion teilen sich den Stand. Verworfen: ein eindeutiges `(vereinId, stand)` — ein Verlaufseintrag braucht seinen Stand beim Anlegen, seine ID entsteht erst dabei, also bekommt die Arbeit der Transaktion den Stand vorab (4.2). Lückenlos bleibt der Zähler: Jede committete schreibende Transaktion hat genau einen Stand. `threadId` und `objektId` sind bewusst keine Fremdschlüssel, damit das Löschen eines Threads als Änderung erhalten bleibt. `art` z. B. `THREAD`, `MODUL`, `ANTWORT`, `VERLAUF`, `SICHTBARKEIT`, `GELOESCHT` (nicht für das Löschen einer Nachricht, 2.4). Keine Inhalte, nur Kennungen.
 - Einträge älter als 90 Tage werden beim Start und danach täglich im App-Prozess gelöscht (ein `setInterval`, kein Cron). Ein Sync, der älter einsteigt, bekommt „vollständig neu laden“ (5.2).
 
 ---
@@ -236,7 +239,7 @@ Aus dem Entwurf übernommen und auf Europe/Berlin umgestellt (FAM 3.1, 3.2):
 - `istNeu(thread, gelesenStand, person)`: Es gibt eine `Aenderung` des Threads mit `stand > gelesenBis` und `urheberId ≠ person` (nur fremde Aktivität, Erkenntnis aus dem Entwurf). Ohne Gelesen-Stand ist ein Thread neu, wenn er nach dem Einrichten des eigenen Zugangs veröffentlicht wurde oder seither fremde Aktivität hatte.
 - Zähler am Reiter „Verlauf“: fremde, nicht gelöschte Nachrichten (Art `NACHRICHT`, keine Systemeinträge) mit `stand > verlaufGelesenBis`. Verworfen: Systemeinträge mitzählen — ein verschobener Termin im Aushang hieße sonst „1 neuer Kommentar“, wo niemand kommentieren kann.
 - „Neu seit deinem letzten Besuch“ (6.1): die neuen Threads mit einer Kurzangabe („Neuer Thread“, „2 neue Kommentare“, „Aushang geändert“).
-- Öffnen eines Threads setzt `gelesenBis` auf den aktuellen Stand, Öffnen des Verlaufs zusätzlich `verlaufGelesenBis`.
+- Öffnen eines Threads setzt `gelesenBis` auf den Stand, **den der Client geladen hat**, Öffnen des Verlaufs zusätzlich `verlaufGelesenBis` (4.1, 4.2). Die Thread-Seite meldet die Übersicht erst, wenn die Person sie sieht (wer direkt im Verlauf landet, hat die Module nicht gesehen). Nach dem Abgeben einer Antwort schickt die Seite **kein** neues PUT. Verworfen: den Stand aus der Antwort als gelesen melden — er könnte fremde Änderungen, die die Seite nie geladen hat, als gelesen markieren.
 
 ### 3.10 Namen in Threads
 
@@ -251,7 +254,11 @@ Alle Leser des Threads sehen diese Form. Damit gibt ein Thread preis, welches Ki
 
 ### 3.11 Info-Text
 
-Eine kleine Markdown-Teilmenge: Absätze, **fett** (`**…**`), _kursiv_ (`_…_`), Listen mit `- `, Links (`[Text](https://…)` und erkannte URLs; nur `https:`, `http:`, `mailto:`). Gerendert im Client mit dem vorhandenen `marked` und einem eigenen Renderer: Alles andere (HTML, Bilder, Überschriften, Code) erscheint als Text. Der Editor hat eine kleine Knopfleiste (B, I, Liste, Link). Verworfen: ein WYSIWYG-Editor (neue Abhängigkeit, am Handy hakelig); reiner Klartext (Listen und Hervorhebungen wurden im Entwurf vermisst).
+Eine kleine Markdown-Teilmenge: Absätze (ein einfacher Zeilenumbruch bleibt ein Umbruch), **fett**, _kursiv_, Listen, Links (`[Text](https://…)` und erkannte URLs; nur `https:`, `http:`, `mailto:`). Gerendert im Client mit dem vorhandenen `marked` und einem eigenen Renderer: Alles andere erscheint als Text, so wie es getippt wurde: HTML, Bilder, Überschriften, Code (Block und Inline), Zitate, Linien, Tabellen, nummerierte Listen, Durchgestrichenes, Aufgabenkästchen, Linkdefinitionen und Links mit anderem Schema oder ohne Schema (`javascript:`, `data:`, `/relativ`).
+
+Angenommen wird, was `marked` für diese Elemente als solche erkennt, nicht nur die Schreibweise der Knopfleiste: fett auch als `__…__`, kursiv auch als `*…*`, Listen auch mit `*` und `+`. Verworfen: die Tokens der Knopfleiste allein zuzulassen — wer `*kursiv*` oder eine Liste mit `*` tippt, sähe die Zeichen statt der Formatierung, und die Ablehnung würde Autoren überraschen, obwohl sie nichts öffnet. Der Renderer beantwortet dafür jeden Token-Typ selbst, statt Tokenizer abzuschalten (`marked` fiele bei einem abgelehnten Tokenizer auf den eingebauten zurück, und eine neue Version könnte einen Weg zu HTML mitbringen). Angulars Sanitizer bei `[innerHTML]` bleibt der zweite Riegel.
+
+Der Editor hat eine kleine Knopfleiste (B, I, Liste, Link). Verworfen: ein WYSIWYG-Editor (neue Abhängigkeit, am Handy hakelig); reiner Klartext (Listen und Hervorhebungen wurden im Entwurf vermisst).
 
 ### 3.12 Teilnahme-Umfrage
 
@@ -274,7 +281,7 @@ Liegen Antworten vor, verweigert der Server (409 mit Hinweis am Feld):
 
 Umbenennen und Umsortieren von Optionen, Frist und Ergebnis-Einstellung bleiben frei. Verworfen: Antworten bei solchen Änderungen still verwerfen.
 
-Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder das Modul noch der Thread: Die Datenbank verweigert es (der Fremdschlüssel von der Antwort auf die Umfrage ist `NoAction`, es gibt keinen Kaskadenweg zu den Antworten, 2.3). Verworfen: die Kaskade von der Umfrage zur Antwort zu lassen und allein auf die Sperre über die gewählte Option zu bauen — ob zuerst die Sperre oder die Kaskade greift, hängt von der Reihenfolge der Prüftrigger in Postgres ab; und ein aufgeschobener Fremdschlüssel (`DEFERRABLE INITIALLY DEFERRED`) — er prüfte erst nach der Kaskade und ließe Antworten kommentarlos verschwinden. Folge für Etappe 2: `PUT /threads/:id` antwortet mit 409, wenn es ein beantwortetes Umfrage-Modul entfernen würde.
+Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder das Modul noch der Thread: Die Datenbank verweigert es (der Fremdschlüssel von der Antwort auf die Umfrage ist `NoAction`, es gibt keinen Kaskadenweg zu den Antworten, 2.3). Verworfen: die Kaskade von der Umfrage zur Antwort zu lassen und allein auf die Sperre über die gewählte Option zu bauen — ob zuerst die Sperre oder die Kaskade greift, hängt von der Reihenfolge der Prüftrigger in Postgres ab; und ein aufgeschobener Fremdschlüssel (`DEFERRABLE INITIALLY DEFERRED`) — er prüfte erst nach der Kaskade und ließe Antworten kommentarlos verschwinden. Folge für Etappe 3: `PUT /threads/:id` antwortet mit 409, wenn es ein beantwortetes Umfrage-Modul entfernen würde.
 
 ---
 
@@ -284,48 +291,68 @@ Eine beantwortete Umfrage lässt sich auch **nicht als Ganzes** löschen, weder 
 
 Alle unter `/<slug>/api/v1`, in `vereinsApi`, mit `brauchtMitglied` und je einem Eintrag im Mandanten-Test (TP2 9). Wo eine Person etwas nicht sieht: 404.
 
-| Methode und Pfad                                        | Zweck                                                                                                               |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `GET /threads?suche=&archiv=`                           | Liste der sichtbaren Threads mit Neu-Kennzeichen und nächstem Termin; `suche` filtert Titel, Info-Text, Ort (ILIKE) |
-| `GET /threads/:id`                                      | Kopf, Module, eigene Antwortzeilen, Ergebnisse nach 3.4, Rechte des Betrachters                                     |
-| `GET /threads/:id/verlauf?vor=`                         | 50 Einträge je Seite, neueste zuerst                                                                                |
-| `POST /threads/:id/verlauf`                             | Nachricht schreiben (mit `clientId`)                                                                                |
-| `DELETE /verlauf/:eintragId`                            | eigene oder (mit Recht) fremde Nachricht entfernen                                                                  |
-| `PUT /threads/:id/gelesen`                              | Gelesen-Stand setzen (`bereich`: `uebersicht` oder `verlauf`)                                                       |
-| `PUT /umfragen/:modulId/antworten/:fuerId`              | Antwort abgeben oder ändern (Upsert, `clientId`)                                                                    |
-| `GET /start`                                            | um „Braucht deine Antwort“, „Als Nächstes“, „Neu seit deinem letzten Besuch“ erweitert                              |
-| `GET /termine?monat=JJJJ-MM`                            | Termine sichtbarer Threads im Monat                                                                                 |
-| `POST /threads`, `PUT /threads/:id`                     | Thread samt Modulen anlegen oder ersetzen, in einer Transaktion                                                     |
-| `POST /threads/:id/veroeffentlichen`                    |                                                                                                                     |
-| `PUT /threads/:id/archiv`, `PUT /threads/:id/angepinnt` |                                                                                                                     |
-| `DELETE /threads/:id`                                   | nach 3.5                                                                                                            |
-| `GET /threads/:id/antworten`                            | Antworten-Übersicht für die Verwaltung (wer was, wer fehlt)                                                         |
-| `GET /sync?seit=`                                       | 5.2                                                                                                                 |
+| Methode und Pfad                                        | Zweck                                                                                                                                                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /threads?suche=&archiv=`                           | Liste der sichtbaren Threads mit Neu-Kennzeichen und nächstem Termin; `suche` filtert Titel, Info-Text, Ort (ILIKE)                                                                              |
+| `GET /threads/:id`                                      | Kopf, Module, eigene Antwortzeilen mit Antwortrecht, Ergebnisse nach 3.4, Schreibsperre, Zähler des Verlaufs (Rechte zum Bearbeiten und Verwalten ergänzt Etappe 3, wenn der Editor sie braucht) |
+| `GET /threads/:id/verlauf?vor=`                         | 50 Einträge je Seite, neueste zuerst; `vor` ist die ID eines Eintrags                                                                                                                            |
+| `POST /threads/:id/verlauf`                             | Nachricht schreiben (mit `clientId`)                                                                                                                                                             |
+| `DELETE /verlauf/:eintragId`                            | eigene oder (mit Recht) fremde Nachricht entfernen                                                                                                                                               |
+| `PUT /threads/:id/gelesen`                              | Gelesen-Stand setzen (Körper `{ bereich, bis }`, `bereich`: `uebersicht` oder `verlauf`)                                                                                                         |
+| `PUT /umfragen/:modulId/antworten/:fuerId`              | Antwort abgeben oder ändern (Upsert, `clientId`)                                                                                                                                                 |
+| `GET /start`                                            | um „Braucht deine Antwort“, „Als Nächstes“, „Neu seit deinem letzten Besuch“ erweitert                                                                                                           |
+| `GET /termine?monat=JJJJ-MM`                            | Termine sichtbarer Threads im Monat                                                                                                                                                              |
+| `POST /threads`, `PUT /threads/:id`                     | Thread samt Modulen anlegen oder ersetzen, in einer Transaktion                                                                                                                                  |
+| `POST /threads/:id/veroeffentlichen`                    |                                                                                                                                                                                                  |
+| `PUT /threads/:id/archiv`, `PUT /threads/:id/angepinnt` |                                                                                                                                                                                                  |
+| `DELETE /threads/:id`                                   | nach 3.5                                                                                                                                                                                         |
+| `GET /threads/:id/antworten`                            | Antworten-Übersicht für die Verwaltung (wer was, wer fehlt)                                                                                                                                      |
+| `GET /sync?seit=`                                       | 5.2                                                                                                                                                                                              |
+
+**Formen und Pfade der lesenden Routen (Etappe 2).** Die Antworttypen (`ThreadAnsicht`, `UmfrageAnsicht`, `VerlaufAnsicht`) stehen in `libs/domain` (`threads/ansicht.ts`, `threads/verlauf.ts`), und der Client nutzt dieselben. Verworfen: sie im Client nachzuschreiben (Muster `mitglieder-api.ts`) — bei einer Antwort dieser Größe liefen beide Seiten auseinander. Was eine Person sieht, baut dieselbe reine Funktion für alle Routen (`threadAnsicht`, `verlaufAnsicht`); der Server lädt nur.
+
+- `GET /threads/:id` liefert die `ThreadAnsicht`: Kopf, Module, je Umfrage die eigenen Antwortzeilen (mit eigenem Antwortrecht je Zeile) und die Ergebnisse nach 3.4, `schreibSperre`, den Zähler des Verlaufs und `stand`. Das Antwortrecht und die Löschberechtigung stehen an der Zeile beziehungsweise am Eintrag, nicht in einem Block „Rechte“; Rechte für Bearbeiten und Verwalten fehlen noch; Etappe 3 ergänzt sie, wenn der Editor sie braucht. Der `stand` ist der Vereinsstand, der **vor** den Thread-Daten gelesen wird: Unter READ COMMITTED ist, was danach geladen wird, mindestens so neu.
+- `GET /threads/:id/verlauf?vor=` liefert `{ eintraege, weitere }`. `vor` ist die ID des ältesten gezeigten Eintrags, geordnet wird nach `(stand, id)`, damit Einträge eines Standes eine feste Reihenfolge haben und an der Seitengrenze keiner fehlt oder doppelt kommt. Verworfen: `vor` als Änderungsstand — mehrere Einträge einer Transaktion teilen sich einen Stand. Ein `vor` aus einem anderen Thread oder ein unbekanntes ist 404, sonst ließe sich fremder Verlauf an einem eigenen Thread abzählen.
+- `POST /threads/:id/verlauf` antwortet `{ eintrag, stand }`, 201 beim Anlegen und 200 bei einer Wiederholung (4.2). `DELETE /verlauf/:eintragId` antwortet 204, auch beim zweiten Löschen derselben Nachricht (eine Wiederholung ist kein Verbot); wer nie löschen durfte, bekommt weiter 404 und erfährt nicht, dass die Nachricht schon weg ist. Die eigene Nachricht lässt sich auch im Archiv löschen.
+- `PUT /umfragen/:modulId/antworten/:fuerId` antwortet 200 mit `{ modul, stand }`: die Umfrage so, wie die Person sie jetzt sieht, und der Stand, bis zu dem sie geladen ist. Ein Info- oder Termin-Modul unter dieser ID ist „unbekannt“ (404); eine andere Antwort verriete, dass es unter der ID ein Modul gibt. Der Körper ist `{ optionIds, clientId }`; geprüft wird die Form (nicht leer, höchstens 20, Zeichenketten, ohne Doppelte) vor dem Thread, die Zugehörigkeit zur Umfrage erst nach der 404.
+- `PUT /threads/:id/gelesen` antwortet 204. Der Körper ist `{ bereich, bis }`, `bis` eine ganze Zahl ab 0 (ein Text wie `"5"` gilt nicht); sonst 400 ohne `feld`, geprüft vor dem Thread, damit die 400 über ihn nichts verrät. Der Client schickt den `stand` aus `GET /threads/:id` als `bis`; der Server speichert `max(alt, min(bis, aktueller Stand))`. Die Kappung auf den Vereinsstand verhindert, dass ein Client etwas als gelesen markiert, das es noch gar nicht gibt, der Höchstwert, dass ein langsames Gerät den Stand zurücksetzt. So markiert ein Öffnen nie etwas als gelesen, das der Client nicht geladen hat.
 
 `PUT /threads/:id` vergleicht Module und Optionen über ihre IDs und Schlüssel: Unveränderte bleiben, neue entstehen, fehlende werden gelöscht (soweit 3.14 es erlaubt). Termin-, Frist- und Modusänderungen erzeugen Systemeinträge (2.4).
 
 ### 4.2 Schreibpfad
 
-Jede schreibende Route arbeitet in einer Transaktion über `mitAenderung(tx, vereinId, urheberId, jetzt, arbeit)`. Es muss die **erste schreibende Anweisung** der Transaktion sein und setzt READ COMMITTED voraus (Postgres-Vorgabe; unter REPEATABLE READ oder SERIALIZABLE scheiterten gleichzeitige Schreiber mit 40001, statt zu warten):
+Jede schreibende Route außer `gelesen` arbeitet in einer Transaktion über `mitAenderung(tx, vereinId, urheberId, jetzt, arbeit)`. Es muss die **erste schreibende Anweisung** der Transaktion sein und setzt READ COMMITTED voraus (Postgres-Vorgabe; unter REPEATABLE READ oder SERIALIZABLE scheiterten gleichzeitige Schreiber mit 40001, statt zu warten):
 
 1. `aenderungsstand` um eins erhöhen; das UPDATE sperrt die Vereinszeile bis zum Commit (wie `sperreVereinszeile`, TP2; damit vergeben gleichzeitige Anfragen lückenlose, in Commit-Reihenfolge aufsteigende Stände, und eine zurückgerollte Transaktion verbraucht keinen). Der neue Stand geht an `arbeit(stand)`, **bevor** sie schreibt — ein Verlaufseintrag braucht seinen Stand beim Anlegen. Verworfen: eine Postgres-Sequenz — sie vergibt Nummern vor dem Commit, und eine später committete kleinere Nummer überholte ein Sync, der die größere schon gesehen hat.
 2. `arbeit` schreibt die Daten und gibt Ergebnis und `aenderungen` zurück (je Eintrag `threadId`, `art`, `objektId`); `mitAenderung` schreibt je Eintrag eine `Aenderung` mit dem Stand und setzt `letzteAktivitaetAm` und `letzteAktivitaetStand` der betroffenen Threads, **nicht** für `GELOESCHT` (die Zeile ist weg) und `SICHTBARKEIT` (eine neue Zielgruppe ist kein Beitrag, der den Thread in der Liste nach oben schieben soll).
 3. Nach dem Commit das Ereignis an den Bus im Prozess melden (5.1).
 
-Jede Schreibroute prüft zuerst die Regeln aus Abschnitt 3 im Speicher. Antworten und Nachrichten sind über `clientId` idempotent: Eine Wiederholung liefert das vorhandene Ergebnis.
+Jede Schreibroute prüft zuerst die Regeln aus Abschnitt 3 im Speicher.
+
+**Ausnahme `PUT /threads/:id/gelesen`:** Es läuft ohne `mitAenderung`, ohne Änderungsstand und ohne `Aenderung`. Verworfen: es über `mitAenderung` zu schicken — jedes Öffnen schöbe den Thread in der Liste nach oben (`letzteAktivitaetAm`) und machte ihn für alle anderen „neu“ (3.9). Die Monotonie sichern bedingte Updates: `updateMany` mit `gelesenBis < neu` setzt nur hoch, zwei gleichzeitige Aufrufe enden beim größeren Wert, ohne zu lesen und zu schreiben. Die Zeile legt der erste Aufruf per `upsert` an; laufen zwei erste Aufrufe in den Unique-Index, genügt ein zweiter Durchlauf.
+
+**Wiederholungen.** Antworten und Nachrichten sind über `clientId` idempotent: Eine Wiederholung liefert das vorhandene Ergebnis (200 statt 201), ohne einen Stand zu verbrauchen.
+
+- Erkannt wird sie **unter der Sperre**: Die Arbeit in `mitAenderung` sucht die `clientId` erneut; ist sie schon da, wirft sie `Wiederholung` und rollt damit auch den eben vergebenen Stand zurück. Die Suche vor der Transaktion spart nur Sperre und Stand bei der häufigsten Wiederholung (das Netz brach nach dem Commit ab). Verworfen: die `clientId` nur vor der Transaktion suchen — zwei gleichzeitige Anfragen liefen beide an der Suche vorbei. Ein Unique-Verstoß (P2002) von einem Schreiber ohne Sperre wird genauso beurteilt.
+- Gehört die `clientId` einer anderen Person, einem anderen Thread oder einer anderen Antwortzeile: 409 `CLIENT_ID_VERGEBEN` mit dem nichtssagenden Text „Ungültige Anfrage“, ohne etwas preiszugeben. Verworfen: einen Hinweis, wem die `clientId` gehört — der Anfragende darf nicht erfahren, dass es sie gibt und wer sie benutzt.
+- **Reihenfolge der Prüfungen:** Rate-Limit, Form des Körpers (400), Thread laden und Sichtbarkeit beziehungsweise Gefragtsein (404), **dann die Suche nach der `clientId`**, erst danach die Sperren des Threads (Entwurf, „Nur Aushang“, archiviert: 409; Frist: 410) und die Zugehörigkeit der Optionen. Die Suche steht nach der 404, damit eine fremde `clientId` nichts über einen unsichtbaren Thread verrät, aber vor 409 und 410: Eine gespeicherte Nachricht oder Antwort, deren Rückmeldung unterwegs verloren ging, wäre sonst nach dem Archivieren oder nach der Frist eine Fehlermeldung, wenn die Outbox (Teilprojekt 5) sie wiederholt, und der Client hielte sie für gescheitert. Verworfen: die Suche erst hinter die 409/410 zu setzen — dann scheiterte genau die Wiederholung, für die es die `clientId` gibt.
+- Bei Antworten hängt die `clientId` an der Zeile und wird bei jeder Änderung überschrieben; eine Wiederholung erkennt der Server nur, solange niemand die Zeile seither geändert hat. Verworfen: alle `clientId`s einer Zeile aufzuheben — eine eigene Tabelle für den seltenen Fall, dass die Outbox wiederholt, nachdem jemand anderes für dasselbe Kind neu geantwortet hat.
 
 ### 4.3 Grenzen
 
-- Nachricht höchstens 2000 Zeichen, Info-Text 10 000, Titel 120, höchstens 20 Module und 20 Optionen.
+- Nachricht 1–2000 Zeichen, Info-Text 10 000, Titel 120, höchstens 20 Module und 20 Optionen. Die Nachricht wird ohne Leerraum an den Enden gespeichert und in Code-Points gezählt (wie `char_length` im CHECK); ein einzelnes Surrogat ohne Partner (JSON erlaubt `"\ud800"`) ist keine gültige Nachricht, weil es beim Schreiben als UTF-8 still zu U+FFFD würde. Verworfen: `text.length` — ein Emoji zählte doppelt, und die Grenze läge anders als die der Datenbank.
+- `clientId` passt auf `^[A-Za-z0-9-]{1,100}$` (deckt `randomUUID` und `cuid`). Verworfen: jede Zeichenkette — sie landet im Unique-Index und in Fehlerberichten.
 - Höchstens 30 Nachrichten und 60 Antworten pro Minute und Person (Rate-Limit im Speicher wie bei der Anmeldung).
 - Anfragen höchstens 100 KB (TP2 8.5).
 
 ### 4.4 Fehler
 
-- 404 für alles Unsichtbare und Unbekannte, nie 403 (Rahmen 8.3).
+- 404 für alles Unsichtbare, Unbekannte und Nicht-Gefragte, nie 403 (Rahmen 8.3); die Antwort ist in allen Fällen byte-gleich, sonst verriete jede Abweichung, dass es das Objekt gibt. Der Client zeigt dazu „Nicht gefunden oder keine Berechtigung“.
 - 409 bei Konflikten aus 3.14 und doppelter Teilnahme-Umfrage, mit `feld`.
-- 410 „Frist abgelaufen“.
-- Schreiben in einem archivierten Thread oder im Modus „Nur Aushang“: 409 mit `code`.
+- Schreiben in einem Entwurf, einem archivierten Thread oder im Modus „Nur Aushang“: 409 mit `code` `ENTWURF`, `ARCHIVIERT` beziehungsweise `NUR_AUSHANG`. Eine `clientId` einer fremden Zeile: 409 `CLIENT_ID_VERGEBEN` (4.2).
+- 410 `FRIST_ABGELAUFEN` („Frist abgelaufen“); nur für Antworten, die nicht nachtragen dürfen (3.3).
+- 400 mit `feld`. Vor dem Laden des Threads, aus dem Körper allein: leere, doppelte oder mehr als 20 Optionen, oder Einträge, die keine Zeichenkette sind → `feld: 'optionen'`; leere, zu lange oder ungültige Nachricht → `feld: 'text'`; fehlende oder unpassende `clientId` → `feld: 'clientId'`. Erst nach der 404, der Wiederholungssuche und den Sperren 409/410, weil sie die Umfrage brauchen: Optionen, die nicht zur Umfrage gehören (auch „Vielleicht“ bei abgeschaltetem Vielleicht), und mehrere Optionen bei `mehrfach = false` → ebenfalls `feld: 'optionen'` (sonst verriete die 400 die Optionen einer unsichtbaren Umfrage). `feld` heißt wie das Feld der Oberfläche (`optionen`, nicht `optionIds`): Der Client markiert damit die Auswahl, nicht ein Datenfeld.
+- 429 mit `wartenSekunden` beim Rate-Limit (4.3).
 - `fehler.ts` loggt nur noch Name und Code eines Fehlers, nicht das ganze Objekt (Rückstand aus Etappe 6: Prisma-Meldungen können Eingabewerte enthalten).
 
 ---
@@ -375,16 +402,20 @@ Der Client ruft Sync beim Start, nach jedem Wiederverbinden und beim Zurückkehr
 
 ### 6.2 Thread-Seite
 
-- URL `/<slug>/t/<id>-<titel-slug>`; maßgeblich ist die ID, ein umbenannter Thread bleibt erreichbar (Rahmen 5.4). Deep Links `?reiter=verlauf` und `/<slug>/t/<id>/m/<modulId>` scrollen zur Stelle und heben sie hervor.
-- Kopf: Titel, „Teilen“, für Berechtigte „Bearbeiten“ (öffnet den Editor in der Verwaltung).
-- Reiter **Übersicht** und **Verlauf** (mit Zähler). Der Reiter Verlauf fehlt nur bei „Nur Aushang“ ohne Einträge; bei „Nur Aushang“ mit Einträgen bleibt er lesbar, ohne Eingabefeld. Verworfen: den Verlauf bei „Nur Aushang“ ausblenden (Rahmen 6.1 wörtlich) — nach der Veranstaltung verschwände das Gespräch.
+- URL `/<slug>/t/<id>-<titel-slug>`; maßgeblich ist die ID, ein umbenannter Thread bleibt erreichbar (Rahmen 5.4); die Seite schreibt ein veraltetes Segment ohne neuen Eintrag in der Browser-Historie (`replaceUrl`) auf den aktuellen Titel um. Verworfen: den Titel nie umschreiben — er stünde sonst in jeder Adresse, die jemand aus der Leiste kopiert, falsch da. Deep Links `?reiter=verlauf` und `/<slug>/t/<id>/m/<modulId>` scrollen zur Stelle und heben sie hervor.
+- **Die ID kennt zwei Formen:** `cuid` (vom Code) und `gen_random_uuid()` (der Austausch aus der Migration, mit Bindestrichen). `idAusSegment` erkennt zuerst die UUID-Form, sonst gilt alles bis zum ersten Bindestrich. Verworfen: immer bis zum ersten Bindestrich — die UUID des Austauschs würde nach ihrem ersten Block abgeschnitten, und der Austausch wäre über seine Adresse nie zu öffnen. Verworfen: den Slug mitprüfen und bei einem umbenannten Thread umleiten — jeder alte Link geht über die ID ohnehin auf. Ein Segment ohne lesbare ID ergibt ohne Anfrage dieselbe Seite wie ein 404.
+- Kopf: Titel, „Teilen“, für Berechtigte „Bearbeiten“ (öffnet den Editor in der Verwaltung). Der Zurück-Pfeil führt **bis Etappe 4** zur Startseite des Vereins. Verworfen: ein Link auf die Thread-Liste — es gibt sie erst mit Etappe 4 (6.5); bis dahin führen Demo und Ende-zu-Ende-Test direkt in Threads.
+- Geöffnet wird immer die **Übersicht**, auch bei Threads im Modus „Offener Chat“ (kein Start-Reiter je Modus). _Vorläufig; offene Frage an den Eigentümer:_ ob ein Chat besser im Verlauf beginnt. Verworfen (vorläufig): den Reiter nach Modus wählen — die Entscheidung gehört dem Eigentümer, und `?reiter=verlauf` genügt für Links, die in den Chat führen sollen.
+- Reiter **Übersicht** und **Verlauf** (mit Zähler). Der Reiter Verlauf fehlt nur bei „Nur Aushang“ ohne Nachrichten; bei „Nur Aushang“ mit Nachrichten bleibt er lesbar, ohne Eingabefeld. Der Zähler `verlauf.eintraege` der Ansicht zählt nur Nachrichten (gelöschte eingeschlossen), keine Systemeinträge. Verworfen: den Verlauf bei „Nur Aushang“ ausblenden (Rahmen 6.1 wörtlich) — nach der Veranstaltung verschwände das Gespräch. Verworfen: alle Einträge zählen — jedes Veröffentlichen schreibt ab Etappe 3 einen Systemeintrag (3.6), der Reiter erschiene dann bei jedem veröffentlichten Aushang, mit dem einen Satz „veröffentlicht“.
 - Archivierte Threads tragen oben den Hinweis „Archiviert“; für Berechtigte mit „Wiederherstellen“.
 
 ### 6.3 Module
 
 - **Info-Text**: gerendertes Markdown (3.11).
 - **Termin**: Zeitangabe (3.8), Ort mit Karten-Link, Treffpunkt, Knopf „In Kalender eintragen“ mit „Kalender des Telefons“ (.ics) und „Google Kalender“ (FAM 3.3, 3.4).
-- **Umfrage**: Frage, Frist („bis Do 18:00“, nach Ablauf „Frist abgelaufen“), je Antwortzeile Pillen („✓ Dabei“, „? Vielleicht“, „✗ Abgesagt“ beziehungsweise die Optionen) oder bei Mehrfachauswahl Haken und „Antworten“; daneben „eingetragen von …“ (3.3). Darunter die Ergebnisse nach 3.4.
+- **Umfrage**: Frage, Frist (Fristtext, s. u.), je Antwortzeile Pillen („✓ Dabei“, „? Vielleicht“, „✗ Abgesagt“ beziehungsweise die Optionen) oder bei Mehrfachauswahl Haken und „Antworten“; daneben „eingetragen von …“ (3.3). Darunter die Ergebnisse nach 3.4.
+
+**Fristtext** (`fristText(frist, jetzt)`): „bis Do 18:00“, wenn die Frist in den nächsten sechs Berliner Kalendertagen liegt, sonst „bis Do 29.10. 18:00“, damit derselbe Wochentag nicht auch die Woche darauf meinen kann; ab `jetzt >= frist` „Frist abgelaufen“ (passend zum Server, der in der Fristsekunde 410 antwortet). Gerechnet wird in Kalendertagen, nicht in 24-Stunden-Spannen. Im Systemsatz des Verlaufs steht dagegen immer die volle Form „Do 22.10. 18:00“ (`fristZeitpunkt`), weil der Satz stehen bleibt und „Do“ dort in einer Woche nicht mehr eindeutig wäre. `UmfrageAnsicht.frist` ist ein ISO-Zeitpunkt oder `null`; der Client rechnet den Fristtext mit der aktuellen Uhrzeit selbst. Verworfen: den fertigen Text vom Server schicken — er veraltete bei offener Seite, und Zeiten gehen überall als ISO über die Leitung. Die Zeitzone bleibt Berlin, weil beide Seiten dieselbe Domänenfunktion nutzen, nie die des Browsers.
 
 ### 6.4 Verlauf
 
@@ -508,6 +539,8 @@ Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kont
 ### 10.4 Demo
 
 `pnpm run demo` bringt zusätzlich: „Wichtige Infos“ (angepinnt, Nur Aushang, Info-Text, Termin „Nächste Gruppenstunde“), „Bowling“ im Ausgangszustand aus 1.1, „Zeltlager 2027“ (Chat, Untergruppe, Pizza-Umfrage pro Person), einen archivierten Thread und den Austausch mit einigen Nachrichten.
+
+**Teilweise vorgezogen (Etappe 2):** Die Demo spielt schon jetzt „Wichtige Infos“, „Bowling“ (ohne Antworten, Frist der Donnerstag davor 18:00) und zwei Nachrichten im Austausch ein und gibt die Thread-Adressen aus. Ohne das hätte der Eigentümer vor Etappe 4 nichts abzunehmen, denn eine Thread-Liste gibt es noch nicht. „Zeltlager 2027“ und der archivierte Thread folgen in Etappe 6. Verworfen: die ganze Demo bis Etappe 6 aufzuschieben.
 
 ---
 

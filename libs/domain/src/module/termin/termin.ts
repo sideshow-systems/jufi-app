@@ -26,11 +26,19 @@ export interface TerminEintrag {
 const WOCHENTAG = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 const UHRZEIT = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** "Sa 17.10." */
-function tagKurz(tag: string): string {
+/** "Sa" */
+export function wochentagKurz(tag: string): string {
 	const [j, m, t] = tag.split('-').map(Number);
-	const wochentag = WOCHENTAG[new Date(Date.UTC(j, m - 1, t)).getUTCDay()];
-	return `${wochentag} ${tag.slice(8, 10)}.${tag.slice(5, 7)}.`;
+	return WOCHENTAG[new Date(Date.UTC(j, m - 1, t)).getUTCDay()];
+}
+
+/**
+ * "Sa 17.10." Exportiert, damit Fristen und Systemsaetze dieselbe Datumsform
+ * zeigen wie die Karte. Verworfen: die Form in verlauf.ts und umfrage.ts
+ * nachbauen, weil die Anzeigen dann auseinanderlaufen.
+ */
+export function tagKurz(tag: string): string {
+	return `${wochentagKurz(tag)} ${tag.slice(8, 10)}.${tag.slice(5, 7)}.`;
 }
 
 /** Ein Enddatum gleich dem Startdatum zaehlt als eintaegig, damit ein doppelt gesetztes Datum nichts aendert. */

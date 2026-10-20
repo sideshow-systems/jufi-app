@@ -44,6 +44,12 @@ export function berlinerTag(d: Date): string {
 	return `${w.getUTCFullYear()}-${zwei(w.getUTCMonth() + 1)}-${zwei(w.getUTCDate())}`;
 }
 
+/** Berliner Uhrzeit eines Zeitpunkts als 'HH:MM'. */
+export function berlinerUhrzeit(d: Date): string {
+	const w = new Date(wandzeitAlsUtc(d));
+	return `${zwei(w.getUTCHours())}:${zwei(w.getUTCMinutes())}`;
+}
+
 const TAG_MS = 86_400_000;
 
 /**

@@ -1,4 +1,4 @@
-import { berlinerTag, berlinZeitpunkt, tagPlus } from './zeit.js';
+import { berlinerTag, berlinerUhrzeit, berlinZeitpunkt, tagPlus } from './zeit.js';
 
 describe('berlinerTag', () => {
 	it('liefert den Berliner Kalendertag, auch wenn UTC noch beim Vortag liegt', () => {
@@ -64,5 +64,16 @@ describe('tagPlus', () => {
 		expect(tagPlus('2026-03-01', -1)).toBe('2026-02-28');
 		expect(tagPlus('2026-10-25', 1)).toBe('2026-10-26');
 		expect(tagPlus('2026-10-25', 0)).toBe('2026-10-25');
+	});
+});
+
+describe('berlinerUhrzeit', () => {
+	it('liefert die Berliner Wandzeit als HH:MM in Sommer- und Winterzeit', () => {
+		expect(berlinerUhrzeit(new Date('2026-10-22T16:00:00Z'))).toBe('18:00');
+		expect(berlinerUhrzeit(new Date('2026-10-29T17:00:00Z'))).toBe('18:00');
+	});
+
+	it('nennt Mitternacht als 00:00 und nicht als 24:00', () => {
+		expect(berlinerUhrzeit(new Date('2026-10-23T22:00:00Z'))).toBe('00:00');
 	});
 });

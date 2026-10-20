@@ -8,6 +8,7 @@ import { mitStandardwerten } from './abhaengigkeiten.js';
 import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
 import { Nachlauf } from './nachlauf.js';
+import { legeThreadAn } from './threads/test-threads.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
 import { vereinsApi, vereinsRouten } from './verein.js';
@@ -29,6 +30,12 @@ interface Kontext {
 	fremdesKindId: string;
 	/** Eine Untergruppe im Verein fremd, mit dem fremden Kind als Mitglied. */
 	fremdeGruppeId: string;
+	/**
+	 * Ein veroeffentlichter Thread im Verein fremd mit einem Umfrage-Modul samt Option, einer
+	 * Antwort und einer Nachricht; die Routen der Threads pruefen mit ihm, dass nichts von
+	 * dort nach eigen durchdringt.
+	 */
+	fremderThread: { threadId: string; modulId: string; optionId: string; nachrichtId: string };
 	/** Token einer offenen Einladung im Verein eigen. */
 	einladungsToken: string;
 	/** Kennung und Passwort einer Person mit TOTP im Verein eigen. */
@@ -88,6 +95,40 @@ async function fremdesLogo(k: Kontext) {
 		update: {},
 	});
 	return k.prisma.vereinLogo.findUnique({ where: { vereinId: k.fremd.id } });
+}
+
+/** Alles, was ein Lesen oder Gelesen-Setzen im Verein fremd veraendern koennte: Zahl der Gelesen-Staende und Vereinsstand. */
+async function fremdeThreadZeilen(k: Kontext) {
+	return {
+		gelesen: await k.prisma.gelesenStand.count({ where: { vereinId: k.fremd.id } }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/** Alles, was ein Schreiben oder Loeschen im Verlauf von fremd veraendern koennte. */
+async function fremderVerlauf(k: Kontext) {
+	return {
+		zeilen: await k.prisma.verlaufEintrag.count({ where: { vereinId: k.fremd.id } }),
+		nachricht: await k.prisma.verlaufEintrag.findUnique({ where: { id: k.fremderThread.nachrichtId } }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/** Alles, was ein Antworten in fremd veraendern koennte: Antwortzeilen samt Optionen und Vereinsstand. */
+async function fremdeAntworten(k: Kontext) {
+	return {
+		antworten: await k.prisma.umfrageAntwort.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
+		optionen: await k.prisma.umfrageAntwortOption.findMany({
+			where: { vereinId: k.fremd.id },
+			orderBy: [{ antwortId: 'asc' }, { optionId: 'asc' }],
+		}),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/** Ein frischer Thread in eigen, den die Verwaltung von eigen sieht und in dem sie schreiben darf. */
+async function eigenerThread(k: Kontext): Promise<string> {
+	return (await legeThreadAn(k.prisma, k.eigen, new Date(), { titel: 'Eigener Thread' })).threadId;
 }
 
 /**
@@ -384,6 +425,128 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await lege(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
 		expect((await lege(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
 		expect(await anzahl()).toBe(vorher);
+	},
+	'GET /threads/:id': async (k) => {
+		const vorher = await fremdeThreadZeilen(k);
+		const hole = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${k.fremderThread.threadId}`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Auch die Verwaltung von eigen, die dort alles sieht, kennt den Thread aus fremd nicht.
+		const r = await hole(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		expect(await fremdeThreadZeilen(k)).toEqual(vorher);
+	},
+	'PUT /threads/:id/gelesen': async (k) => {
+		const vorher = await fremdeThreadZeilen(k);
+		const lies = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${k.fremderThread.threadId}/gelesen`, {
+				methode: 'PUT',
+				body: { bereich: 'verlauf', bis: 1 },
+				cookie,
+			});
+		expect((await lies(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await lies(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await lies(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		expect(await fremdeThreadZeilen(k)).toEqual(vorher);
+	},
+	'GET /threads/:id/verlauf': async (k) => {
+		const vorher = await fremderVerlauf(k);
+		const lies = (slug: string, threadId: string, cookie?: string, vor?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/verlauf${vor ? `?vor=${vor}` : ''}`, { cookie });
+		expect((await lies(k.gesperrt.slug, k.fremderThread.threadId, k.eigenerLeiter)).status).toBe(404);
+		expect((await lies(k.fremd.slug, k.fremderThread.threadId, k.eigenerLeiter)).status).toBe(401);
+		const r = await lies(k.eigen.slug, k.fremderThread.threadId, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Die Nachricht aus fremd taugt auch an einem eigenen Thread nicht als Seitenanker.
+		const anker = await lies(k.eigen.slug, await eigenerThread(k), k.eigenerLeiter, k.fremderThread.nachrichtId);
+		expect(anker.status).toBe(404);
+		expect(await anker.json()).toEqual({ fehler: 'nicht gefunden' });
+		expect(await fremderVerlauf(k)).toEqual(vorher);
+	},
+	'POST /threads/:id/verlauf': async (k) => {
+		const vorher = await fremderVerlauf(k);
+		const schreibe = (slug: string, threadId: string, clientId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/verlauf`, {
+				methode: 'POST',
+				body: { text: 'Uebernommen', clientId },
+				cookie,
+			});
+		const fremderThread = k.fremderThread.threadId;
+		expect((await schreibe(k.gesperrt.slug, fremderThread, 'mandant-neu', k.eigenerLeiter)).status).toBe(404);
+		expect((await schreibe(k.fremd.slug, fremderThread, 'mandant-neu', k.eigenerLeiter)).status).toBe(401);
+		const r = await schreibe(k.eigen.slug, fremderThread, 'mandant-neu', k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Die clientId der Nachricht in fremd ist in eigen frei: ein 409 verriete, dass es sie dort gibt.
+		expect((await schreibe(k.eigen.slug, await eigenerThread(k), 'mandant-nachricht', k.eigenerLeiter)).status).toBe(
+			201,
+		);
+		expect(await fremderVerlauf(k)).toEqual(vorher);
+	},
+	'DELETE /verlauf/:eintragId': async (k) => {
+		const vorher = await fremderVerlauf(k);
+		const loesche = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/verlauf/${k.fremderThread.nachrichtId}`, { methode: 'DELETE', cookie });
+		expect((await loesche(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await loesche(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		const r = await loesche(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		expect(await fremderVerlauf(k)).toEqual(vorher);
+	},
+	'PUT /umfragen/:modulId/antworten/:fuerId': async (k) => {
+		const vorher = await fremdeAntworten(k);
+		const antworte = (
+			slug: string,
+			modulId: string,
+			fuerId: string,
+			optionId: string,
+			clientId: string,
+			cookie?: string,
+		) =>
+			sende(k.url, `/${slug}/api/v1/umfragen/${modulId}/antworten/${fuerId}`, {
+				methode: 'PUT',
+				body: { optionIds: [optionId], clientId },
+				cookie,
+			});
+		const { modulId, optionId } = k.fremderThread;
+		const fremd = (slug: string) => antworte(slug, modulId, k.fremdePersonId, optionId, 'mandant-neu', k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		// Eine eigene Umfrage, in der eine neue Person aus eigen fuer sich selbst antworten darf.
+		const ich = await legeMitgliedAn(k.prisma, k.eigen, { art: 'ERWACHSENER', rechte: ['THREADS_ERSTELLEN'] });
+		const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: ich.personId,
+			module: [{ typ: 'UMFRAGE', einheit: 'PERSON' }],
+		});
+		const eigenesModul = eigene.modulIds[0] as string;
+		const eigeneOption = eigene.optionIds['ja'] as string;
+		// Die Person aus fremd ist in der eigenen Umfrage unbekannt, die Option aus fremd ungueltig.
+		const fremdePerson = await antworte(
+			k.eigen.slug,
+			eigenesModul,
+			k.fremdePersonId,
+			eigeneOption,
+			'mandant-1',
+			ich.cookie,
+		);
+		expect(fremdePerson.status).toBe(404);
+		expect(await fremdePerson.json()).toEqual({ fehler: 'nicht gefunden' });
+		expect((await antworte(k.eigen.slug, eigenesModul, ich.personId, optionId, 'mandant-2', ich.cookie)).status).toBe(
+			400,
+		);
+		// Die clientId der Antwort in fremd ist in eigen frei: ein 409 verriete, dass es sie dort gibt.
+		expect(
+			(await antworte(k.eigen.slug, eigenesModul, ich.personId, eigeneOption, 'mandant-antwort', ich.cookie)).status,
+		).toBe(200);
+		expect(await fremdeAntworten(k)).toEqual(vorher);
 	},
 	'PATCH /untergruppen/:id': async (k) => {
 		const vorher = await k.prisma.untergruppe.findUniqueOrThrow({ where: { id: k.fremdeGruppeId } });
@@ -683,6 +846,37 @@ describe('Mandanten-Test', () => {
 		await prisma.untergruppeMitglied.create({
 			data: { vereinId: fremd.id, untergruppeId: fremdeGruppe.id, personId: fremdesKind.id },
 		});
+		const { threadId, modulIds, optionIds } = await legeThreadAn(prisma, fremd, new Date(), {
+			titel: 'Fremder Thread',
+			erstelltVonId: nachbar.personId,
+			module: [{ typ: 'UMFRAGE', einheit: 'PERSON', optionen: ['Ja', 'Nein'] }],
+		});
+		await vereinDb(prisma, fremd.id).umfrageAntwort.create({
+			data: {
+				umfrageId: modulIds[0] as string,
+				fuerId: nachbar.personId,
+				vonId: nachbar.personId,
+				abgegebenAm: new Date(),
+				clientId: 'mandant-antwort',
+				optionen: { create: [{ optionId: optionIds['ja'] as string }] },
+			},
+		});
+		const { aenderungsstand } = await prisma.verein.update({
+			where: { id: fremd.id },
+			data: { aenderungsstand: { increment: 1 } },
+			select: { aenderungsstand: true },
+		});
+		const nachricht = await prisma.verlaufEintrag.create({
+			data: {
+				vereinId: fremd.id,
+				threadId,
+				art: 'NACHRICHT',
+				autorId: nachbar.personId,
+				text: 'Nachricht in fremd',
+				stand: aenderungsstand,
+				clientId: 'mandant-nachricht',
+			},
+		});
 		const totpPerson = { kennung: 'mandant-totp@example.test', passwort: 'gruene-forelle-am-see' };
 		const { zugangId } = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
@@ -703,6 +897,12 @@ describe('Mandanten-Test', () => {
 			fremdePersonId: nachbar.personId,
 			fremdesKindId: fremdesKind.id,
 			fremdeGruppeId: fremdeGruppe.id,
+			fremderThread: {
+				threadId,
+				modulId: modulIds[0] as string,
+				optionId: optionIds['ja'] as string,
+				nachrichtId: nachricht.id,
+			},
 			einladungsToken: await einladungsToken(prisma, eigen),
 			totpPerson,
 			prisma,

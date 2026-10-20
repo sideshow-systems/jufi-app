@@ -65,10 +65,29 @@ describe('fuehreAus', () => {
 		await p.verein.deleteMany();
 	});
 
-	it('demo einspielen liefert 0 und meldet den Verein', async () => {
+	it('demo einspielen liefert 0, meldet den Verein und druckt die Adresse jedes Threads', async () => {
 		ausgabe.length = 0;
 		expect(await fuehreAus(['demo', 'einspielen'], deps)).toBe(0);
-		expect(ausgabe).toEqual(['Demo-Verein angelegt: /demo/ (10 Personen)']);
+		expect(ausgabe[0]).toBe('Demo-Verein angelegt: /demo/ (10 Personen)');
+		expect(ausgabe).toHaveLength(4);
+		expect(ausgabe[1]).toMatch(/^Wichtige Infos: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-wichtige-infos$/);
+		expect(ausgabe[2]).toMatch(/^🎳 Bowling: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-bowling$/);
+		expect(ausgabe[3]).toMatch(
+			/^Jugendsprecher-Austausch: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-jugendsprecher-austausch$/,
+		);
+	});
+
+	it('demo einspielen druckt ohne BASIS_URL nur den Pfad und liefert trotzdem 0', async () => {
+		ausgabe.length = 0;
+		const ohneBasis: Abhaengigkeiten = {
+			...deps,
+			basisUrl: () => {
+				throw new CliFehler('BASIS_URL fehlt.');
+			},
+		};
+		expect(await fuehreAus(['demo', 'einspielen'], ohneBasis)).toBe(0);
+		expect(ausgabe[1]).toMatch(/^Wichtige Infos: \/demo\/t\/[a-z0-9]+-wichtige-infos$/);
+		expect(ausgabe).toHaveLength(4);
 	});
 
 	it('die Hilfe nennt alle Befehle', async () => {

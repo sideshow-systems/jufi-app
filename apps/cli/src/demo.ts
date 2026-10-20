@@ -1,5 +1,13 @@
 import { austauschAnlegen, Recht, type Beziehung, type PrismaClient } from '@jufi/db';
-import { DEMO_SLUG, EINWILLIGUNG_TEXT_VERSION } from '@jufi/domain';
+import {
+	berlinerTag,
+	berlinZeitpunkt,
+	DEMO_SLUG,
+	EINWILLIGUNG_TEXT_VERSION,
+	tagPlus,
+	teilnahmeOptionen,
+	threadSegment,
+} from '@jufi/domain';
 import { CliFehler } from './fehler.js';
 
 const ALLE_RECHTE = Object.values(Recht);
@@ -42,6 +50,44 @@ function geburtsdatumMorgenVolljaehrig(jetzt: Date): Date {
 }
 
 /**
+ * Der erste Tag mit dem gewuenschten Wochentag (0 = Sonntag) nach dem Berliner Tag von `jetzt`,
+ * heute selbst nie: An einem Freitag ist der "naechste Freitag" der in einer Woche. Verworfen:
+ * den heutigen Tag mitzaehlen, weil ein Termin um 17:00 dann je nach Tageszeit des Einspielens
+ * schon vorbei waere und die Demo einen abgelaufenen Termin zeigte.
+ */
+function naechsterWochentag(jetzt: Date, wochentag: number): string {
+	const heute = berlinerTag(jetzt);
+	const [j, m, t] = heute.split('-').map(Number);
+	const aktuell = new Date(Date.UTC(j, m - 1, t)).getUTCDay();
+	return tagPlus(heute, ((wochentag - aktuell + 6) % 7) + 1);
+}
+
+const FREITAG = 5;
+const SAMSTAG = 6;
+
+/** Spalte @db.Date: Mitternacht UTC des Kalendertags, ohne Zeitzonenversatz (wie ladeThread sie liest). */
+function datumSpalte(tag: string): Date {
+	return new Date(`${tag}T00:00:00Z`);
+}
+
+const INFO_TEXT_WICHTIGE_INFOS = [
+	'Willkommen bei den **Jungfischern**! Das sollte jeder wissen:',
+	'',
+	'- Wir treffen uns freitags um 17:00 im Vereinsheim.',
+	'- Bitte feste Schuhe und warme Kleidung mitbringen.',
+	'- Fragen an die Jugendleitung: [jugend@example.org](mailto:jugend@example.org)',
+	'',
+	'Mehr zum Verein auf [jungfischer-demo.example.org](https://jungfischer-demo.example.org).',
+].join('\n');
+
+const INFO_TEXT_BOWLING = [
+	'Wir gehen bowlen! Bitte **Socken** mitbringen, die Schuhe gibt es vor Ort.',
+	'',
+	'- Treffpunkt ist eine halbe Stunde vor dem Start am Vereinsheim.',
+	'- Wir fahren gemeinsam, Abholung ab 17:00 Uhr am Bowlingcenter.',
+].join('\n');
+
+/**
  * Spielt den erfundenen Verein "Jungfischer Demo" ein (Spec 7.1). Ein vorhandener
  * Verein `demo` wird vorher samt allen Daten geloescht, andere Vereine bleiben
  * unberuehrt. Hat im vorhandenen Verein `demo` eine Person eine Adresse, die nicht
@@ -59,7 +105,7 @@ function geburtsdatumMorgenVolljaehrig(jetzt: Date): Date {
 export async function demoEinspielen(
 	prisma: PrismaClient,
 	jetzt: Date,
-): Promise<{ vereinId: string; personen: number }> {
+): Promise<{ vereinId: string; personen: number; threads: { titel: string; segment: string }[] }> {
 	return prisma.$transaction(async (tx) => {
 		// Der Slug demo laesst sich nicht in pruefeSlug reservieren: der Demo-Verein
 		// selbst muss darunter erreichbar bleiben. Also kann ein echter Verein ihn
@@ -121,7 +167,7 @@ export async function demoEinspielen(
 				data: { vereinId, art: 'JUNGFISCHER', vorname, nachname, geburtsdatum, jugendsprecher },
 			});
 
-		await erwachsener('Thomas', 'Beispiel', ALLE_RECHTE);
+		const thomas = await erwachsener('Thomas', 'Beispiel', ALLE_RECHTE);
 		await erwachsener(
 			'Katrin',
 			'Muster',
@@ -200,6 +246,139 @@ export async function demoEinspielen(
 			data: { vereinId, name: 'Jüngere', mitglieder: { create: [{ personId: max.id }] } },
 		});
 
-		return { vereinId, personen: await tx.person.count({ where: { vereinId } }) };
+		// Staende von Hand statt ueber mitAenderung: Das Werkzeug vergibt sie fuer einen Verein, den nur
+		// diese Transaktion kennt, also gibt es keinen gleichzeitigen Schreiber, den die Sperre der
+		// Vereinszeile ausschliessen muesste. Ein Update des Zaehlers am Ende genuegt. Jeder Thread und
+		// jede Nachricht bekommt trotzdem einen eigenen Stand mit einer Aenderung, wie es die Routen tun.
+		let stand = 0;
+		const aenderungen: {
+			stand: number;
+			threadId: string;
+			art: 'THREAD' | 'VERLAUF';
+			objektId: string;
+			urheberId: string;
+		}[] = [];
+
+		const thread = async (
+			daten: { titel: string; modus: 'AUSHANG' | 'KOMMENTARE'; angepinnt: boolean },
+			module: (threadId: string) => Promise<void>,
+		) => {
+			stand += 1;
+			const zeile = await tx.thread.create({
+				data: {
+					vereinId,
+					...daten,
+					rollenfilter: 'JUNGFISCHER_FAMILIE',
+					alleUntergruppen: true,
+					veroeffentlichtAm: jetzt,
+					erstelltVonId: thomas.id,
+					letzteAktivitaetAm: jetzt,
+					letzteAktivitaetStand: stand,
+					angelegtAm: jetzt,
+				},
+			});
+			await module(zeile.id);
+			aenderungen.push({ stand, threadId: zeile.id, art: 'THREAD', objektId: zeile.id, urheberId: thomas.id });
+			return zeile;
+		};
+		const infoModul = async (threadId: string, position: number, text: string) => {
+			const modul = await tx.threadModul.create({ data: { vereinId, threadId, typ: 'INFO', position } });
+			await tx.infoModul.create({ data: { vereinId, id: modul.id, text } });
+		};
+		const terminModul = async (
+			threadId: string,
+			position: number,
+			titel: string,
+			termin: { tag: string; beginn: string; ende: string; ort: string; treffpunkt?: string },
+		) => {
+			const modul = await tx.threadModul.create({ data: { vereinId, threadId, typ: 'TERMIN', position, titel } });
+			await tx.terminModul.create({
+				data: {
+					vereinId,
+					id: modul.id,
+					startDatum: datumSpalte(termin.tag),
+					beginn: termin.beginn,
+					ende: termin.ende,
+					ort: termin.ort,
+					treffpunkt: termin.treffpunkt ?? null,
+				},
+			});
+		};
+
+		const infos = await thread({ titel: 'Wichtige Infos', modus: 'AUSHANG', angepinnt: true }, async (threadId) => {
+			await infoModul(threadId, 0, INFO_TEXT_WICHTIGE_INFOS);
+			await terminModul(threadId, 1, 'Nächste Gruppenstunde', {
+				tag: naechsterWochentag(jetzt, FREITAG),
+				beginn: '17:00',
+				ende: '18:30',
+				ort: 'Vereinsheim',
+			});
+		});
+
+		// Der uebernaechste Samstag, damit zwischen Einspielen und Frist immer Tage liegen; die Frist
+		// ist der Donnerstag davor, 18:00 Berliner Wandzeit (berlinZeitpunkt kennt die Zeitumstellung).
+		const bowlingTag = tagPlus(naechsterWochentag(jetzt, SAMSTAG), 7);
+		const bowling = await thread({ titel: '🎳 Bowling', modus: 'KOMMENTARE', angepinnt: false }, async (threadId) => {
+			await infoModul(threadId, 0, INFO_TEXT_BOWLING);
+			await terminModul(threadId, 1, 'Bowling', {
+				tag: bowlingTag,
+				beginn: '14:00',
+				ende: '17:00',
+				ort: 'Bowlingcenter',
+				treffpunkt: '13:30 am Vereinsheim',
+			});
+			const modul = await tx.threadModul.create({ data: { vereinId, threadId, typ: 'UMFRAGE', position: 2 } });
+			await tx.umfrageModul.create({
+				data: {
+					vereinId,
+					id: modul.id,
+					threadId,
+					frage: 'Kommst du mit?',
+					einheit: 'JUNGFISCHER',
+					teilnahme: true,
+					vielleicht: true,
+					frist: berlinZeitpunkt(tagPlus(bowlingTag, -2), '18:00'),
+					ergebnisse: 'ALLE',
+				},
+			});
+			// Ohne Antworten: Die Demo soll das Antworten selbst vorfuehren.
+			await tx.umfrageOption.createMany({
+				data: teilnahmeOptionen(true).map((o, position) => ({ vereinId, umfrageId: modul.id, position, ...o })),
+			});
+		});
+
+		// Den Austausch hat der Verein schon (austauschAnlegen); er bekommt hier nur seine Stande und
+		// zwei Nachrichten, damit der Verlauf nicht leer ist.
+		const austausch = await tx.thread.findFirstOrThrow({
+			where: { vereinId, art: 'JUGENDSPRECHER_AUSTAUSCH' },
+			select: { id: true, titel: true },
+		});
+		stand += 1;
+		aenderungen.push({ stand, threadId: austausch.id, art: 'THREAD', objektId: austausch.id, urheberId: thomas.id });
+		for (const [autor, text] of [
+			[jonas, 'Können wir beim Bowling hinterher noch Pizza essen?'],
+			[thomas, 'Gute Idee, ich frage im Bowlingcenter nach.'],
+		] as const) {
+			stand += 1;
+			const eintrag = await tx.verlaufEintrag.create({
+				data: { vereinId, threadId: austausch.id, art: 'NACHRICHT', autorId: autor.id, text, stand, angelegtAm: jetzt },
+			});
+			aenderungen.push({ stand, threadId: austausch.id, art: 'VERLAUF', objektId: eintrag.id, urheberId: autor.id });
+		}
+		await tx.thread.update({
+			where: { id: austausch.id },
+			data: { letzteAktivitaetAm: jetzt, letzteAktivitaetStand: stand },
+		});
+
+		await tx.aenderung.createMany({
+			data: aenderungen.map((a) => ({ vereinId, ...a, angelegtAm: jetzt })),
+		});
+		await tx.verein.update({ where: { id: vereinId }, data: { aenderungsstand: stand } });
+
+		return {
+			vereinId,
+			personen: await tx.person.count({ where: { vereinId } }),
+			threads: [infos, bowling, austausch].map((t) => ({ titel: t.titel, segment: threadSegment(t.id, t.titel) })),
+		};
 	});
 }

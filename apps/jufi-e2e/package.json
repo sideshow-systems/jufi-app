@@ -2,9 +2,10 @@
   "name": "@jufi/jufi-e2e",
   "version": "0.0.1",
   "private": true,
-  "//": "Ein Paket nur aus zwei Gruenden: type module, weil Playwright sonst als CommonJS laedt und libs/db/src/testing.ts (import.meta) nicht laden kann; und @jufi/db als Abhaengigkeit, damit der Aufbau bereiteTestDatenbankVor ueber den Paketnamen findet. Verworfen: paths in tsconfig.json wie bei apps/jufi -- nx sync verlangt den Projektverweis ohnehin, und die Abhaengigkeit steht so dort, wo pnpm und Nx sie lesen.",
+  "//": "Ein Paket nur aus zwei Gruenden: type module, weil Playwright sonst als CommonJS laedt und libs/db/src/testing.ts (import.meta) nicht laden kann; und @jufi/db und @jufi/domain als Abhaengigkeiten, damit der Aufbau bereiteTestDatenbankVor und threads.ts die Thread-Segmente ueber die Paketnamen finden. Verworfen: paths in tsconfig.json wie bei apps/jufi -- nx sync verlangt den Projektverweis ohnehin, und die Abhaengigkeit steht so dort, wo pnpm und Nx sie lesen.",
   "type": "module",
   "dependencies": {
-    "@jufi/db": "workspace:*"
+    "@jufi/db": "workspace:*",
+    "@jufi/domain": "workspace:*"
   }
 }

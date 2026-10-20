@@ -1,4 +1,6 @@
 import type { AntwortEinheit, Rollenfilter, UmfrageDaten } from '../../threads/typen.js';
+import { berlinerTag, berlinerUhrzeit, tagPlus } from '../../zeit.js';
+import { tagKurz, wochentagKurz } from '../termin/termin.js';
 
 // Spec 3.12. Nur "dabei" gilt als Teilnahme (Grundlage fuer Mitfahrt und Zahlung in TP4,
 // Erinnerungen in TP5); "vielleicht" gilt als beantwortet. Die Schluessel sind fest und
@@ -83,4 +85,29 @@ export function pruefeUmfrageAenderung(
 		konflikte.push({ feld: 'mehrfach' });
 	}
 	return konflikte;
+}
+
+/**
+ * Frist in der Kopfzeile einer Umfrage. Innerhalb der naechsten sechs Berliner
+ * Kalendertage genuegt der Wochentag ("bis Do 18:00"), danach braucht es das
+ * Datum, weil derselbe Wochentag sonst auch die Woche darauf meinen koennte.
+ * Gerechnet wird in Kalendertagen, nicht in 24-Stunden-Spannen: Eine Frist
+ * "So 23:59" ist am Montag davor noch der sechste Tag. Ab jetzt >= frist gilt
+ * sie als abgelaufen, passend zum Server (410 in der Fristsekunde).
+ */
+export function fristText(frist: Date, jetzt: Date): string {
+	if (jetzt.getTime() >= frist.getTime()) return 'Frist abgelaufen';
+	const tag = berlinerTag(frist);
+	const innerhalbEinerWoche = tag <= tagPlus(berlinerTag(jetzt), 6);
+	const wann = innerhalbEinerWoche ? wochentagKurz(tag) : tagKurz(tag);
+	return `bis ${wann} ${berlinerUhrzeit(frist)}`;
+}
+
+/**
+ * Immer die volle Form "Do 22.10. 18:00": Der Systemsatz im Verlauf bleibt
+ * stehen, und "Do" waere in einer Woche nicht mehr eindeutig. Verworfen:
+ * fristText dafuer verwenden, weil es vom Lesezeitpunkt abhaengt.
+ */
+export function fristZeitpunkt(frist: Date): string {
+	return `${tagKurz(berlinerTag(frist))} ${berlinerUhrzeit(frist)}`;
 }
