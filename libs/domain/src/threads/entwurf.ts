@@ -229,14 +229,18 @@ const zahl = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
 const hoechstens = (n: number) => `Höchstens ${zahl(n)} Zeichen.`;
 
+// Gemessen wird der getrimmte Text, denn entwurfAus schneidet den Leerraum ab, bevor der
+// Server prueft. Der Editor ruft entwurfFehler auf dem rohen Formularzustand; mit dem
+// ungetrimmten Wert gaebe er "gueltig" fuer "   " und der Server 400. Verworfen: den
+// Editor vorher trimmen lassen, denn dann stuende die Regel an zwei Orten.
 // null (nicht gesetzt) ist immer gueltig.
 function laengeFehler(feld: string, wert: string | null, grenze: number): Feldfehler[] {
-	return wert !== null && laenge(wert) > grenze ? [{ feld, text: hoechstens(grenze) }] : [];
+	return wert !== null && laenge(wert.trim()) > grenze ? [{ feld, text: hoechstens(grenze) }] : [];
 }
 
 // Leerer Text und zu langer Text als je ein Satz.
 function pflichtFehler(feld: string, wert: string, grenze: number, fehlt: string): Feldfehler[] {
-	if (wert === '') return [{ feld, text: fehlt }];
+	if (wert.trim() === '') return [{ feld, text: fehlt }];
 	return laengeFehler(feld, wert, grenze);
 }
 
@@ -259,7 +263,17 @@ function modulFehler(m: ModulEntwurf, i: number, rollenfilter: Rollenfilter, tei
 		return [...fehler, ...pflichtFehler(f('text'), m.text, GRENZEN.infoText, 'Bitte einen Text eingeben.')];
 	}
 	if (m.typ === 'TERMIN') {
-		const t = terminFehler({ modulId: '', ...m.termin });
+		// Wie entwurfAus getrimmt, sonst ist " 2026-10-24" im Editor ein Fehler und am Server keiner.
+		const roh = m.termin;
+		const t = terminFehler({
+			modulId: '',
+			startDatum: roh.startDatum.trim(),
+			endDatum: roh.endDatum?.trim() || null,
+			beginn: roh.beginn?.trim() || null,
+			ende: roh.ende?.trim() || null,
+			ort: null,
+			treffpunkt: null,
+		});
 		return [
 			...fehler,
 			...(t === null ? [] : [{ feld: f('termin'), text: t }]),

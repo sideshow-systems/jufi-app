@@ -121,6 +121,13 @@ describe('entwurfFehler', () => {
 			]);
 		});
 
+		it('liest nur Leerzeichen als leer und misst den Titel ohne Leerraum an den Enden', () => {
+			expect(entwurfFehler({ ...bowling(), titel: '   ' }, GRUPPEN)).toEqual([
+				{ feld: 'titel', text: 'Bitte einen Titel eingeben.' },
+			]);
+			expect(entwurfFehler({ ...bowling(), titel: ` ${zeichen(120)} ` }, GRUPPEN)).toEqual([]);
+		});
+
 		it('zaehlt Code-Points, nicht UTF-16-Einheiten: 120 Emojis sind erlaubt', () => {
 			expect(entwurfFehler({ ...bowling(), titel: '🎳'.repeat(120) }, GRUPPEN)).toEqual([]);
 			expect(entwurfFehler({ ...bowling(), titel: '🎳'.repeat(121) }, GRUPPEN)).toHaveLength(1);
@@ -155,6 +162,10 @@ describe('entwurfFehler', () => {
 			expect(entwurfFehler(e, GRUPPEN)).toEqual([{ feld: 'module', text: 'Höchstens 20 Module.' }]);
 		});
 
+		it('misst den Modultitel ohne Leerraum an den Enden', () => {
+			expect(entwurfFehler(mitModul(0, { titel: ` ${zeichen(80)} ` }), GRUPPEN)).toEqual([]);
+		});
+
 		it('begrenzt den Modultitel auf 80 Zeichen', () => {
 			expect(entwurfFehler(mitModul(0, { titel: zeichen(80) }), GRUPPEN)).toEqual([]);
 			expect(entwurfFehler(mitModul(0, { titel: zeichen(81) }), GRUPPEN)).toEqual([
@@ -183,6 +194,13 @@ describe('entwurfFehler', () => {
 			]);
 		});
 
+		it('liest nur Leerzeichen als leer und misst ohne Leerraum an den Enden', () => {
+			expect(entwurfFehler(mitModul(0, { text: '  \n ' }), GRUPPEN)).toEqual([
+				{ feld: 'module.0.text', text: 'Bitte einen Text eingeben.' },
+			]);
+			expect(entwurfFehler(mitModul(0, { text: ` ${zeichen(10_000)} ` }), GRUPPEN)).toEqual([]);
+		});
+
 		it('erlaubt 10 000 und verweigert 10 001 Zeichen', () => {
 			expect(entwurfFehler(mitModul(0, { text: zeichen(10_000) }), GRUPPEN)).toEqual([]);
 			expect(entwurfFehler(mitModul(0, { text: zeichen(10_001) }), GRUPPEN)).toEqual([
@@ -204,6 +222,15 @@ describe('entwurfFehler', () => {
 			]);
 		});
 
+		it('trimmt wie entwurfAus: Leerraum um Datum, Ort und Treffpunkt ist kein Fehler', () => {
+			expect(
+				entwurfFehler(
+					mitTermin({ startDatum: ' 2026-10-24 ', ort: ` ${zeichen(200)} `, treffpunkt: ` ${zeichen(200)} ` }),
+					GRUPPEN,
+				),
+			).toEqual([]);
+		});
+
 		it('begrenzt Ort und Treffpunkt auf 200 Zeichen', () => {
 			expect(entwurfFehler(mitTermin({ ort: zeichen(200), treffpunkt: zeichen(200) }), GRUPPEN)).toEqual([]);
 			expect(entwurfFehler(mitTermin({ ort: zeichen(201) }), GRUPPEN)).toEqual([
@@ -223,6 +250,13 @@ describe('entwurfFehler', () => {
 			expect(entwurfFehler(mitModul(2, { frage: zeichen(201) }), GRUPPEN)).toEqual([
 				{ feld: 'module.2.frage', text: 'Höchstens 200 Zeichen.' },
 			]);
+		});
+
+		it('liest eine Frage nur aus Leerzeichen als leer und misst sie ohne Leerraum', () => {
+			expect(entwurfFehler(mitModul(2, { frage: '   ' }), GRUPPEN)).toEqual([
+				{ feld: 'module.2.frage', text: 'Bitte eine Frage eingeben.' },
+			]);
+			expect(entwurfFehler(mitModul(2, { frage: ` ${zeichen(200)} ` }), GRUPPEN)).toEqual([]);
 		});
 
 		it('verweigert Pro Jungfischer, wenn die Zielgruppe keine Jungfischer fragt', () => {
