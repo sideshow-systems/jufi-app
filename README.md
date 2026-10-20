@@ -266,7 +266,7 @@ Einen Dump von Hand auf den Entwicklungsrechner holen: `bash tools/backup.sh` (n
 Ob die Sicherung auch ohne Server funktioniert, zeigt `bash tools/probe-sicherung.sh` (Wegwerf-Postgres, braucht Docker):
 ein gelungener Dump ist lesbar und enthält Tabellen, ein gescheiterter hinterlässt keine halbe Datei, ein abgeschnittener
 Dump oder eine abweichende Zeilenzahl fällt bei der Wiederherstellungsprobe auf. Der restic-Zweig ist dort nicht
-abgedeckt.
+abgedeckt. `bash tools/probe-deploy-tor.sh` (ohne Docker, mit ssh-Stub) belegt die Entscheidung in Tor 5b und `restic_env`.
 
 ## Wiederherstellungsprobe
 
