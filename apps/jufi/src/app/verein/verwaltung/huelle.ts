@@ -39,7 +39,7 @@ interface Punkt {
 const PUNKTE: Punkt[] = [
 	{ schluessel: 'mitglieder', pfad: [], text: 'Mitglieder', icon: 'personen' },
 	// Ohne recht wie Mitglieder: Die Liste ist fuer alle Jugendleiter da, ohne Schreibrechte nur lesbar (TP3-Spec 6.6);
-	// wer gar nichts darf, bekommt vom Server 404, und die Liste sagt es.
+	// wer gar nichts darf, hat ohnehin keine Leiste (zugang); das 404 der Liste ist nur das Sicherheitsnetz.
 	{ schluessel: 'threads', pfad: ['threads'], text: 'Threads', icon: 'threads' },
 	{ schluessel: 'untergruppen', pfad: ['untergruppen'], text: 'Untergruppen', icon: 'liste', recht: 'MITGLIEDER' },
 	{

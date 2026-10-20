@@ -88,12 +88,14 @@ describe('Lesende Routen der Verwaltung', () => {
 				titel: 'Mein Aushang',
 				entwurf: false,
 				darfBearbeiten: true,
+				darfAntwortenSehen: true,
 				hatUmfrage: false,
 			});
 			expect(zeile(fremderEntwurf.threadId)).toMatchObject({
 				titel: 'Tinas Entwurf',
 				entwurf: true,
 				darfBearbeiten: false,
+				darfAntwortenSehen: false,
 				hatUmfrage: true,
 			});
 			expect(zeile(austausch.id)).toMatchObject({ art: 'JUGENDSPRECHER_AUSTAUSCH', darfBearbeiten: false });
@@ -118,6 +120,8 @@ describe('Lesende Routen der Verwaltung', () => {
 			const liste = (await r.json()) as VerwaltungListe;
 			expect(liste.darfErstellen).toBe(false);
 			expect(liste.threads.some((t) => t.darfBearbeiten)).toBe(false);
+			// Die Antworten dagegen darf er sehen: ANTWORTEN_DETAIL genuegt.
+			expect(liste.threads.every((t) => t.darfAntwortenSehen)).toBe(true);
 		});
 
 		it('Sandra ohne Recht bekommt 404 wie bei etwas, das es nicht gibt', async () => {

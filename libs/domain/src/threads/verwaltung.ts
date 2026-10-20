@@ -53,6 +53,8 @@ export interface VerwaltungThread {
 	/** Anzeigetext des naechsten Termins (terminZeit), null ohne bevorstehenden. */
 	naechsterTermin: string | null;
 	darfBearbeiten: boolean;
+	/** Ob die Person die Antworten-Uebersicht sehen darf (siehtAntworten); sonst waere der Link dorthin eine 404-Seite. */
+	darfAntwortenSehen: boolean;
 	hatUmfrage: boolean;
 }
 
@@ -79,6 +81,13 @@ export interface ThreadBearbeitung {
 	untergruppen: { id: string; name: string }[];
 }
 
+// Wer die Antworten-Uebersicht eines Threads sieht: wer ihn bearbeiten darf (dann auch Nachtragen)
+// oder "Antworten im Detail" hat. Eine Funktion fuer Server und Liste: Die Liste zeigt den Link
+// nur, wenn die Uebersicht auch kommt, und rechnet die Regel nicht im Browser nach.
+export function siehtAntworten(ich: ThreadPerson, kopf: ThreadKopf): boolean {
+	return darfBearbeiten(ich, kopf) || hatRecht(ich, 'ANTWORTEN_DETAIL');
+}
+
 // Eine Zeile der Liste als reine Funktion, damit der Server nur noch laedt und nichts
 // herleitet. Der naechste Termin kommt aus naechsteTermine und nicht aus dem fruehesten
 // Datum: ein laufendes Zeltlager bleibt der naechste, ein vergangener Termin nie.
@@ -103,6 +112,7 @@ export function verwaltungThread(
 		keineZielgruppe: !kopf.alleUntergruppen && gewaehlteNamen(kopf, namen).length === 0,
 		naechsterTermin: naechster ? terminZeit(naechster.termin) : null,
 		darfBearbeiten: darfBearbeiten(ich, kopf),
+		darfAntwortenSehen: siehtAntworten(ich, kopf),
 		hatUmfrage: umfragen.length > 0,
 	};
 }
@@ -153,8 +163,8 @@ export function antwortenUebersicht(
 ): AntwortenUebersicht | null {
 	const { kopf, umfragen } = daten;
 	if (!siehtThread(ich, kopf, umfeld)) return null;
+	if (!siehtAntworten(ich, kopf)) return null;
 	const nachtragen = darfBearbeiten(ich, kopf);
-	if (!nachtragen && !hatRecht(ich, 'ANTWORTEN_DETAIL')) return null;
 
 	const name = (id: string) => {
 		const p = umfeld.personen.get(id);

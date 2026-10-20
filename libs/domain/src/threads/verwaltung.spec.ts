@@ -2,7 +2,7 @@ import type { TerminDaten } from '../module/termin/termin.js';
 import { threadDatenAus, type ModulDaten } from './ansicht.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
 import type { AntwortDaten, ThreadKopf, UmfrageDaten } from './typen.js';
-import { antwortenUebersicht, verwaltungThread, zielgruppeText } from './verwaltung.js';
+import { antwortenUebersicht, siehtAntworten, verwaltungThread, zielgruppeText } from './verwaltung.js';
 
 const umfeld = bowlingUmfeld();
 const person = (id: string) => umfeld.personen.get(id)!;
@@ -109,6 +109,7 @@ describe('verwaltungThread', () => {
 			keineZielgruppe: false,
 			naechsterTermin: 'Sa 24.10. · 18:00',
 			darfBearbeiten: true,
+			darfAntwortenSehen: true,
 			hatUmfrage: true,
 		});
 	});
@@ -129,6 +130,24 @@ describe('verwaltungThread', () => {
 		expect(t).toMatchObject({ keineZielgruppe: true, zielgruppe: 'Keine Zielgruppe mehr', darfBearbeiten: true });
 		const fremd = verwaltungThread(person('petra'), daten(kopf({ erstelltVonId: 'thomas' })), UNTERGRUPPEN, JETZT);
 		expect(fremd.darfBearbeiten).toBe(false);
+	});
+});
+
+describe('siehtAntworten', () => {
+	it('gilt fuer Bearbeiter und fuer Antworten im Detail, nicht fuer Ersteller fremder Threads', () => {
+		expect(siehtAntworten(person('thomas'), kopf())).toBe(true);
+		expect(siehtAntworten(person('bea'), kopf())).toBe(true);
+		// Petra darf Threads erstellen, aber nicht den von Thomas bearbeiten.
+		expect(siehtAntworten(person('petra'), kopf())).toBe(false);
+		expect(siehtAntworten(person('petra'), kopf({ erstelltVonId: 'petra' }))).toBe(true);
+		expect(siehtAntworten(person('sandra'), kopf())).toBe(false);
+	});
+
+	it('verwaltungThread meldet es je Zeile', () => {
+		const fremd = verwaltungThread(person('petra'), daten(kopf(), [umfrageModul()]), UNTERGRUPPEN, JETZT);
+		expect(fremd).toMatchObject({ hatUmfrage: true, darfBearbeiten: false, darfAntwortenSehen: false });
+		const betreuer = verwaltungThread(person('bea'), daten(kopf(), [umfrageModul()]), UNTERGRUPPEN, JETZT);
+		expect(betreuer).toMatchObject({ darfBearbeiten: false, darfAntwortenSehen: true });
 	});
 });
 

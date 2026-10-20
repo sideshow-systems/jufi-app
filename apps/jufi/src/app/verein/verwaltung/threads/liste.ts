@@ -15,7 +15,9 @@ import { VerwaltungThreadsApi } from './threads-api';
  *
  * Wer einen Thread nicht bearbeiten darf, sieht ihn trotzdem und gelangt mit dem Titel in die
  * normale Thread-Seite; ob die Person den Editor oeffnen darf, entscheidet der Server schon in
- * der Antwort (darfBearbeiten), die Seite rechnet keine Rechte nach. Das Archiv ist eingeklappt:
+ * der Antwort (darfBearbeiten, darfAntwortenSehen), die Seite rechnet keine Rechte nach. Den Link
+ * "Antworten" gibt es nur mit darfAntwortenSehen: Ohne das Recht antwortete der Server mit 404.
+ * Das Archiv ist eingeklappt:
  * Es waechst mit den Jahren und wird selten gebraucht, aber es soll nicht erst gesucht werden.
  * "Angepinnt" ist kein eigener Abschnitt wie in der Mitgliederliste, sondern steht oben in "Aktiv":
  * Die Jugendleiter sollen sehen, was bei den Mitgliedern oben steht, ohne dass die Liste Abschnitte
@@ -57,7 +59,7 @@ import { VerwaltungThreadsApi } from './threads-api';
 									} @else {
 										<a class="titel" [routerLink]="['/', slug(), 't', t.segment]">{{ t.titel }}</a>
 									}
-									@if (t.hatUmfrage) {
+									@if (t.hatUmfrage && t.darfAntwortenSehen) {
 										<a class="antworten" [routerLink]="['/', slug(), 'verwaltung', 'threads', t.id, 'antworten']"
 											>Antworten</a
 										>

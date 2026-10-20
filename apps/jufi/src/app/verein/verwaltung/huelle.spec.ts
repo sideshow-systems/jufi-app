@@ -292,6 +292,13 @@ describe('Verwaltungs-Huelle', () => {
 		expect(seite.textContent).not.toContain('Zur Mitgliederliste');
 	});
 
+	it('macht auf threads/:id/antworten den Punkt Threads aktiv', async () => {
+		const { seite } = await oeffneSeite('/demo/verwaltung/threads/t1/antworten', ichMit(['MITGLIEDER']), []);
+
+		const aktiv = [...seite.querySelectorAll('nav a[aria-current="page"]')].map((a) => a.textContent?.trim());
+		expect(aktiv).toEqual(['Threads']);
+	});
+
 	// Die Leiste nennt den Verein schon; jede Seite hat darum eine eigene Ueberschrift mit ihrem Namen (Ruling R8).
 	it.each([
 		['/demo/verwaltung', 'Mitglieder', LISTE],

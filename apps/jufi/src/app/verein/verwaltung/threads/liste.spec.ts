@@ -16,6 +16,7 @@ function thread(rest: Partial<VerwaltungThread> & { id: string; titel: string })
 		keineZielgruppe: false,
 		naechsterTermin: null,
 		darfBearbeiten: true,
+		darfAntwortenSehen: true,
 		hatUmfrage: false,
 		...rest,
 	};
@@ -32,6 +33,7 @@ const LISTE: VerwaltungListe = {
 			keineZielgruppe: true,
 		}),
 		thread({ id: 't-normal', titel: 'Hallo', darfBearbeiten: false }),
+		thread({ id: 't-fremd', titel: 'Fremd', darfBearbeiten: false, darfAntwortenSehen: false, hatUmfrage: true }),
 		thread({
 			id: 't-pin',
 			titel: 'Zeltlager',
@@ -64,7 +66,7 @@ describe('Thread-Liste der Verwaltung', () => {
 	it('gliedert in Entwuerfe und Aktiv, Angepinnte zuerst, das Archiv ist eingeklappt', async () => {
 		const { abschnitt, titel, seite } = await oeffne();
 		expect(titel(abschnitt('Entwürfe'))).toEqual(['Entwurf', 'Verwaist']);
-		expect(titel(abschnitt('Aktiv'))).toEqual(['Zeltlager', 'Hallo']);
+		expect(titel(abschnitt('Aktiv'))).toEqual(['Zeltlager', 'Hallo', 'Fremd']);
 		expect(abschnitt('Archiv')).toBeUndefined();
 		expect(knopf(seite, 'Archiv zeigen (1)')).toBeTruthy();
 		expect(seite.textContent).not.toContain('Fruehling');
@@ -101,12 +103,14 @@ describe('Thread-Liste der Verwaltung', () => {
 		expect(href('t-normal')).toBe('/demo/t/t-normal-hallo');
 	});
 
-	it('hat den Antworten-Link nur bei einer Umfrage', async () => {
+	it('hat den Antworten-Link nur bei einer Umfrage und nur mit Recht, die Antworten zu sehen', async () => {
 		const { seite } = await oeffne();
 		const antworten = (id: string) =>
 			seite.querySelector(`[data-thread="${id}"] a.antworten`)?.getAttribute('href') ?? null;
 		expect(antworten('t-pin')).toBe('/demo/verwaltung/threads/t-pin/antworten');
 		expect(antworten('t-normal')).toBeNull();
+		// Der Server antwortete der Person mit 404; ein Link dorthin waere tot.
+		expect(antworten('t-fremd')).toBeNull();
 	});
 
 	it('zeigt Neuer Thread mit darfErstellen und verlinkt in den Editor', async () => {
