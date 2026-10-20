@@ -48,6 +48,12 @@ services:
       - max_connections=25
       - -c
       - log_min_duration_statement=500
+      # Langsame Abfragen ja, ihre Werte nein: Ohne diese Zeile schriebe Postgres die
+      # Bind-Parameter mit ins Log, also Namen und E-Mail-Adressen (Spec 8.5).
+      # Verworfen: log_min_duration_statement abschalten; dann fehlte der Hinweis auf
+      # langsame Abfragen ganz.
+      - -c
+      - log_parameter_max_length=0
     # Harte Grenze, damit ein Ausrutscher hier nicht paperless umbringt.
     mem_limit: 384m
     volumes:

@@ -155,15 +155,14 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 
 ## Sicherung
 
-[Geplant, noch nicht in Betrieb — nach der Inbetriebnahme vom Eigentümer zu bestätigen]
-
 - Die Datenbank wird täglich gesichert, verschlüsselt und auf einen getrennten Speicher außer Haus übertragen (ein zweites Konto bei Hetzner, eigenes Passwort für die Sicherung).
+- Auf dem Server selbst bleiben die täglichen Sicherungen zusätzlich 30 Tage liegen, lesbar nur für den Betreiber.
 - Aufbewahrt werden 7 tägliche, 4 wöchentliche und 6 monatliche Stände. Eine Sicherung kann also bis zu etwa sechs Monate alt werden.
 - Die Wiederherstellung wird regelmäßig geprobt, indem der letzte Stand in eine getrennte, danach verworfene Datenbank eingespielt und geprüft wird, zunächst bei der Inbetriebnahme, danach vierteljährlich.
 
 ## Auftragsverarbeiter und Empfänger
 
-- **Hetzner** ([Firma und Anschrift der Hetzner-Gesellschaft, Standort des Rechenzentrums, Vertrag zur Auftragsverarbeitung — liefert der Eigentümer]): Server und Datenbank; geplant außerdem Versand der E-Mails über den Mailserver von Hetzner und Speicher für die Sicherungskopien [nach Inbetriebnahme bestätigen — liefert der Eigentümer].
+- **Hetzner** ([Firma und Anschrift der Hetzner-Gesellschaft, Standort des Rechenzentrums, Vertrag zur Auftragsverarbeitung — liefert der Eigentümer]): Server und Datenbank, Versand der E-Mails über den Mailserver von Hetzner und Speicher für die Sicherungskopien.
 - **Keine Drittanbieter-Einbindungen:** Die App lädt keine Schriften, Skripte, Bilder oder sonstige Inhalte von fremden Servern und bindet keine Analyse-, Werbe- oder Social-Media-Dienste ein.
 - Die App selbst gibt keine Daten an weitere Dienste weiter. [Übermittlung in Länder außerhalb der EU: Bestätigung für Hosting, Mailversand und Sicherung — liefert der Eigentümer]
 - Innerhalb des Vereins sehen Jugendleiter und Familien Daten nur im Umfang von „Wer im Verein was sieht“.
