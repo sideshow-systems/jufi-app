@@ -122,8 +122,8 @@ describe('alsIcs', () => {
 		);
 		// Entfaltet, weil die lange Beschreibung gefaltet wird.
 		const ics = alsIcs(e, 'mod1@jufi-app.de', jetzt).replace(/\r\n /g, '');
-		expect(ics).toContain('SUMMARY:A\\, B\; C\r\n');
-		expect(ics).toContain('LOCATION:Halle 1\\, Hof\; hinten\\\\links\r\n');
+		expect(ics).toContain('SUMMARY:A\\, B\\; C\r\n');
+		expect(ics).toContain('LOCATION:Halle 1\\, Hof\\; hinten\\\\links\r\n');
 		expect(ics).toContain('DESCRIPTION:Treffpunkt: Tor\\nEnde offen\\n' + LINK);
 	});
 

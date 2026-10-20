@@ -74,7 +74,7 @@ function utcStempel(d: Date): string {
 
 /** TEXT-Werte nach RFC 5545 3.3.11. */
 function text(s: string): string {
-	return s.replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+	return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 }
 
 const UTF8 = new TextEncoder();
