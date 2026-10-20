@@ -49,6 +49,7 @@ ENV
 mkdir -p "$WORK/tools"
 cp "$JUFI_ROOT/tools/_config.sh" "$WORK/tools/" 2>/dev/null || true
 cp "$JUFI_ROOT/tools/backup.sh" "$WORK/tools/" 2>/dev/null || true
+cp "$JUFI_ROOT/tools/restore-test.sh" "$WORK/tools/" 2>/dev/null || true
 
 BACKUPS="$WORK/backups"
 DB() { docker compose -f "$WORK/docker-compose.yml" --project-directory "$WORK" --env-file "$WORK/.env" "$@"; }
@@ -83,6 +84,12 @@ run_backup() {
 	REMOTE_DIR="$WORK" REMOTE_COMPOSE=docker-compose.yml BACKUP_DIR="$BACKUPS" \
 		COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
 		bash "$WORK/tools/backup.sh" --local --no-restic
+}
+# Die Wiederherstellungsprobe liegt wie auf dem Server neben _config.sh. Benutzer
+# und Datenbank der Probe-Compose, Quelle ist deren Container.
+run_restore() {
+	JUFI_POSTGRES_USER=probe JUFI_POSTGRES_DB=probe SOURCE_CONTAINER="$SRC" \
+		bash "$WORK/tools/restore-test.sh" "$@"
 }
 # pg_restore liegt auf dem Entwicklungsrechner oft nicht vor: im Image lesen.
 restore_list() { docker run --rm -i postgres:17-alpine pg_restore --list <"$1"; }
@@ -119,4 +126,51 @@ else
 	FAILED=1
 fi
 
+# --- Faelle C bis E: Wiederherstellung ----------------------------------------
+# Fall B hat die Datenbank gestoppt; fuer die Restore-Faelle laeuft sie wieder
+# und liefert einen frischen Dump.
+DB start jufi-db >/dev/null
+for _ in $(seq 1 60); do
+	DB exec -T jufi-db psql -U probe -d probe -tAc 'select 1' >/dev/null 2>&1 && break
+	sleep 1
+done
+SRC="$(DB ps -q jufi-db | head -1)"
+find "$BACKUPS" -name 'jufi-*.dump' -delete 2>/dev/null || true
+run_backup >/dev/null 2>&1 || true
+DUMP_C="$(find "$BACKUPS" -name 'jufi-*.dump' | head -1)"
+
+# --- Fall C: Restore gleich Quelle ----------------------------------------------
+if OUT_C="$(run_restore --dump "$DUMP_C" 2>&1)"; then CODE_C=0; else CODE_C=$?; fi
+if [[ "$CODE_C" -eq 0 && "$OUT_C" == *'✓ familie '*3* && "$OUT_C" == *'✓ person '*5* ]]; then
+	echo '✓ C: Wiederherstellung gleich Quelle (familie 3, person 5)'
+else
+	echo "✗ C: Exit $CODE_C"
+	printf '%s\n' "$OUT_C" | sed 's/^/    /'
+	FAILED=1
+fi
+
+# --- Fall D: Quelle wuchs nach dem Dump -----------------------------------------
+DB exec -T jufi-db psql -U probe -d probe -q -c "insert into person (familie_id, name) values (1, 'Nachzuegler')" >/dev/null
+if OUT_D="$(run_restore --dump "$DUMP_C" 2>&1)"; then CODE_D=0; else CODE_D=$?; fi
+if [[ "$CODE_D" -ne 0 && "$OUT_D" == *person*'Quelle 6, wiederhergestellt 5'* ]]; then
+	echo '✓ D: gewachsene Quelle -> Abweichung benannt, Exit != 0'
+else
+	echo "✗ D: Exit $CODE_D"
+	printf '%s\n' "$OUT_D" | sed 's/^/    /'
+	FAILED=1
+fi
+
+# --- Fall E: Dump abgeschnitten -------------------------------------------------
+HALF=$(( $(wc -c <"$DUMP_C" | tr -d ' ') / 2 ))
+head -c "$HALF" "$DUMP_C" >"$WORK/abgeschnitten.dump"
+if OUT_E="$(run_restore --dump "$WORK/abgeschnitten.dump" 2>&1)"; then CODE_E=0; else CODE_E=$?; fi
+if [[ "$CODE_E" -ne 0 && "$OUT_E" == *'pg_restore ist gescheitert'* ]]; then
+	echo '✓ E: abgeschnittener Dump -> pg_restore ist gescheitert, Exit != 0'
+else
+	echo "✗ E: Exit $CODE_E"
+	printf '%s\n' "$OUT_E" | sed 's/^/    /'
+	FAILED=1
+fi
+
+[[ "$FAILED" -eq 0 ]] && echo '✓ Sicherung und Wiederherstellung bewiesen'
 exit "$FAILED"
