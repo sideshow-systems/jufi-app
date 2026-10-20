@@ -230,7 +230,7 @@ Die Postgres-Datenbank (`jufi-db`) ist das einzige Exemplar der Vereinsdaten. De
    ein `jufi-*.dump`. Die Dumps sind nur für den Besitzer lesbar (`umask 077`), denn sie enthalten Klartext-Daten von
    Kindern.
 3. Lokale Dumps nach 30 Tagen löschen (`LOCAL_KEEP_DAYS`).
-4. Verschlüsselt mit restic nach außen schieben (zweites Hetzner-Konto, SFTP, eigenes Repository, Tag `jufi-db`),
+4. Verschlüsselt mit restic nach außen schieben (Hetzner-Konto wie bei HWYD, SFTP, eigenes Repository `backups/jufi`, Tag `jufi-db`),
    prüfen, dass der Snapshot den Dump in voller Größe enthält, und erst dann aufräumen: 7 tägliche, 4 wöchentliche und
    6 monatliche Stände.
 
@@ -252,7 +252,7 @@ Der Probelauf am Ende beweist restic, Schlüssel, `known_hosts`, Snapshot-Prüfu
 statt sie um 03:40 zum ersten Mal zu versuchen. Er ist nur mit einem erreichbaren Server und einer echten Ablage
 beweisbar.
 
-**Wohin das restic-Passwort gehört:** `JUFI_RESTIC_REPOSITORY` (zum Beispiel `sftp:benutzer@wirt:jufi-backup`) und
+**Wohin das restic-Passwort gehört:** `JUFI_RESTIC_REPOSITORY` (`sftp:sidesha@www417.your-server.de:backups/jufi`, dasselbe Konto wie HWYD, daneben dessen `backups/hwyd`) und
 `JUFI_RESTIC_PASSWORD` stehen in der geteilten `.env` auf dem Server (Vorlage: `deploy/env.jufi.example`), das Passwort
 **zusätzlich im Passwortmanager**. Es ist ein **eigenes** Passwort für ein eigenes Repository, nicht das von HWYD; ohne
 den Passwortsatz ist die Ablage nicht lesbar, und auf dem Server liegt er neben dem, was er schützt. Die Skripte kennen
@@ -367,7 +367,7 @@ Der Rest ist Handarbeit und Serverarbeit. **Nichts davon läuft ohne das Wort de
 
 **A. Vom Eigentümer vorzubereiten (außerhalb des Repos):**
 
-1. Zweites Hetzner-Konto (SFTP, ohne Shell) und ein SSH-Schlüssel **ohne Passphrase** für root auf dem Server; `JUFI_RESTIC_REPOSITORY=sftp:benutzer@wirt:jufi-backup` und ein **neues** `JUFI_RESTIC_PASSWORD` (nicht das von HWYD) in die `.env` auf dem Server, das Passwort zusätzlich in den Passwortmanager. Ohne dieses Passwort ist die Ablage nicht lesbar.
+1. Das Hetzner-Konto, in das schon HWYD sichert (SFTP, ohne Shell), und der dort schon eingerichtete SSH-Schlüssel ohne Passphrase für root auf dem Server werden mitbenutzt — kein neues Konto nötig. `JUFI_RESTIC_REPOSITORY=sftp:sidesha@www417.your-server.de:backups/jufi` (Verzeichnis neben `backups/hwyd`; `restic init` legt es an) und ein **neues** `JUFI_RESTIC_PASSWORD` (nicht das von HWYD) in die `.env` auf dem Server, das Passwort zusätzlich in den Passwortmanager. Ohne dieses Passwort ist die Ablage nicht lesbar.
 2. Hetzner-Postfach `app@jufi-app.de` samt SMTP-Zugang; SPF, DKIM und DMARC für `jufi-app.de` bei Hetzner. `JUFI_SMTP_HOST`, `JUFI_SMTP_PORT`, `JUFI_SMTP_USER`, `JUFI_SMTP_PASS` **noch nicht** in die `.env`; das ist Schritt 11.
 3. DNS: `test.jufi-app.de` zeigt schon auf den Server; `app-test.jufi-app.de` bleibt, bis die Umleitung geprüft ist.
 4. Impressum, Datenschutzerklärung und Wortlaut des Einwilligungstexts (Spec 8.6), außerdem die Entscheidung zu I2 aus Etappe 4.
