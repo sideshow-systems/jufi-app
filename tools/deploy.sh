@@ -296,19 +296,25 @@ note "Sicherungsskript $REMOTE_TOOLS/backup.sh ausfuehrbar"
 # Ohne restic (--no-restic): die Kopie ausser Haus macht der naechtliche Lauf; ein
 # Deploy soll nicht an der Erreichbarkeit des zweiten Kontos haengen.
 step 'Tor 5b: Dump vor der Migration'
-# Ein scheiternder ps-Aufruf ist nicht "Dienst laeuft nicht": still als erstes
-# Ausrollen gedeutet, uebersprang er den Dump und oeffnete die Sicherungsschranke.
-# Nur ein erfolgreiches ps mit leerer Ausgabe heisst "noch nichts da".
-DB_LAEUFT="$(remote_compose "ps --status running -q $DB_SERVICE" 2>/dev/null)" \
+# Die Entscheidung steht in db_vorzustand (_config.sh, geprobt mit
+# tools/probe-deploy-tor.sh). Nur "kein Container" ist ein erstes Ausrollen; ein
+# vorhandener, nicht laufender Container hat Daten und braucht erst den Start.
+DB_ZUSTAND="$(db_vorzustand)" \
 	|| fail 'Zustand von '"$DB_SERVICE"' nicht abfragbar -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
-if [[ -n "$DB_LAEUFT" ]]; then
-	jufi_ssh "$REMOTE_TOOLS/backup.sh --local --no-restic" \
-		|| fail 'Dump gescheitert -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
-	note 'Dump gezogen (lokal auf dem Server, ohne restic)'
-else
-	# Allererstes Ausrollen: es gibt noch nichts zu sichern.
-	note "$DB_SERVICE laeuft nicht (erstes Ausrollen?) -- kein Dump noetig"
-fi
+case "$DB_ZUSTAND" in
+	laeuft)
+		jufi_ssh "$REMOTE_TOOLS/backup.sh --local --no-restic" \
+			|| fail 'Dump gescheitert -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
+		note 'Dump gezogen (lokal auf dem Server, ohne restic)'
+		;;
+	steht)
+		fail "Datenbank laeuft nicht -- kein Deploy ohne Sicherung. Naechster Schritt: auf dem Server $DB_SERVICE starten (docker compose up -d $DB_SERVICE in $REMOTE_DIR), dann den Deploy erneut. Auf dem Server wurde nichts veraendert."
+		;;
+	*)
+		# Allererstes Ausrollen: es gibt noch nichts zu sichern.
+		note "Kein Container von $DB_SERVICE (erstes Ausrollen) -- kein Dump noetig"
+		;;
+esac
 
 # --- Tor 6: Uebertragen und Ausrollen ------------------------------------------
 step "Tor 6: Image per SSH uebertragen ($IMAGE:$SHA)"

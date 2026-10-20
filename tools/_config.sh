@@ -55,6 +55,23 @@ jufi_scp() { scp "${SSH_OPTS[@]}" "$@"; }
 # Compose auf dem Server, immer mit Datei und immer aus dem richtigen Verzeichnis.
 remote_compose() { jufi_ssh "cd $REMOTE_DIR && docker compose -f $REMOTE_COMPOSE $*"; }
 
+# Zustand der Datenbank vor der Migration (Tor 5b in deploy.sh): keiner | laeuft |
+# steht. Exit 1, wenn der Zustand nicht abfragbar ist.
+#
+# "Erstes Ausrollen" (keiner) heisst nur: es gibt gar keinen Container des
+# Dienstes. Ein vorhandener, aber gestoppter oder neustartender Container hat
+# Daten im Volume; als erstes Ausrollen gedeutet, uebersprange der Deploy den Dump
+# und `jufi-migrate` migrierte ohne Sicherung. Verworfen: allein `ps --status
+# running` auszuwerten -- das kann "nie gestartet" und "gerade abgestuerzt" nicht
+# unterscheiden. Auch ein scheiternder ps-Aufruf ist kein "nichts da".
+db_vorzustand() {
+	local alle laeuft
+	alle="$(remote_compose "ps -a -q $DB_SERVICE" 2>/dev/null)" || return 1
+	if [[ -z "$alle" ]]; then echo keiner; return 0; fi
+	laeuft="$(remote_compose "ps --status running -q $DB_SERVICE" 2>/dev/null)" || return 1
+	if [[ -n "$laeuft" ]]; then echo laeuft; else echo steht; fi
+}
+
 # restic kennt nur RESTIC_REPOSITORY und RESTIC_PASSWORD. In der geteilten .env
 # tragen die Werte nach Regel 2 das Praefix JUFI_ -- unpraefixiert sicherte eine
 # zweite App mit restic in dieselbe Ablage.
