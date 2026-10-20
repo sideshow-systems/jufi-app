@@ -86,7 +86,7 @@ elif [[ "$DRY_RUN" -eq 1 ]]; then
 else
 	note 'restic fehlt -- wird installiert'
 	jufi_ssh 'apt-get update -qq && apt-get install -y -qq restic' >/dev/null \
-		|| fail 'apt-get install restic ist gescheitert. Von Hand nachziehen.'
+		|| fail 'apt-get install restic ist gescheitert. Auf dem Server von Hand installieren, dann erneut aufrufen.'
 	jufi_ssh 'command -v restic >/dev/null 2>&1' \
 		|| fail 'restic ist nach der Installation nicht auffindbar. Auf dem Server apt-get install restic von Hand pruefen.'
 	note "restic: $(jufi_ssh 'restic version' | head -1)"
@@ -119,7 +119,7 @@ if [[ "$WITH_CRON" -eq 1 ]]; then
 		# 644 und root:root sind nicht Geschmack: cron ignoriert Dateien in
 		# /etc/cron.d, die fuer andere schreibbar sind -- und zwar schweigend.
 		jufi_ssh "install -m 644 -o root -g root $REMOTE_TOOLS/jufi-backup.cron /etc/cron.d/jufi-backup" \
-			|| fail 'Cron-Datei liess sich nicht installieren.'
+			|| fail 'Cron-Datei liess sich nicht installieren. /etc/cron.d auf dem Server pruefen, dann erneut aufrufen.'
 		note "$(jufi_ssh 'grep -v "^#" /etc/cron.d/jufi-backup | grep backup.sh')"
 	fi
 fi
