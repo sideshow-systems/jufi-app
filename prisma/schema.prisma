@@ -701,7 +701,7 @@ model UmfrageModul {
   /// Teilnahme-Umfrage je Thread erlaubt (umfrage_eine_teilnahme, Migration threads).
   threadId   String
   modul      ThreadModul    @relation(fields: [vereinId, id, threadId], references: [vereinId, id, threadId], onDelete: Cascade, onUpdate: NoAction)
-  /// 1-200 Zeichen ohne Rand (CHECK umfrage_frage).
+  /// 1-200 Zeichen nach Abzug des Rands (CHECK umfrage_frage).
   frage      String
   einheit    AntwortEinheit
   mehrfach   Boolean        @default(false)
@@ -726,7 +726,7 @@ model UmfrageOption {
   verein     Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   umfrageId  String
   umfrage    UmfrageModul @relation(fields: [vereinId, umfrageId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
-  /// 1-200 Zeichen ohne Rand (CHECK option_text).
+  /// 1-200 Zeichen nach Abzug des Rands (CHECK option_text).
   text       String
   /// Mindestens 0 (CHECK option_position); nicht eindeutig, wie bei ThreadModul.
   position   Int
@@ -786,9 +786,15 @@ model UmfrageAntwortOption {
   antwortId String
   antwort   UmfrageAntwort @relation(fields: [vereinId, umfrageId, antwortId], references: [vereinId, umfrageId, id], onDelete: Cascade, onUpdate: NoAction)
   optionId  String
-  /// NoAction statt Cascade: Eine beantwortete Option laesst sich nicht loeschen.
-  /// Zweiter Riegel neben der Pruefung in der Domaene (TP3-Spec 3.14); das
-  /// Loeschen der ganzen Umfrage geht trotzdem durch (Begruendung bei Einwilligung).
+  /// NoAction statt Cascade: Eine beantwortete Option laesst sich nicht loeschen,
+  /// und damit auch keine beantwortete Umfrage, kein Modul und kein Thread mit
+  /// einer solchen Umfrage -- Postgres prueft den Verweis vor der Kaskade ueber
+  /// UmfrageAntwort (P2003). Gewollt: Antworten gehen nie still verloren (Spec
+  /// 3.14); Threads loescht man nur ohne Antworten (Spec 3.5). Zweiter Riegel
+  /// neben der Pruefung in der Domaene. Verworfen: DEFERRABLE INITIALLY DEFERRED --
+  /// die Pruefung liefe nach der Kaskade, und das Loeschen verwuerfe beantwortete
+  /// Umfragen kommentarlos. Das Loeschen eines ganzen Vereins geht trotzdem durch,
+  /// weil jede Tabelle direkt vom Verein kaskadiert.
   option    UmfrageOption  @relation(fields: [vereinId, umfrageId, optionId], references: [vereinId, umfrageId, id], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([antwortId, optionId])

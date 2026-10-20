@@ -552,7 +552,11 @@ describe('Threads (TP3)', () => {
 		});
 	}
 
-	/** Termin-Modul mit eigenem Modul; das Versprechen ist der abgelehnte oder erlaubte Vorgang. */
+	/**
+	 * Legt ein Modul und dazu das Termin-Modul an und gibt das Anlegen des Termin-Moduls
+	 * zurueck (ohne darauf zu warten), damit der Aufrufer es mit fehlertext() oder await
+	 * abfangen kann. Das Modul entsteht vorher, weil jeder Termin ein eigenes braucht.
+	 */
 	async function termin(
 		vereinId: string,
 		threadId: string,
@@ -745,6 +749,92 @@ describe('Threads (TP3)', () => {
 		await prisma.verlaufEintrag.create({
 			data: { ...nachricht, autorId: leiter.id, text: null, geloeschtAm: new Date(), geloeschtVonId: leiter.id },
 		});
+	});
+
+	it('beantwortete Umfrage laesst sich als Ganzes nicht loeschen, unbeantwortete schon', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const kind = await jungfischer(a.id);
+		const t = await thread(a.id, leiter.id);
+		const beantwortet = await umfrage(a.id, t.id);
+		const o = await option(a.id, beantwortet.id);
+		const a1 = await antwort(a.id, beantwortet.id, kind.id, leiter.id);
+		await prisma.umfrageAntwortOption.create({
+			data: { vereinId: a.id, umfrageId: beantwortet.id, antwortId: a1.id, optionId: o.id },
+		});
+		const unbeantwortet = await umfrage(a.id, t.id);
+		await option(a.id, unbeantwortet.id);
+
+		// Weder Umfrage noch Modul noch Thread: Die Option haelt die Antwort fest.
+		expect(await fehlercode(prisma.umfrageModul.delete({ where: { id: beantwortet.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.threadModul.delete({ where: { id: beantwortet.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
+		expect(await prisma.umfrageAntwortOption.count({ where: { antwortId: a1.id } })).toBe(1);
+
+		await prisma.threadModul.delete({ where: { id: unbeantwortet.id } });
+		expect(await prisma.umfrageOption.count({ where: { umfrageId: unbeantwortet.id } })).toBe(0);
+	});
+
+	it('Positionen, Fragetext, Optionen und Info-Text ausserhalb der Grenzen abgelehnt', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const u = await umfrage(a.id, t.id);
+		const info = (text: string) =>
+			modul(a.id, t.id).then((m) => prisma.infoModul.create({ data: { id: m.id, vereinId: a.id, text } }));
+		const optionMit = (daten: Partial<Prisma.UmfrageOptionUncheckedCreateInput>) =>
+			prisma.umfrageOption.create({
+				data: { vereinId: a.id, umfrageId: u.id, text: 'Dabei', position: 0, schluessel: 'dabei', ...daten },
+			});
+
+		expect(
+			await fehlertext(
+				prisma.threadModul.create({ data: { vereinId: a.id, threadId: t.id, typ: 'INFO', position: -1 } }),
+			),
+		).toContain('modul_position');
+		expect(await fehlertext(optionMit({ position: -1 }))).toContain('option_position');
+
+		for (const frage of ['', '   ', 'x'.repeat(201)]) {
+			expect(await fehlertext(umfrage(a.id, t.id, { frage }))).toContain('umfrage_frage');
+		}
+		// Die Laenge zaehlt nach dem Abzug des Rands.
+		await umfrage(a.id, t.id, { frage: ` ${'x'.repeat(200)} ` });
+
+		for (const schluessel of ['', 'Dabei', 'dabei!', 'a b', 'x'.repeat(41)]) {
+			expect(await fehlertext(optionMit({ schluessel }))).toContain('option_schluessel');
+		}
+		for (const text of ['', '   ', 'x'.repeat(201)]) {
+			expect(await fehlertext(optionMit({ text }))).toContain('option_text');
+		}
+		await optionMit({ schluessel: 'x'.repeat(40), text: 'x'.repeat(200) });
+
+		expect(await fehlertext(info('x'.repeat(10001)))).toContain('info_text');
+		await info('x'.repeat(10000));
+	});
+
+	it('Verlauf: Systemeintrag ohne Art oder mit Text, Loeschzeitpunkt ohne Person abgelehnt', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const t = await thread(a.id, leiter.id);
+		const eintrag = { vereinId: a.id, threadId: t.id, stand: 1 } as const;
+
+		expect(
+			await fehlertext(prisma.verlaufEintrag.create({ data: { ...eintrag, art: 'SYSTEM', autorId: leiter.id } })),
+		).toContain('verlauf_system');
+		expect(
+			await fehlertext(
+				prisma.verlaufEintrag.create({
+					data: { ...eintrag, art: 'SYSTEM', systemArt: 'VEROEFFENTLICHT', text: 'Hallo' },
+				}),
+			),
+		).toContain('verlauf_system');
+		expect(
+			await fehlertext(
+				prisma.verlaufEintrag.create({
+					data: { ...eintrag, art: 'SYSTEM', systemArt: 'VEROEFFENTLICHT', geloeschtAm: new Date() },
+				}),
+			),
+		).toContain('verlauf_geloescht');
+		await prisma.verlaufEintrag.create({ data: { ...eintrag, art: 'SYSTEM', systemArt: 'VEROEFFENTLICHT' } });
 	});
 
 	it('Untergruppe loeschen nimmt die Auswahl mit, der Thread bleibt', async () => {
