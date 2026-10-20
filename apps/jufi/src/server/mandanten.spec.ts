@@ -22,8 +22,13 @@ interface Kontext {
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
-	/** Cookie einer Person aus eigen mit Verwaltungs-, Rechte- und Einstellungsrecht: sieht in eigen alles, in fremd nichts. */
+	/**
+	 * Cookie einer Person aus eigen mit Verwaltungs-, Rechte-, Einstellungs-, Thread-erstellen-
+	 * und Antworten-im-Detail-Recht: sieht in eigen alles, in fremd nichts.
+	 */
 	eigenerLeiter: string;
+	/** Die Person hinter eigenerLeiter, damit ein Fall einen Thread anlegen kann, den sie bearbeiten darf. */
+	eigenerLeiterId: string;
 	/** Eine Person im Verein fremd. */
 	fremdePersonId: string;
 	/** Ein volljaehriges Kind im Verein fremd. */
@@ -486,6 +491,43 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		);
 		expect(await fremderVerlauf(k)).toEqual(vorher);
 	},
+	'GET /verwaltung/threads': async (k) => {
+		const pfad = '/api/v1/verwaltung/threads';
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const liste = (await r.json()) as { threads: { id: string; titel: string }[]; untergruppen: { id: string }[] };
+		// Weder der Thread noch die Untergruppe aus fremd erscheinen in der Liste von eigen.
+		expect(liste.threads.map((t) => t.id)).not.toContain(k.fremderThread.threadId);
+		expect(liste.threads.map((t) => t.titel)).not.toContain('Fremder Thread');
+		expect(liste.untergruppen.map((g) => g.id)).not.toContain(k.fremdeGruppeId);
+	},
+	'GET /threads/:id/bearbeitung': async (k) => {
+		const hole = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/bearbeitung`, { cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await hole(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await hole(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters ist bearbeitbar, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await hole(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+	},
+	'GET /threads/:id/antworten': async (k) => {
+		const hole = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/antworten`, { cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await hole(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await hole(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: "Antworten im Detail" genuegt an einem eigenen Thread, das Recht fehlt also nicht.
+		expect((await hole(k.eigen.slug, await eigenerThread(k), k.eigenerLeiter)).status).toBe(200);
+	},
 	'DELETE /verlauf/:eintragId': async (k) => {
 		const vorher = await fremderVerlauf(k);
 		const loesche = (slug: string, cookie?: string) =>
@@ -821,7 +863,7 @@ describe('Mandanten-Test', () => {
 		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
 		const leiter = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
-			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE', 'EINSTELLUNGEN'],
+			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE', 'EINSTELLUNGEN', 'THREADS_ERSTELLEN', 'ANTWORTEN_DETAIL'],
 		});
 		const fremderPasskey = await prisma.passkey.create({
 			data: {
@@ -894,6 +936,7 @@ describe('Mandanten-Test', () => {
 			gesperrt,
 			eigenesCookie: cookie,
 			eigenerLeiter: leiter.cookie,
+			eigenerLeiterId: leiter.personId,
 			fremdePersonId: nachbar.personId,
 			fremdesKindId: fremdesKind.id,
 			fremdeGruppeId: fremdeGruppe.id,
