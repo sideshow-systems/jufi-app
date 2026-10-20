@@ -154,7 +154,7 @@ restic backup --tag jufi-db "$DUMP"
 # reicht also nicht: es wird nachgesehen, ob der Snapshot den Dump in seiner
 # Groesse enthaelt.
 step 'Snapshot pruefen'
-SNAP_SIZE="$(restic ls --long latest --tag jufi-db 2>/dev/null | awk -v p="$DUMP" '$NF == p { print $4 }' | tail -1)"
+SNAP_SIZE="$(restic ls --long latest --tag jufi-db 2>/dev/null | awk -v p="$DUMP" '$NF == p { print $4 }' | tail -1 || true)"
 [[ "$SNAP_SIZE" == "$SIZE" ]] \
 	|| fail "Snapshot enthaelt den Dump nicht in voller Groesse (${SNAP_SIZE:-nichts} statt $SIZE Byte). Nichts aufgeraeumt -- der vorige Snapshot bleibt der gueltige."
 note "$SNAP_SIZE Byte im Snapshot, gleich dem Dump"
@@ -162,8 +162,14 @@ note "$SNAP_SIZE Byte im Snapshot, gleich dem Dump"
 # 7/4/6: HWYD haelt 12 Monate, Spezifikation 8.3 gibt hier 6 vor. Aufgeraeumt wird
 # erst *nach* der Snapshot-Pruefung, damit ein misslungener Lauf nie den letzten
 # guten Stand wegraeumt.
+#
+# `--group-by host,tags` ist noetig: restic gruppiert vorgabemaessig nach
+# host,paths, und der Pfad des Dumps ist bei jedem Lauf ein anderer
+# (jufi-<STAMP>.dump). Jeder Snapshot bildete dann eine eigene Gruppe, die
+# keep-Regeln griffen nie, und es bliebe alles fuer immer liegen. Dasselbe Muster
+# steckt im HWYD-Original (dort unveraendert gelassen).
 step 'Aufraeumen: 7 taeglich / 4 woechentlich / 6 monatlich'
-restic forget --tag jufi-db --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+restic forget --tag jufi-db --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --group-by host,tags --prune
 
 # Verworfen: eine zweite, kuerzere lokale Aufbewahrung, sobald die Ablage ausser
 # Haus steht. Sie schnitte am ersten erfolgreichen Lauf die lokalen Dumps zusammen
