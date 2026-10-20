@@ -11,3 +11,4 @@ export * from './verlauf.js';
 export * from './ansicht.js';
 export * from './entwurf.js';
 export * from './vergleich.js';
+export * from './verwaltung.js';

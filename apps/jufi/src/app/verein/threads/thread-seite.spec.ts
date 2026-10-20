@@ -67,6 +67,8 @@ function thread(zusatz: Partial<ThreadAnsicht> = {}): ThreadAnsicht {
 		archiviert: false,
 		stand: 42,
 		schreibSperre: null,
+		darfBearbeiten: false,
+		darfArchivieren: false,
 		verlauf: { eintraege: 3, ungelesen: 2 },
 		module: MODULE,
 		...zusatz,
