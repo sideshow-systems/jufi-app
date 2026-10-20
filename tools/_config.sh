@@ -1,10 +1,9 @@
 # Gemeinsame Konfiguration der Skripte fuer die echte App (Teilprojekt 2).
 # Wird per `source` eingebunden, nicht ausgefuehrt. Muster: ../hwyd/tools/_config.sh.
 #
-# Heute bindet nur tools/deploy.sh sie ein. Eine eigene Datei trotzdem, weil mit
-# der Datenbank auf dem Server Sicherung, Rueckfall und Wiederherstellungsprobe
-# folgen (wie in HWYD), und die brauchen dieselben Adressen und dieselben zwei
-# Regeln. tools/deploy-entwurf.sh bleibt eigenstaendig: der Entwurf ist
+# Eingebunden von deploy.sh, rollback.sh, backup.sh, restore-test.sh,
+# install-backup.sh und pruefe-betrieb.sh: Deploy, Rueckfall, Sicherung und Wiederherstellungsprobe
+# brauchen dieselben Adressen und dieselben zwei Regeln. tools/deploy-entwurf.sh bleibt eigenstaendig: der Entwurf ist
 # Wegwerfcode und soll nicht an dieser Datei haengen.
 #
 # Hintergrund: JuFi wohnt nicht in einem eigenen Stack, sondern in der
@@ -86,6 +85,10 @@ db_vorzustand() {
 restic_env() {
 	RESTIC_REPOSITORY="${JUFI_RESTIC_REPOSITORY:-}"
 	RESTIC_PASSWORD="${JUFI_RESTIC_PASSWORD:-}"
+	# restic zieht PASSWORD_FILE/-COMMAND und REPOSITORY_FILE dem Klartextwert vor.
+	# Stuende eine davon fremd in der Umgebung (geteilter Server, andere App), legte
+	# `restic init` das Repository mit deren Passwort an und nicht mit unserem.
+	unset RESTIC_PASSWORD_FILE RESTIC_PASSWORD_COMMAND RESTIC_REPOSITORY_FILE
 	export RESTIC_REPOSITORY RESTIC_PASSWORD
 }
 

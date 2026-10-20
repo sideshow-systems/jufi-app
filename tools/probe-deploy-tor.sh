@@ -48,5 +48,18 @@ pruefe 'Container vorhanden, laeuft nicht'  steht  0 'abc123' '' 0
 pruefe 'Container laeuft'                   laeuft 0 'abc123' 'abc123' 0
 pruefe 'ps scheitert'                       ''     1 '' '' 1
 
+# restic_env: fremde RESTIC_*-Variablen aus der Umgebung duerfen nicht gelten.
+# restic bevorzugt PASSWORD_FILE/-COMMAND vor RESTIC_PASSWORD; ein Fremdwert legte
+# das Repository mit falschem Passwort an.
+ENV_AUS="$(env RESTIC_PASSWORD_FILE=/fremd RESTIC_PASSWORD_COMMAND='echo fremd' RESTIC_REPOSITORY_FILE=/fremd \
+	JUFI_RESTIC_REPOSITORY=r JUFI_RESTIC_PASSWORD=p \
+	bash -c 'source "$1"; restic_env; env | grep -c "^RESTIC_\(PASSWORD_FILE\|PASSWORD_COMMAND\|REPOSITORY_FILE\)=" || true; echo "$RESTIC_PASSWORD"' _ "$WORK/tools/_config.sh")"
+if [[ "$(head -1 <<<"$ENV_AUS")" == 0 && "$(tail -1 <<<"$ENV_AUS")" == p ]]; then
+	echo '✓ restic_env raeumt fremde RESTIC_*_FILE/_COMMAND weg'
+else
+	echo "✗ restic_env: fremde Variablen bleiben ($ENV_AUS)"
+	FAILED=1
+fi
+
 [[ "$FAILED" -eq 0 ]] && echo '✓ Tor 5b: Vorzustand richtig zugeordnet'
 exit "$FAILED"
