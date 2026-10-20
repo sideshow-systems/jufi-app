@@ -11,10 +11,16 @@
 # Compose die anderen Apps an):
 #   docker compose up -d jufi-entwurf
 #
-# Abweichung von Spec TP1 8.3: die Regel ist nur `Host(...)`, ohne
-# `PathPrefix(/entwurf)`. Bis Teilprojekt 2 gibt es unter dieser Domain nichts
-# anderes, und die Umleitung von `/` auf `/entwurf/` (ebenfalls Spec 8.3) braucht
-# den Wurzelpfad — mit PathPrefix kaeme `/` gar nicht erst bei nginx an.
+# Die Regel hat `PathPrefix(/entwurf)`, wie Spec TP1 8.3 es vorsah. Bis Etappe 6
+# lag hier die Abweichung, nur `Host(...)`, weil der Entwurf die Domain allein
+# hatte und `/` auf `/entwurf/` umleitete. Mit Etappe 6 gehoert die Wurzel der
+# echten App (jufi-services.yml); die Abweichung endet.
+#
+# Reihenfolge (Entscheidung 9): Traefik ordnet Router ohne `priority` nach der
+# Laenge der Regel. Host + PathPrefix ist laenger als Host allein, der Entwurf
+# gewinnt also fuer /entwurf, die App fuer alles uebrige. Verworfen: eine
+# ausdrueckliche `priority` -- ein Wert mehr, der mit der Regel auseinanderlaufen
+# kann.
 #
 # Testdomain ist test.jufi-app.de. Die erste Domain jufi-app.sideshow-systems.de
 # leitet dauerhaft dorthin um, damit verschickte Testlinks weiter funktionieren.
@@ -31,7 +37,7 @@ services:
     # Kein `ports:`. Erreichbar nur ueber Traefik.
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.jufi-entwurf.rule=Host(`test.jufi-app.de`)'
+      - 'traefik.http.routers.jufi-entwurf.rule=Host(`test.jufi-app.de`) && PathPrefix(`/entwurf`)'
       # Traefik terminiert TLS selbst per Let's Encrypt, wie bei HWYD.
       - 'traefik.http.routers.jufi-entwurf.entrypoints=websecure'
       - 'traefik.http.routers.jufi-entwurf.tls.certresolver=letsencrypt'

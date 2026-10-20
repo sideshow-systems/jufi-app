@@ -120,8 +120,12 @@ BASE_HREF='<base href="/entwurf/" ?/?>'
 curl -fsS "$BASIS/entwurf/" | grep -qE "$BASE_HREF" || fail '/entwurf/ liefert keine index.html mit base href.'
 curl -fsS "$BASIS/entwurf/glonntal/t/2-bowling" | grep -qE "$BASE_HREF" \
 	|| fail 'Tiefer Link liefert nicht die index.html.'
+# Gegenprobe: die Wurzel gehoert seit Etappe 6 der echten App. Leitet nginx dort
+# noch um, kaeme die Umleitung dem App-Router in die Quere, falls Traefik die
+# Wurzel je an den Entwurf gaebe.
 KOPF="$(curl -sS -o /dev/null -D - "$BASIS/")"
-grep -qi '^location: /entwurf/' <<<"$KOPF" || fail "/ leitet nicht relativ auf /entwurf/ um: $KOPF"
+head -1 <<<"$KOPF" | grep -q ' 404' || fail "/ antwortet nicht mit 404: $KOPF"
+! grep -qi '^location:' <<<"$KOPF" || fail "/ leitet noch um: $KOPF"
 KOPF="$(curl -fsS -o /dev/null -D - "$BASIS/entwurf/")"
 grep -qi '^cache-control: no-cache' <<<"$KOPF" || fail 'index.html ohne Cache-Control: no-cache.'
 grep -qi '^x-content-type-options: nosniff' <<<"$KOPF" || fail 'Header X-Content-Type-Options fehlt.'
@@ -131,7 +135,7 @@ MAIN="$(curl -fsS "$BASIS/entwurf/" | grep -oE 'main-[A-Z0-9]{8}\.js' | head -1)
 [[ -n "$MAIN" ]] || fail 'Kein main-<hash>.js in der index.html gefunden.'
 curl -fsS -o /dev/null -D - "$BASIS/entwurf/$MAIN" | grep -qi '^cache-control: .*immutable' \
 	|| fail "$MAIN wird nicht dauerhaft gecacht."
-note "/ → /entwurf/, tiefe Links → index.html, Cache- und Sicherheits-Header stimmen"
+note "/ → 404 ohne Umleitung, tiefe Links → index.html, Cache- und Sicherheits-Header stimmen"
 docker rm -f "$SMOKE" >/dev/null
 trap - EXIT INT TERM
 
