@@ -61,6 +61,13 @@ interface ErgebnisZeile {
 		@if (frist(); as f) {
 			<p class="frist" [class.vorbei]="fristVorbei()">{{ f }}</p>
 		}
+		@if (vorschau()) {
+			<span class="optionen" role="group" aria-label="Antworten">
+				@for (k of knoepfe(); track k.id) {
+					<button type="button" class="knopf klein" disabled>{{ k.text }}</button>
+				}
+			</span>
+		}
 
 		@for (z of zeilen(); track z.fuerId) {
 			<div class="zeile">
@@ -232,6 +239,13 @@ interface ErgebnisZeile {
 export class UmfrageModul {
 	readonly modul = input.required<UmfrageAnsicht>();
 	readonly slug = input.required<string>();
+	/**
+	 * Die Vorschau des Editors: Sie hat keine Zeilen, also auch keine Knoepfe zum Antworten, und
+	 * zeigte ohne diesen Schalter nur die Frage. Die Antworten erscheinen deshalb einmal als gesperrte
+	 * Knoepfe, so wie die Mitglieder sie sehen werden. Verworfen: eine erfundene Zeile "Du" in der
+	 * Vorschau, deren Knoepfe die API riefen.
+	 */
+	readonly vorschau = input(false);
 	/** Die Ansicht des Servers nach einer Antwort; die Seite setzt sie in ihren Thread ein. */
 	readonly geaendert = output<UmfrageAnsicht>();
 

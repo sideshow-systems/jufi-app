@@ -438,4 +438,30 @@ describe('Umfrage-Modul', () => {
 			expect(el.querySelector('.ergebnis')).toBeNull();
 		});
 	});
+
+	describe('Vorschau', () => {
+		function zeigeVorschau(modul: UmfrageAnsicht, vorschau: boolean): HTMLElement {
+			const f = TestBed.createComponent(UmfrageModul);
+			f.componentRef.setInput('modul', modul);
+			f.componentRef.setInput('slug', 'demo');
+			f.componentRef.setInput('vorschau', vorschau);
+			f.detectChanges();
+			return f.nativeElement as HTMLElement;
+		}
+
+		it('zeigt ohne Zeilen die Antworten als gesperrte Knoepfe', () => {
+			const wurzel = zeigeVorschau(umfrage({ zeilen: [] }), true);
+
+			const k = knoepfe(wurzel);
+			expect(k.map((b) => b.textContent?.trim())).toEqual(['✓ Dabei', '? Vielleicht', '✗ Abgesagt']);
+			expect(k.every((b) => b.disabled)).toBe(true);
+			expect(wurzel.querySelector('.zeile')).toBeNull();
+		});
+
+		it('zeigt ohne vorschau und ohne Zeilen keine Antworten', () => {
+			const wurzel = zeigeVorschau(umfrage({ zeilen: [] }), false);
+
+			expect(knoepfe(wurzel)).toEqual([]);
+		});
+	});
 });

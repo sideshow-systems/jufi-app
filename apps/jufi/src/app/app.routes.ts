@@ -4,6 +4,7 @@ import { PlattformStartComponent } from './seiten/plattform-start';
 import { mitgliedAngemeldet } from './verein/mitglied-waechter';
 import { MitgliederHuelle } from './verein/mitglieder-huelle';
 import { VerwaltungHuelle } from './verein/verwaltung/huelle';
+import { ungespeichertWaechter } from './verein/verwaltung/threads/ungespeichert';
 
 /**
  * Die Router-Einstellungen gehoeren zu den Routen und stehen deshalb hier; die Tests
@@ -84,10 +85,12 @@ export const routes: Routes = [
 					{
 						path: 'threads/neu',
 						loadComponent: () => import('./verein/verwaltung/threads/editor').then((m) => m.ThreadEditorComponent),
+						canDeactivate: [ungespeichertWaechter],
 					},
 					{
 						path: 'threads/:id',
 						loadComponent: () => import('./verein/verwaltung/threads/editor').then((m) => m.ThreadEditorComponent),
+						canDeactivate: [ungespeichertWaechter],
 					},
 					{
 						path: 'threads/:id/antworten',
