@@ -125,6 +125,23 @@ describe('Thread-Seite', () => {
 		return koerper;
 	}
 
+	/** Beantwortet GET /threads/:id/verlauf und quittiert die Meldung des Verlaufs; gibt deren Koerper zurueck. */
+	async function antworteVerlauf(id = 'ck1'): Promise<unknown> {
+		await vi.waitFor(() => {
+			const anfrage = http.expectOne(`/demo/api/v1/threads/${id}/verlauf`);
+			expect(anfrage.request.method).toBe('GET');
+			anfrage.flush({ eintraege: [], weitere: false });
+		});
+		const url = `/demo/api/v1/threads/${id}/gelesen`;
+		let koerper: unknown;
+		await vi.waitFor(() => {
+			const anfrage = http.expectOne(url);
+			koerper = anfrage.request.body;
+			anfrage.flush(null, { status: 204, statusText: 'No Content' });
+		});
+		return koerper;
+	}
+
 	/** Der Vereinskopf kommt zuletzt, weil seine offene Anfrage die Stabilitaet sonst aufhaelt. */
 	async function beendeSeite(harness: RouterTestingHarness): Promise<void> {
 		for (const kopf of http.match('/demo/api/v1/verein')) kopf.flush(VEREIN);
@@ -239,7 +256,13 @@ describe('Thread-Seite', () => {
 
 	describe('Adresse', () => {
 		it('schreibt einen veralteten Titel im Segment um und behaelt Modul und Reiter', async () => {
-			await oeffne('/demo/t/ck1-kegeln/m/m2?reiter=verlauf', { id: 'ck1', koerper: thread() }, false);
+			const { harness } = await oeffne(
+				'/demo/t/ck1-kegeln/m/m2?reiter=verlauf',
+				{ id: 'ck1', koerper: thread() },
+				false,
+			);
+			await antworteVerlauf();
+			await beendeSeite(harness);
 
 			await vi.waitFor(() =>
 				expect(router.url).toBe(`/demo/t/${threadSegment('ck1', '🎳 Bowling')}/m/m2?reiter=verlauf`),
@@ -344,16 +367,50 @@ describe('Thread-Seite', () => {
 		});
 
 		it('zeigt mit reiter=verlauf den Verlauf statt der Module und meldet die Uebersicht nicht', async () => {
-			const { seite } = await oeffne('/demo/t/ck1-bowling?reiter=verlauf', { id: 'ck1', koerper: thread() }, false);
+			const { harness, seite } = await oeffne(
+				'/demo/t/ck1-bowling?reiter=verlauf',
+				{ id: 'ck1', koerper: thread() },
+				false,
+			);
+			const gemeldet = await antworteVerlauf();
+			await beendeSeite(harness);
 
 			expect(seite.querySelector('#modul-m1')).toBeNull();
-			expect(seite.querySelector('#verlauf')).not.toBeNull();
+			expect(seite.querySelector('jf-verlauf#verlauf')).not.toBeNull();
 			expect(seite.querySelector('nav.reiter a[aria-current="page"]')?.textContent).toContain('Verlauf');
-			// Ein PUT waere hier eine offene Anfrage, und afterEach wuerde scheitern.
+			// Gemeldet wird der Verlauf, nicht die Uebersicht (die Person hat sie nicht gesehen).
+			expect(gemeldet).toEqual({ bereich: 'verlauf', bis: 42 });
+		});
+
+		it('setzt den Zaehler am Reiter auf 0, sobald der Server den Verlauf als gelesen angenommen hat', async () => {
+			const { harness, seite } = await oeffne(
+				'/demo/t/ck1-bowling?reiter=verlauf',
+				{ id: 'ck1', koerper: thread() },
+				false,
+			);
+			expect(seite.querySelector('nav.reiter .zahl')?.textContent).toBe('2');
+			await antworteVerlauf();
+			await beendeSeite(harness);
+
+			expect(seite.querySelector('nav.reiter .zahl')).toBeNull();
+		});
+
+		it('meldet die Uebersicht nach dem Zaehler-Zuruecksetzen nicht doppelt, wenn sie schon gemeldet war', async () => {
+			const { harness } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+			await router.navigateByUrl('/demo/t/ck1-bowling?reiter=verlauf');
+			await antworteVerlauf();
+			await beendeSeite(harness);
+			await router.navigateByUrl('/demo/t/ck1-bowling');
+			await beendeSeite(harness);
+			await new Promise((r) => setTimeout(r));
+
+			// Ein zweites PUT uebersicht waere eine offene Anfrage, und afterEach wuerde scheitern.
+			http.expectNone('/demo/api/v1/threads/ck1/gelesen');
 		});
 
 		it('meldet die Uebersicht beim Wechsel vom Verlauf dorthin', async () => {
 			const { harness } = await oeffne('/demo/t/ck1-bowling?reiter=verlauf', { id: 'ck1', koerper: thread() }, false);
+			await antworteVerlauf();
 			await router.navigateByUrl('/demo/t/ck1-bowling');
 			const gemeldet = await quittiereGelesen();
 			await beendeSeite(harness);
@@ -470,6 +527,7 @@ describe('Thread-Seite', () => {
 			await vi.waitFor(() => expect(scrollen).toHaveBeenCalledTimes(1));
 
 			await router.navigateByUrl('/demo/t/ck1-bowling/m/m2?reiter=verlauf');
+			await antworteVerlauf();
 			await beendeSeite(harness);
 			expect((harness.routeNativeElement as HTMLElement).querySelector('#verlauf')).not.toBeNull();
 			await router.navigateByUrl('/demo/t/ck1-bowling/m/m2');

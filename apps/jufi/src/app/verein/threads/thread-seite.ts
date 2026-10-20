@@ -23,6 +23,7 @@ import { InfoModul } from './info-modul';
 import { TerminModul } from './termin-modul';
 import { ThreadApi } from './thread-api';
 import { UmfrageModul } from './umfrage-modul';
+import { Verlauf } from './verlauf';
 
 /** So lange bleibt die Karte eines Deep Links hervorgehoben. */
 const HERVOR_MS = 2000;
@@ -42,7 +43,7 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
  */
 @Component({
 	selector: 'jf-thread-seite',
-	imports: [IconComponent, InfoModul, KarteComponent, PilleComponent, RouterLink, TerminModul, UmfrageModul],
+	imports: [IconComponent, InfoModul, KarteComponent, PilleComponent, RouterLink, TerminModul, UmfrageModul, Verlauf],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@switch (zustand()) {
@@ -91,8 +92,14 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 					}
 
 					@if (zeigtVerlauf()) {
-						<!-- Task 10 setzt hier den Verlauf ein. -->
-						<jf-karte id="verlauf"></jf-karte>
+						<jf-verlauf
+							id="verlauf"
+							[slug]="slug()"
+							[threadId]="t.id"
+							[stand]="t.stand"
+							[schreibSperre]="t.schreibSperre"
+							(gelesen)="verlaufGelesen()"
+						/>
 					} @else {
 						@for (m of t.module; track m.id) {
 							<jf-karte [attr.id]="'modul-' + m.id" [class.hervor]="hervor() === m.id">
@@ -399,6 +406,20 @@ export class ThreadSeite {
 		const ersetzt: ThreadAnsicht = { ...alt, module: alt.module.map((m) => (m.id === neu.id ? neu : m)) };
 		if (this.gemeldet === alt) this.gemeldet = ersetzt;
 		this.thread.set(ersetzt);
+	}
+
+	/**
+	 * Der Server hat den Verlauf als gelesen angenommen: Der Zaehler am Reiter faellt auf 0. Wie bei
+	 * ersetzeModul bleibt der Stand der geladene, und eine schon gemeldete Ansicht gilt auch in der
+	 * neuen Fassung als gemeldet, sonst ginge beim Wechsel zur Uebersicht ein zweites PUT mit
+	 * demselben Stand raus.
+	 */
+	protected verlaufGelesen(): void {
+		const alt = this.thread();
+		if (alt === null || alt.verlauf.ungelesen === 0) return;
+		const neu: ThreadAnsicht = { ...alt, verlauf: { ...alt.verlauf, ungelesen: 0 } };
+		if (this.gemeldet === alt) this.gemeldet = neu;
+		this.thread.set(neu);
 	}
 
 	/**
