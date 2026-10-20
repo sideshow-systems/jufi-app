@@ -93,8 +93,10 @@ services:
   # Docker-Netz unter dem Dienstnamen. Ohne Volume: die Mails sind nach einem
   # Neustart weg, und das ist fuer eine Mail-Falle richtig so.
   #
-  # Kommt echter Versand, faellt dieser Dienst weg, und SMTP_* der App zeigen auf
-  # den echten Server (dann ohne MAIL_BETREFF_PRAEFIX).
+  # Echter Versand wird ueber JUFI_SMTP_* in der .env geschaltet; dieser Dienst
+  # bleibt dann trotzdem stehen (die App haengt per depends_on an ihm) und
+  # bleibt ungenutzt. MAIL_BETREFF_PRAEFIX bleibt fest '[Test] ', solange die
+  # App unter app-test laeuft.
   jufi-mailpit:
     image: axllent/mailpit:v1.21
     restart: unless-stopped
