@@ -105,6 +105,20 @@ async function fremdeThreadZeilen(k: Kontext) {
 	};
 }
 
+/** Alles, was ein Schreiben oder Loeschen im Verlauf von fremd veraendern koennte. */
+async function fremderVerlauf(k: Kontext) {
+	return {
+		zeilen: await k.prisma.verlaufEintrag.count({ where: { vereinId: k.fremd.id } }),
+		nachricht: await k.prisma.verlaufEintrag.findUnique({ where: { id: k.fremderThread.nachrichtId } }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/** Ein frischer Thread in eigen, den die Verwaltung von eigen sieht und in dem sie schreiben darf. */
+async function eigenerThread(k: Kontext): Promise<string> {
+	return (await legeThreadAn(k.prisma, k.eigen, new Date(), { titel: 'Eigener Thread' })).threadId;
+}
+
 /**
  * Jede Vereins-Route braucht hier einen Fall (Spec 9). Kommt eine Route
  * hinzu, scheitert der erste Test, bis der Fall eingetragen ist.
@@ -424,6 +438,52 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await lies(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
 		expect((await lies(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
 		expect(await fremdeThreadZeilen(k)).toEqual(vorher);
+	},
+	'GET /threads/:id/verlauf': async (k) => {
+		const vorher = await fremderVerlauf(k);
+		const lies = (slug: string, threadId: string, cookie?: string, vor?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/verlauf${vor ? `?vor=${vor}` : ''}`, { cookie });
+		expect((await lies(k.gesperrt.slug, k.fremderThread.threadId, k.eigenerLeiter)).status).toBe(404);
+		expect((await lies(k.fremd.slug, k.fremderThread.threadId, k.eigenerLeiter)).status).toBe(401);
+		const r = await lies(k.eigen.slug, k.fremderThread.threadId, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Die Nachricht aus fremd taugt auch an einem eigenen Thread nicht als Seitenanker.
+		const anker = await lies(k.eigen.slug, await eigenerThread(k), k.eigenerLeiter, k.fremderThread.nachrichtId);
+		expect(anker.status).toBe(404);
+		expect(await anker.json()).toEqual({ fehler: 'nicht gefunden' });
+		expect(await fremderVerlauf(k)).toEqual(vorher);
+	},
+	'POST /threads/:id/verlauf': async (k) => {
+		const vorher = await fremderVerlauf(k);
+		const schreibe = (slug: string, threadId: string, clientId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/verlauf`, {
+				methode: 'POST',
+				body: { text: 'Uebernommen', clientId },
+				cookie,
+			});
+		const fremderThread = k.fremderThread.threadId;
+		expect((await schreibe(k.gesperrt.slug, fremderThread, 'mandant-neu', k.eigenerLeiter)).status).toBe(404);
+		expect((await schreibe(k.fremd.slug, fremderThread, 'mandant-neu', k.eigenerLeiter)).status).toBe(401);
+		const r = await schreibe(k.eigen.slug, fremderThread, 'mandant-neu', k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Die clientId der Nachricht in fremd ist in eigen frei: ein 409 verriete, dass es sie dort gibt.
+		expect((await schreibe(k.eigen.slug, await eigenerThread(k), 'mandant-nachricht', k.eigenerLeiter)).status).toBe(
+			201,
+		);
+		expect(await fremderVerlauf(k)).toEqual(vorher);
+	},
+	'DELETE /verlauf/:eintragId': async (k) => {
+		const vorher = await fremderVerlauf(k);
+		const loesche = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/verlauf/${k.fremderThread.nachrichtId}`, { methode: 'DELETE', cookie });
+		expect((await loesche(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await loesche(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		const r = await loesche(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		expect(await fremderVerlauf(k)).toEqual(vorher);
 	},
 	'PATCH /untergruppen/:id': async (k) => {
 		const vorher = await k.prisma.untergruppe.findUniqueOrThrow({ where: { id: k.fremdeGruppeId } });
