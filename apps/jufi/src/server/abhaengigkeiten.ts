@@ -1,6 +1,7 @@
 import { AttemptTracker, verifyAuthentication, verifyRegistration } from '@jufi/auth';
 import type { PrismaClient } from '@jufi/db';
 import { Nachlauf } from './nachlauf.js';
+import { Fensterzaehler } from './threads/fenster.js';
 import type { Umgebung } from './umgebung.js';
 
 // Eigene Datei statt in app.ts: admin/ braucht mitStandardwerten, und app.ts
@@ -28,6 +29,10 @@ export interface AppDeps {
 	 * beim Beenden auf denselben warten kann und Tests auf das Ergebnis.
 	 */
 	nachlauf?: Nachlauf;
+	/** Nachrichten je Person und Minute (TP3-Spec 4.4); ein Test bekommt so einen frischen Zaehler. */
+	nachrichtenFenster?: Fensterzaehler;
+	/** Antworten auf Umfragen je Person und Minute. */
+	antwortenFenster?: Fensterzaehler;
 }
 
 /** AppDeps ohne Luecken, wie die Routen sie brauchen. */
@@ -40,11 +45,16 @@ export type VolleAppDeps = Required<AppDeps>;
  * Fehlversuche in seinem eigenen AttemptTracker.
  */
 export function mitStandardwerten(deps: AppDeps): VolleAppDeps {
+	const jetzt = deps.jetzt ?? (() => new Date());
 	return {
 		...deps,
-		jetzt: deps.jetzt ?? (() => new Date()),
+		jetzt,
 		anmeldeVersuche: deps.anmeldeVersuche ?? new AttemptTracker(),
 		webauthn: deps.webauthn ?? { verifyRegistration, verifyAuthentication },
 		nachlauf: deps.nachlauf ?? new Nachlauf(),
+		// Die Uhr der App statt Date.now(), damit ein Test, der `jetzt` stellt, auch das Fenster
+		// mitstellt und nicht eine Minute wartet.
+		nachrichtenFenster: deps.nachrichtenFenster ?? new Fensterzaehler(30, 60_000, () => jetzt().getTime()),
+		antwortenFenster: deps.antwortenFenster ?? new Fensterzaehler(60, 60_000, () => jetzt().getTime()),
 	};
 }

@@ -7,10 +7,17 @@ import type { ErrorRequestHandler } from 'express';
  * voruebergehend und versuchte es wieder, obwohl ein zu grosser Body zu gross
  * bleibt (in hwyd stumm in der Outbox gelandet, siehe dort server.ts).
  *
- * Alles andere ist ein Programmfehler: 500 ohne Einzelheiten nach aussen, die
- * Ursache steht im Log. Fehler der Klasse 4xx werden nicht geloggt -- sie sind
- * Eingaben von aussen, kein Befund, und ein Stacktrace je kaputter Anfrage
- * fuellte das Log mit Rauschen.
+ * Alles andere ist ein Programmfehler: 500 ohne Einzelheiten nach aussen. Fehler
+ * der Klasse 4xx werden nicht geloggt -- sie sind Eingaben von aussen, kein
+ * Befund, und ein Stacktrace je kaputter Anfrage fuellte das Log mit Rauschen.
+ *
+ * Ins Log kommen nur Name und Code des Fehlers, nie Meldung, meta oder Stack
+ * (TP3-Spec 4.4). Prismas Meldungen und meta zitieren die beteiligten Werte, und
+ * seit den Threads sind das Nachrichtentexte von Kindern und Familien; das Log
+ * liegt ausserhalb der Zugriffsregeln der App. Name und Code (P2010, P2002 ...)
+ * genuegen, um die Fehlerart zu finden, die Stelle liefert der Pfad. Verworfen:
+ * die Meldung zu schwaerzen -- ein Filter erkennt fremde Inhalte nicht verlaesslich,
+ * und der Stack allein sagt bei Prisma ohnehin nur "in der Laufzeit".
  *
  * Geloggt wird der Pfad ohne Query: spaetere Links tragen Einmal-Tokens in der
  * Query, die nicht im Log stehen sollen.
@@ -20,7 +27,13 @@ export const fehlerbehandlung: ErrorRequestHandler = (error, req, res, next) => 
 	const code = typeof status === 'number' ? status : (error as { statusCode?: unknown } | null)?.statusCode;
 	const istClientfehler = typeof code === 'number' && code >= 400 && code < 500;
 
-	if (!istClientfehler) console.error(`[${req.method} ${req.path}]`, error);
+	if (!istClientfehler) {
+		const name = (error as { name?: unknown } | null)?.name;
+		const fehlercode = (error as { code?: unknown } | null)?.code;
+		console.error(
+			`[${req.method} ${req.path}] ${typeof name === 'string' ? name : typeof error}${typeof fehlercode === 'string' ? ' ' + fehlercode : ''}`,
+		);
+	}
 	// server.ts streamt die Angular-Antwort: Scheitert das nach den ersten Bytes, ist
 	// der Status gesendet und eine JSON-Fehlerantwort nicht mehr moeglich. Einfach
 	// zurueckzukehren liesse die Antwort offen, der Client wartete bis zum Timeout.
