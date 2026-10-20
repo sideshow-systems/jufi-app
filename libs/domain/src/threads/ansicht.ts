@@ -1,5 +1,4 @@
 import type { TerminDaten } from '../module/termin/termin.js';
-import { fristText } from '../module/umfrage/umfrage.js';
 import { antwortZeilen, auswertung, darfAntworten, type Auswertung } from './antworten.js';
 import { istArchiviert } from './archiv.js';
 import { eingetragenVon } from './namen.js';
@@ -52,8 +51,9 @@ export interface UmfrageAnsicht {
 	einheit: AntwortEinheit;
 	mehrfach: boolean;
 	teilnahme: boolean;
-	// Fertiger Text ("bis Do 18:00"), damit die Oberflaeche nicht selbst rechnet und die
-	// Zeitzone immer die Berliner ist.
+	// ISO-Zeitpunkt (Zeiten reisen als ISO). Verworfen: den fertigen Text ("bis Do 18:00")
+	// mitzuschicken, weil er bei offener Seite veralten wuerde; der Client rechnet ihn mit
+	// fristText und der aktuellen Uhrzeit selbst, die Zeitzone bleibt dank der Domaene Berlin.
 	frist: string | null;
 	fristAbgelaufen: boolean;
 	optionen: { id: string; schluessel: string; text: string }[];
@@ -127,7 +127,7 @@ export function umfrageAnsicht(
 		einheit: u.einheit,
 		mehrfach: u.mehrfach,
 		teilnahme: u.teilnahme,
-		frist: u.frist ? fristText(u.frist, jetzt) : null,
+		frist: u.frist ? u.frist.toISOString() : null,
 		fristAbgelaufen: u.frist !== null && jetzt.getTime() >= u.frist.getTime(),
 		optionen: u.optionen.map((o) => ({ id: o.id, schluessel: o.schluessel, text: o.text })),
 		zeilen,

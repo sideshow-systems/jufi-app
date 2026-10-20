@@ -120,9 +120,9 @@ describe('threadAnsicht: Umfragezeilen', () => {
 });
 
 describe('threadAnsicht: Frist', () => {
-	it('nennt die Frist als Text und laesst vor Ablauf antworten', () => {
+	it('nennt die Frist als ISO-Zeitpunkt und laesst vor Ablauf antworten', () => {
 		const u = umfrageVon(ansichtVon('sandra', kopf(), [umfrageModul()]));
-		expect(u.frist).toBe('bis Do 18:00');
+		expect(u.frist).toBe('2026-10-22T16:00:00.000Z');
 		expect(u.fristAbgelaufen).toBe(false);
 	});
 
@@ -130,7 +130,7 @@ describe('threadAnsicht: Frist', () => {
 		const modul = umfrageModul({ frist: JETZT });
 		const sandra = umfrageVon(ansichtVon('sandra', kopf(), [modul]));
 		expect(sandra.fristAbgelaufen).toBe(true);
-		expect(sandra.frist).toBe('Frist abgelaufen');
+		expect(sandra.frist).toBe('2026-10-22T10:00:00.000Z');
 		expect(sandra.zeilen.map((z) => z.darfAntworten)).toEqual([false, false]);
 		const thomas = umfrageVon(ansichtVon('thomas', kopf(), [modul]));
 		expect(thomas.fristAbgelaufen).toBe(true);
