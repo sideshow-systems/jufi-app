@@ -2,9 +2,10 @@
 # Wird per `source` eingebunden, nicht ausgefuehrt. Muster: ../hwyd/tools/_config.sh.
 #
 # Eingebunden von deploy.sh, rollback.sh, backup.sh, restore-test.sh,
-# install-backup.sh und pruefe-betrieb.sh: Deploy, Rueckfall, Sicherung und Wiederherstellungsprobe
-# brauchen dieselben Adressen und dieselben zwei Regeln. tools/deploy-entwurf.sh bleibt eigenstaendig: der Entwurf ist
-# Wegwerfcode und soll nicht an dieser Datei haengen.
+# install-backup.sh und pruefe-betrieb.sh: Deploy, Rueckfall, Sicherung und
+# Wiederherstellungsprobe brauchen dieselben Adressen und dieselben zwei Regeln.
+# tools/deploy-entwurf.sh bleibt eigenstaendig: der Entwurf ist Wegwerfcode und
+# soll nicht an dieser Datei haengen.
 #
 # Hintergrund: JuFi wohnt nicht in einem eigenen Stack, sondern in der
 # gemeinsamen Compose-Datei von paperless unter /home/paperless/paperless-ngx.
