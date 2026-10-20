@@ -76,6 +76,24 @@ export const routes: Routes = [
 						path: 'personen/:id',
 						loadComponent: () => import('./verein/verwaltung/personenseite').then((m) => m.PersonenseiteComponent),
 					},
+					// threads/neu vor threads/:id, sonst waere "neu" eine Thread-ID.
+					{
+						path: 'threads',
+						loadComponent: () => import('./verein/verwaltung/threads/liste').then((m) => m.ThreadListeComponent),
+					},
+					{
+						path: 'threads/neu',
+						loadComponent: () => import('./verein/verwaltung/threads/editor').then((m) => m.ThreadEditorComponent),
+					},
+					{
+						path: 'threads/:id',
+						loadComponent: () => import('./verein/verwaltung/threads/editor').then((m) => m.ThreadEditorComponent),
+					},
+					{
+						path: 'threads/:id/antworten',
+						loadComponent: () =>
+							import('./verein/verwaltung/threads/antworten').then((m) => m.ThreadAntwortenComponent),
+					},
 					{
 						path: 'untergruppen',
 						loadComponent: () => import('./verein/verwaltung/untergruppen').then((m) => m.UntergruppenComponent),
