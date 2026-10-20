@@ -497,3 +497,318 @@ describe('Loeschen', () => {
 		expect(await prisma.person.count({ where: { id: { in: [kind.id, mutter.id] } } })).toBe(2);
 	});
 });
+
+describe('Threads (TP3)', () => {
+	/** Ein gewoehnlicher Thread; `erstelltVonId` null ist nur beim Austausch erlaubt. */
+	async function thread(
+		vereinId: string,
+		erstelltVonId: string | null,
+		daten: Partial<Prisma.ThreadUncheckedCreateInput> = {},
+	) {
+		return prisma.thread.create({
+			data: {
+				vereinId,
+				erstelltVonId,
+				titel: 'Sommerfest',
+				modus: 'KOMMENTARE',
+				rollenfilter: 'JUNGFISCHER_FAMILIE',
+				...daten,
+			},
+		});
+	}
+
+	async function modul(vereinId: string, threadId: string, typ: 'INFO' | 'TERMIN' | 'UMFRAGE' = 'INFO') {
+		return prisma.threadModul.create({ data: { vereinId, threadId, typ, position: 0 } });
+	}
+
+	/** Umfrage-Modul samt Kopfzeile; Modul und Umfrage teilen sich die ID. */
+	async function umfrage(
+		vereinId: string,
+		threadId: string,
+		daten: Partial<Prisma.UmfrageModulUncheckedCreateInput> = {},
+	) {
+		const m = await modul(vereinId, threadId, 'UMFRAGE');
+		return prisma.umfrageModul.create({
+			data: { id: m.id, vereinId, threadId, frage: 'Kommst du mit?', einheit: 'JUNGFISCHER', ...daten },
+		});
+	}
+
+	async function option(vereinId: string, umfrageId: string, schluessel = 'dabei') {
+		return prisma.umfrageOption.create({
+			data: { vereinId, umfrageId, text: 'Dabei', position: 0, schluessel },
+		});
+	}
+
+	async function antwort(vereinId: string, umfrageId: string, fuerId: string, vonId: string) {
+		return prisma.umfrageAntwort.create({
+			data: {
+				vereinId,
+				umfrageId,
+				fuerId,
+				vonId,
+				abgegebenAm: new Date('2026-10-21T10:00:00Z'),
+				clientId: eindeutig(),
+			},
+		});
+	}
+
+	/** Termin-Modul mit eigenem Modul; das Versprechen ist der abgelehnte oder erlaubte Vorgang. */
+	async function termin(
+		vereinId: string,
+		threadId: string,
+		daten: Omit<Prisma.TerminModulUncheckedCreateInput, 'id' | 'vereinId'>,
+	) {
+		const m = await modul(vereinId, threadId, 'TERMIN');
+		return prisma.terminModul.create({ data: { id: m.id, vereinId, ...daten } });
+	}
+
+	it('ThreadModul zu Thread aus fremdem Verein abgelehnt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const threadA = await thread(a.id, (await erwachsener(a.id)).id);
+
+		expect(
+			await fehlercode(
+				prisma.threadModul.create({ data: { vereinId: b.id, threadId: threadA.id, typ: 'INFO', position: 0 } }),
+			),
+		).toBe('P2003');
+	});
+
+	it('Antwort fuer Person aus fremdem Verein abgelehnt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const leiterA = await erwachsener(a.id);
+		const u = await umfrage(a.id, (await thread(a.id, leiterA.id)).id);
+		const kindB = await jungfischer(b.id);
+
+		expect(await fehlercode(antwort(a.id, u.id, kindB.id, leiterA.id))).toBe('P2003');
+		expect(await fehlercode(antwort(a.id, u.id, (await jungfischer(a.id)).id, (await erwachsener(b.id)).id))).toBe(
+			'P2003',
+		);
+	});
+
+	it('zweiter Austausch je Verein abgelehnt, je einer in zwei Vereinen erlaubt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const austausch = {
+			art: 'JUGENDSPRECHER_AUSTAUSCH',
+			modus: 'CHAT',
+			rollenfilter: 'JUGENDLEITER_JUGENDSPRECHER',
+		} as const;
+
+		await thread(a.id, null, austausch);
+		await thread(b.id, null, austausch);
+		expect(await fehlercode(thread(a.id, null, austausch))).toBe('P2002');
+		expect(await prisma.thread.count({ where: { vereinId: a.id, art: 'JUGENDSPRECHER_AUSTAUSCH' } })).toBe(1);
+	});
+
+	it('zweite Teilnahme-Umfrage im Thread abgelehnt, zwei gewoehnliche erlaubt', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+
+		await umfrage(a.id, t.id);
+		await umfrage(a.id, t.id);
+		await umfrage(a.id, t.id, { teilnahme: true });
+		expect(await fehlercode(umfrage(a.id, t.id, { teilnahme: true }))).toBe('P2002');
+
+		// In einem anderen Thread ist wieder eine erlaubt.
+		const t2 = await thread(a.id, (await erwachsener(a.id)).id);
+		await umfrage(a.id, t2.id, { teilnahme: true });
+	});
+
+	it('zweite Antwort fuer dieselbe Person und Umfrage abgelehnt', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const kind = await jungfischer(a.id);
+		const u = await umfrage(a.id, (await thread(a.id, leiter.id)).id);
+
+		await antwort(a.id, u.id, kind.id, leiter.id);
+		expect(await fehlercode(antwort(a.id, u.id, kind.id, leiter.id))).toBe('P2002');
+	});
+
+	it('Antwortoption aus anderer Umfrage abgelehnt', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const kind = await jungfischer(a.id);
+		const t = await thread(a.id, leiter.id);
+		const u1 = await umfrage(a.id, t.id);
+		const u2 = await umfrage(a.id, t.id);
+		const optionU2 = await option(a.id, u2.id);
+		const antwortU1 = await antwort(a.id, u1.id, kind.id, leiter.id);
+
+		expect(
+			await fehlercode(
+				prisma.umfrageAntwortOption.create({
+					data: { vereinId: a.id, umfrageId: u1.id, antwortId: antwortU1.id, optionId: optionU2.id },
+				}),
+			),
+		).toBe('P2003');
+	});
+
+	it('UmfrageModul mit threadId eines anderen Threads abgelehnt', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const t1 = await thread(a.id, leiter.id);
+		const t2 = await thread(a.id, leiter.id);
+		const m = await modul(a.id, t1.id, 'UMFRAGE');
+
+		expect(
+			await fehlercode(
+				prisma.umfrageModul.create({
+					data: { id: m.id, vereinId: a.id, threadId: t2.id, frage: 'Kommst du mit?', einheit: 'JUNGFISCHER' },
+				}),
+			),
+		).toBe('P2003');
+	});
+
+	it('beantwortete Option laesst sich nicht loeschen', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const kind = await jungfischer(a.id);
+		const u = await umfrage(a.id, (await thread(a.id, leiter.id)).id);
+		const o = await option(a.id, u.id);
+		const a1 = await antwort(a.id, u.id, kind.id, leiter.id);
+		await prisma.umfrageAntwortOption.create({
+			data: { vereinId: a.id, umfrageId: u.id, antwortId: a1.id, optionId: o.id },
+		});
+
+		expect(await fehlercode(prisma.umfrageOption.delete({ where: { id: o.id } }))).toBe('P2003');
+		expect(await prisma.umfrageOption.count({ where: { id: o.id } })).toBe(1);
+	});
+
+	it('Termin: Ende vor Start, gleicher Tag 17:00-14:00 und 14:00-14:00, 24:00 abgelehnt', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const tag = new Date('2026-10-24');
+
+		expect(await fehlertext(termin(a.id, t.id, { startDatum: tag, endDatum: new Date('2026-10-23') }))).toContain(
+			'termin_reihenfolge',
+		);
+		expect(await fehlertext(termin(a.id, t.id, { startDatum: tag, beginn: '17:00', ende: '14:00' }))).toContain(
+			'termin_eintaegig',
+		);
+		expect(await fehlertext(termin(a.id, t.id, { startDatum: tag, beginn: '14:00', ende: '14:00' }))).toContain(
+			'termin_eintaegig',
+		);
+		expect(await fehlertext(termin(a.id, t.id, { startDatum: tag, beginn: '09:00', ende: '24:00' }))).toContain(
+			'termin_uhrzeit',
+		);
+	});
+
+	it('Termin: mehrtaegig 17:00-12:00 und Ende ohne Beginn erlaubt', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+
+		await termin(a.id, t.id, {
+			startDatum: new Date('2026-10-23'),
+			endDatum: new Date('2026-10-25'),
+			beginn: '17:00',
+			ende: '12:00',
+		});
+		await termin(a.id, t.id, { startDatum: new Date('2026-10-24'), ende: '12:00' });
+	});
+
+	it('Titel leer, mit Rand oder 121 Zeichen abgelehnt; normaler Thread ohne Ersteller abgelehnt', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+
+		for (const titel of ['', ' Sommerfest', 'Sommerfest ', 'x'.repeat(121)]) {
+			expect(await fehlertext(thread(a.id, leiter.id, { titel }))).toContain('thread_titel');
+		}
+		await thread(a.id, leiter.id, { titel: 'x'.repeat(120) });
+		expect(await fehlertext(thread(a.id, null))).toContain('thread_ersteller');
+	});
+
+	it('Verlauf: Nachricht ohne Autor, mit 2001 Zeichen, geloescht mit Text abgelehnt', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const t = await thread(a.id, leiter.id);
+		const nachricht = { vereinId: a.id, threadId: t.id, art: 'NACHRICHT', stand: 1 } as const;
+
+		expect(
+			await fehlertext(prisma.verlaufEintrag.create({ data: { ...nachricht, autorId: null, text: 'Hallo' } })),
+		).toContain('verlauf_nachricht');
+		expect(
+			await fehlertext(
+				prisma.verlaufEintrag.create({ data: { ...nachricht, autorId: leiter.id, text: 'x'.repeat(2001) } }),
+			),
+		).toContain('verlauf_text');
+		expect(
+			await fehlertext(
+				prisma.verlaufEintrag.create({
+					data: { ...nachricht, autorId: leiter.id, text: 'Hallo', geloeschtAm: new Date(), geloeschtVonId: leiter.id },
+				}),
+			),
+		).toContain('verlauf_nachricht');
+
+		await prisma.verlaufEintrag.create({ data: { ...nachricht, autorId: leiter.id, text: 'x'.repeat(2000) } });
+		await prisma.verlaufEintrag.create({
+			data: { ...nachricht, autorId: leiter.id, text: null, geloeschtAm: new Date(), geloeschtVonId: leiter.id },
+		});
+	});
+
+	it('Untergruppe loeschen nimmt die Auswahl mit, der Thread bleibt', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id, { alleUntergruppen: false });
+		const gruppe = await prisma.untergruppe.create({ data: { vereinId: a.id, name: 'Hechte' } });
+		await prisma.threadUntergruppe.create({ data: { vereinId: a.id, threadId: t.id, untergruppeId: gruppe.id } });
+
+		await prisma.untergruppe.delete({ where: { id: gruppe.id } });
+
+		expect(await prisma.threadUntergruppe.count({ where: { threadId: t.id } })).toBe(0);
+		expect(await prisma.thread.count({ where: { id: t.id } })).toBe(1);
+	});
+
+	it('Verein loeschen mit Thread, Modulen, Antworten, Verlauf, Gelesen-Stand und Aenderung geht durch', async () => {
+		const a = await verein('weg');
+		const vereinId = a.id;
+		const leiter = await erwachsener(vereinId);
+		const kind = await jungfischer(vereinId);
+		const gruppe = await prisma.untergruppe.create({ data: { vereinId, name: 'Hechte' } });
+		const t = await thread(vereinId, leiter.id, { alleUntergruppen: false });
+		await prisma.threadUntergruppe.create({ data: { vereinId, threadId: t.id, untergruppeId: gruppe.id } });
+		const info = await modul(vereinId, t.id, 'INFO');
+		await prisma.infoModul.create({ data: { id: info.id, vereinId, text: 'Bitte Angel mitbringen.' } });
+		await termin(vereinId, t.id, { startDatum: new Date('2026-10-24'), beginn: '14:00', ende: '17:00' });
+		const u = await umfrage(vereinId, t.id);
+		const o = await option(vereinId, u.id);
+		const antw = await antwort(vereinId, u.id, kind.id, leiter.id);
+		await prisma.umfrageAntwortOption.create({
+			data: { vereinId, umfrageId: u.id, antwortId: antw.id, optionId: o.id },
+		});
+		await prisma.verlaufEintrag.create({
+			data: { vereinId, threadId: t.id, art: 'NACHRICHT', autorId: leiter.id, text: 'Hallo', stand: 1 },
+		});
+		await prisma.gelesenStand.create({
+			data: {
+				vereinId,
+				personId: leiter.id,
+				threadId: t.id,
+				gelesenBis: 1,
+				verlaufGelesenBis: 1,
+				gelesenAm: new Date(),
+			},
+		});
+		await prisma.aenderung.create({
+			data: { vereinId, stand: 1, threadId: t.id, art: 'THREAD', objektId: t.id, urheberId: leiter.id },
+		});
+
+		await prisma.verein.delete({ where: { id: vereinId } });
+
+		const uebrig = {
+			thread: await prisma.thread.count({ where: { vereinId } }),
+			threadUntergruppe: await prisma.threadUntergruppe.count({ where: { vereinId } }),
+			threadModul: await prisma.threadModul.count({ where: { vereinId } }),
+			infoModul: await prisma.infoModul.count({ where: { vereinId } }),
+			terminModul: await prisma.terminModul.count({ where: { vereinId } }),
+			umfrageModul: await prisma.umfrageModul.count({ where: { vereinId } }),
+			umfrageOption: await prisma.umfrageOption.count({ where: { vereinId } }),
+			umfrageAntwort: await prisma.umfrageAntwort.count({ where: { vereinId } }),
+			umfrageAntwortOption: await prisma.umfrageAntwortOption.count({ where: { vereinId } }),
+			verlaufEintrag: await prisma.verlaufEintrag.count({ where: { vereinId } }),
+			gelesenStand: await prisma.gelesenStand.count({ where: { vereinId } }),
+			aenderung: await prisma.aenderung.count({ where: { vereinId } }),
+		};
+		expect(uebrig).toEqual(Object.fromEntries(Object.keys(uebrig).map((k) => [k, 0])));
+	});
+});

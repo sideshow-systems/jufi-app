@@ -52,6 +52,18 @@ export const VEREINS_MODELLE = [
 	'Einladung',
 	'Einwilligung',
 	'MailWarteschlange',
+	'Thread',
+	'ThreadUntergruppe',
+	'ThreadModul',
+	'InfoModul',
+	'TerminModul',
+	'UmfrageModul',
+	'UmfrageOption',
+	'UmfrageAntwort',
+	'UmfrageAntwortOption',
+	'VerlaufEintrag',
+	'GelesenStand',
+	'Aenderung',
 ] as const satisfies readonly Prisma.ModelName[];
 
 type VereinsModell = (typeof VEREINS_MODELLE)[number];

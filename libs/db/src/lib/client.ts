@@ -11,7 +11,18 @@ import { PrismaClient } from '../generated/client.js';
 
 export type { PrismaClient } from '../generated/client.js';
 /** Die Modelltypen, die Server und Testhilfen nennen; sonst muessten sie in den generierten Ordner greifen. */
-export type { Bezugsperson, PlattformAdmin, Person, Verein, Zugang } from '../generated/client.js';
+export type {
+	Bezugsperson,
+	PlattformAdmin,
+	Person,
+	Thread,
+	ThreadModul,
+	UmfrageAntwort,
+	UmfrageModul,
+	Verein,
+	VerlaufEintrag,
+	Zugang,
+} from '../generated/client.js';
 /** Fuer getippte `where`-Klauseln (z.B. `Prisma.PersonWhereInput`) ausserhalb dieser Bibliothek. */
 export { Prisma } from '../generated/client.js';
 /** Die Enums des Schemas als Werte und Typen, damit niemand ausserhalb in den generierten Ordner greift. */
