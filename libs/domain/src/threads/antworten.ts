@@ -137,7 +137,10 @@ export interface Auswertung {
 // Spec 3.4. Gezaehlt wird nur, wer jetzt gefragt ist (Review-Schwerpunkt 3): eine
 // Antwort fuer eine entfernte oder aus der Untergruppe gefallene Person bleibt in der
 // Datenbank, taucht aber weder in Zahlen noch in Namen auf. Bei "mehrfach" zaehlt eine
-// Person unter jeder gewaehlten Option, "Offen" sind nur die ohne jede Antwort.
+// Person unter jeder gewaehlten Option, "Offen" sind nur die ohne jede Antwort. Eine
+// Antwort ohne Option gilt als keine Antwort (Etappe 2 verweigert sie serverseitig): eine
+// verirrte Zeile darf niemanden aus "Offen" verschwinden lassen, weil dann die Person
+// weder gezaehlt noch als fehlend genannt wuerde.
 // "eingetragen von" ist hier der Vermerk der Ergebnisliste fuer Jugendleiter, nicht
 // namen.eingetragenVon, das die Zeile unter der eigenen Antwort formuliert ("von dir").
 export function auswertung(
@@ -150,7 +153,7 @@ export function auswertung(
 	if (ansicht === 'NICHTS') return null;
 
 	const gefragt = gefragte(umfrage, kopf, umfeld);
-	const antwortVon = new Map(umfrage.antworten.map((a) => [a.fuerId, a]));
+	const antwortVon = new Map(umfrage.antworten.filter((a) => a.optionIds.length > 0).map((a) => [a.fuerId, a]));
 	const mitVermerk = istJugendleiter(betrachter);
 
 	const name = (p: ThreadPerson): AuswertungsName => {

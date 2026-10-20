@@ -3,7 +3,10 @@ import type { AntwortEinheit, Rollenfilter, UmfrageDaten } from '../../threads/t
 // Spec 3.12. Nur "dabei" gilt als Teilnahme (Grundlage fuer Mitfahrt und Zahlung in TP4,
 // Erinnerungen in TP5); "vielleicht" gilt als beantwortet. Die Schluessel sind fest und
 // dienen den Folgeprojekten als Anker, die Texte nicht: sie lassen sich umbenennen.
-export const TEILNAHME_OPTIONEN: readonly { schluessel: 'dabei' | 'vielleicht' | 'abgesagt'; text: string }[] = [
+export const TEILNAHME_OPTIONEN: readonly {
+	readonly schluessel: 'dabei' | 'vielleicht' | 'abgesagt';
+	readonly text: string;
+}[] = [
 	{ schluessel: 'dabei', text: 'Dabei' },
 	{ schluessel: 'vielleicht', text: 'Vielleicht' },
 	{ schluessel: 'abgesagt', text: 'Abgesagt' },
@@ -53,7 +56,7 @@ export type UmfrageKonflikt =
 // entwerten wuerden (409, Hinweis am Feld). Verworfen: Antworten dabei still loeschen.
 // Optionen werden ueber den Schluessel verglichen, nicht ueber die ID, weil der Editor
 // neue Optionen ohne ID schickt; Umbenennen und Umsortieren bleiben dadurch frei.
-// Es zaehlen alle gespeicherten Antworten, auch die nicht mehr Gefragter: sie bleiben in
+// Es zaehlen alle gespeicherten Antworten mit Option, auch die nicht mehr Gefragter: sie bleiben in
 // der Datenbank und kaemen mit der Zielgruppe zurueck.
 export function pruefeUmfrageAenderung(
 	alt: UmfrageDaten,
@@ -64,7 +67,8 @@ export function pruefeUmfrageAenderung(
 		optionen: readonly { schluessel: string }[];
 	},
 ): UmfrageKonflikt[] {
-	if (alt.antworten.length === 0) return [];
+	// Antworten ohne Option gelten als nicht beantwortet und blockieren nichts.
+	if (!alt.antworten.some((a) => a.optionIds.length > 0)) return [];
 	const konflikte: UmfrageKonflikt[] = [];
 	const bleibt = new Set(neu.optionen.map((o) => o.schluessel));
 	for (const option of alt.optionen) {

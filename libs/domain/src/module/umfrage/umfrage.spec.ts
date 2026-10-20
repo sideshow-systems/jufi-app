@@ -101,6 +101,11 @@ describe('pruefeUmfrageAenderung', () => {
 		expect(pruefeUmfrageAenderung(umfrage({ antworten: [antwort('lena', 'o-dabei')] }), gleich)).toEqual([]);
 	});
 
+	it('ignoriert Antworten ohne Option: sie gelten als nicht beantwortet', () => {
+		const alt = umfrage({ antworten: [antwort('lena')] });
+		expect(pruefeUmfrageAenderung(alt, { ...gleich, einheit: 'PERSON', teilnahme: false })).toEqual([]);
+	});
+
 	it('verweigert das Entfernen einer beantworteten Option', () => {
 		const alt = umfrage({ antworten: [antwort('lena', 'o-vielleicht')] });
 		const neu = { ...gleich, optionen: [{ schluessel: 'dabei' }, { schluessel: 'abgesagt' }] };

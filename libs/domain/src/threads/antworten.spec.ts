@@ -159,6 +159,9 @@ describe('antwortZeilen', () => {
 
 	it('gibt nur die Kinder der Zielgruppe, auch bei Grosseltern', () => {
 		expect(zeilen('hans', 'JUNGFISCHER', kopf(NUR_KLEIN))).toEqual([{ fuerId: 'max', vorname: 'Max', selbst: false }]);
+		expect(zeilen('sandra', 'JUNGFISCHER', kopf(NUR_GROSS))).toEqual([
+			{ fuerId: 'lena', vorname: 'Lena', selbst: false },
+		]);
 		expect(zeilen('sandra', 'JUNGFISCHER', kopf(NUR_KLEIN))).toEqual([
 			{ fuerId: 'max', vorname: 'Max', selbst: false },
 		]);
@@ -170,9 +173,6 @@ describe('antwortZeilen', () => {
 
 	it('gibt wer den Thread nicht sieht keine Zeile', () => {
 		expect(zeilen('sandra', 'JUNGFISCHER', kopf({ veroeffentlichtAm: null }))).toEqual([]);
-		expect(zeilen('sandra', 'JUNGFISCHER', kopf(NUR_GROSS))).toEqual([
-			{ fuerId: 'lena', vorname: 'Lena', selbst: false },
-		]);
 		expect(zeilen('peter', 'JUNGFISCHER', kopf(NUR_KLEIN))).toEqual([]);
 	});
 });
@@ -360,5 +360,39 @@ describe('auswertung', () => {
 			['o-abgesagt', 1],
 		]);
 		expect(a.offen.anzahl).toBe(4);
+	});
+
+	it('behandelt eine Antwort ohne Option als offen, auch fuer den Vermerk', () => {
+		const leer: AntwortDaten = { ...antwort('jonas', 'thomas', 'o-dabei'), optionIds: [] };
+		const a = von('thomas', umfrage({ antworten: [antworten[0], antworten[1], leer] }))!;
+		expect(a.optionen.map((o) => o.anzahl)).toEqual([2, 0, 0]);
+		expect(a.offen.anzahl).toBe(3);
+		expect(a.offen.namen).toEqual([
+			{ fuerId: 'jonas', name: 'Jonas K.', eingetragenVon: null },
+			{ fuerId: 'paul', name: 'Paul V.', eingetragenVon: null },
+			{ fuerId: 'tim', name: 'Tim S.', eingetragenVon: null },
+		]);
+	});
+
+	it('zaehlt die Antwort einer Jugendsprecherin nicht mehr, wenn ihr das Merkmal entzogen wurde', () => {
+		const austausch = kopf({ rollenfilter: 'JUGENDLEITER_JUGENDSPRECHER' });
+		const u = umfrage({ einheit: 'JUNGFISCHER', antworten: [antwort('lena', 'lena', 'o-dabei')] });
+		expect(von('thomas', u, austausch)!.optionen[0].namen).toEqual([
+			{ fuerId: 'lena', name: 'Lena M.', eingetragenVon: null },
+		]);
+
+		const personen = new Map(umfeld.personen);
+		personen.set('lena', { ...person('lena'), jugendsprecher: false });
+		const a = auswertung(person('thomas'), u, austausch, { ...umfeld, personen })!;
+		expect(a.optionen.map((o) => o.anzahl)).toEqual([0, 0, 0]);
+		expect(a.optionen[0].namen).toEqual([]);
+		expect(a.offen).toEqual({ anzahl: 0, namen: [] });
+	});
+
+	it('hat bei leerer Zielgruppe pro Jungfischer nichts zu zaehlen und niemanden offen', () => {
+		const leer = kopf({ alleUntergruppen: false, untergruppenIds: [] });
+		const a = von('thomas', umfrage({ antworten }), leer)!;
+		expect(a.optionen.map((o) => o.anzahl)).toEqual([0, 0, 0]);
+		expect(a.offen).toEqual({ anzahl: 0, namen: [] });
 	});
 });
