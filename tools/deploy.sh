@@ -256,6 +256,28 @@ FEHLT="$(jufi_ssh "cd $REMOTE_DIR && for v in JUFI_POSTGRES_USER JUFI_POSTGRES_P
 	|| fail "Die .env in $REMOTE_DIR ist nicht lesbar."
 [[ -z "$FEHLT" ]] || fail "In $REMOTE_DIR/.env fehlen oder sind leer: $(tr '\n' ' ' <<<"$FEHLT")(Vorlage: deploy/env.jufi.example)"
 note "Dienste $DB_SERVICE, $MIGRATE_SERVICE, $MAIL_SERVICE, $APP_SERVICE und alle JUFI_-Variablen vorhanden"
+# Ohne Sicherungsskript auf dem Server gaebe es gleich keinen Dump vor der
+# Migration. Das faellt hier auf, vor dem Uebertragen, und nicht mittendrin.
+jufi_ssh "test -x $REMOTE_TOOLS/backup.sh" \
+	|| fail 'Kein Deploy ohne Sicherung: tools/install-backup.sh ausfuehren.'
+note "Sicherungsskript $REMOTE_TOOLS/backup.sh ausfuehrbar"
+
+# --- Tor 5b: Dump vor der Migration --------------------------------------------
+# Spec 8.2. Bewusst **vor** dem Uebertragen und nicht danach: ein gescheiterter
+# Dump bricht ab, bevor irgendetwas auf dem Server veraendert wurde (weder Image
+# noch JUFI_IMAGE_TAG). Nach dem Ausrollen laeuft die Migration schon, und der
+# Dump zeigte den Stand danach -- der Zweck, der Stand davor, waere verfehlt.
+# Ohne restic (--no-restic): die Kopie ausser Haus macht der naechtliche Lauf; ein
+# Deploy soll nicht an der Erreichbarkeit des zweiten Kontos haengen.
+step 'Tor 5b: Dump vor der Migration'
+if [[ -n "$(remote_compose "ps --status running -q $DB_SERVICE" 2>/dev/null)" ]]; then
+	jufi_ssh "$REMOTE_TOOLS/backup.sh --local --no-restic" \
+		|| fail 'Dump gescheitert -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
+	note 'Dump gezogen (lokal auf dem Server, ohne restic)'
+else
+	# Allererstes Ausrollen: es gibt noch nichts zu sichern.
+	note "$DB_SERVICE laeuft nicht (erstes Ausrollen?) -- kein Dump noetig"
+fi
 
 # --- Tor 6: Uebertragen und Ausrollen ------------------------------------------
 step "Tor 6: Image per SSH uebertragen ($IMAGE:$SHA)"
@@ -312,7 +334,6 @@ else
 fi
 
 printf '\n\033[32m✓ Ausgerollt: %s (%s)\033[0m\n' "$SHA" "$VERSION"
-# Kein rollback.sh wie in HWYD: Migrationen laufen nur vorwaerts, und ob ein
-# altes Image mit dem neuen Schema zurechtkommt, entscheidet ein Mensch, kein Skript.
-note "Rueckfall (nur ohne Migration dazwischen): auf dem Server JUFI_IMAGE_TAG in $REMOTE_DIR/.env"
-note "auf den vorigen SHA setzen, dann: docker compose -f $REMOTE_COMPOSE up -d $APP_SERVICE"
+# Die Rueckfallzeile nennt das Skript, nicht die Handarbeit: es prueft vorher, ob
+# die Migrationen gleich sind und das Image auf dem Server liegt.
+note "Rueckfall: tools/rollback.sh (--list zeigt die Tags; bricht ab, wenn sich Migrationen unterscheiden)"
