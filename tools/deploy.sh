@@ -211,7 +211,10 @@ for _ in $(seq 1 40); do
 	sleep 1
 done
 [[ "$STATUS" == 'healthy' ]] || fail "Docker-Healthcheck meldet '$STATUS' statt healthy."
-docker logs "$SMOKE_APP" 2>&1 | grep -q 'Mail-Arbeiter gestartet' || fail 'Der Mail-Arbeiter ist nicht gestartet.'
+# Erst in eine Variable: grep -q beendet sich beim ersten Treffer, docker logs
+# bekommt SIGPIPE, und pipefail machte daraus (141) einen falschen Fehlschlag.
+APP_LOG="$(docker logs "$SMOKE_APP" 2>&1)"
+grep -q 'Mail-Arbeiter gestartet' <<<"$APP_LOG" || fail 'Der Mail-Arbeiter ist nicht gestartet.'
 [[ "$(docker exec "$SMOKE_APP" id -u)" != '0' ]] || fail 'Der Container laeuft als root.'
 note "Docker-Healthcheck: healthy; Mail-Arbeiter gestartet; laeuft nicht als root; $(docker stats --no-stream --format '{{.MemUsage}}' "$SMOKE_APP" | cut -d/ -f1)im Leerlauf"
 
@@ -270,7 +273,12 @@ note "Sicherungsskript $REMOTE_TOOLS/backup.sh ausfuehrbar"
 # Ohne restic (--no-restic): die Kopie ausser Haus macht der naechtliche Lauf; ein
 # Deploy soll nicht an der Erreichbarkeit des zweiten Kontos haengen.
 step 'Tor 5b: Dump vor der Migration'
-if [[ -n "$(remote_compose "ps --status running -q $DB_SERVICE" 2>/dev/null)" ]]; then
+# Ein scheiternder ps-Aufruf ist nicht "Dienst laeuft nicht": still als erstes
+# Ausrollen gedeutet, uebersprang er den Dump und oeffnete die Sicherungsschranke.
+# Nur ein erfolgreiches ps mit leerer Ausgabe heisst "noch nichts da".
+DB_LAEUFT="$(remote_compose "ps --status running -q $DB_SERVICE" 2>/dev/null)" \
+	|| fail 'Zustand von '"$DB_SERVICE"' nicht abfragbar -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
+if [[ -n "$DB_LAEUFT" ]]; then
 	jufi_ssh "$REMOTE_TOOLS/backup.sh --local --no-restic" \
 		|| fail 'Dump gescheitert -- kein Deploy ohne Sicherung. Auf dem Server wurde nichts veraendert.'
 	note 'Dump gezogen (lokal auf dem Server, ohne restic)'

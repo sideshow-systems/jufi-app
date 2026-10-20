@@ -47,7 +47,8 @@ if [[ "$LIST" -eq 1 ]]; then
 fi
 
 if [[ -z "$TARGET_SHA" ]]; then
-	TARGET_SHA="$(git rev-parse --short=12 HEAD~1)"
+	TARGET_SHA="$(git rev-parse --short=12 HEAD~1 2>/dev/null)" \
+		|| fail 'HEAD hat keinen Vorgaenger -- bitte einen SHA angeben.'
 	note "Kein SHA angegeben, nehme den Commit vor HEAD: $TARGET_SHA"
 fi
 # Aufgeloest auf die zwoelf Stellen, mit denen deploy.sh taggt; eine Kurzform
@@ -82,7 +83,8 @@ step "Zuruecksetzen auf $TARGET_SHA"
 jufi_ssh "cd $REMOTE_DIR && sed -i.bak 's|^JUFI_IMAGE_TAG=.*|JUFI_IMAGE_TAG=$TARGET_SHA|' .env" \
 	|| fail 'JUFI_IMAGE_TAG in .env setzen gescheitert.'
 # Nur der App-Dienst, wie im Deploy: ein blankes up -d nahme die anderen Apps mit.
-remote_compose "up -d $APP_SERVICE" || fail 'Ausrollen gescheitert.'
+remote_compose "up -d $APP_SERVICE" \
+	|| fail "Ausrollen gescheitert. In .env steht jetzt JUFI_IMAGE_TAG=$TARGET_SHA. Zurueck: ein vorheriges Tag aus der Liste von 'tools/rollback.sh --list' mit rollback.sh <sha> setzen."
 
 step 'Nachpruefen'
 TARGET_FULL="$(git rev-parse "$TARGET_SHA")"
