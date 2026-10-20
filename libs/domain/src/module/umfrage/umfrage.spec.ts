@@ -1,6 +1,8 @@
 import type { AntwortDaten, UmfrageDaten } from '../../threads/typen.js';
 import {
 	einheitenFuer,
+	fristText,
+	fristZeitpunkt,
 	neueUmfrageVorlage,
 	pruefeUmfrageAenderung,
 	TEILNAHME_OPTIONEN,
@@ -143,5 +145,39 @@ describe('pruefeUmfrageAenderung', () => {
 			{ feld: 'teilnahme' },
 			{ feld: 'mehrfach' },
 		]);
+	});
+});
+
+describe('fristText', () => {
+	// Mo 19.10.2026 10:00 Berlin
+	const jetzt = new Date('2026-10-19T08:00:00Z');
+
+	it('nennt innerhalb der naechsten sechs Berliner Tage nur den Wochentag', () => {
+		expect(fristText(new Date('2026-10-22T16:00:00Z'), jetzt)).toBe('bis Do 18:00');
+	});
+
+	it('zaehlt Berliner Kalendertage, nicht 24-Stunden-Spannen: So 23:59 ist der sechste Tag', () => {
+		expect(fristText(new Date('2026-10-25T22:59:00Z'), jetzt)).toBe('bis So 23:59');
+	});
+
+	it('nennt danach das Datum, auch nach der Zeitumstellung mit Winterzeit', () => {
+		expect(fristText(new Date('2026-10-29T17:00:00Z'), jetzt)).toBe('bis Do 29.10. 18:00');
+	});
+
+	it('nennt am siebten Tag das Datum', () => {
+		expect(fristText(new Date('2026-10-25T23:00:00Z'), jetzt)).toBe('bis Mo 26.10. 00:00');
+	});
+
+	it('meldet die Frist ab der Fristsekunde als abgelaufen', () => {
+		const frist = new Date('2026-10-19T08:00:00Z');
+		expect(fristText(frist, frist)).toBe('Frist abgelaufen');
+		expect(fristText(frist, new Date('2026-10-19T08:00:01Z'))).toBe('Frist abgelaufen');
+		expect(fristText(frist, new Date('2026-10-19T07:59:59Z'))).toBe('bis Mo 10:00');
+	});
+});
+
+describe('fristZeitpunkt', () => {
+	it('nennt Wochentag, Datum und Berliner Uhrzeit', () => {
+		expect(fristZeitpunkt(new Date('2026-10-22T16:00:00Z'))).toBe('Do 22.10. 18:00');
 	});
 });
