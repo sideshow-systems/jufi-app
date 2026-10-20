@@ -126,8 +126,17 @@ services:
       # wertlos und muessen neu eingerichtet werden -- Passwort und TOTP bleiben.
       WEBAUTHN_RP_ID: app-test.jufi-app.de
       WEBAUTHN_ORIGIN: https://app-test.jufi-app.de
-      SMTP_HOST: jufi-mailpit
-      SMTP_PORT: '1025'
+      # Mail-Schalter: ohne Eintrag in der `.env` bleibt es bei der Mail-Falle.
+      # `:-` greift auch bei einem **leeren** Wert -- `JUFI_SMTP_HOST=` aus der
+      # Vorlage (deploy/env.jufi.example) bedeutet also Mailpit und kein
+      # leerer Host. Verworfen: die Form ohne Doppelpunkt (`${X-...}`), denn die
+      # nimmt eine leere, aber gesetzte Vorlagenzeile als Wert und bricht den Start.
+      # `jufi-mailpit` bleibt unter depends_on, auch bei echtem Versand: so
+      # reicht das Umschalten per .env, ohne den Block umzubauen.
+      SMTP_HOST: ${JUFI_SMTP_HOST:-jufi-mailpit}
+      SMTP_PORT: ${JUFI_SMTP_PORT:-1025}
+      SMTP_USER: ${JUFI_SMTP_USER:-}
+      SMTP_PASS: ${JUFI_SMTP_PASS:-}
       MAIL_ABSENDER: app@jufi-app.de
       MAIL_ANTWORT: kontakt@jufi-app.de
       # Damit eine Mail aus der Testumgebung nie wie eine echte aussieht.
