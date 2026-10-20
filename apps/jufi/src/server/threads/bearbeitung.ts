@@ -41,6 +41,16 @@ export async function ladeUntergruppen(db: VereinDb | VereinTx): Promise<{ id: s
  * eine ohne Option, und von den Nachrichten nur die nicht geloeschten; eine geloeschte hat
  * keinen Text mehr, und Systemeintraege sind Verlauf, keine Meinungsaeusserung. Die Antworten
  * sind mit dem Thread schon geladen, die Nachrichten kommen aus einer eigenen Zaehlung.
+ *
+ * Die Version wird VOR dem Inhalt gelesen, wie ladeVereinsstand vor den Daten: Unter READ
+ * COMMITTED ist alles, was danach geladen wird, mindestens so neu wie die Version. Committet
+ * ein PUT dazwischen, hat der Client neueren Inhalt mit der alten Version, und sein naechster
+ * PUT endet in einem harmlosen 409 VERALTET. Andersherum (erst Inhalt, dann Version) bekaeme
+ * er alten Inhalt mit der neuen Version, und sein PUT ueberschriebe die fremde Aenderung
+ * still -- genau das, was die Version verhindern soll (Entscheidung 2). Verworfen: eine
+ * Transaktion mit hoeherer Isolation (Global Constraint: keine isolationLevel) oder eine
+ * Sperre der Vereinszeile fuer einen Lesevorgang. In der Transaktion einer Schreibroute
+ * haelt die Sperre ohnehin alle Schreiber fern, dort ist die Reihenfolge gleichgueltig.
  */
 export async function ladeBearbeitung(
 	db: VereinDb | VereinTx,
@@ -49,18 +59,18 @@ export async function ladeBearbeitung(
 	umfeld: Umfeld,
 	jetzt: Date,
 ): Promise<ThreadBearbeitung | null> {
+	const stand = await db.thread.findUnique({ where: { id: threadId }, select: { bearbeitetStand: true } });
+	if (!stand) return null;
 	const geladen = await ladeThread(db, threadId);
+	// Zwischen den beiden Abfragen geloescht: wie unbekannt behandeln.
 	if (!geladen) return null;
 	const { kopf, module } = geladen;
 	if (!siehtThread(ich, kopf, umfeld) || !darfBearbeiten(ich, kopf)) return null;
 
-	const [stand, nachrichten, untergruppen] = await Promise.all([
-		db.thread.findUnique({ where: { id: threadId }, select: { bearbeitetStand: true } }),
+	const [nachrichten, untergruppen] = await Promise.all([
 		db.verlaufEintrag.count({ where: { threadId, art: 'NACHRICHT', geloeschtAm: null } }),
 		ladeUntergruppen(db),
 	]);
-	// Zwischen den beiden Abfragen geloescht: wie unbekannt behandeln.
-	if (!stand) return null;
 
 	const daten = threadDatenAus(kopf, module);
 	const antworten = daten.umfragen.reduce((summe, u) => summe + u.antworten.length, 0);

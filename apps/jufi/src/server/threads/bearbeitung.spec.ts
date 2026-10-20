@@ -66,4 +66,39 @@ describe('ladeBearbeitung', () => {
 		);
 		expect(ergebnis).toEqual({ titel: 'Nur in der Transaktion', entwurfTitel: 'Nur in der Transaktion' });
 	});
+
+	it('liest die Version vor dem Inhalt: ein PUT dazwischen ergibt neuen Inhalt mit alter Version, nie umgekehrt', async () => {
+		const { db, ersteller, t } = await szenario();
+		const umfeld = await ladeThreadUmfeld(db);
+		const ich = umfeld.personen.get(ersteller.personId);
+		if (!ich) throw new Error('Person fehlt im Umfeld');
+
+		// Ein Dazwischenschreiben genau nach dem Lesen der Version, ohne Haken im Produktionscode:
+		// die Hilfe umhuellt nur den Aufruf thread.findUnique des Test-db.
+		const nachDerVersion = new Proxy(db, {
+			get(ziel, name, empfaenger) {
+				const wert = Reflect.get(ziel, name, empfaenger) as unknown;
+				if (name !== 'thread') return wert;
+				return new Proxy(wert as object, {
+					get(modell, methode, e) {
+						const m = Reflect.get(modell, methode, e) as unknown;
+						if (methode !== 'findUnique') return m;
+						return async (...args: unknown[]) => {
+							const ergebnis = await (m as (...a: unknown[]) => Promise<unknown>).apply(modell, args);
+							await prisma.thread.update({
+								where: { id: t.threadId },
+								data: { titel: 'Von einem anderen Geraet', bearbeitetStand: 5 },
+							});
+							return ergebnis;
+						};
+					},
+				});
+			},
+		});
+
+		const b = await ladeBearbeitung(nachDerVersion, ich, t.threadId, umfeld, JETZT);
+		// Neuer Inhalt mit alter Version: der naechste PUT scheitert an VERALTET, statt still zu ueberschreiben.
+		expect(b?.version).toBe(0);
+		expect(b?.entwurf.titel).toBe('Von einem anderen Geraet');
+	});
 });

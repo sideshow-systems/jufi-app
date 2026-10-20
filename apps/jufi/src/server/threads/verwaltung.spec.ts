@@ -84,7 +84,12 @@ describe('Lesende Routen der Verwaltung', () => {
 				[meiner.threadId, fremderEntwurf.threadId, austausch.id].sort(),
 			);
 			const zeile = (id: string) => liste.threads.find((t) => t.id === id);
-			expect(zeile(meiner.threadId)).toMatchObject({ titel: 'Mein Aushang', entwurf: false, darfBearbeiten: true });
+			expect(zeile(meiner.threadId)).toMatchObject({
+				titel: 'Mein Aushang',
+				entwurf: false,
+				darfBearbeiten: true,
+				hatUmfrage: false,
+			});
 			expect(zeile(fremderEntwurf.threadId)).toMatchObject({
 				titel: 'Tinas Entwurf',
 				entwurf: true,

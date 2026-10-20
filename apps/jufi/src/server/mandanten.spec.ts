@@ -501,6 +501,8 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Weder der Thread noch die Untergruppe aus fremd erscheinen in der Liste von eigen.
 		expect(liste.threads.map((t) => t.id)).not.toContain(k.fremderThread.threadId);
 		expect(liste.threads.map((t) => t.titel)).not.toContain('Fremder Thread');
+		// Positiv: Der eigene Austausch steht in der Liste, sie ist also nicht nur leer.
+		expect(liste.threads.map((t) => t.titel)).toContain('Jugendsprecher-Austausch');
 		expect(liste.untergruppen.map((g) => g.id)).not.toContain(k.fremdeGruppeId);
 	},
 	'GET /threads/:id/bearbeitung': async (k) => {
