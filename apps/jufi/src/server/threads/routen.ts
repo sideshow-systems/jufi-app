@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
+import { antwortenRouten } from './antworten.js';
 import { lesenRouten } from './lesen.js';
 import { verlaufRouten } from './verlauf.js';
 
@@ -10,4 +11,5 @@ import { verlaufRouten } from './verlauf.js';
 export function threadRouten(router: Router, deps: VolleAppDeps): void {
 	lesenRouten(router, deps);
 	verlaufRouten(router, deps);
+	antwortenRouten(router, deps);
 }

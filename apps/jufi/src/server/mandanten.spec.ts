@@ -114,6 +114,18 @@ async function fremderVerlauf(k: Kontext) {
 	};
 }
 
+/** Alles, was ein Antworten in fremd veraendern koennte: Antwortzeilen samt Optionen und Vereinsstand. */
+async function fremdeAntworten(k: Kontext) {
+	return {
+		antworten: await k.prisma.umfrageAntwort.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
+		optionen: await k.prisma.umfrageAntwortOption.findMany({
+			where: { vereinId: k.fremd.id },
+			orderBy: [{ antwortId: 'asc' }, { optionId: 'asc' }],
+		}),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
 /** Ein frischer Thread in eigen, den die Verwaltung von eigen sieht und in dem sie schreiben darf. */
 async function eigenerThread(k: Kontext): Promise<string> {
 	return (await legeThreadAn(k.prisma, k.eigen, new Date(), { titel: 'Eigener Thread' })).threadId;
@@ -484,6 +496,57 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect(r.status).toBe(404);
 		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
 		expect(await fremderVerlauf(k)).toEqual(vorher);
+	},
+	'PUT /umfragen/:modulId/antworten/:fuerId': async (k) => {
+		const vorher = await fremdeAntworten(k);
+		const antworte = (
+			slug: string,
+			modulId: string,
+			fuerId: string,
+			optionId: string,
+			clientId: string,
+			cookie?: string,
+		) =>
+			sende(k.url, `/${slug}/api/v1/umfragen/${modulId}/antworten/${fuerId}`, {
+				methode: 'PUT',
+				body: { optionIds: [optionId], clientId },
+				cookie,
+			});
+		const { modulId, optionId } = k.fremderThread;
+		const fremd = (slug: string) => antworte(slug, modulId, k.fremdePersonId, optionId, 'mandant-neu', k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		// Eine eigene Umfrage, in der eine neue Person aus eigen fuer sich selbst antworten darf.
+		const ich = await legeMitgliedAn(k.prisma, k.eigen, { art: 'ERWACHSENER', rechte: ['THREADS_ERSTELLEN'] });
+		const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: ich.personId,
+			module: [{ typ: 'UMFRAGE', einheit: 'PERSON' }],
+		});
+		const eigenesModul = eigene.modulIds[0] as string;
+		const eigeneOption = eigene.optionIds['ja'] as string;
+		// Die Person aus fremd ist in der eigenen Umfrage unbekannt, die Option aus fremd ungueltig.
+		const fremdePerson = await antworte(
+			k.eigen.slug,
+			eigenesModul,
+			k.fremdePersonId,
+			eigeneOption,
+			'mandant-1',
+			ich.cookie,
+		);
+		expect(fremdePerson.status).toBe(404);
+		expect(await fremdePerson.json()).toEqual({ fehler: 'nicht gefunden' });
+		expect((await antworte(k.eigen.slug, eigenesModul, ich.personId, optionId, 'mandant-2', ich.cookie)).status).toBe(
+			400,
+		);
+		// Die clientId der Antwort in fremd ist in eigen frei: ein 409 verriete, dass es sie dort gibt.
+		expect(
+			(await antworte(k.eigen.slug, eigenesModul, ich.personId, eigeneOption, 'mandant-antwort', ich.cookie)).status,
+		).toBe(200);
+		expect(await fremdeAntworten(k)).toEqual(vorher);
 	},
 	'PATCH /untergruppen/:id': async (k) => {
 		const vorher = await k.prisma.untergruppe.findUniqueOrThrow({ where: { id: k.fremdeGruppeId } });
