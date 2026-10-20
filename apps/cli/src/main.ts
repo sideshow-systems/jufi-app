@@ -46,8 +46,18 @@ export async function fuehreAus(argv: string[], deps: Abhaengigkeiten): Promise<
 
 	try {
 		if (befehl === 'demo' && unterbefehl === 'einspielen') {
-			const { personen } = await demoEinspielen(deps.prisma(), deps.jetzt());
+			const { personen, threads } = await demoEinspielen(deps.prisma(), deps.jetzt());
 			deps.ausgabe(`Demo-Verein angelegt: /demo/ (${personen} Personen)`);
+			// Ohne gueltige BASIS_URL nur der Pfad: Das Einspielen ist da schon durch, und ein Abbruch
+			// jetzt meldete einen Fehler fuer einen Demo-Verein, der steht. Verworfen: die BASIS_URL wie
+			// bei admin anlegen vorab zu pruefen, weil die Demo ohne .env laufen soll.
+			let basis = '';
+			try {
+				basis = deps.basisUrl();
+			} catch (fehler) {
+				if (!(fehler instanceof CliFehler)) throw fehler;
+			}
+			for (const { titel, segment } of threads) deps.ausgabe(`${titel}: ${basis}/demo/t/${segment}`);
 			return 0;
 		}
 
