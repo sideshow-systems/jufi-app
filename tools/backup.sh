@@ -26,6 +26,12 @@
 
 set -euo pipefail
 
+# Klartext-Dumps enthalten Daten von Kindern. Ohne diese Maske waeren sie mit der
+# Vorgabe 022 fuer alle Benutzer des gemeinsamen Servers lesbar. Vor dem ersten
+# Anlegen einer Datei oder eines Verzeichnisses, nicht erst danach per chmod:
+# dazwischen laege ein Zeitfenster.
+umask 077
+
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/_config.sh"
 
@@ -46,11 +52,24 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 # Fehlerpfade nach dem Anlegen laufen deshalb ueber diese Funktion. Verworfen:
 # `trap ... ERR` -- das feuerte auch bei harmlosen Fehlschlaegen (etwa dem
 # `grep -c` ohne Treffer) und liesse sich nicht auf die Dump-Datei eingrenzen.
+#
+# Geschrieben wird nach <ziel>.part und erst nach bestandener Pruefung per mv in
+# den endgueltigen Namen gebracht. Bei SIGINT/SIGTERM mitten im Dump (Cron-Ende,
+# Strg-C, Neustart) bliebe sonst eine halbe `jufi-*.dump`, die Aufraeumregel und
+# Wiederherstellungsprobe fuer einen Dump hielten; `*.part` passt auf kein
+# `jufi-*.dump`-Muster. Verworfen: die Datei bei jedem Signal erst nachtraeglich
+# auf Gueltigkeit zu pruefen -- ein Name, der nie vorzeitig stimmt, braucht das nicht.
+ZIEL=''
 DUMP=''
 verwirf() {
 	[[ -n "$DUMP" ]] && rm -f "$DUMP"
 	fail "$@"
 }
+# Signale in einen normalen Exit umsetzen, damit der EXIT-Trap sicher laeuft.
+# Nach dem mv ist DUMP leer, dann bleibt die fertige Datei unberuehrt.
+trap '[[ -n "$DUMP" ]] && rm -f "$DUMP"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ "$LOCAL_MODE" -eq 1 ]]; then
 	# Auf dem Server: Compose liegt neben uns, .env liefert die Zugaenge.
@@ -60,7 +79,8 @@ if [[ "$LOCAL_MODE" -eq 1 ]]; then
 	: "${JUFI_POSTGRES_USER:?JUFI_POSTGRES_USER fehlt in .env}"
 	: "${JUFI_POSTGRES_DB:?JUFI_POSTGRES_DB fehlt in .env}"
 	mkdir -p "$BACKUP_DIR"
-	DUMP="$BACKUP_DIR/jufi-$STAMP.dump"
+	ZIEL="$BACKUP_DIR/jufi-$STAMP.dump"
+	DUMP="$ZIEL.part"
 	# Kein `set -e`-Abbruch hier: dann bliebe die vom Umleiten angelegte, leere
 	# oder halbe Datei zurueck, und die Meldung nennte nicht, was gescheitert ist.
 	if ! docker compose -f "$REMOTE_COMPOSE" exec -T "$DB_SERVICE" \
@@ -72,7 +92,8 @@ else
 	# Auf dem Entwicklungsrechner gilt nicht der Serverpfad aus _config.sh.
 	BACKUP_DIR="$JUFI_ROOT/backups"
 	mkdir -p "$BACKUP_DIR"
-	DUMP="$BACKUP_DIR/jufi-$STAMP.dump"
+	ZIEL="$BACKUP_DIR/jufi-$STAMP.dump"
+	DUMP="$ZIEL.part"
 	step "Dump vom Server holen"
 	if ! jufi_ssh "cd $REMOTE_DIR && set -a && . ./.env && set +a && docker compose -f $REMOTE_COMPOSE exec -T $DB_SERVICE pg_dump -U \"\$JUFI_POSTGRES_USER\" -d \"\$JUFI_POSTGRES_DB\" -Fc --no-owner --no-privileges" >"$DUMP"; then
 		verwirf 'pg_dump auf dem Server gescheitert. Halbe Datei geloescht.'
@@ -89,6 +110,10 @@ if [[ "${TABLES:-0}" -lt 1 ]]; then
 	TABLES=$(docker run --rm -i postgres:17-alpine pg_restore --list <"$DUMP" 2>/dev/null | grep -c 'TABLE DATA' || true)
 fi
 [[ "${TABLES:-0}" -ge 1 ]] || verwirf 'Dump enthaelt keine Tabellendaten. Datei geloescht.'
+# Erst jetzt ist es ein Dump. mv im selben Verzeichnis ist atomar.
+mv "$DUMP" "$ZIEL"
+DUMP="$ZIEL"
+trap - EXIT
 note "$DUMP"
 note "$SIZE Byte, $TABLES Tabellen mit Daten"
 
@@ -96,6 +121,10 @@ note "$SIZE Byte, $TABLES Tabellen mit Daten"
 # ohne eingerichtete Ablage ausser Haus wuerde nie etwas geloescht, und die Platte
 # des gemeinsamen Servers laeuft voll.
 LOCAL_KEEP_DAYS="${LOCAL_KEEP_DAYS:-30}"
+# Reste abgebrochener Laeufe (SIGKILL, Stromausfall -- der Trap greift dort nicht)
+# erst nach einem Tag: ein gleichzeitig laufender Dump hat eine frische .part, die
+# nicht unter ihm weggeloescht werden darf.
+find "$(dirname "$DUMP")" -name 'jufi-*.dump.part' -mtime +0 -delete 2>/dev/null || true
 find "$(dirname "$DUMP")" -name 'jufi-*.dump' -mtime "+$LOCAL_KEEP_DAYS" -delete 2>/dev/null || true
 REMAINING=$(find "$(dirname "$DUMP")" -name 'jufi-*.dump' | wc -l | tr -d ' ')
 note "$REMAINING Dumps vorhanden, Aufbewahrung $LOCAL_KEEP_DAYS Tage"

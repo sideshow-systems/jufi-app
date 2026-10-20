@@ -103,9 +103,18 @@ if [[ "$CODE_A" -eq 0 && "$COUNT_A" -eq 1 ]]; then
 	LIST_A="$(restore_list "$DUMP_A" 2>/dev/null || true)"
 	if grep -q 'TABLE DATA public familie' <<<"$LIST_A" && grep -q 'TABLE DATA public person' <<<"$LIST_A"; then A_OK=1; fi
 fi
+# Klartext-Dumps enthalten Daten von Kindern: nur der Besitzer darf sie lesen.
+# macOS (BSD) und Linux (GNU) haben verschiedene stat-Schalter.
+rechte() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+RECHTE_A=''
 if [[ "$A_OK" -eq 1 ]]; then
-	echo '✓ A: Dump liegt vor, enthaelt familie und person'
+	RECHTE_A="$(rechte "$DUMP_A")"
+	[[ "$RECHTE_A" == 600 ]] || A_OK=0
+fi
+if [[ "$A_OK" -eq 1 ]]; then
+	echo '✓ A: Dump liegt vor, enthaelt familie und person, Rechte 600'
 else
+	[[ -n "$RECHTE_A" && "$RECHTE_A" != 600 ]] && echo "  Dateirechte $RECHTE_A statt 600"
 	echo "✗ A: Dump liegt nicht (korrekt) vor (Exit $CODE_A, $COUNT_A Dateien)"
 	printf '%s\n' "$OUT_A" | sed 's/^/    /'
 	FAILED=1
@@ -123,6 +132,34 @@ if [[ "$CODE_B" -ne 0 && "$OUT_B" == *pg_dump* && "$COUNT_B" -eq 0 ]]; then
 else
 	echo "✗ B: Exit $CODE_B, $COUNT_B .dump-Dateien, Meldung mit pg_dump: $([[ "$OUT_B" == *pg_dump* ]] && echo ja || echo nein)"
 	printf '%s\n' "$OUT_B" | sed 's/^/    /'
+	FAILED=1
+fi
+
+# --- Fall B2: Abbruch mitten im Dump --------------------------------------------
+# Ein docker-Stub haengt, das Skript bekommt SIGTERM. Danach darf kein
+# `jufi-*.dump` liegen: der Aufraeumer und der Restore-Test hielten es fuer einen
+# Dump. Uebrig bleibt hoechstens eine `.part`-Datei, und auch die raeumt der
+# Abbruch selbst weg.
+mkdir -p "$WORK/stubbin"
+printf '#!/bin/sh\nexec sleep 20\n' >"$WORK/stubbin/docker"
+chmod +x "$WORK/stubbin/docker"
+rm -rf "$BACKUPS"
+PATH="$WORK/stubbin:$PATH" REMOTE_DIR="$WORK" REMOTE_COMPOSE=docker-compose.yml BACKUP_DIR="$BACKUPS" \
+	bash "$WORK/tools/backup.sh" --local --no-restic >/dev/null 2>&1 &
+BPID=$!
+for _ in $(seq 1 20); do
+	[[ -n "$(find "$BACKUPS" -name 'jufi-*' 2>/dev/null)" ]] && break
+	sleep 0.5
+done
+kill -TERM "$BPID" 2>/dev/null || true
+wait "$BPID" 2>/dev/null || true
+pkill -f "sleep 20" 2>/dev/null || true
+COUNT_B2="$(find "$BACKUPS" -name 'jufi-*.dump' 2>/dev/null | wc -l | tr -d ' ' || true)"
+REST_B2="$(find "$BACKUPS" -name 'jufi-*' 2>/dev/null | wc -l | tr -d ' ' || true)"
+if [[ "$COUNT_B2" -eq 0 && "$REST_B2" -eq 0 ]]; then
+	echo '✓ B2: Abbruch mitten im Dump -> kein jufi-*.dump, keine Reste'
+else
+	echo "✗ B2: nach Abbruch $COUNT_B2 .dump-Dateien, $REST_B2 Dateien insgesamt"
 	FAILED=1
 fi
 
