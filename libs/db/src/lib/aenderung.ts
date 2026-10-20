@@ -24,7 +24,14 @@ const OHNE_AKTIVITAET: readonly AenderungArt[] = ['GELOESCHT', 'SICHTBARKEIT'];
  * stellen sich an und vergeben so lueckenlose Staende in Commit-Reihenfolge; eine
  * zurueckgerollte Transaktion verbraucht keinen. Verworfen: eine Postgres-Sequenz —
  * sie vergibt Nummern vor dem Commit, und eine spaeter committete kleinere Nummer
- * ueberholte einen Sync, der die groessere schon gesehen hat.
+ * ueberholte einen Sync, der die groessere schon gesehen hat. Das Warten setzt
+ * READ COMMITTED voraus (Postgres-Vorgabe, das Projekt setzt keine isolationLevel):
+ * Unter REPEATABLE READ oder SERIALIZABLE scheiterten gleichzeitige Schreiber mit
+ * 40001/P2034, statt zu warten.
+ *
+ * Aufrufer rufen mitAenderung als erste schreibende Anweisung der Transaktion auf.
+ * Was vor der Sperre der Vereinszeile geschrieben wird, kann mit einer Transaktion
+ * verklemmen, die die Sperre schon haelt und in `arbeit` dieselben Zeilen anfasst.
  *
  * Ein Stand je Transaktion, nicht je Zeile (Plan-Entscheidung 2): Die Arbeit bekommt
  * ihn vorab, denn ein Verlaufseintrag braucht seinen Stand beim Anlegen, seine ID
