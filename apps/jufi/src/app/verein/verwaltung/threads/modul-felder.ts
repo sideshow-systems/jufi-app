@@ -49,6 +49,30 @@ const AUSGANGSOPTIONEN = (): OptionEntwurf[] => [
 	{ schluessel: null, text: 'Nein' },
 ];
 
+// Die Felder, an denen die Vorlage einen Fehler zeigt, je Typ und (bei Umfragen) Modus. Eine
+// Teilnahme hat keine Optionsliste, zeigt "optionen" aber unter "Vielleicht anbieten": Dort meldet
+// der Server ein abgewaehltes, schon gewaehltes "Vielleicht" (Spec 3.14). "vielleicht",
+// "ergebnisse", "typ" und "id" haben kein Fehlerfeld; sie sind Auswahlen ohne Eingabefehler.
+const FEHLERFELDER = {
+	INFO: ['titel', 'text'],
+	TERMIN: ['titel', 'termin', 'ort', 'treffpunkt'],
+	TEILNAHME: ['titel', 'frage', 'teilnahme', 'optionen', 'einheit', 'frist'],
+	UMFRAGE: ['titel', 'frage', 'teilnahme', 'optionen', 'mehrfach', 'einheit', 'frist'],
+} as const satisfies Record<string, readonly string[]>;
+
+/**
+ * Ob jf-modul-felder einen Fehler an diesem Feld (Pfad nach "module.N.") fuer dieses Modul zeigt.
+ * Der Editor fragt das, bevor er einen Feldfehler des Servers an ein Modul haengt; was hier fehlt,
+ * nennt er als Satz unter den Knoepfen, statt ihn an einer Stelle abzulegen, die niemand sieht.
+ * Eine Liste fuer beide: Die Vorlage zeigt nur, was hier steht (fehlerNachFeld), und der Test
+ * prueft, dass sie alles davon zeigt. Verworfen: eine zweite Liste im Editor, die beim naechsten
+ * neuen Feld still auseinanderliefe.
+ */
+export function zeigtModulFeld(m: ModulEntwurf, feld: string): boolean {
+	const art = m.typ === 'UMFRAGE' && m.teilnahme ? 'TEILNAHME' : m.typ;
+	return (FEHLERFELDER[art] as readonly string[]).includes(feld);
+}
+
 const leerNull = (w: string): string | null => (w === '' ? null : w);
 const hakenVon = (e: Event): boolean => (e.target as HTMLInputElement).checked;
 
@@ -269,12 +293,19 @@ const hakenVon = (e: Event): boolean => (e.target as HTMLInputElement).checked;
 							name="vielleicht"
 							[checked]="m.vielleicht"
 							[disabled]="vielleichtGesperrt(m)"
+							[attr.aria-invalid]="fehlerAn('optionen') ? 'true' : null"
+							[attr.aria-describedby]="fehlerAn('optionen') ? fehlerId('optionen') : null"
 							(change)="vielleichtSetzen(m, haken($event))"
 						/>
 						Vielleicht anbieten
 					</label>
 					@if (vielleichtGesperrt(m)) {
 						<p class="hinweis gedaempft klein">{{ gesperrtText }}</p>
+					}
+					<!-- Die Optionen einer Teilnahme stellt allein dieser Schalter; ein Konflikt an ihnen
+					(Vielleicht abgewaehlt, obwohl jemand es gewaehlt hat) gehoert deshalb hierher. -->
+					@if (fehlerAn('optionen'); as text) {
+						<p class="fehler" role="alert" [id]="fehlerId('optionen')">{{ text }}</p>
 					}
 				} @else {
 					<fieldset class="optionen">
@@ -571,14 +602,15 @@ export class ModulFelderComponent {
 	protected readonly einheiten = computed(() => einheitenFuer(this.rollenfilter()));
 
 	// Zeichen der Fehler je Feld; der Pfad kommt aus entwurfFehler ("module.<i>.<feld>"). Mehrere
-	// Fehler am selben Feld zeigt nur der erste: Der zweite waere meist dieselbe Ursache.
+	// Fehler am selben Feld zeigt nur der erste: Der zweite waere meist dieselbe Ursache. Nur Felder
+	// aus zeigtModulFeld: So zeigt die Vorlage nie mehr, als der Editor ihr zutraut.
 	private readonly fehlerNachFeld = computed(() => {
 		const vorsatz = `module.${this.index()}.`;
+		const modul = this.modul();
 		const karte = new Map<string, string>();
 		for (const f of this.fehler()) {
-			if (f.feld.startsWith(vorsatz) && !karte.has(f.feld.slice(vorsatz.length))) {
-				karte.set(f.feld.slice(vorsatz.length), f.text);
-			}
+			const feld = f.feld.slice(vorsatz.length);
+			if (f.feld.startsWith(vorsatz) && zeigtModulFeld(modul, feld) && !karte.has(feld)) karte.set(feld, f.text);
 		}
 		return karte;
 	});

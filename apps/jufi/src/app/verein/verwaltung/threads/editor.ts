@@ -34,7 +34,7 @@ import { wertVon } from '../../../gemeinsam/formular';
 import { IconComponent } from '../../../gestaltung/icon';
 import { KarteComponent, PilleComponent } from '../../../gestaltung/ui';
 import { beiAbgelaufenerSitzung } from '../../sitzung-abgelaufen';
-import { ModulFelderComponent } from './modul-felder';
+import { ModulFelderComponent, zeigtModulFeld } from './modul-felder';
 import { VerwaltungThreadsApi } from './threads-api';
 import { ThreadVorschauComponent } from './vorschau';
 
@@ -119,6 +119,19 @@ function uebergabeAus(nav: Navigation | null): Uebergabe | null {
 
 const KEINE_FEHLER: Feldfehler[] = [];
 const MODULFEHLER = /^module\.(\d+)\./;
+
+/**
+ * Ein Feldfehler des Servers, an einem Modul ueber dessen Schluessel statt ueber den Index: Der
+ * Server nennt die Position zum Zeitpunkt der Anfrage, danach kann die Person umsortieren,
+ * entfernen oder hinzufuegen, und der Fehler stuende am Nachbarn. Verworfen: den Index beim
+ * Umsortieren mitzufuehren, denn das muesste jede Aenderung der Modulliste wissen.
+ * schluessel null: ein Feld des Threads (titel, zielgruppe, module), feld ist dann der ganze Pfad.
+ */
+interface ServerFehler {
+	schluessel: string | null;
+	feld: string;
+	text: string;
+}
 
 /**
  * Der Thread-Editor der Verwaltung (Spec 6.6): links das Formular, rechts die Live-Vorschau,
@@ -664,7 +677,7 @@ export class ThreadEditorComponent {
 
 	/** Fehler aus entwurfFehler zeigt die Seite erst nach dem ersten Speichern, dann aber bei jeder Eingabe neu. */
 	private readonly geprueft = signal(false);
-	private readonly serverFehler = signal<Feldfehler | null>(null);
+	private readonly serverFehler = signal<ServerFehler | null>(null);
 	protected readonly meldung = signal<string | null>(null);
 	protected readonly veraltet = signal<string | null>(null);
 	protected readonly status = signal<string | null>(null);
@@ -699,9 +712,18 @@ export class ThreadEditorComponent {
 		zielgruppeText(this.kopf(), new Map(this.untergruppen().map((u) => [u.id, u.name]))),
 	);
 
+	/** Der Feldfehler des Servers mit dem Index, den sein Modul jetzt hat; mit dem Modul entfernt, ist er weg. */
+	private readonly serverFeldfehler = computed<Feldfehler | null>(() => {
+		const s = this.serverFehler();
+		if (s === null) return null;
+		if (s.schluessel === null) return { feld: s.feld, text: s.text };
+		const i = this.arbeit().module.findIndex((e) => e.schluessel === s.schluessel);
+		return i < 0 ? null : { feld: `module.${i}.${s.feld}`, text: s.text };
+	});
+
 	protected readonly fehler = computed<Feldfehler[]>(() => {
 		const client = this.geprueft() ? entwurfFehler(this.entwurf(), this.untergruppenIds()) : [];
-		const server = this.serverFehler();
+		const server = this.serverFeldfehler();
 		return server ? [...client, server] : client;
 	});
 
@@ -783,7 +805,8 @@ export class ThreadEditorComponent {
 			this.status.set(uebergabe.status);
 			this.meldung.set(uebergabe.meldung);
 			if (uebergabe.serverFehler) {
-				this.serverFehler.set(uebergabe.serverFehler);
+				// Nach uebernehme: Die Module tragen jetzt die Schluessel, an die der Fehler gehoert.
+				this.setzeServerFehler(uebergabe.serverFehler);
 				this.geprueft.set(true);
 			}
 			this.zustand.set('bereit');
@@ -871,10 +894,17 @@ export class ThreadEditorComponent {
 		this.setzeKopf({ alleUntergruppen: an, untergruppenIds: [] });
 	}
 
+	// Aufsteigend nach ID, wie der Server sie liefert (laden.ts: orderBy untergruppeId asc). Ungespeichert
+	// vergleicht den Entwurf als JSON; ab- und wieder angehakt stuende die ID sonst hinten und die Seite
+	// fragte beim Verlassen nach einer Aenderung, die keine ist. Verglichen nach Code-Einheiten statt
+	// localeCompare: postgres:17-alpine (lokal wie auf dem Server) sortiert mit Sortierfolge C, also nach
+	// Bytes, und fuer die IDs (cuid, Kleinbuchstaben und Ziffern) ist das dieselbe Reihenfolge.
+	// Verworfen: ungespeichert die IDs als Menge vergleichen zu lassen, denn dann muesste der Vergleich
+	// die Form des Entwurfs kennen.
 	protected untergruppeSetzen(id: string, an: boolean): void {
 		const k = this.kopf();
-		const bisher = k.alleUntergruppen ? [] : k.untergruppenIds;
-		const ids = an ? [...bisher.filter((x) => x !== id), id] : bisher.filter((x) => x !== id);
+		const bisher = k.alleUntergruppen ? [] : k.untergruppenIds.filter((x) => x !== id);
+		const ids = (an ? [...bisher, id] : bisher).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 		this.setzeKopf({ alleUntergruppen: false, untergruppenIds: ids });
 	}
 
@@ -1021,6 +1051,9 @@ export class ThreadEditorComponent {
 				} catch (ursache) {
 					if (this.weg) return;
 					await this.zeigeFehler(ursache);
+					// Bei abgelaufener Sitzung hat zeigeFehler zur Anmeldung gefuehrt und die Seite ist
+					// zerstoert; die Navigation nach threads/<id> unten ueberholte sonst die Anmeldeseite.
+					if (this.weg) return;
 				}
 			}
 			if (!veroeffentlichen || veroeffentlicht) {
@@ -1032,7 +1065,7 @@ export class ThreadEditorComponent {
 					bearbeitung: b,
 					status: this.status(),
 					meldung: this.meldung(),
-					serverFehler: this.serverFehler(),
+					serverFehler: this.serverFeldfehler(),
 				};
 				await this.router.navigate(['/', slug, 'verwaltung', 'threads', b.id], {
 					replaceUrl: true,
@@ -1058,20 +1091,36 @@ export class ThreadEditorComponent {
 		}
 		if (fehler.feld !== undefined && this.zeigtFeld(fehler.feld)) {
 			const f: Feldfehler = { feld: fehler.feld, text: fehler.fehler };
-			this.serverFehler.set(f);
+			this.setzeServerFehler(f);
 			this.zeigeFehlerhaftes([f]);
 			return;
 		}
 		this.meldung.set(fehlertextNichtGefunden(fehler));
 	}
 
-	/** Ob die Seite ein Feld des Servers an einer Stelle zeigen kann; sonst ginge der Fehler unter. */
+	/**
+	 * Ob die Seite ein Feld des Servers an einer Stelle zeigen kann; sonst ginge der Fehler unter.
+	 * An einem Modul zaehlt, was jf-modul-felder fuer dessen Typ und Modus zeigt (zeigtModulFeld):
+	 * Ein Fehler an einem Feld, das es dort nicht gibt, waehlte das Modul, und zu sehen waere nichts.
+	 */
 	private zeigtFeld(feld: string): boolean {
 		if (feld === 'titel' || feld === 'modus') return true;
 		if (this.austausch()) return false;
 		if (feld === 'zielgruppe' || feld === 'module') return true;
 		const treffer = MODULFEHLER.exec(feld);
-		return treffer !== null && Number(treffer[1]) < this.arbeit().module.length;
+		const e = treffer ? this.arbeit().module[Number(treffer[1])] : undefined;
+		return treffer !== null && e !== undefined && zeigtModulFeld(e.modul, feld.slice(treffer[0].length));
+	}
+
+	/** Haengt einen Fehler an einem Modul an dessen Schluessel (siehe ServerFehler). */
+	private setzeServerFehler(f: Feldfehler): void {
+		const treffer = MODULFEHLER.exec(f.feld);
+		const e = treffer ? this.arbeit().module[Number(treffer[1])] : undefined;
+		this.serverFehler.set(
+			treffer && e
+				? { schluessel: e.schluessel, feld: f.feld.slice(treffer[0].length), text: f.text }
+				: { schluessel: null, feld: f.feld, text: f.text },
+		);
 	}
 
 	/** Waehlt das erste Modul mit Fehler, damit seine Felder samt Fehler zu sehen sind. */

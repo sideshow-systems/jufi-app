@@ -164,7 +164,10 @@ export function antwortenUebersicht(
 	const { kopf, umfragen } = daten;
 	if (!siehtThread(ich, kopf, umfeld)) return null;
 	if (!siehtAntworten(ich, kopf)) return null;
-	const nachtragen = darfBearbeiten(ich, kopf);
+	// Nachtragen nur im veroeffentlichten Thread: Im Entwurf verweigert der Server jede Antwort
+	// (darfAntworten: ENTWURF), ein "Eintragen" endete also immer im Fehler. Verworfen: den
+	// Knopf zu zeigen und den Fehler zu melden, denn ein Knopf, der nie gelingt, ist keiner.
+	const nachtragen = darfBearbeiten(ich, kopf) && kopf.veroeffentlichtAm !== null;
 
 	const name = (id: string) => {
 		const p = umfeld.personen.get(id);

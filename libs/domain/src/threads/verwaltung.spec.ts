@@ -222,6 +222,11 @@ describe('antwortenUebersicht', () => {
 		expect(antwortenUebersicht(person('petra'), eigener, umfeld, JETZT)).toMatchObject({ darfNachtragen: true });
 	});
 
+	it('laesst in einem Entwurf nicht nachtragen, weil dort niemand antworten kann', () => {
+		const entwurf = thread({}, kopf({ veroeffentlichtAm: null }));
+		expect(antwortenUebersicht(person('thomas'), entwurf, umfeld, JETZT)).toMatchObject({ darfNachtragen: false });
+	});
+
 	it('gibt null fuer einen Entfernten mit Recht', () => {
 		const entfernt = { ...person('bea'), entferntAm: new Date('2026-09-01T00:00:00Z') };
 		expect(antwortenUebersicht(entfernt, thread(), umfeld, JETZT)).toBeNull();

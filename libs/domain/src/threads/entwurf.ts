@@ -1,6 +1,6 @@
 import { terminFehler, type TerminDaten } from '../module/termin/termin.js';
 import { einheitenFuer, neueUmfrageVorlage, teilnahmeOptionen } from '../module/umfrage/umfrage.js';
-import { berlinerTag, tagPlus } from '../zeit.js';
+import { berlinerTag, istKalendertag, tagPlus } from '../zeit.js';
 import type { ModulDaten } from './ansicht.js';
 import type { AntwortEinheit, ErgebnisSicht, Rollenfilter, ThreadKopf, ThreadModus } from './typen.js';
 
@@ -137,7 +137,10 @@ function frist(w: unknown, feld: string): string | null {
 	const roh = textOderNull(w, feld);
 	if (roh === null) return null;
 	const ms = Date.parse(roh);
-	if (!ISO_ZEITPUNKT.test(roh) || Number.isNaN(ms)) throw new Ungueltig(feld);
+	// Date.parse rollt "2026-02-30T..." still in den Maerz; der Tag muss einer sein, den es gibt
+	// (Spec 2.2), wie beim Datum eines Termins. Verworfen: den gelesenen Zeitpunkt zurueck mit
+	// der Eingabe zu vergleichen, denn bei einer Zone wie +02:00 ist der UTC-Tag ein anderer.
+	if (!ISO_ZEITPUNKT.test(roh) || !istKalendertag(roh.slice(0, 10)) || Number.isNaN(ms)) throw new Ungueltig(feld);
 	// Normalisiert auf UTC: So gleicht der Vergleich mit der gespeicherten Frist
 	// (entwurfAusThread schreibt toISOString) nicht an der Schreibweise.
 	return new Date(ms).toISOString();

@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import type { Feldfehler, ModulEntwurf, Rollenfilter, UmfrageSperre } from '@jufi/domain';
-import { ModulFelderComponent } from './modul-felder';
+import { ModulFelderComponent, zeigtModulFeld } from './modul-felder';
 
 type Umfrage = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
 
@@ -344,6 +344,63 @@ describe('jf-modul-felder', () => {
 			const kennung = r.el('input[name="titel"]')?.getAttribute('aria-describedby');
 			expect(kennung).toBeTruthy();
 			expect(r.seite.querySelector(`#${kennung}`)?.textContent).toContain('zu lang');
+		});
+
+		it('zeigt den Konflikt an den Optionen auch bei einer Teilnahme-Umfrage, an "Vielleicht anbieten"', () => {
+			const text = 'Auf „Vielleicht“ hat schon jemand geantwortet.';
+			const r = oeffne(umfrage({ teilnahme: true, vielleicht: false }), {
+				fehler: [{ feld: 'module.0.optionen', text }],
+			});
+			expect(r.seite.querySelector('p.fehler[role="alert"]')?.textContent).toContain(text);
+			const vielleicht = r.el('input[name="vielleicht"]');
+			expect(vielleicht?.getAttribute('aria-invalid')).toBe('true');
+			expect(r.seite.querySelector(`#${vielleicht?.getAttribute('aria-describedby')}`)?.textContent).toContain(text);
+		});
+	});
+
+	describe('zeigtModulFeld', () => {
+		// Jedes Feld, das der Server je an einem Modul nennen kann (entwurfAus, entwurfFehler, vergleich.ts).
+		const ALLE = [
+			'typ',
+			'id',
+			'titel',
+			'text',
+			'termin',
+			'ort',
+			'treffpunkt',
+			'frage',
+			'teilnahme',
+			'vielleicht',
+			'mehrfach',
+			'einheit',
+			'frist',
+			'ergebnisse',
+			'optionen',
+		];
+		const FAELLE: [string, ModulEntwurf][] = [
+			['Info', info()],
+			['Termin', termin()],
+			['Umfrage', umfrage()],
+			['Teilnahme', umfrage({ teilnahme: true })],
+		];
+
+		it.each(FAELLE)('%s: genau die genannten Felder zeigen ihren Fehler', (_, modul) => {
+			const ergebnis = ALLE.map((feld) => {
+				const r = oeffne(modul, { fehler: [{ feld: `module.0.${feld}`, text: `Fehler ${feld}` }] });
+				return { feld, sichtbar: r.seite.textContent?.includes(`Fehler ${feld}`) ?? false };
+			});
+			expect(ergebnis).toEqual(ALLE.map((feld) => ({ feld, sichtbar: zeigtModulFeld(modul, feld) })));
+		});
+
+		it('kennt die Optionen einer Teilnahme, aber weder Mehrfachauswahl noch Vielleicht noch Ergebnisse', () => {
+			const teilnahme = umfrage({ teilnahme: true });
+			expect(zeigtModulFeld(teilnahme, 'optionen')).toBe(true);
+			expect(zeigtModulFeld(teilnahme, 'mehrfach')).toBe(false);
+			expect(zeigtModulFeld(teilnahme, 'vielleicht')).toBe(false);
+			expect(zeigtModulFeld(umfrage(), 'mehrfach')).toBe(true);
+			expect(zeigtModulFeld(umfrage(), 'ergebnisse')).toBe(false);
+			expect(zeigtModulFeld(info(), 'optionen')).toBe(false);
+			expect(zeigtModulFeld(termin(), 'ort')).toBe(true);
 		});
 	});
 

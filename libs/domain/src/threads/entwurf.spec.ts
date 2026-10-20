@@ -384,6 +384,12 @@ describe('entwurfAus', () => {
 		expect(entwurfAus(k)).toEqual(ungueltig('module.2.frist'));
 	});
 
+	it('weist eine Frist an einem Tag ab, den es nicht gibt, statt sie in den Maerz zu rollen', () => {
+		const k = koerper();
+		(k['module'] as Record<string, unknown>[])[2]['frist'] = '2026-02-30T18:00:00Z';
+		expect(entwurfAus(k)).toEqual(ungueltig('module.2.frist'));
+	});
+
 	it('schreibt die Frist als UTC-ISO, damit sie sich mit der gespeicherten vergleichen laesst', () => {
 		const k = koerper();
 		(k['module'] as Record<string, unknown>[])[2]['frist'] = '2026-10-22T18:00:00+02:00';

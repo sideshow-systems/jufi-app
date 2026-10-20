@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import type { ModulEntwurf, ThreadBearbeitung, ThreadEntwurf, VerwaltungListe } from '@jufi/domain';
 import { adminTestAnbieter, knopf, tippe } from '../../../admin/test-hilfen';
-import { API, hake, ichMit, oeffneSeite, stabil, waehle } from '../test-hilfen';
+import { antworteAbgelaufen, API, erwarteAnmeldung, hake, ichMit, oeffneSeite, stabil, waehle } from '../test-hilfen';
 
 type Umfrage = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
 
@@ -288,6 +288,31 @@ describe('Thread-Editor', () => {
 			expect(() => knopf(neu, 'Veröffentlichen')).toThrow();
 		});
 
+		it('401 beim Veröffentlichen fuehrt zur Anmeldung und danach nicht mehr zum neuen Thread', async () => {
+			const { harness, seite, http } = await oeffneNeu();
+			const router = TestBed.inject(Router);
+			const navigieren = vi.spyOn(router, 'navigate');
+			tippe(seite, '#thread-titel', 'Bowling');
+			await stabil(harness);
+			knopf(seite, 'Veröffentlichen').click();
+
+			await vi.waitFor(() =>
+				http
+					.expectOne({ method: 'POST', url: `${API}/threads` })
+					.flush(bearbeitung({ entwurf: { ...bowling(), module: [] } }), { status: 201, statusText: 'Created' }),
+			);
+			await antworteAbgelaufen(http, '/threads/t1/veroeffentlichen');
+			await erwarteAnmeldung(http, '/demo/verwaltung/threads/neu');
+			// Die zerstoerte Seite haette sonst gleich danach noch threads/t1 angesteuert.
+			// Ohne whenStable: Eine solche Navigation hinge am Waechter (GET /ich) und liesse den Test
+			// in die Zeitgrenze laufen, statt zu sagen, was geschah.
+			await new Promise((fertig) => setTimeout(fertig, 20));
+			http.match(() => true);
+
+			expect(navigieren).not.toHaveBeenCalled();
+			expect(router.url).toBe(`/demo/anmelden?weiter=${encodeURIComponent('/demo/verwaltung/threads/neu')}`);
+		});
+
 		it('schickt keine lokalen Schluessel der Module an den Server', async () => {
 			const { harness, seite, http, hinzufuegen } = await oeffneNeu();
 			tippe(seite, '#thread-titel', 'Bowling');
@@ -504,6 +529,74 @@ describe('Thread-Editor', () => {
 			expect(knopf(seite, 'Veröffentlichen')).toBeTruthy();
 		});
 
+		it('409 BEANTWORTET an den Optionen einer Teilnahme-Umfrage steht an ihrem Feld', async () => {
+			const { harness, seite, http, modulFelder } = await oeffneBestehend();
+			knopf(seite, 'Entwurf speichern').click();
+			await vi.waitFor(() =>
+				http.expectOne({ method: 'PUT', url: `${API}/threads/t1` }).flush(
+					{
+						fehler: 'Auf „Vielleicht“ hat schon jemand geantwortet.',
+						code: 'BEANTWORTET',
+						feld: 'module.2.optionen',
+					},
+					{ status: 409, statusText: 'Conflict' },
+				),
+			);
+			await stabil(harness);
+			expect(modulFelder()?.querySelector('input[name="teilnahme"]')).toBeTruthy();
+			expect(modulFelder()?.textContent).toContain('Auf „Vielleicht“ hat schon jemand geantwortet.');
+			expect(seite.querySelector('.meldung')).toBeNull();
+		});
+
+		it('ein Feld, das die Seite an diesem Modul nicht zeigt, steht als Satz unter den Knoepfen', async () => {
+			const { harness, seite, http } = await oeffneBestehend();
+			for (const feld of ['module.2.ergebnisse', 'module.0.optionen']) {
+				knopf(seite, 'Entwurf speichern').click();
+				await vi.waitFor(() =>
+					http
+						.expectOne({ method: 'PUT', url: `${API}/threads/t1` })
+						.flush({ fehler: `Ungültige Anfrage an ${feld}`, feld }, { status: 400, statusText: 'Bad Request' }),
+				);
+				await stabil(harness);
+				expect(seite.querySelector('.meldung[role="alert"]')?.textContent).toContain(`Ungültige Anfrage an ${feld}`);
+				expect(seite.querySelector('.fehlermarke')).toBeNull();
+				expect(seite.querySelector('jf-modul-felder .fehler')).toBeNull();
+			}
+		});
+
+		it('ein Feldfehler des Servers wandert beim Umsortieren mit seinem Modul und geht mit ihm', async () => {
+			const { harness, seite, http, nachLabel, modulFelder } = await oeffneBestehend();
+			const eintraege = () => [...seite.querySelectorAll('ol.module > li')];
+			knopf(seite, 'Entwurf speichern').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne({ method: 'PUT', url: `${API}/threads/t1` })
+					.flush(
+						{ fehler: 'Höchstens 80 Zeichen.', feld: 'module.0.titel' },
+						{ status: 400, statusText: 'Bad Request' },
+					),
+			);
+			await stabil(harness);
+			expect(modulFelder()?.textContent).toContain('Höchstens 80 Zeichen.');
+
+			// Der Info-Text rutscht an die zweite Stelle; sein Fehler kommt mit, der Termin bleibt sauber.
+			nachLabel('Nach unten: Modul 1').click();
+			await stabil(harness);
+			expect(modulFelder()?.querySelector('textarea[name="text"]')).toBeTruthy();
+			expect(modulFelder()?.textContent).toContain('Höchstens 80 Zeichen.');
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[0]?.click();
+			await stabil(harness);
+			expect(modulFelder()?.querySelector('input[name="startDatum"]')).toBeTruthy();
+			expect(modulFelder()?.textContent).not.toContain('Höchstens 80 Zeichen.');
+			expect(eintraege().map((e) => e.querySelector('.fehlermarke') !== null)).toEqual([false, true, false]);
+
+			// Entfernt, nimmt das Modul seinen Fehler mit; kein anderes erbt ihn.
+			nachLabel('Entfernen: Modul 2').click();
+			await stabil(harness);
+			expect(eintraege().map((e) => e.querySelector('.fehlermarke') !== null)).toEqual([false, false]);
+			expect(seite.textContent).not.toContain('Höchstens 80 Zeichen.');
+		});
+
 		it('404 beim Speichern sagt Nicht gefunden oder keine Berechtigung, 429 nennt die Wartezeit', async () => {
 			const { harness, seite, http } = await oeffneBestehend();
 			knopf(seite, 'Entwurf speichern').click();
@@ -639,6 +732,19 @@ describe('Thread-Editor', () => {
 			await TestBed.inject(Router).navigateByUrl('/demo/verwaltung/threads');
 			await vi.waitFor(() => http.expectOne(`${API}/verwaltung/threads`).flush(LISTE));
 			expect(frage).not.toHaveBeenCalled();
+		});
+
+		it('eine ab- und wieder angehakte Untergruppe ist keine Aenderung', async () => {
+			const { harness, seite } = await oeffneBestehend(
+				bearbeitung({ entwurf: { ...bowling(), untergruppenIds: ['u-gross', 'u-klein'] } }),
+			);
+			hake(seite, 'input[name="untergruppe"][value="u-gross"]', false);
+			await stabil(harness);
+			hake(seite, 'input[name="untergruppe"][value="u-gross"]', true);
+			await stabil(harness);
+			const verlassen = new Event('beforeunload', { cancelable: true });
+			window.dispatchEvent(verlassen);
+			expect(verlassen.defaultPrevented).toBe(false);
 		});
 
 		it('haelt beforeunload nur mit Aenderung auf', async () => {
