@@ -172,5 +172,50 @@ else
 	FAILED=1
 fi
 
+# --- Fall F: Quelle ohne Tabellen ----------------------------------------------
+# Eine leere Quelle darf nicht als gleich gelten.
+LEER="jufi-probe-leer-$$"
+docker run -d --name "$LEER" -e POSTGRES_USER=probe -e POSTGRES_PASSWORD=probe -e POSTGRES_DB=probe postgres:17-alpine >/dev/null
+for _ in $(seq 1 60); do
+	docker exec "$LEER" psql -U probe -d probe -tAc 'select 1' >/dev/null 2>&1 && break
+	sleep 1
+done
+sleep 3
+if OUT_F="$(SRC="$LEER" run_restore --dump "$DUMP_C" 2>&1)"; then CODE_F=0; else CODE_F=$?; fi
+docker rm -f "$LEER" >/dev/null 2>&1 || true
+if [[ "$CODE_F" -ne 0 && "$OUT_F" == *'keine Tabellen'* ]]; then
+	echo '✓ F: leere Quelle -> Fehler, Exit != 0'
+else
+	echo "✗ F: Exit $CODE_F"
+	printf '%s\n' "$OUT_F" | sed 's/^/    /'
+	FAILED=1
+fi
+
+# --- Fall G und H: Tabellenliste weicht ab --------------------------------------
+# G: Tabelle nur in der Wiederherstellung (Quelle verlor sie nach dem Dump).
+# H: Tabelle fehlt im Dump (Quelle bekam sie nach dem Dump).
+DB exec -T jufi-db psql -U probe -d probe -q -c "create table zusatz (id int)" >/dev/null
+find "$BACKUPS" -name 'jufi-*.dump' -delete 2>/dev/null || true
+run_backup >/dev/null 2>&1 || true
+DUMP_G="$(find "$BACKUPS" -name 'jufi-*.dump' | head -1)"
+DB exec -T jufi-db psql -U probe -d probe -q -c "drop table zusatz" >/dev/null
+if OUT_G="$(run_restore --dump "$DUMP_G" 2>&1)"; then CODE_G=0; else CODE_G=$?; fi
+if [[ "$CODE_G" -ne 0 && "$OUT_G" == *zusatz*'nur in der Wiederherstellung'* ]]; then
+	echo '✓ G: Tabelle nur im Restore -> benannt, Exit != 0'
+else
+	echo "✗ G: Exit $CODE_G"
+	printf '%s\n' "$OUT_G" | sed 's/^/    /'
+	FAILED=1
+fi
+DB exec -T jufi-db psql -U probe -d probe -q -c "create table neu (id int)" >/dev/null
+if OUT_H="$(run_restore --dump "$DUMP_G" 2>&1)"; then CODE_H=0; else CODE_H=$?; fi
+if [[ "$CODE_H" -ne 0 && "$OUT_H" == *neu*'fehlt in der Wiederherstellung'* ]]; then
+	echo '✓ H: Tabelle fehlt im Dump -> benannt, Exit != 0'
+else
+	echo "✗ H: Exit $CODE_H"
+	printf '%s\n' "$OUT_H" | sed 's/^/    /'
+	FAILED=1
+fi
+
 [[ "$FAILED" -eq 0 ]] && echo '✓ Sicherung und Wiederherstellung bewiesen'
 exit "$FAILED"

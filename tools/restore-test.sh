@@ -60,7 +60,10 @@ cleanup() {
 	docker rm -f "$PROBE_NAME" >/dev/null 2>&1 || true
 	rm -rf "$WORKDIR"
 }
-trap cleanup EXIT INT TERM
+# EXIT raeumt auf; INT/TERM nur, damit der Abbruch den EXIT-Trap ausloest und mit
+# 130 endet statt mit dem Status des letzten Befehls.
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 # --- Dump beschaffen ----------------------------------------------------------
 if [[ -z "$DUMP" ]]; then
@@ -125,6 +128,9 @@ counts_of() {
 step 'Zeilen in der wiederhergestellten Datenbank'
 counts_of "$PROBE_NAME" >"$WORKDIR/restored.tsv"
 awk -F'\t' '{printf "  %-24s %8s\n", $1, $2}' "$WORKDIR/restored.tsv"
+# Eine Wiederherstellung ohne Tabellen ist kein Erfolg, auch wenn pg_restore 0
+# meldete und die Quelle ebenfalls leer ist -- sonst verglichen zwei leere Listen.
+[[ -s "$WORKDIR/restored.tsv" ]] || fail 'Die Wiederherstellung enthaelt keine Tabellen.'
 
 if [[ "$COMPARE" -eq 0 ]]; then
 	echo '✓ Restore gelesen, Vergleich uebersprungen (--no-compare)'
@@ -138,8 +144,11 @@ if [[ "$SOURCE" == 'remote' ]]; then
 	remote_psql() {
 		jufi_ssh "cd $REMOTE_DIR && set -a && . ./.env && set +a && docker compose -f $REMOTE_COMPOSE exec -T $DB_SERVICE psql -U \"\$JUFI_POSTGRES_USER\" -d \"\$JUFI_POSTGRES_DB\" -tAc \"$1\""
 	}
+	# Erst in eine Variable: in `for t in $(...)` verschluckte die Schleife den
+	# Fehlschlag der SSH-Abfrage, und die Probe sah eine leere Quelle als gleich.
+	remote_tables="$(remote_psql "$count_sql" | tr -d '\r')"
 	: >"$WORKDIR/source.tsv"
-	for t in $(remote_psql "$count_sql" | tr -d '\r'); do
+	for t in $remote_tables; do
 		printf '%s\t%s\n' "$t" "$(remote_psql "select count(*) from \\\"$t\\\"" | tr -d '\r')" >>"$WORKDIR/source.tsv"
 	done
 else
@@ -165,6 +174,8 @@ else
 	counts_of "$SOURCE_CONTAINER" >"$WORKDIR/source.tsv"
 fi
 
+[[ -s "$WORKDIR/source.tsv" ]] || fail 'Quelle lieferte keine Tabellen -- nichts zu vergleichen.'
+
 FAILED=0
 while IFS=$'\t' read -r table expected; do
 	actual="$(awk -F'\t' -v t="$table" '$1==t {print $2}' "$WORKDIR/restored.tsv")"
@@ -178,6 +189,14 @@ while IFS=$'\t' read -r table expected; do
 		printf '  ✓ %-24s %s\n' "$table" "$actual"
 	fi
 done <"$WORKDIR/source.tsv"
+# Gegenrichtung: eine Tabelle, die nur in der Wiederherstellung steht, ist ebenfalls
+# eine Abweichung (die Quelle hat sie inzwischen verloren).
+while IFS=$'\t' read -r table _; do
+	if ! awk -F'\t' -v t="$table" '$1==t {f=1} END {exit !f}' "$WORKDIR/source.tsv"; then
+		printf '  ✗ %-24s nur in der Wiederherstellung, nicht in der Quelle\n' "$table"
+		FAILED=1
+	fi
+done <"$WORKDIR/restored.tsv"
 
 if [[ "$FAILED" -ne 0 ]]; then
 	echo '✗ Restore-Probe fehlgeschlagen.' >&2
