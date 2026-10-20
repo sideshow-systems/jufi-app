@@ -36,14 +36,20 @@ describe('berlinZeitpunkt', () => {
 		expect(berlinZeitpunkt('2026-03-29', '02:30').toISOString()).toBe('2026-03-29T01:30:00.000Z');
 	});
 
-	it('nimmt in der doppelten Stunde der Umstellung einen der beiden Zeitpunkte, nie einen dritten', () => {
-		const z = berlinZeitpunkt('2026-10-25', '02:30').toISOString();
-		expect(['2026-10-25T00:30:00.000Z', '2026-10-25T01:30:00.000Z']).toContain(z);
+	it('nimmt in der doppelten Stunde der Umstellung den fruehen Zeitpunkt (Sommerzeit)', () => {
+		expect(berlinZeitpunkt('2026-10-25', '02:00').toISOString()).toBe('2026-10-25T00:00:00.000Z');
+		expect(berlinZeitpunkt('2026-10-25', '02:30').toISOString()).toBe('2026-10-25T00:30:00.000Z');
+		expect(berlinZeitpunkt('2026-10-25', '02:59').toISOString()).toBe('2026-10-25T00:59:00.000Z');
+	});
+
+	it('behandelt eine leere Uhrzeit wie keine', () => {
+		expect(berlinZeitpunkt('2026-10-24', '').toISOString()).toBe('2026-10-23T22:00:00.000Z');
 	});
 
 	it('trifft die Stunden unmittelbar um die Umstellung', () => {
 		expect(berlinZeitpunkt('2026-03-29', '01:59').toISOString()).toBe('2026-03-29T00:59:00.000Z');
 		expect(berlinZeitpunkt('2026-03-29', '03:00').toISOString()).toBe('2026-03-29T01:00:00.000Z');
+		expect(berlinZeitpunkt('2026-10-25', '01:59').toISOString()).toBe('2026-10-24T23:59:00.000Z');
 		expect(berlinZeitpunkt('2026-10-25', '03:00').toISOString()).toBe('2026-10-25T02:00:00.000Z');
 	});
 });

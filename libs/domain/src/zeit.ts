@@ -44,23 +44,36 @@ export function berlinerTag(d: Date): string {
 	return `${w.getUTCFullYear()}-${zwei(w.getUTCMonth() + 1)}-${zwei(w.getUTCDate())}`;
 }
 
+const TAG_MS = 86_400_000;
+
 /**
- * Berliner Wandzeit als Zeitpunkt; ohne Uhrzeit Mitternacht. Der Versatz haengt
- * vom Ergebnis ab, das Ergebnis vom Versatz: Erst am Kandidaten gemessen, dann
- * am Ergebnis nachgeprueft. In der uebersprungenen Stunde der Sommerzeit
- * (02:30 am 29.03.) fuehrt das zur Stunde danach (03:30 Sommerzeit); eine
- * Uhrzeit abzulehnen waere fuer eine Eingabe, die der Editor nicht kennen kann,
- * unfreundlicher. In der doppelten Stunde im Herbst bleibt es bei der
- * zweiten (Winterzeit); die Eingabe ist dort ohnehin mehrdeutig, wichtig ist
- * nur, dass das Ergebnis eindeutig und stabil ist.
+ * Berliner Wandzeit als Zeitpunkt; ohne Uhrzeit Mitternacht. Der Versatz
+ * haengt vom Ergebnis ab, das Ergebnis vom Versatz. Deshalb werden die beiden
+ * Versaetze ein Tag davor und ein Tag danach gemessen (eine Umstellung liegt
+ * nie naeher an beiden), daraus je ein Kandidat gebildet und nur der behalten,
+ * dessen Berliner Wandzeit wirklich die gewuenschte ist. Das entspricht
+ * Temporal "compatible":
+ * - doppelte Stunde im Herbst (02:30 am 25.10.): beide Kandidaten passen, der
+ *   fruehere (Sommerzeit) gilt;
+ * - uebersprungene Stunde im Fruehjahr (02:30 am 29.03.): kein Kandidat passt,
+ *   es gilt der mit dem Versatz davor, die Uhrzeit rueckt also eine Stunde vor
+ *   (03:30 Sommerzeit).
+ * Verworfen: den Versatz am UTC-gelesenen Wandwert messen und am Ergebnis
+ * nachpruefen. Das landete im Herbst auf der Winterzeit, weil der Wandwert
+ * 02:30 "als UTC" schon nach der Umstellung liegt, und passte nicht zur
+ * Regel, dass die Luecke im Fruehjahr nach vorn rueckt. Eine Uhrzeit
+ * abzulehnen waere fuer eine Eingabe, die der Editor nicht kennen kann,
+ * unfreundlicher.
  */
 export function berlinZeitpunkt(tag: string, uhrzeit?: string | null): Date {
 	const [j, m, t] = tag.split('-').map(Number);
-	const [h, min] = (uhrzeit ?? '00:00').split(':').map(Number);
+	// || statt ??: Eine leere Uhrzeit heisst wie null "keine Uhrzeit", nicht Invalid Date.
+	const [h, min] = (uhrzeit || '00:00').split(':').map(Number);
 	const wand = Date.UTC(j, m - 1, t, h, min);
-	const kandidat = wand - versatz(wand);
-	const ergebnis = wand - versatz(kandidat);
-	return new Date(ergebnis);
+	const davor = wand - versatz(wand - TAG_MS);
+	const danach = wand - versatz(wand + TAG_MS);
+	const passend = [davor, danach].filter((ms) => wandzeitAlsUtc(new Date(ms)) === wand);
+	return new Date(passend.length > 0 ? Math.min(...passend) : davor);
 }
 
 /** Kalendertag 'JJJJ-MM-TT' plus tage. Date.UTC statt lokaler Date-Objekte: Die Zeitumstellung verschiebt so keinen Tag. */
