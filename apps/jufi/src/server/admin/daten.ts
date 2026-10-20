@@ -1,4 +1,5 @@
 import {
+	austauschAnlegen,
 	Recht,
 	sperreVereinszeile,
 	type AdminAktion,
@@ -366,6 +367,8 @@ export function adminDaten(prisma: PrismaClient) {
 							anzeigename: eingabe.anzeigename,
 							farbe: eingabe.farbe,
 							angelegtAm: jetzt,
+							// Verschachtelt, damit der Verein nie ohne Austausch entsteht.
+							threads: { create: austauschAnlegen(jetzt) },
 						},
 						select: { id: true, slug: true, anzeigename: true },
 					});

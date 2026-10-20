@@ -9,7 +9,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { createPrismaClient, Prisma } from './index.js';
+import { austauschAnlegen, AUSTAUSCH_TITEL, createPrismaClient, Prisma } from './index.js';
 
 const prisma = createPrismaClient();
 
@@ -499,6 +499,35 @@ describe('Loeschen', () => {
 });
 
 describe('Threads (TP3)', () => {
+	it('austauschAnlegen ergibt einen veroeffentlichten, angepinnten Austausch ohne Ersteller', async () => {
+		const jetzt = new Date('2026-10-20T09:30:00Z');
+		const v = await prisma.verein.create({
+			data: {
+				slug: `austausch-${eindeutig()}`,
+				name: 'Erfundener Fischereiverein 1900 e.V.',
+				anzeigename: 'Jungfischer Test',
+				farbe: '#1f6f8b',
+				threads: { create: austauschAnlegen(jetzt) },
+			},
+			include: { threads: true },
+		});
+
+		expect(v.threads).toHaveLength(1);
+		expect(v.threads[0]).toMatchObject({
+			art: 'JUGENDSPRECHER_AUSTAUSCH',
+			titel: AUSTAUSCH_TITEL,
+			modus: 'CHAT',
+			rollenfilter: 'JUGENDLEITER_JUGENDSPRECHER',
+			alleUntergruppen: true,
+			angepinnt: true,
+			erstelltVonId: null,
+			veroeffentlichtAm: jetzt,
+			letzteAktivitaetAm: jetzt,
+			angelegtAm: jetzt,
+		});
+		expect(AUSTAUSCH_TITEL).toBe('Jugendsprecher-Austausch');
+	});
+
 	/** Ein gewoehnlicher Thread; `erstelltVonId` null ist nur beim Austausch erlaubt. */
 	async function thread(
 		vereinId: string,

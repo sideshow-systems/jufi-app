@@ -1,4 +1,4 @@
-import type { PrismaClient, VereinStatus } from '@jufi/db';
+import { austauschAnlegen, type PrismaClient, type VereinStatus } from '@jufi/db';
 
 /**
  * Legt einen erfundenen Verein an. Jede Testdatei nimmt eigene Slugs, weil alle
@@ -16,6 +16,10 @@ export function legeVereinAn(
 			farbe: daten.farbe ?? '#0f766e',
 			kontakt: daten.kontakt,
 			status: daten.status ?? 'AKTIV',
+			// Wie im echten Anlegen (legeVereinAn): Testvereine haben den Austausch, den jeder echte
+			// Verein hat. Die Uhrzeit ist hier gleichgueltig (der Verein selbst bekommt auch nur die
+			// Zeit der Datenbank), deshalb kein `jetzt` als Parameter, den alle Aufrufer fuellen muessten.
+			threads: { create: austauschAnlegen(new Date()) },
 		},
 	});
 }

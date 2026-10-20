@@ -97,6 +97,15 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 			erstelltVonPersonId: null,
 		});
 
+		// Jeder Verein bekommt seinen Austausch gleich beim Anlegen, nicht erst bei Bedarf.
+		const threads = await prisma.thread.findMany({ where: { vereinId: verein.id } });
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			art: 'JUGENDSPRECHER_AUSTAUSCH',
+			veroeffentlichtAm: uhr,
+			erstelltVonId: null,
+		});
+
 		const protokoll = await prisma.adminProtokoll.findMany({ where: { vereinId: verein.id } });
 		expect(protokoll).toHaveLength(1);
 		expect(protokoll[0]).toMatchObject({

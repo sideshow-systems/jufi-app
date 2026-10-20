@@ -35,6 +35,7 @@ describe('demoEinspielen', () => {
 			bezugspersonen: await prisma.bezugsperson.count(),
 			untergruppen: await prisma.untergruppe.count(),
 			mitglieder: await prisma.untergruppeMitglied.count(),
+			threads: await prisma.thread.count(),
 		};
 	}
 
@@ -115,6 +116,18 @@ describe('demoEinspielen', () => {
 		expect(await prisma.person.count({ where: { art: 'JUNGFISCHER', email: { not: null } } })).toBe(0);
 	});
 
+	it('der Demo-Verein hat genau einen Austausch', async () => {
+		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+		const threads = await prisma.thread.findMany({ where: { vereinId } });
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			art: 'JUGENDSPRECHER_AUSTAUSCH',
+			veroeffentlichtAm: BEZUGSTAG,
+			erstelltVonId: null,
+		});
+	});
+
 	it('zweimal einspielen ergibt denselben Stand', async () => {
 		await demoEinspielen(prisma, BEZUGSTAG);
 		const erster = await zaehlung();
@@ -123,6 +136,7 @@ describe('demoEinspielen', () => {
 		expect(await zaehlung()).toEqual(erster);
 		expect(erster.vereine).toBe(1);
 		expect(erster.personen).toBe(10);
+		expect(erster.threads).toBe(1);
 	});
 
 	it('andere Vereine bleiben unberuehrt', async () => {
