@@ -3,7 +3,7 @@ import { teilnahmeOptionen } from '../module/umfrage/umfrage.js';
 import { entwurfAusThread, type ModulEntwurf, type ThreadEntwurf } from './entwurf.js';
 import { kopf } from './testhilfe.js';
 import type { UmfrageDaten } from './typen.js';
-import { umfrageSperre, vergleicheEntwurf } from './vergleich.js';
+import { umfrageSperre, vergleicheEntwurf, zielgruppeGeaendert } from './vergleich.js';
 import { systemSatz } from './verlauf.js';
 
 type UmfrageEntwurf = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
@@ -452,6 +452,27 @@ describe('vergleicheEntwurf', () => {
 			const e = entwurf((e) => (e.untergruppenIds = ['gross']));
 			expect(vergleicheEntwurf(alt(), e).sichtbarkeitGeaendert).toBe(false);
 		});
+	});
+});
+
+describe('zielgruppeGeaendert', () => {
+	const gewaehlt = kopf({ alleUntergruppen: false, untergruppenIds: ['gross', 'klein'] });
+	const entwurf = (aenderung: Partial<ThreadEntwurf>): ThreadEntwurf => ({
+		...entwurfAusThread(gewaehlt, []),
+		...aenderung,
+	});
+
+	it('erkennt einen anderen Rollenfilter, Schalter oder eine andere Auswahl', () => {
+		expect(zielgruppeGeaendert(gewaehlt, entwurf({}))).toBe(false);
+		expect(zielgruppeGeaendert(gewaehlt, entwurf({ rollenfilter: 'NUR_FAMILIE' }))).toBe(true);
+		expect(zielgruppeGeaendert(gewaehlt, entwurf({ alleUntergruppen: true }))).toBe(true);
+		expect(zielgruppeGeaendert(gewaehlt, entwurf({ untergruppenIds: ['gross'] }))).toBe(true);
+	});
+
+	it('vergleicht die Auswahl als Menge und ignoriert sie bei "alle Untergruppen"', () => {
+		expect(zielgruppeGeaendert(gewaehlt, entwurf({ untergruppenIds: ['klein', 'gross', 'klein'] }))).toBe(false);
+		const alle = kopf({ alleUntergruppen: true, untergruppenIds: [] });
+		expect(zielgruppeGeaendert(alle, { ...entwurfAusThread(alle, []), untergruppenIds: ['gross'] })).toBe(false);
 	});
 });
 

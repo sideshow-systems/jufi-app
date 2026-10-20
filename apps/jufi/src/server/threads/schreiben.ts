@@ -7,6 +7,7 @@ import {
 	hatRecht,
 	siehtThread,
 	vergleicheEntwurf,
+	zielgruppeGeaendert,
 	type EntwurfVergleich,
 	type ModulEntwurf,
 	type OptionEntwurf,
@@ -107,16 +108,11 @@ function planeAenderung(alt: { kopf: ThreadKopf; module: GeladenerThread['module
 	return plan;
 }
 
-function gleicheMenge(a: readonly string[], b: readonly string[]): boolean {
-	const andere = new Set(b);
-	return new Set(a).size === andere.size && a.every((s) => andere.has(s));
-}
-
 /**
  * Am Austausch aendert der Editor nur Titel und Modus (FAM 2.5, Entscheidung 7); Anpinnen
  * hat seine eigene Route. Geprueft gegen den gespeicherten Thread, vor der Pruefung des
  * Entwurfs: Was am Austausch nicht geht, soll nicht erst als Eingabefehler erscheinen.
- * Die Module vergleicht isDeepStrictEqual mit dem Entwurf, den der Editor geladen hat
+ * Die Zielgruppe nach derselben Regel wie SICHTBARKEIT (zielgruppeGeaendert). Die Module vergleicht isDeepStrictEqual mit dem Entwurf, den der Editor geladen hat
  * (entwurfAusThread) -- jede Abweichung ist eine Aenderung, auch eine kaputte Modul-ID.
  * Verworfen: das Ergebnis von vergleicheEntwurf -- bei einem Fehler ist dessen Plan leer und
  * saehe aus wie "nichts geaendert".
@@ -124,11 +120,7 @@ function gleicheMenge(a: readonly string[], b: readonly string[]): boolean {
 function pruefeAustausch(alt: GeladenerThread, e: ThreadEntwurf): void {
 	const k = alt.kopf;
 	if (k.art !== 'JUGENDSPRECHER_AUSTAUSCH') return;
-	const zielgruppe =
-		e.rollenfilter !== k.rollenfilter ||
-		e.alleUntergruppen !== k.alleUntergruppen ||
-		(!e.alleUntergruppen && !gleicheMenge(e.untergruppenIds, k.untergruppenIds));
-	if (zielgruppe) throw new ThreadAbbruch(409, amFeld(AUSTAUSCH, { feld: 'zielgruppe' }));
+	if (zielgruppeGeaendert(k, e)) throw new ThreadAbbruch(409, amFeld(AUSTAUSCH, { feld: 'zielgruppe' }));
 	if (!isDeepStrictEqual(e.module, entwurfAusThread(k, alt.module).module)) {
 		throw new ThreadAbbruch(409, amFeld(AUSTAUSCH, { feld: 'module' }));
 	}

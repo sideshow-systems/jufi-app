@@ -547,6 +547,18 @@ describe('Threads anlegen und ersetzen', () => {
 				).toEqual([s.zander.id]);
 			});
 
+			it('veroeffentlicht: ein anderer Rollenfilter allein ergibt SICHTBARKEIT', async () => {
+				const s = await szenario();
+				const t = await s.bowlingThread();
+				const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+				const e = { ...b.entwurf, rollenfilter: 'JUGENDLEITER_JUGENDSPRECHER' as const };
+				expect((await s.ersetze(t.threadId, b.version, e, s.thomas.cookie)).status).toBe(200);
+				expect(await s.arten(await s.stand())).toEqual(['SICHTBARKEIT', 'THREAD']);
+				expect(await prisma.thread.findUniqueOrThrow({ where: { id: t.threadId } })).toMatchObject({
+					rollenfilter: 'JUGENDLEITER_JUGENDSPRECHER',
+				});
+			});
+
 			it('im Entwurf ist eine andere Zielgruppe keine SICHTBARKEIT', async () => {
 				const s = await szenario();
 				const t = await s.bowlingThread({ veroeffentlicht: false });

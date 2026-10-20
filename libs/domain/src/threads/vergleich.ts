@@ -182,6 +182,24 @@ function gleicheMenge(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
+ * Ob der Entwurf eine andere Zielgruppe hat als der gespeicherte Thread: Rollenfilter,
+ * Untergruppen-Schalter oder (ohne "alle") die gewaehlten Untergruppen als Menge. Eine Regel
+ * fuer SICHTBARKEIT (vergleicheEntwurf) und fuer das Verbot am Austausch, damit beide nie
+ * Verschiedenes unter "Zielgruppe geaendert" verstehen.
+ */
+export function zielgruppeGeaendert(
+	kopf: Pick<ThreadKopf, 'rollenfilter' | 'alleUntergruppen' | 'untergruppenIds'>,
+	entwurf: ThreadEntwurf,
+): boolean {
+	return (
+		entwurf.rollenfilter !== kopf.rollenfilter ||
+		entwurf.alleUntergruppen !== kopf.alleUntergruppen ||
+		// Bei "alle Untergruppen" sind die IDs ohne Belang, ein Rest im Entwurf aendert nichts.
+		(!entwurf.alleUntergruppen && !gleicheMenge(entwurf.untergruppenIds, kopf.untergruppenIds))
+	);
+}
+
+/**
  * Was ein Entwurf am gespeicherten Thread aendert, ohne zu schreiben: welche Module bleiben,
  * kommen, gehen, welche Optionen wegfallen, ob Kopf und Sichtbarkeit sich aendern und welche
  * Systemeintraege der Verlauf bekommen soll. Der Server ruft sie unter der Sperre der
@@ -260,11 +278,7 @@ export function vergleicheEntwurf(
 	}
 
 	const k = alt.kopf;
-	const sichtbarkeitGeaendert =
-		neu.rollenfilter !== k.rollenfilter ||
-		neu.alleUntergruppen !== k.alleUntergruppen ||
-		// Bei "alle Untergruppen" sind die IDs ohne Belang, ein Rest im Entwurf aendert nichts.
-		(!neu.alleUntergruppen && !gleicheMenge(neu.untergruppenIds, k.untergruppenIds));
+	const sichtbarkeitGeaendert = zielgruppeGeaendert(k, neu);
 	return {
 		fehler: null,
 		konflikt: null,
