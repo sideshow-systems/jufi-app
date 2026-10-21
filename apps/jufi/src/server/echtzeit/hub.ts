@@ -19,6 +19,14 @@ const SITZUNG_UNGUELTIG = 4401;
 /** Service Restart: Der Server faehrt herunter, der Client verbindet sich spaeter neu. */
 const NEUSTART = 1012;
 /**
+ * Internal Error: Verteilen oder Pruefen ist gescheitert (reiheEin, pruefeSicher). Der Client
+ * fragt nach jedem Abbruch ausser 1012 sofort GET /sync ab seinem alten Stand und verbindet dann
+ * mit Backoff neu; der Upgrade prueft die Sitzung frisch. Verworfen: 1012 -- der Server startet
+ * nicht neu, und der Client glich erst nach dem naechsten gelungenen Oeffnen ab; ist die
+ * Datenbank noch gestoert, scheitert schon der Upgrade.
+ */
+const INTERNER_FEHLER = 1011;
+/**
  * So lange wartet schliesseAlle auf den Schliess-Handschlag, dann kappt es. ws selbst wartet
  * 30 Sekunden auf einen Client, der nicht antwortet; Docker beendet den Prozess nach 10, und
  * der Rest von SIGTERM (Mail-Arbeiter, Nachlauf) kaeme dann nicht mehr dran.
@@ -60,7 +68,8 @@ type Aenderungsereignis = Extract<BusEreignis, { typ: 'aenderung' }>;
  * braeuchte dann einen Hub, und unter ng serve lebt der Hub auf einem eigenen Port.
  *
  * Geschlossen wird ein Socket nur, wenn seine Sitzung nicht mehr gilt: abgemeldet, Zugang
- * entzogen, Person entfernt, Sitzung abgelaufen, Verein gesperrt (Plan-Entscheidung 4).
+ * entzogen, Person entfernt, Sitzung abgelaufen, Verein gesperrt (Plan-Entscheidung 4), oder
+ * wenn der Hub selbst scheitert (1011, siehe reiheEin und pruefeSicher).
  * Eine Aenderung der Rechte schliesst nichts, denn der Socket haelt kein Umfeld. Darum prueft
  * der Hub bei jedem pruefen-Ereignis und jeder Umfeld-Aenderung (Aenderung ohne Thread) die
  * Sitzungen aller Sockets des Vereins neu, mit derselben Regel wie die Middleware
@@ -69,7 +78,7 @@ type Aenderungsereignis = Extract<BusEreignis, { typ: 'aenderung' }>;
  * entferne stecken in sieben Routen, und eine vergessene liesse einen Socket offen.
  *
  * Schliesscodes (Plan-Entscheidung 5): 1012 beim Herunterfahren, 4401 wenn Sitzung oder Verein
- * nicht mehr gelten. Abgelehnte Upgrades: 403 bei fremdem Origin (wie pruefeUrsprung), 404 bei
+ * nicht mehr gelten, 1011 wenn Verteilen oder Pruefen scheitert. Abgelehnte Upgrades: 403 bei fremdem Origin (wie pruefeUrsprung), 404 bei
  * unbekanntem oder gesperrtem Verein, 401 ohne gueltige Sitzung, 429 ab dem elften Socket einer
  * Person. Verworfen: 401/404 auch fuer den Origin (Spec 5.1 woertlich) -- die REST-Pruefung
  * antwortet 403, und der Unterschied verraet nichts.
@@ -145,7 +154,7 @@ export class Hub {
 		clearInterval(this.takt);
 		this.takt = undefined;
 		// Laufende Verteilungen fragen noch die Datenbank; wer danach die Verbindung schliesst,
-		// soll nicht in eine offene Abfrage fallen. Sie scheitern nie (verteile faengt ab).
+		// soll nicht in eine offene Abfrage fallen. Sie scheitern nie (reiheEin faengt ab).
 		const laufend = [...this.ketten.values()];
 		const alle = [...this.vereine.values()].flatMap((set) => [...set]);
 		await Promise.all(
@@ -257,8 +266,9 @@ export class Hub {
 
 	/**
 	 * Der Bus liefert synchron in der Anfrage der Route (bus.ts): Hier wird nur angestossen,
-	 * nie gewartet. Die Sockets werden jetzt festgehalten; wer danach dazukommt, hat seine
-	 * Sitzung beim Upgrade selbst geprueft (und prueft nach, siehe pruefungen).
+	 * nie gewartet. Fuer die Pruefung werden die Sockets jetzt festgehalten; wer danach dazukommt,
+	 * hat seine Sitzung beim Upgrade selbst geprueft (und prueft nach, siehe pruefungen). Die
+	 * Verteilung liest sie dagegen erst nach dem Laden (verteile).
 	 */
 	private beiEreignis(e: BusEreignis): void {
 		if (e.typ === 'aenderung') {
@@ -297,10 +307,25 @@ export class Hub {
 		for (const [vereinId, liste] of abgelaufen) this.pruefeSicher(vereinId, liste);
 	}
 
-	/** Haengt die Verteilung hinten an die Kette des Vereins; der Bus wartet nicht darauf. */
+	/**
+	 * Haengt die Verteilung hinten an die Kette des Vereins; der Bus wartet nicht darauf.
+	 *
+	 * Scheitert sie (etwa die Datenbank beim Laden von Umfeld oder Koepfen), schliesst der Hub alle
+	 * Sockets des Vereins mit 1011. Der Client erkennt Luecken nur am Abbruch (Spec 5.2) und gleicht
+	 * danach ab seinem alten Stand ab. Alle Sockets des Vereins, nicht nur die, die das Signal
+	 * bekommen haetten: Wer das ist, entscheidet erst signaleFuer mit dem Umfeld, das gerade nicht zu
+	 * laden war, und ein Teil kann schon verschickt sein. Verworfen: nur loggen und die Sockets offen
+	 * lassen -- das naechste gelungene Signal hoebe den Stand im Client ueber das verlorene, und auch
+	 * ein spaeterer Abgleich meldete dessen Thread nicht mehr.
+	 */
 	private reiheEin(e: Aenderungsereignis): void {
 		const vorher = this.ketten.get(e.vereinId) ?? Promise.resolve();
-		const fertig = vorher.then(() => this.verteile(e)).catch((error: unknown) => logge('Verteilen', error));
+		const fertig = vorher
+			.then(() => this.verteile(e))
+			.catch((error: unknown) => {
+				logge('Verteilen', error);
+				schliesseMitFehler(this.vereine.get(e.vereinId) ?? []);
+			});
 		this.ketten.set(e.vereinId, fertig);
 		void fertig.then(() => {
 			if (this.ketten.get(e.vereinId) === fertig) this.ketten.delete(e.vereinId);
@@ -351,8 +376,19 @@ export class Hub {
 		return geladen;
 	}
 
+	/**
+	 * Scheitert die Pruefung, schliesst der Hub die geprueften Sockets mit 1011: Ihr Upgrade danach
+	 * prueft die Sitzung frisch, und ohne sie fuehrt der Abgleich des Clients zur Anmeldung (401).
+	 * Nur die geprueften, denn nur deren Sitzung ist offen; die uebrigen hat ihr Upgrade oder eine
+	 * fruehere Pruefung bestaetigt, und ihr gespeicherter Ablauf ist nicht vorbei. Verworfen: nur
+	 * loggen und offen lassen -- ein abgemeldetes Geraet (etwa nach "Ueberall abmelden") bekaeme
+	 * weiter Nachrichten live, bis zum naechsten Anlass im Verein oder bis zum gespeicherten Ablauf.
+	 */
 	private pruefeSicher(vereinId: string, verbindungen: readonly Verbindung[]): void {
-		this.pruefe(vereinId, verbindungen).catch((error: unknown) => logge('Pruefen', error));
+		this.pruefe(vereinId, verbindungen).catch((error: unknown) => {
+			logge('Pruefen', error);
+			schliesseMitFehler(verbindungen);
+		});
 	}
 
 	/**
@@ -384,6 +420,15 @@ export class Hub {
  */
 function lehneAb(socket: Duplex, status: 401 | 403 | 404 | 429): void {
 	socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\n\r\n`, () => socket.destroy());
+}
+
+/**
+ * Ein Socket, der schon schliesst (4401 aus pruefe, 1012 beim Herunterfahren), behaelt seinen Code:
+ * ws.close tut dann nichts mehr. Die Menge des Vereins aendert sich dabei nicht, denn ein Socket
+ * meldet sich erst mit dem close-Ereignis ab, nach dem Handschlag.
+ */
+function schliesseMitFehler(verbindungen: Iterable<Verbindung>): void {
+	for (const v of verbindungen) v.ws.close(INTERNER_FEHLER);
 }
 
 function ignoriere(): void {

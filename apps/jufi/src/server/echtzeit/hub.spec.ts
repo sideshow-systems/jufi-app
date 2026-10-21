@@ -4,7 +4,7 @@ import type { EchtzeitSignal, ThreadBearbeitung, VerlaufAnsicht } from '@jufi/do
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { meldeAdminAn } from '../admin/test-admin.js';
 import { createApp } from '../app.js';
@@ -475,6 +475,78 @@ describe('Hub', () => {
 				staende.push((await f.schreibe(bowling.threadId, f.thomas.cookie, text)).stand);
 			}
 			await expect.poll(() => sandra.signale.map((s) => s.stand)).toEqual(staende);
+		});
+	});
+
+	describe('Fehler im Hub', () => {
+		/** Das Modell, dessen findMany im Hub scheitert; null, solange alles gelingt. */
+		let scheitert: string | null = null;
+		let fehlerLog: ReturnType<typeof vi.spyOn>;
+
+		beforeEach(async () => {
+			scheitert = null;
+			// Nur der Hub bekommt den scheiternden Client; die Routen schreiben weiter echt.
+			const scheiternd = prisma.$extends({
+				query: {
+					$allModels: {
+						async findMany({ model, args, query }) {
+							if (model === scheitert) throw new Error('Datenbank weg');
+							return query(args);
+						},
+					},
+				},
+			}) as unknown as PrismaClient;
+			await stoppe();
+			await starte(scheiternd);
+			// Der Hub loggt den Fehler; hier wird geprueft, dass er es tut, statt die Ausgabe zu fuellen.
+			fehlerLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		});
+
+		afterEach(() => fehlerLog.mockRestore());
+
+		/** Der Schliesscode, oder offen, wenn der Socket nach einer Sekunde noch steht (statt bis zum Zeitlimit zu warten). */
+		const schliesscode = (c: Client) =>
+			Promise.race([c.geschlossen, new Promise<'offen'>((fertig) => setTimeout(() => fertig('offen'), 1000))]);
+
+		it('scheitert das Verteilen, schliesst der Hub alle Sockets des Vereins mit 1011, die eines anderen bleiben', async () => {
+			const f = await familie();
+			const bowling = await f.thread();
+			const b = await szenario('hub-b');
+			const imVerein = [await oeffne(f.verein.slug, f.thomas.cookie), await oeffne(f.verein.slug, f.sandra.cookie)];
+			const anderer = await oeffne(b.verein.slug, b.thomas.cookie);
+
+			// Das Umfeld laedt der Hub erst mit dem ersten Ereignis; daran scheitert die Verteilung.
+			scheitert = 'UntergruppeMitglied';
+			await f.schreibe(bowling.threadId, f.thomas.cookie, 'Wer faehrt mit?');
+			expect(await Promise.all(imVerein.map(schliesscode))).toEqual([1011, 1011]);
+			expect(imVerein.flatMap((c) => c.signale)).toEqual([]);
+			expect(anderer.ws.readyState).toBe(WebSocket.OPEN);
+			expect(fehlerLog).toHaveBeenCalledWith('Hub: Verteilen fehlgeschlagen:', 'Error');
+
+			// Das gescheiterte Umfeld bleibt nicht im Cache: Nach dem Neuverbinden kommt das naechste Signal an.
+			scheitert = null;
+			const sandra = await oeffne(f.verein.slug, f.sandra.cookie);
+			const { eintrag } = await f.schreibe(bowling.threadId, f.thomas.cookie, 'Jetzt aber');
+			await expect.poll(() => sandra.signale.map((s) => s.objektId)).toEqual([eintrag.id]);
+		});
+
+		it('scheitert die Pruefung, schliesst der Hub die geprueften Sockets mit 1011, die anderen bleiben', async () => {
+			const s = await szenario();
+			const sandra = await legeMitgliedAn(prisma, s.verein, { art: 'ERWACHSENER', vorname: 'Sandra', jetzt: T0 });
+			// Sandras Sitzung laeuft spaeter ab; der Ping prueft darum nur den Socket von Thomas.
+			const ende = new Date(T0.getTime() + MITGLIEDER_SITZUNG_SEKUNDEN * 1000);
+			await prisma.session.updateMany({
+				where: { zugangId: sandra.zugangId },
+				data: { ablauf: new Date(ende.getTime() + 60_000) },
+			});
+			const thomas = await oeffne(s.verein.slug, s.thomas.cookie);
+			const sandrasSocket = await oeffne(s.verein.slug, sandra.cookie);
+
+			scheitert = 'Session';
+			uhr = ende;
+			expect(await schliesscode(thomas)).toBe(1011);
+			expect(sandrasSocket.ws.readyState).toBe(WebSocket.OPEN);
+			expect(fehlerLog).toHaveBeenCalledWith('Hub: Pruefen fehlgeschlagen:', 'Error');
 		});
 	});
 

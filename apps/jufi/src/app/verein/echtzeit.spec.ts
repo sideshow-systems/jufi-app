@@ -340,6 +340,22 @@ describe('Echtzeit', () => {
 		expect(FalscherSocket.alle.length).toBe(2);
 	});
 
+	it('gleicht nach 1011 (Fehler im Hub) erst ab und verbindet dann mit Backoff neu', () => {
+		bereite();
+		vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const s = verbinde(5);
+		s.sende(signal({ stand: 7 }));
+
+		// Der Hub hat ein Signal verloren und schliesst; der Abgleich ab dem alten Stand holt es nach.
+		s.brichAb(1011);
+		http.expectOne(`${SYNC}?seit=7`).flush(antwort({ stand: 8, geaendert: ['t2'] }));
+		expect(ereignisse.at(-1)).toEqual({ typ: 'sync', geaendert: ['t2'], unsichtbar: [] });
+		vi.advanceTimersByTime(999);
+		expect(FalscherSocket.alle.length).toBe(1);
+		vi.advanceTimersByTime(1);
+		expect(FalscherSocket.alle.length).toBe(2);
+	});
+
 	it.each([
 		[0, 800, 1600],
 		[0.9999, 1200, 2400],
