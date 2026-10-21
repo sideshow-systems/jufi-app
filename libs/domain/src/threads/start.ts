@@ -1,6 +1,6 @@
 import { istArchiviert } from './archiv.js';
 import { antwortZeilen } from './antworten.js';
-import type { ThreadDaten, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
+import type { AenderungArt, ThreadDaten, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
 
 export interface OffenerPunkt {
 	threadId: string;
@@ -68,13 +68,36 @@ export function brauchtAntwort(
 	);
 }
 
+export interface NeuAenderung {
+	stand: number;
+	art: AenderungArt;
+	urheberId: string | null;
+	angelegtAm: Date;
+}
+
 export interface NeuEingabe {
 	personId: string;
 	zugangSeit: Date;
 	gelesenBis: number | null;
 	erstelltVonId: string | null;
 	veroeffentlichtAm: Date | null;
-	aenderungen: readonly { stand: number; urheberId: string | null; angelegtAm: Date }[];
+	aenderungen: readonly NeuAenderung[];
+}
+
+// Die Auswahl, die "neu" ausmacht: fremd, nicht LISTE, über dem Stand (ohne Stand: ab dem
+// Zugang). Eigene Funktion, weil die Startseite aus denselben Änderungen ihre Kurzangabe
+// bildet ("Neue Antworten") und sonst eine zweite Auslegung von "fremd" entstünde.
+// LISTE (Anpinnen, Archivieren) ändert nichts am Inhalt: Wer einen Thread anpinnt, hat
+// ihn für die anderen nicht neu geschrieben. Verworfen: die Art erst in der Abfrage des
+// Servers auszufiltern — die Regel gehört hierher und ist so ohne Datenbank prüfbar.
+function fremdeNeueAenderungen(e: NeuEingabe): NeuAenderung[] {
+	const fremd = e.aenderungen.filter((a) => a.urheberId !== e.personId && a.art !== 'LISTE');
+	if (e.gelesenBis !== null) {
+		const gelesen = e.gelesenBis;
+		return fremd.filter((a) => a.stand > gelesen);
+	}
+	const seit = e.zugangSeit.getTime();
+	return fremd.filter((a) => a.angelegtAm.getTime() >= seit);
 }
 
 // Spec 3.9. Nur fremde Aktivität macht einen Thread neu (Erkenntnis aus dem Entwurf):
@@ -91,15 +114,13 @@ export interface NeuEingabe {
 // sieht, und einen Entwurf sehen nur Jugendleiter, für die fremde Aktivität daran
 // berechtigt neu ist.
 export function istNeu(e: NeuEingabe): boolean {
-	const fremd = e.aenderungen.filter((a) => a.urheberId !== e.personId);
-	if (e.gelesenBis !== null) {
-		const gelesen = e.gelesenBis;
-		return fremd.some((a) => a.stand > gelesen);
+	if (e.gelesenBis === null) {
+		const seit = e.zugangSeit.getTime();
+		const veroeffentlicht =
+			e.veroeffentlichtAm !== null && e.veroeffentlichtAm.getTime() >= seit && e.erstelltVonId !== e.personId;
+		if (veroeffentlicht) return true;
 	}
-	const seit = e.zugangSeit.getTime();
-	const veroeffentlicht =
-		e.veroeffentlichtAm !== null && e.veroeffentlichtAm.getTime() >= seit && e.erstelltVonId !== e.personId;
-	return veroeffentlicht || fremd.some((a) => a.angelegtAm.getTime() >= seit);
+	return fremdeNeueAenderungen(e).length > 0;
 }
 
 export interface NachrichtenEingabe {

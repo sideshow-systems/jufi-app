@@ -1,6 +1,13 @@
 import type { TerminDaten } from '../module/termin/termin.js';
-import { brauchtAntwort, istNeu, neuKurzangabe, ungeleseneNachrichten, type OffenerPunkt } from './start.js';
-import type { AntwortDaten, ThreadDaten, ThreadKopf, UmfrageDaten } from './typen.js';
+import {
+	brauchtAntwort,
+	istNeu,
+	neuKurzangabe,
+	ungeleseneNachrichten,
+	type NeuAenderung,
+	type OffenerPunkt,
+} from './start.js';
+import type { AenderungArt, AntwortDaten, ThreadDaten, ThreadKopf, UmfrageDaten } from './typen.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
 
 const umfeld = bowlingUmfeld();
@@ -172,10 +179,16 @@ describe('istNeu', () => {
 		gelesenBis: 4 as number | null,
 		erstelltVonId: 'thomas' as string | null,
 		veroeffentlichtAm: new Date('2026-10-21T10:00:00Z') as Date | null,
-		aenderungen: [] as { stand: number; urheberId: string | null; angelegtAm: Date }[],
+		aenderungen: [] as NeuAenderung[],
 	};
-	const aenderung = (stand: number, urheberId: string | null, angelegtAm = '2026-10-21T10:00:00Z') => ({
+	const aenderung = (
+		stand: number,
+		urheberId: string | null,
+		angelegtAm = '2026-10-21T10:00:00Z',
+		art: AenderungArt = 'THREAD',
+	): NeuAenderung => ({
 		stand,
+		art,
 		urheberId,
 		angelegtAm: new Date(angelegtAm),
 	});
@@ -194,6 +207,34 @@ describe('istNeu', () => {
 
 	it('zaehlt eine Aenderung ohne Urheber (System) als fremd', () => {
 		expect(istNeu({ ...basis, aenderungen: [aenderung(5, null)] })).toBe(true);
+	});
+
+	it('ignoriert eine fremde LISTE-Aenderung ueber dem Gelesen-Stand', () => {
+		expect(istNeu({ ...basis, aenderungen: [aenderung(5, 'thomas', undefined, 'LISTE')] })).toBe(false);
+	});
+
+	it('ignoriert eine fremde LISTE-Aenderung nach dem Zugang ohne Gelesen-Stand', () => {
+		expect(
+			istNeu({
+				...basis,
+				gelesenBis: null,
+				veroeffentlichtAm: new Date('2026-09-20T10:00:00Z'),
+				aenderungen: [aenderung(1, 'thomas', '2026-10-05T00:00:00Z', 'LISTE')],
+			}),
+		).toBe(false);
+	});
+
+	it('zaehlt eine Systemaenderung ohne Urheber vom Typ VERLAUF als fremd', () => {
+		expect(istNeu({ ...basis, aenderungen: [aenderung(5, null, undefined, 'VERLAUF')] })).toBe(true);
+	});
+
+	it('zaehlt neben einer LISTE-Aenderung eine andere fremde Aenderung', () => {
+		expect(
+			istNeu({
+				...basis,
+				aenderungen: [aenderung(5, 'thomas', undefined, 'LISTE'), aenderung(6, 'thomas', undefined, 'ANTWORT')],
+			}),
+		).toBe(true);
 	});
 
 	it('beachtet mit Gelesen-Stand die Veroeffentlichung nicht', () => {

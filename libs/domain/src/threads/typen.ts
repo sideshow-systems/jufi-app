@@ -10,6 +10,7 @@ export type Rollenfilter = 'JUNGFISCHER_FAMILIE' | 'NUR_FAMILIE' | 'NUR_JUGENDLE
 export type ArchivModus = 'AUTOMATISCH' | 'ARCHIVIERT' | 'AKTIV_HALTEN';
 export type AntwortEinheit = 'JUNGFISCHER' | 'ERWACHSENER' | 'PERSON';
 export type ErgebnisSicht = 'ALLE' | 'SUMME' | 'JUGENDLEITER';
+export type AenderungArt = 'THREAD' | 'MODUL' | 'ANTWORT' | 'VERLAUF' | 'SICHTBARKEIT' | 'GELOESCHT' | 'LISTE';
 
 // Eine Person samt dem, was die Threadregeln ueber die Rechte hinaus brauchen: Namen
 // (fuer Absender und "eingetragen von") und das Merkmal Jugendsprecher.
