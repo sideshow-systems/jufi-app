@@ -67,6 +67,11 @@ describe('erkenneTyp', () => {
 		expect(erkenneTyp(ZIP, 'a.docx', 'FOTO')).toEqual({ ok: false, grund: 'TYP' });
 	});
 
+	it('haelt Prototyp-Schluessel nicht fuer erlaubte Endungen', () => {
+		expect(erkenneTyp(ZIP, 'a.constructor', 'DATEI')).toEqual({ ok: false, grund: 'TYP' });
+		expect(erkenneTyp(ZIP, 'a.__proto__', 'DATEI')).toEqual({ ok: false, grund: 'TYP' });
+	});
+
 	it('meldet HEIC-Marken fuer Foto und Datei eigens', () => {
 		for (const marke of ['heic', 'heix', 'hevc', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1']) {
 			expect(erkenneTyp(ftyp(marke), 'a.heic', 'FOTO')).toEqual({ ok: false, grund: 'HEIC' });

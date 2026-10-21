@@ -20,13 +20,15 @@ export const FEHLER_TEXT = {
 	HEIC: 'HEIC-Bilder gehen nicht. Bitte als JPEG senden.',
 } as const;
 
-const ZIP_TYPEN: Record<string, string> = {
-	docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-	xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-	pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-	odt: 'application/vnd.oasis.opendocument.text',
-	ods: 'application/vnd.oasis.opendocument.spreadsheet',
-};
+// Map statt Objekt-Literal: Die Endung kommt vom Absender, und ein Literal liesse
+// "constructor" oder "__proto__" als Schluessel durch.
+const ZIP_TYPEN = new Map<string, string>([
+	['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+	['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+	['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+	['odt', 'application/vnd.oasis.opendocument.text'],
+	['ods', 'application/vnd.oasis.opendocument.spreadsheet'],
+]);
 
 const HEIC_MARKEN = new Set(['heic', 'heix', 'hevc', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1']);
 
@@ -63,7 +65,7 @@ export function erkenneTyp(
 	if (beginntMit(kopf, text('%PDF-'))) return { ok: true, typ: 'application/pdf' };
 	if (beginntMit(kopf, [0x50, 0x4b, 0x03, 0x04]) && dateiname !== null) {
 		const endung = /\.([^.]+)$/u.exec(dateiname)?.[1]?.toLowerCase();
-		const typ = endung === undefined ? undefined : ZIP_TYPEN[endung];
+		const typ = endung === undefined ? undefined : ZIP_TYPEN.get(endung);
 		if (typ !== undefined) return { ok: true, typ };
 	}
 	return { ok: false, grund: 'TYP' };
