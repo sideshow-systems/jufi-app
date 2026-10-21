@@ -138,6 +138,10 @@ export const routes: Routes = [
 						loadComponent: () => import('./verein/termine').then((m) => m.TermineComponent),
 					},
 					{
+						path: 'medien',
+						loadComponent: () => import('./verein/medien').then((m) => m.MedienComponent),
+					},
+					{
 						path: 'profil',
 						loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
 					},

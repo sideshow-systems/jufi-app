@@ -116,13 +116,14 @@ describe('Mitglieder-Huelle', () => {
 		return a;
 	}
 
-	it('zeigt auf der Startseite vier Eintraege, und Start ist aktiv', async () => {
+	it('zeigt auf der Startseite fuenf Eintraege, und Start ist aktiv', async () => {
 		await oeffne('/demo');
 
-		expect(leiste().map((a) => a.textContent?.trim())).toEqual(['Start', 'Threads', 'Termine', 'Mehr']);
+		expect(leiste().map((a) => a.textContent?.trim())).toEqual(['Start', 'Threads', 'Termine', 'Medien', 'Mehr']);
 		expect(eintrag('Start').getAttribute('href')).toBe('/demo');
 		expect(eintrag('Threads').getAttribute('href')).toBe('/demo/threads');
 		expect(eintrag('Termine').getAttribute('href')).toBe('/demo/termine');
+		expect(eintrag('Medien').getAttribute('href')).toBe('/demo/medien');
 		expect(eintrag('Mehr').getAttribute('href')).toBe('/demo/mehr');
 		expect(eintrag('Start').getAttribute('aria-current')).toBe('page');
 		expect(eintrag('Mehr').hasAttribute('aria-current')).toBe(false);
@@ -145,7 +146,7 @@ describe('Mitglieder-Huelle', () => {
 		seite = harness.routeNativeElement as HTMLElement;
 
 		expect(seite.querySelector('main jf-start')).not.toBeNull();
-		expect(leiste().length).toBe(4);
+		expect(leiste().length).toBe(5);
 		expect(seite.querySelector('header .name')).toBeNull();
 
 		await startDaten();
@@ -163,6 +164,16 @@ describe('Mitglieder-Huelle', () => {
 		await oeffne(url, VEREIN, daten);
 
 		expect(eintrag('Mehr').getAttribute('aria-current')).toBe('page');
+		expect(eintrag('Start').hasAttribute('aria-current')).toBe(false);
+	});
+
+	it('macht auf /demo/medien den Eintrag Medien aktiv', async () => {
+		await oeffne('/demo/medien', VEREIN, () =>
+			vi.waitFor(() => http.expectOne(`${API}/dokumente`).flush({ kategorien: [], darfPflegen: false })),
+		);
+
+		expect(eintrag('Medien').getAttribute('aria-current')).toBe('page');
+		expect(eintrag('Mehr').hasAttribute('aria-current')).toBe(false);
 		expect(eintrag('Start').hasAttribute('aria-current')).toBe(false);
 	});
 
@@ -311,7 +322,7 @@ describe('Mitglieder-Huelle', () => {
 		await stabil();
 
 		expect(seite.textContent).not.toContain('Keine Verbindung');
-		expect(leiste().length).toBe(4);
+		expect(leiste().length).toBe(5);
 	});
 
 	// Entscheidung 8: Der alte Pfad wurde nie ausgeliefert, deshalb gibt es keine Weiterleitung.
