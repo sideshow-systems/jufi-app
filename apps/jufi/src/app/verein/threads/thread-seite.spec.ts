@@ -11,6 +11,7 @@ import {
 	type VerlaufAnsicht,
 } from '@jufi/domain';
 import { adminTestAnbieter, EchtzeitAttrappe, tippe } from '../../admin/test-hilfen';
+import { MeldungService } from '../../gestaltung/meldung';
 import type { EchtzeitEreignis } from '../echtzeit';
 
 const VEREIN = { slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false, logoStand: null };
@@ -308,6 +309,60 @@ describe('Thread-Seite', () => {
 			const zurueck = seite.querySelector('a[aria-label^="Zurück"]');
 			expect(zurueck?.getAttribute('href')).toBe('/demo/threads');
 			expect(zurueck?.getAttribute('aria-label')).toBe('Zurück zur Thread-Liste');
+		});
+	});
+
+	describe('Stand teilen', () => {
+		const teilenKnopf = (seite: HTMLElement) =>
+			seite.querySelector<HTMLButtonElement>('button[aria-label="Stand teilen"]');
+
+		afterEach(() => {
+			delete (navigator as { clipboard?: unknown }).clipboard;
+		});
+
+		function mitZwischenablage(writeText: (text: string) => Promise<void>) {
+			const schreibe = vi.fn(writeText);
+			Object.defineProperty(navigator, 'clipboard', { value: { writeText: schreibe }, configurable: true });
+			return schreibe;
+		}
+
+		it('hat den Knopf Stand teilen', async () => {
+			const mit = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+			expect(teilenKnopf(mit.seite)).not.toBeNull();
+		});
+
+		it('hat bei einem Entwurf keinen Knopf', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ entwurf: true }) });
+			expect(teilenKnopf(seite)).toBeNull();
+		});
+
+		it('kopiert am Rechner den Text mit Link und meldet Kopiert', async () => {
+			const schreibe = mitZwischenablage(() => Promise.resolve());
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			teilenKnopf(seite)?.click();
+			await vi.waitFor(() => expect(schreibe).toHaveBeenCalledTimes(1));
+			await harness.fixture.whenStable();
+
+			const gesendet = schreibe.mock.calls[0][0];
+			expect(gesendet.startsWith('🎳 *Bowling*')).toBe(true);
+			expect(gesendet.endsWith(`/demo/t/${threadSegment('ck1', '🎳 Bowling')}`)).toBe(true);
+			expect(TestBed.inject(MeldungService).text()).toBe('Kopiert');
+		});
+
+		it('zeigt bei verweigerter Zwischenablage den Text zum Markieren', async () => {
+			const schreibe = mitZwischenablage(() => Promise.reject(new Error('verweigert')));
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			teilenKnopf(seite)?.click();
+			await vi.waitFor(() => {
+				harness.detectChanges();
+				expect(seite.querySelector('textarea[aria-label="Text zum Teilen"]')).not.toBeNull();
+			});
+
+			const feld = seite.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text zum Teilen"]');
+			expect(feld?.readOnly).toBe(true);
+			expect(feld?.value).toBe(schreibe.mock.calls[0][0]);
 		});
 	});
 
