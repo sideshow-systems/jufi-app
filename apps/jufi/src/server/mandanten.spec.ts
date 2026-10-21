@@ -468,6 +468,61 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		const suche = await sende(k.url, `/${k.eigen.slug}${pfad}?archiv=1&suche=Fremder`, { cookie: k.eigenerLeiter });
 		expect(((await suche.json()) as { threads: unknown[] }).threads).toEqual([]);
 	},
+	'GET /start': async (k) => {
+		const pfad = '/api/v1/start';
+		const tag = new Date(Date.now() + 4 * 86_400_000).toISOString().slice(0, 10);
+		await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			titel: 'Eigener Ausflug',
+			module: [
+				{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' },
+				{
+					typ: 'TERMIN',
+					termin: { startDatum: tag, endDatum: null, beginn: '16:00', ende: null, ort: null, treffpunkt: null },
+				},
+			],
+		});
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const start = (await r.json()) as { brauchtAntwort: { titel: string }[]; alsNaechstes: { titel: string }[] };
+		// Die offene Umfrage aus fremd taucht in keinem Block von eigen auf.
+		expect(JSON.stringify(start)).not.toContain(k.fremderThread.threadId);
+		expect(JSON.stringify(start)).not.toContain('Fremder Thread');
+		// Positiv: Der eigene Thread steht in den Bloecken, die Antwort ist also nicht nur leer.
+		expect(start.alsNaechstes.map((t) => t.titel)).toContain('Eigener Ausflug');
+		expect(start.brauchtAntwort.map((t) => t.titel)).toContain('Eigener Ausflug');
+	},
+	'GET /termine': async (k) => {
+		const tag = new Date(Date.now() + 4 * 86_400_000).toISOString().slice(0, 10);
+		const monat = tag.slice(0, 7);
+		const mitTermin = (titel: string) => ({
+			titel,
+			module: [
+				{
+					typ: 'TERMIN' as const,
+					termin: { startDatum: tag, endDatum: null, beginn: '16:00', ende: null, ort: null, treffpunkt: null },
+				},
+			],
+		});
+		await legeThreadAn(k.prisma, k.fremd, new Date(), {
+			...mitTermin('Fremder Termin'),
+			erstelltVonId: k.fremdePersonId,
+		});
+		await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			...mitTermin('Eigener Termin'),
+			erstelltVonId: k.eigenerLeiterId,
+		});
+		const pfad = `/api/v1/termine?monat=${monat}`;
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const titel = ((await r.json()) as { termine: { titel: string }[] }).termine.map((t) => t.titel);
+		// Der Termin aus fremd steht nicht im Kalender von eigen; der eigene schon, er ist also nicht nur leer.
+		expect(titel).not.toContain('Fremder Termin');
+		expect(titel).toContain('Eigener Termin');
+	},
 	'GET /threads/:id': async (k) => {
 		const vorher = await fremdeThreadZeilen(k);
 		const hole = (slug: string, cookie?: string) =>

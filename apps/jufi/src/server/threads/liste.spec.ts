@@ -1,5 +1,5 @@
 import { createPrismaClientFromEnv } from '@jufi/db';
-import type { ThreadAnsicht, ThreadListe } from '@jufi/domain';
+import type { StartAnsicht, TerminZeile, ThreadAnsicht, ThreadListe } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
@@ -278,5 +278,138 @@ describe('GET /threads', () => {
 			data: { letzteAktivitaetAm: new Date('2026-10-21T10:00:00Z') },
 		});
 		expect((await s.liste(s.sandra.cookie)).threads.map((z) => z.titel)).toEqual(['B', 'A']);
+	});
+	const termin = (startDatum: string, beginn: string | null = '16:00') => ({
+		typ: 'TERMIN' as const,
+		termin: { startDatum, endDatum: null, beginn, ende: null, ort: null, treffpunkt: null },
+	});
+
+	describe('GET /start', () => {
+		const start = async (s: Awaited<ReturnType<typeof szenario>>, cookie: string) => {
+			const r = await sende(server.url, s.api('/start'), { cookie });
+			expect(r.status).toBe(200);
+			return (await r.json()) as StartAnsicht;
+		};
+
+		it('Sandra sieht Bowling in allen drei Bloecken, den Jugendleiter-Thread nirgends', async () => {
+			const s = await szenario();
+			const t = await s.bowling('Bowling', {
+				module: [{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' }, termin('2026-10-26')],
+			});
+			// Gleiches Muster, aber nur fuer Jugendleiter: Umfrage und Termin duerfen Sandra nicht erreichen.
+			await s.bowling('Leiterrunde', {
+				rollenfilter: 'NUR_JUGENDLEITER',
+				module: [{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' }, termin('2026-10-25')],
+			});
+
+			const sandra = await start(s, s.sandra.cookie);
+			expect(sandra.brauchtAntwort).toHaveLength(2);
+			expect(new Set(sandra.brauchtAntwort.map((p) => p.vorname))).toEqual(new Set([null, 'Lena']));
+			expect(sandra.brauchtAntwort.every((p) => p.threadId === t.threadId)).toBe(true);
+			expect(sandra.alsNaechstes.map((z) => z.titel)).toEqual(['Bowling']);
+			expect(sandra.neu).toEqual([
+				{
+					threadId: t.threadId,
+					segment: expect.stringMatching(/^.+-bowling$/),
+					titel: 'Bowling',
+					angabe: 'Neuer Thread',
+				},
+			]);
+			expect(JSON.stringify(sandra)).not.toContain('Leiterrunde');
+		});
+
+		it('Thomas sieht seinen Entwurf nirgends', async () => {
+			const s = await szenario();
+			await s.bowling('Geplant', {
+				veroeffentlicht: false,
+				module: [{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' }, termin('2026-10-26')],
+			});
+			const thomas = await start(s, s.thomas.cookie);
+			expect(thomas.brauchtAntwort).toEqual([]);
+			expect(thomas.alsNaechstes).toEqual([]);
+			// Neu ist hoechstens der Austausch (ohne Ersteller angelegt, also fremd), nie der Entwurf.
+			expect(thomas.neu.map((n) => n.titel)).toEqual(['Jugendsprecher-Austausch']);
+		});
+
+		it('ein archivierter Thread steht weder unter Als Naechstes noch unter Braucht deine Antwort', async () => {
+			const s = await szenario();
+			await s.bowling('Vorbei', {
+				archivModus: 'ARCHIVIERT',
+				module: [{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' }, termin('2026-10-26')],
+			});
+			expect(await start(s, s.sandra.cookie)).toEqual({ brauchtAntwort: [], alsNaechstes: [], neu: [] });
+		});
+
+		it('ist ohne Anmeldung 401 und schreibt nichts', async () => {
+			const s = await szenario();
+			await s.bowling();
+			expect((await sende(server.url, s.api('/start'))).status).toBe(401);
+			const vorher = await s.stand();
+			await start(s, s.sandra.cookie);
+			expect(await s.stand()).toBe(vorher);
+			expect(await prisma.gelesenStand.count({ where: { vereinId: s.verein.id } })).toBe(0);
+		});
+	});
+
+	describe('GET /termine', () => {
+		const termine = async (s: Awaited<ReturnType<typeof szenario>>, cookie: string, monat: string) => {
+			const r = await sende(server.url, s.api(`/termine?monat=${monat}`), { cookie });
+			expect(r.status).toBe(200);
+			return ((await r.json()) as { termine: TerminZeile[] }).termine;
+		};
+
+		it('zeigt Bowling und einen archivierten Thread, aber keinen Entwurf und keinen unsichtbaren Thread', async () => {
+			const s = await szenario();
+			const bowling = await s.bowling('Bowling', { module: [termin('2026-10-26')] });
+			// Termin vor acht Tagen: archiviert, steht aber im Kalender seines Monats.
+			const archiv = await s.bowling('Ausflug', { module: [termin('2026-10-14')] });
+			await s.bowling('Geplant', { veroeffentlicht: false, module: [termin('2026-10-27')] });
+			await s.bowling('Leiterrunde', { rollenfilter: 'NUR_JUGENDLEITER', module: [termin('2026-10-28')] });
+
+			const sandra = await termine(s, s.sandra.cookie, '2026-10');
+			expect(sandra.map((z) => z.threadId)).toEqual([archiv.threadId, bowling.threadId]);
+			expect(sandra[1]).toMatchObject({
+				segment: expect.stringMatching(/^.+-bowling$/),
+				titel: 'Bowling',
+				termin: { startDatum: '2026-10-26', beginn: '16:00' },
+			});
+			// Auch Thomas sieht seinen Entwurf im Kalender nicht, die Leiterrunde aber schon.
+			expect((await termine(s, s.thomas.cookie, '2026-10')).map((z) => z.titel)).toEqual([
+				'Ausflug',
+				'Bowling',
+				'Leiterrunde',
+			]);
+		});
+
+		it('ein Termin ueber die Monatsgrenze steht in beiden Monaten, in einem anderen Monat ist die Liste leer', async () => {
+			const s = await szenario();
+			const t = await s.bowling('Zeltlager', {
+				module: [{ ...termin('2026-10-30'), termin: { ...termin('2026-10-30').termin, endDatum: '2026-11-02' } }],
+			});
+			expect((await termine(s, s.sandra.cookie, '2026-10')).map((z) => z.threadId)).toEqual([t.threadId]);
+			expect((await termine(s, s.sandra.cookie, '2026-11')).map((z) => z.threadId)).toEqual([t.threadId]);
+			expect(await termine(s, s.sandra.cookie, '2026-09')).toEqual([]);
+		});
+
+		it.each(['2026-13', '2026-1', '', '2026-10-01', 'a'])('monat=%j ist 400 mit dem Feld monat', async (monat) => {
+			const s = await szenario();
+			const r = await sende(server.url, s.api(`/termine?monat=${monat}`), { cookie: s.sandra.cookie });
+			expect(r.status).toBe(400);
+			expect(await r.json()).toEqual({ fehler: 'Ungültige Anfrage', feld: 'monat' });
+		});
+
+		it('ohne monat und mit wiederholtem monat ist 400', async () => {
+			const s = await szenario();
+			for (const abfrage of ['', '?monat=2026-10&monat=2026-11']) {
+				const r = await sende(server.url, s.api(`/termine${abfrage}`), { cookie: s.sandra.cookie });
+				expect(r.status).toBe(400);
+				expect(await r.json()).toEqual({ fehler: 'Ungültige Anfrage', feld: 'monat' });
+			}
+		});
+
+		it('ist ohne Anmeldung 401', async () => {
+			const s = await szenario();
+			expect((await sende(server.url, s.api('/termine?monat=2026-10'))).status).toBe(401);
+		});
 	});
 });
