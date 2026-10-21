@@ -45,7 +45,8 @@
 					"otplib",
 					"express",
 					"nodemailer",
-					"sharp"
+					"sharp",
+					"ws"
 				],
 				"security": {
 					"allowedHosts": ["test.jufi-app.de", "localhost", "127.0.0.1"]
