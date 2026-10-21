@@ -19,6 +19,7 @@ import { nodemailerVersand } from './server/mail/versand.js';
 import { Nachlauf } from './server/nachlauf.js';
 import { starteAufraeumen } from './server/threads/aufraeumen.js';
 import { umgebungAusEnv, type Umgebung } from './server/umgebung.js';
+import { htmlAusAntwort } from './server/verein/html-antwort.js';
 import { VERSION } from './version.generated.js';
 
 /** Symbol.for, damit das neu geladene Modul denselben Schluessel findet wie das alte. */
@@ -42,11 +43,13 @@ const browserDistFolder = resolve(serverDistFolder, '../browser');
  * keinen veroeffentlichten Port hat und nur ueber den Proxy erreichbar ist, der
  * die Header fuer nicht vertrauenswuerdige Clients selbst ueberschreibt.
  *
- * Steht vor betriebsApp und nicht dahinter, weil die Link-Vorschau (seitenHtml) die Seite
- * von Angular holt und createApp ihn deshalb schon beim Aufbau kennen muss. Er braucht weder
- * Umgebung noch Datenbank und hat keinen Nebeneffekt, darf also auch im Worker der
- * Routenextraktion stehen; aufgerufen wird er dort nie. Verworfen: eine zweite Engine in
- * betriebsApp -- zwei Stellen mit derselben Proxy-Einstellung, von denen eine vergessen wird.
+ * Steht aus Gruenden der Lesbarkeit vor seinem ersten Nutzer (seitenHtml in betriebsApp, die
+ * Link-Vorschau), damit niemand ein Problem mit der zeitlichen Totzone vermutet: Die Closure
+ * liest ihn erst bei einer Anfrage, noetig waere die Reihenfolge nicht. Der Konstruktor lief
+ * schon vor dieser Stufe auf Modulebene. Er braucht weder Umgebung noch Datenbank und hat
+ * keinen Nebeneffekt, darf also auch im Worker der Routenextraktion stehen; aufgerufen wird
+ * er dort nie. Verworfen: eine zweite Engine in betriebsApp -- zwei Stellen mit derselben
+ * Proxy-Einstellung, von denen eine vergessen wird.
  */
 const angularApp = new AngularNodeAppEngine({
 	trustProxyHeaders: [
@@ -115,10 +118,7 @@ function betriebsApp(): { app: express.Express; betrieb: Betrieb } {
 		nachlauf,
 		bus,
 		// Erst bei einer Anfrage gerufen, nie beim Bau. null: Angular beansprucht den Pfad nicht.
-		seitenHtml: async (req) => {
-			const antwort = await angularApp.handle(req);
-			return antwort ? antwort.text() : null;
-		},
+		seitenHtml: async (req) => htmlAusAntwort(await angularApp.handle(req)),
 	});
 	const hub = new Hub({ prisma, umgebung, jetzt: () => new Date(), bus });
 

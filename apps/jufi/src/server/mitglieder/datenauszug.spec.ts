@@ -633,6 +633,26 @@ describe('Meine Daten herunterladen', () => {
 			expect(eigene[0]).toMatchObject({ fuer: 'ich', von: 'Lena Leitung' });
 		});
 
+		it('Antwort, die eine inzwischen entfernte Leitung fuer das Kind eingetragen hat: von heisst "(entfernte Person)"', async () => {
+			const f = await mitThread();
+			await antworte(
+				f.verein,
+				f.mit,
+				f.kind.personId,
+				f.leitung.personId,
+				[f.t.optionIds['dabei']!],
+				'2026-10-11T10:00:00.000Z',
+			);
+			// Grabstein wie oben: Namen geleert, entferntAm gesetzt (Spec 5.8); die Antwort bleibt stehen.
+			await prisma.person.update({
+				where: { id: f.leitung.personId },
+				data: { vorname: '', nachname: '', email: null, rechte: [], entferntAm: jetzt },
+			});
+			const antworten = (await lade(f, f.mutter.cookie)).antworten;
+			expect(antworten).toHaveLength(1);
+			expect(antworten[0]).toMatchObject({ fuer: 'Kai Muster', von: '(entfernte Person)' });
+		});
+
 		it('Nachrichten: eigene mit Text, eigene geloeschte als null; fremde und Systemeintraege fehlen', async () => {
 			const f = await mitThread();
 			const eintrag = (data: object) =>
