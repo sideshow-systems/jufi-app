@@ -147,6 +147,10 @@ describe('GET /dateien/:id', () => {
 		expect((await s.hole(docx.id)).headers.get('content-disposition')).toMatch(/^attachment; /u);
 		expect((await s.hole(png.id)).headers.get('content-disposition')).toMatch(/^inline; /u);
 		expect((await s.hole(jpeg.id)).headers.get('content-disposition')).toMatch(/^inline; /u);
+		// Dieselbe strenge CSP wie beim PDF: Bild und Anhang sind kein Grund fuer weniger Abschottung.
+		for (const datei of [docx, png, jpeg]) {
+			expect((await s.hole(datei.id)).headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
+		}
 	});
 
 	it('?herunterladen=1 macht auch ein PDF zum Anhang', async () => {

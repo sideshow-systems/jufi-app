@@ -64,7 +64,10 @@ function setzeKoepfe(
 	res.setHeader('Content-Length', datei.groesse);
 	res.setHeader('X-Content-Type-Options', 'nosniff');
 	// Ersetzt die App-CSP: Ein PDF oder Bild in einem eigenen Tab bekommt weder Skripte noch
-	// Origin der App (sandbox), selbst wenn der Inhalt trotz Typpruefung aktiv waere.
+	// Origin der App (sandbox), selbst wenn der Inhalt trotz Typpruefung aktiv waere. Auch fuer
+	// PDF gemessen (Chromium 156, Chrome 155, Firefox 158, je als eigener Tab): Die PDF-Ansicht
+	// erscheint unter dieser CSP genauso wie ganz ohne; nur in einem sandbox-iframe blockiert
+	// Chrome sie. Verworfen: fuer PDF eine lockerere CSP ohne sandbox -- sie braeuchte einen Grund.
 	res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
 	res.setHeader(
 		'Content-Disposition',
