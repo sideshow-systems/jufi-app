@@ -48,7 +48,8 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
  *
  * Live: Ereignisse der Echtzeit, die diesen Thread betreffen, aktualisieren die Seite still
  * (aktualisiereStill), ohne "Wird geladen" und ohne die Karten neu aufzubauen. Eine Nachricht
- * mit mitgeliefertem Eintrag geht bei offenem Verlauf direkt hinein, ohne Anfrage. Geloescht
+ * mit mitgeliefertem Eintrag geht bei offenem Verlauf direkt hinein, ohne Anfrage (nur nach einer
+ * gescheiterten Aktualisierung stoesst sie eine neue an, siehe ausstehend). Geloescht
  * oder unsichtbar zeigt die Seite ohne Anfrage "Nicht gefunden" (Rahmen-Spec 8). Gelesen
  * meldet sie nur bei sichtbarem Dokument und nie ueber das hinaus, was sie geladen hat
  * (bekannterStand, Entscheidung 8).
@@ -335,8 +336,8 @@ export class ThreadSeite {
 	 * Wahr ab dem Beginn einer Ladung oder stillen Aktualisierung, bis eine gelingt. Ein Fehler (ausser
 	 * 404, dann ist der Thread weg) laesst es wahr: Die Aenderung, die die Aktualisierung ausgeloest
 	 * hat, ist dann nicht geladen, und eine spaetere Live-Nachricht darf den Stand nicht ueber sie
-	 * heben, sonst gaelte sie als gelesen (Entscheidung 8). Erst die naechste gelungene Aktualisierung,
-	 * ausgeloest vom naechsten Ereignis, das keine Live-Nachricht im offenen Verlauf ist, holt es nach.
+	 * heben, sonst gaelte sie als gelesen (Entscheidung 8). Erst die naechste gelungene Aktualisierung
+	 * holt es nach; eine Live-Nachricht im offenen Verlauf stoesst sie an (ausstehend).
 	 * Verworfen: der Wortlaut des Plans ("anderer Fehler: alter Stand bleibt" und danach keine
 	 * ausstehende Aktualisierung mehr); dann hoebe die naechste Nachricht den Stand ueber die
 	 * gescheiterte Aenderung hinweg (Review Task 10).
@@ -351,6 +352,15 @@ export class ThreadSeite {
 	 * Anzeige ungelesen, bis sich am Thread wieder etwas aendert.
 	 */
 	private liveBis = 0;
+	/**
+	 * Wahr, solange eine Ladung oder stille Aktualisierung unterwegs ist, deren Ergebnis noch gelten
+	 * kann (gleicher lauf). Eine Live-Nachricht bei standOffen stoesst nur dann eine Aktualisierung
+	 * an: Sonst verwuerfe jede Nachricht eines Schwalls die laufende Anfrage ueber lauf, und keine
+	 * kaeme je durch. Verworfen: auf Live-Nachrichten gar nicht nachladen -- nach einer gescheiterten
+	 * Aktualisierung blieb der Stand dann offen, bis ein Ereignis ohne Eintrag kam, und in einem
+	 * reinen Chat meldete der Verlauf nichts mehr als gelesen (Review Task 10).
+	 */
+	private ausstehend = false;
 	/**
 	 * Zaehlt die Seiten (Adresse, Thread, Abbau). Wiederherstellen prueft diesen Zaehler statt lauf:
 	 * Ein Live-Ereignis waehrend des Aufrufs erhoeht lauf, und ein Fehler des Aufrufs ginge sonst
@@ -375,6 +385,7 @@ export class ThreadSeite {
 		inject(DestroyRef).onDestroy(() => {
 			this.lauf++;
 			this.seitenNr++;
+			this.ausstehend = false;
 			clearTimeout(this.hervorUhr);
 		});
 
@@ -428,6 +439,7 @@ export class ThreadSeite {
 	private async lade(slug: string, id: string | null): Promise<void> {
 		const lauf = ++this.lauf;
 		this.standOffen = id !== null;
+		this.ausstehend = id !== null;
 		this.liveBis = 0;
 		this.thread.set(null);
 		this.fehler.set(null);
@@ -443,12 +455,14 @@ export class ThreadSeite {
 		try {
 			const ansicht = await firstValueFrom(this.api.thread(slug, id));
 			if (lauf !== this.lauf) return;
+			this.ausstehend = false;
 			this.thread.set(ansicht);
 			this.setzeStand(ansicht.stand);
 			this.zustand.set('bereit');
 			this.korrigiereAdresse(slug, ansicht);
 		} catch (ursache) {
 			if (lauf !== this.lauf) return;
+			this.ausstehend = false;
 			const fehler = alsApiFehler(ursache);
 			// Der Waechter prueft die Sitzung nur beim Betreten; sie kann bei offener Seite ablaufen.
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
@@ -481,8 +495,12 @@ export class ThreadSeite {
 			}
 			verlauf.uebernimm(e.signal.eintrag);
 			const stand = e.signal.stand;
-			if (this.standOffen) this.liveBis = Math.max(this.liveBis, stand);
-			else this.bekannterStand.update((s) => Math.max(s, stand));
+			if (this.standOffen) {
+				this.liveBis = Math.max(this.liveBis, stand);
+				// Ist nichts unterwegs, ist die letzte Aktualisierung gescheitert: jetzt neu versuchen.
+				// Still, denn die Seite ist bereit; ein Verlauf ist nur mit geladenem Thread offen.
+				if (!this.ausstehend) void this.aktualisiereStill();
+			} else this.bekannterStand.update((s) => Math.max(s, stand));
 			return;
 		}
 		void this.aktualisiereStill();
@@ -496,6 +514,7 @@ export class ThreadSeite {
 	 */
 	private verschwunden(): void {
 		this.lauf++;
+		this.ausstehend = false;
 		this.thread.set(null);
 		this.fehler.set(null);
 		this.zustand.set('nicht-gefunden');
@@ -522,9 +541,11 @@ export class ThreadSeite {
 		if (zustand === 'laedt' || zustand === 'fehler') return this.lade(slug, id);
 		const lauf = ++this.lauf;
 		this.standOffen = true;
+		this.ausstehend = true;
 		try {
 			const ansicht = await firstValueFrom(this.api.thread(slug, id));
 			if (lauf !== this.lauf) return;
+			this.ausstehend = false;
 			// Gleicher Stand, gleiche Meldung: Ein zweites PUT mit demselben Stand aenderte nichts.
 			const alt = this.thread();
 			if (alt !== null && alt === this.gemeldet && alt.stand === ansicht.stand) this.gemeldet = ansicht;
@@ -534,6 +555,7 @@ export class ThreadSeite {
 			this.korrigiereAdresse(slug, ansicht);
 		} catch (ursache) {
 			if (lauf !== this.lauf) return;
+			this.ausstehend = false;
 			const fehler = alsApiFehler(ursache);
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
 			if (fehler.status === 404 && lauf === this.lauf) this.verschwunden();

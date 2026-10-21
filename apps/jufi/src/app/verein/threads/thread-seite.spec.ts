@@ -931,7 +931,11 @@ describe('Thread-Seite', () => {
 				http.expectOne(THREAD_URL).flush({ fehler: 'Unerwarteter Fehler' }, { status: 500, statusText: 'Fehler' }),
 			);
 			await kurz(harness);
+			// Die Nachricht stoesst eine neue Aktualisierung an; auch sie scheitert.
 			sende(signal('VERLAUF', 44, { eintrag: nachricht('v1', 'Hallo', { stand: 44 }) }));
+			await vi.waitFor(() =>
+				http.expectOne(THREAD_URL).flush({ fehler: 'Unerwarteter Fehler' }, { status: 500, statusText: 'Fehler' }),
+			);
 			await beendeSeite(harness);
 			// Bis 44 gemeldet, galte die nicht geladene Modul-Aenderung 43 als gelesen (Entscheidung 8).
 			http.expectNone(GELESEN_URL);
@@ -941,6 +945,29 @@ describe('Thread-Seite', () => {
 			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 45 });
 			await beendeSeite(harness);
 			http.expectNone(GELESEN_URL);
+		});
+
+		it('holt nach einer gescheiterten Aktualisierung mit der naechsten Live-Nachricht still nach, mit einer Anfrage', async () => {
+			const { harness, seite } = await oeffneVerlauf();
+
+			sende(signal('MODUL', 43));
+			await vi.waitFor(() =>
+				http.expectOne(THREAD_URL).flush({ fehler: 'Unerwarteter Fehler' }, { status: 500, statusText: 'Fehler' }),
+			);
+			await kurz(harness);
+			sende(signal('VERLAUF', 44, { eintrag: nachricht('v1', 'Hallo', { stand: 44 }) }));
+			// Die zweite Nachricht verwirft die offene Anfrage nicht: eine stille Anfrage, nicht zwei.
+			sende(signal('VERLAUF', 45, { eintrag: nachricht('v2', 'Noch da?', { stand: 45 }) }));
+			const offen = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			await kurz(harness);
+			expect(text(seite)).not.toContain('Wird geladen');
+			http.expectNone(GELESEN_URL);
+
+			// Der Server las vor der zweiten Nachricht; sie steht schon im Verlauf und zaehlt mit.
+			offen.flush(thread({ stand: 44 }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 45 });
+			await beendeSeite(harness);
+			expect(nachrichten(seite)).toHaveLength(2);
 		});
 
 		it('meldet eine Nachricht, die waehrend der Aktualisierung kam, auch wenn deren Antwort aelter ist', async () => {
