@@ -11,7 +11,8 @@ import { verlaufAnsicht, type VerlaufAnsicht, type VerlaufEintragDaten } from '.
 export interface EchtzeitSignal {
 	stand: number;
 	// null: Es hat sich etwas am Umfeld des Vereins geaendert (Person, Untergruppe,
-	// Recht), das keinem Thread gehoert. Der Client laedt dann alles neu.
+	// Recht), das keinem Thread gehoert. Der Client laedt dann alles neu, und objektId
+	// ist leer (signaleFuer).
 	threadId: string | null;
 	art: AenderungArt;
 	objektId: string;
@@ -49,8 +50,8 @@ export type SignalEintrag = VerlaufEintragDaten & { threadId: string };
  * Client laedt ohnehin den ganzen Thread neu. Ausnahme sind Verlaufseintraege mit
  * bekanntem Inhalt: Jeder ist eine eigene Nachricht, die ankommen muss. Ein Verlaufseintrag,
  * den die Route nicht mitgegeben hat (etwa ein Systemeintrag), zaehlt wie jede andere Art.
- * Aenderungen ohne Thread werden alle zu einem Signal, weil der Client daraufhin
- * ohnehin alles laedt (Entscheidung 3).
+ * Aenderungen ohne Thread werden alle zu einem Signal mit leerer objektId, weil der
+ * Client daraufhin ohnehin alles laedt (Entscheidung 3).
  */
 export function signaleFuer(e: {
 	ich: ThreadPerson | undefined;
@@ -71,7 +72,12 @@ export function signaleFuer(e: {
 		if (a.threadId === null) {
 			if (gesehen.has('')) continue;
 			gesehen.add('');
-			signale.push({ stand: e.stand, threadId: null, art: 'SICHTBARKEIT', objektId: a.objektId });
+			// Leer statt der ID der Person oder Untergruppe: Das Signal geht an jeden Socket des
+			// Vereins, auch an Familien und Jungfischer, und die ID verriete, bei welchem Kind sich
+			// wann Rechte, Einwilligung, Familie oder Zugang geaendert haben. Der Client braucht sie
+			// nicht, er laedt ohnehin alles neu. Verworfen: die ID weitergeben wie bei Threads, deren
+			// zufaellige ID nichts ueber eine Person sagt.
+			signale.push({ stand: e.stand, threadId: null, art: 'SICHTBARKEIT', objektId: '' });
 			continue;
 		}
 

@@ -83,14 +83,14 @@ describe('signaleFuer', () => {
 		]);
 	});
 
-	it('fasst Aenderungen ohne Thread zu einem Signal zusammen', () => {
+	it('fasst Aenderungen ohne Thread zu einem Signal zusammen, ohne die geaenderte Person zu nennen', () => {
 		expect(
 			signaleFuer({
 				...grund,
 				ich: sandra,
 				aenderungen: [aenderung(null, 'SICHTBARKEIT', 'lena'), aenderung(null, 'SICHTBARKEIT', 'gross')],
 			}),
-		).toEqual([{ stand: 12, threadId: null, art: 'SICHTBARKEIT', objektId: 'lena' }]);
+		).toEqual([{ stand: 12, threadId: null, art: 'SICHTBARKEIT', objektId: '' }]);
 	});
 
 	it('fasst je Thread und Art zusammen und behaelt die erste objektId', () => {

@@ -447,7 +447,8 @@ describe('Hub', () => {
 			});
 			expect(r.status).toBe(200);
 			const stand = await f.stand();
-			const umfeld = { stand, threadId: null, art: 'SICHTBARKEIT', objektId: f.lena.personId };
+			// Ohne die ID von Lena: Das Signal geht an jeden Socket des Vereins.
+			const umfeld = { stand, threadId: null, art: 'SICHTBARKEIT', objektId: '' };
 			await expect.poll(() => thomas.signale.slice(1)).toEqual([umfeld]);
 			await expect.poll(() => sandra.signale).toEqual([umfeld]);
 
