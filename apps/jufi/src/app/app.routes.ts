@@ -130,6 +130,14 @@ export const routes: Routes = [
 						loadComponent: () => import('./verein/mehr').then((m) => m.MehrComponent),
 					},
 					{
+						path: 'threads',
+						loadComponent: () => import('./verein/threads/thread-liste').then((m) => m.ThreadListeComponent),
+					},
+					{
+						path: 'termine',
+						loadComponent: () => import('./verein/termine').then((m) => m.TermineComponent),
+					},
+					{
 						path: 'profil',
 						loadComponent: () => import('./verein/profil').then((m) => m.ProfilComponent),
 					},

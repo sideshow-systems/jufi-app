@@ -51,7 +51,11 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 			@case ('bereit') {
 				@if (thread(); as t) {
 					<header>
-						<a class="knopf leise nur-icon" [routerLink]="['/', slug()]" aria-label="Zurück zur Startseite">
+						<a
+							class="knopf leise nur-icon"
+							[routerLink]="['/', slug(), 'threads']"
+							aria-label="Zurück zur Thread-Liste"
+						>
 							<jf-icon name="zurueck" />
 						</a>
 						<div class="titel">

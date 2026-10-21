@@ -1,6 +1,13 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import type { ThreadAnsicht, UmfrageAnsicht, VerlaufAnsicht } from '@jufi/domain';
+import type {
+	StartAnsicht,
+	TerminZeile,
+	ThreadAnsicht,
+	ThreadListe,
+	UmfrageAnsicht,
+	VerlaufAnsicht,
+} from '@jufi/domain';
 import { catchError, type Observable, throwError } from 'rxjs';
 import { alsApiFehler } from '../../gemeinsam/api-fehler';
 
@@ -29,6 +36,28 @@ export class ThreadApi {
 		return this.http
 			.request<T>(methode, `${this.basis(slug)}${pfad}`, koerper === undefined ? {} : { body: koerper })
 			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
+	}
+
+	/**
+	 * Archiv und Suche sind Filter der Liste, kein eigener Endpunkt. Die Abfrage baut HttpParams statt
+	 * einer zusammengesetzten Zeichenkette (verworfen), damit Sonderzeichen der Suche wie das Prozentzeichen
+	 * nicht von Hand kodiert werden muessen; ohne Filter bleibt der Pfad ohne Fragezeichen.
+	 */
+	liste(slug: string, optionen: { suche?: string; archiv?: boolean }): Observable<ThreadListe> {
+		let params = new HttpParams();
+		if (optionen.suche) params = params.set('suche', optionen.suche);
+		if (optionen.archiv) params = params.set('archiv', '1');
+		const abfrage = params.toString();
+		return this.holen(slug, `/threads${abfrage ? `?${abfrage}` : ''}`);
+	}
+
+	start(slug: string): Observable<StartAnsicht> {
+		return this.holen(slug, '/start');
+	}
+
+	/** monat ist JJJJ-MM. */
+	termine(slug: string, monat: string): Observable<{ termine: TerminZeile[] }> {
+		return this.holen(slug, `/termine?monat=${encodeURIComponent(monat)}`);
 	}
 
 	thread(slug: string, id: string): Observable<ThreadAnsicht> {

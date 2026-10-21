@@ -1,9 +1,8 @@
-import { provideHttpClient, withFetch } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter, Router } from '@angular/router';
+import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { routerFeatures, routes } from '../app.routes';
+import { adminTestAnbieter } from '../admin/test-hilfen';
 import type { Ansprechpartner, KindAnsicht, PersonListe, Warnhinweis } from './mitglieder-api';
 import { wartet, zugangsstand } from './start';
 
@@ -61,7 +60,7 @@ describe('Start', () => {
 
 	beforeEach(() => {
 		TestBed.configureTestingModule({
-			providers: [provideRouter(routes, ...routerFeatures), provideHttpClient(withFetch()), provideHttpClientTesting()],
+			providers: adminTestAnbieter(),
 		});
 		http = TestBed.inject(HttpTestingController);
 		document.documentElement.removeAttribute('style');

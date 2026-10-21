@@ -1,10 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { NichtGefundenComponent } from '../seiten/nicht-gefunden';
 import { IconComponent, type IconName } from '../gestaltung/icon';
 import { KarteComponent } from '../gestaltung/ui';
+import { ThreadUebersicht } from './threads/thread-uebersicht';
 import { VereinKontext } from './verein-kontext';
 import { VereinsLogoComponent } from './vereins-logo';
 
@@ -18,11 +19,13 @@ interface Eintrag {
 }
 
 /**
- * Zwei Eintraege in TP2 (Spec 6.2). Threads, Termine und Medien kommen mit ihren
- * Teilprojekten dazu; bis dahin waere jeder weitere Eintrag ein Link ins Leere.
+ * Vier Eintraege seit TP3 (Spec 6.2). Medien kommt mit TP4 dazu; bis dahin waere jeder
+ * weitere Eintrag ein Link ins Leere. Einzelne Threads (t/...) gehoeren zu Threads.
  */
 const EINTRAEGE: Eintrag[] = [
 	{ pfad: '', text: 'Start', icon: 'start', auch: [] },
+	{ pfad: 'threads', text: 'Threads', icon: 'threads', auch: ['t'] },
+	{ pfad: 'termine', text: 'Termine', icon: 'termine', auch: [] },
 	{ pfad: 'mehr', text: 'Mehr', icon: 'mehr', auch: ['profil', 'meine-jungfischer'] },
 ];
 
@@ -42,6 +45,7 @@ const EINTRAEGE: Eintrag[] = [
 	selector: 'jf-mitglieder-huelle',
 	imports: [IconComponent, KarteComponent, NichtGefundenComponent, RouterLink, RouterOutlet, VereinsLogoComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
+	providers: [ThreadUebersicht],
 	template: `
 		@if (kontext.ladefehler()) {
 			<main>
@@ -73,6 +77,9 @@ const EINTRAEGE: Eintrag[] = [
 					>
 						<jf-icon [name]="e.icon" />
 						<span>{{ e.text }}</span>
+						@if (e.pfad === 'threads' && uebersicht.punkt()) {
+							<span class="punkt" role="img" aria-label="neu"></span>
+						}
 					</a>
 				}
 			</nav>
@@ -112,7 +119,7 @@ const EINTRAEGE: Eintrag[] = [
 			right: 0;
 			bottom: 0;
 			display: grid;
-			grid-template-columns: repeat(2, 1fr);
+			grid-template-columns: repeat(4, 1fr);
 			max-width: 480px;
 			margin: 0 auto;
 			padding-bottom: var(--sicher-unten);
@@ -149,6 +156,7 @@ export class MitgliederHuelle {
 	protected readonly kontext = inject(VereinKontext);
 	private readonly router = inject(Router);
 	protected readonly eintraege = EINTRAEGE;
+	protected readonly uebersicht = inject(ThreadUebersicht);
 
 	/**
 	 * Kommt aus dem Pfad (withComponentInputBinding). Verworfen: kontext.slug(), das
@@ -156,6 +164,19 @@ export class MitgliederHuelle {
 	 * Links auf die Plattform statt auf den Verein.
 	 */
 	readonly slug = input.required<string>();
+
+	constructor() {
+		// Die Ressource haengt am Slug; ohne ihn (vor dem ersten Bau) fragt sie nichts.
+		effect(() => this.uebersicht.slug.set(this.slug()));
+		// Lesen und Antworten aendern "neu"; nach jeder Navigation neu zu fragen ist einfacher als
+		// jede Seite zu bitten, den Punkt nachzuziehen (verworfen: Rueckmeldung der Seiten an die Huelle).
+		this.router.events
+			.pipe(
+				filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+				takeUntilDestroyed(),
+			)
+			.subscribe(() => this.uebersicht.neuLaden());
+	}
 
 	private readonly url = toSignal(
 		this.router.events.pipe(

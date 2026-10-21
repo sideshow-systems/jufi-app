@@ -1,14 +1,39 @@
-import { provideHttpClient, withFetch } from '@angular/common/http';
+import {
+	HttpResponse,
+	type HttpInterceptorFn,
+	provideHttpClient,
+	withFetch,
+	withInterceptors,
+} from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import type { EnvironmentProviders, Provider } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
+import { of } from 'rxjs';
 import { routerFeatures, routes } from '../app.routes';
 
+/**
+ * Die Huelle fragt die Thread-Liste fuer den Punkt an der Leiste, auf jeder Seite des Vereins. Diese
+ * Abfrage beantwortet der Anbieter selbst mit einer leeren Liste: Sonst muesste jeder Test jeder
+ * Seite sie quittieren, und die offene Anfrage hielte whenStable an. Verworfen: sie in jedem Test
+ * einzeln beantworten, das waeren neun Specs mit demselben Handgriff ohne Aussage. Wer den Punkt
+ * pruefen will (mitglieder-huelle.spec.ts), schaltet das mit eigeneThreadListe ab.
+ */
+const leereThreadListe: HttpInterceptorFn = (anfrage, weiter) =>
+	anfrage.method === 'GET' && /^\/[^/]+\/api\/v1\/threads$/.test(anfrage.url)
+		? of(new HttpResponse({ status: 200, body: { threads: [], archiv: 0 } }))
+		: weiter(anfrage);
+
 /** Gemeinsame Bereitstellung der Admin-Tests: echte Routen, gespielte HTTP-Antworten. */
-export function adminTestAnbieter(): Array<Provider | EnvironmentProviders> {
-	return [provideRouter(routes, ...routerFeatures), provideHttpClient(withFetch()), provideHttpClientTesting()];
+export function adminTestAnbieter(
+	optionen: { eigeneThreadListe?: boolean } = {},
+): Array<Provider | EnvironmentProviders> {
+	return [
+		provideRouter(routes, ...routerFeatures),
+		provideHttpClient(withFetch(), withInterceptors(optionen.eigeneThreadListe ? [] : [leereThreadListe])),
+		provideHttpClientTesting(),
+	];
 }
 
 /** Tippt in ein Feld, wie es eine Person taete: Wert setzen, input-Ereignis ausloesen. */
