@@ -13,3 +13,4 @@ export * from './module/termin/kalender.js';
 export * from './module/termin/monat.js';
 export * from './module/umfrage/umfrage.js';
 export * from './threads/index.js';
+export * from './dateien/index.js';
