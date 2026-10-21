@@ -4,15 +4,16 @@ import {
 	expect,
 	type Locator,
 	type Page,
+	request,
 	test,
 	type WebSocket,
 } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { berlinerTag, MONATSNAMEN, tagPlus, threadSegment } from '@jufi/domain';
-import { passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
+import { BASIS_URL, passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
 import { leisteHatVierEintraege, punktUeberdecktTextNicht } from './messen';
-import { fuelleAustausch, personIdMitMail } from './threads';
+import { beendeFrist, fuelleAustausch, legeKindAn, personIdMitMail } from './threads';
 
 /**
  * Der Weg aus Spec 9 von Anfang bis Ende: Der Admin legt den Verein an, die Leitung
@@ -36,6 +37,7 @@ let kindLink = '';
 let bowling = '';
 let bowlingId = '';
 let austausch = '';
+let matsId = '';
 /** Der Tag des Bowling-Termins (der Editor legt ihn sieben Berliner Tage nach jetzt an); sein Monat ist der, in dem der Kalender Bowling zeigt. */
 let terminTag = '';
 
@@ -63,8 +65,12 @@ function hauptnavigation(seite: Page): Locator {
 }
 
 /** Ein Kontext mit der gespeicherten Sitzung der Rolle, wie ihn auch das Projekt layout benutzt. */
-async function ausSitzung(browser: Browser, rolle: string): Promise<{ kontext: BrowserContext; seite: Page }> {
-	const kontext = await browser.newContext({ storageState: join(ZUSTAND, `${rolle}.json`) });
+async function ausSitzung(
+	browser: Browser,
+	rolle: string,
+	optionen: Parameters<Browser['newContext']>[0] = {},
+): Promise<{ kontext: BrowserContext; seite: Page }> {
+	const kontext = await browser.newContext({ ...optionen, storageState: join(ZUSTAND, `${rolle}.json`) });
 	return { kontext, seite: await kontext.newPage() };
 }
 
@@ -360,6 +366,14 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		);
 	});
 
+	test('Mats kommt als zweites Kind der Mutter dazu', async () => {
+		// Direkt in der Datenbank: Mia entstand schon ueber das Formular, ein zweites Kind wiederholte nur
+		// diesen Weg. Geprueft wird, was mit zwei Kindern geschieht (Start, Antworten, Teilen, Fristende).
+		const maraId = await personIdMitMail(SLUG, MUTTER_MAIL);
+		matsId = await legeKindAn(SLUG, maraId, 'Mats', 'Muster');
+		expect(matsId).not.toBe('');
+	});
+
 	test('Mutter sieht Bowling auf Start, am Punkt der Leiste, in der Liste und im Kalender', async ({ browser }) => {
 		const { kontext, seite } = await ausSitzung(browser, 'mutter');
 		// Handymass: Die Leiste und der Punkt sind dafuer gebaut, und gemessen wird an dem, was da ist.
@@ -376,7 +390,11 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		// Die Zeile ist die offene Umfrage fuer Mia (mit ihrem Namen davor), nicht irgendein Text mit Bowling.
 		const bereich = (titel: string) =>
 			seite.locator('jf-abschnitt').filter({ has: seite.getByRole('heading', { name: titel, exact: true }) });
-		await expect(bereich('Braucht deine Antwort').getByRole('link', { name: /Bowling noch offen/ })).toBeVisible();
+		// Je Kind eine Zeile, mit dem Vornamen davor; ohne ihn liessen sich die beiden nicht unterscheiden.
+		const brauchtAntwort = bereich('Braucht deine Antwort');
+		await expect(brauchtAntwort.getByRole('link', { name: /^Mia: .*Bowling noch offen/ })).toBeVisible();
+		await expect(brauchtAntwort.getByRole('link', { name: /^Mats: .*Bowling noch offen/ })).toBeVisible();
+		await expect(brauchtAntwort.getByRole('link', { name: /Bowling noch offen/ })).toHaveCount(2);
 		await expect(bereich('Neu seit deinem letzten Besuch').getByRole('link', { name: /Bowling/ })).toContainText(
 			'Neuer Thread',
 		);
@@ -430,6 +448,25 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await zeileMia.getByRole('button', { name: '✓ Dabei' }).click();
 		await expect(zeileMia).toContainText('von dir eingetragen');
 		await expect(zeileMia.getByRole('button', { name: '✓ Dabei' })).toHaveCount(0);
+
+		// Eine Mutter, zwei Kinder (Rahmen 13): Jede Zeile antwortet fuer sich, Mats mit etwas anderem als Mia.
+		const zeileMats = mutter.seite.locator('jf-umfrage-modul .zeile').filter({ hasText: 'Mats' });
+		await expect(zeileMats).toBeVisible();
+		await zeileMats.getByRole('button', { name: '✗ Abgesagt' }).click();
+		await expect(zeileMats).toContainText('von dir eingetragen');
+		await expect(zeileMia).toContainText('von dir eingetragen');
+
+		// Beide Zeilen sind beantwortet, also steht auf dem Start nichts mehr unter "Braucht deine Antwort".
+		await mutter.seite.goto(`/${SLUG}/`);
+		await expect(mutter.seite.getByRole('heading', { name: 'Hallo Mara' })).toBeVisible();
+		await expect(mutter.seite.getByRole('link', { name: /Bowling noch offen/ })).toHaveCount(0);
+		await expect(
+			mutter.seite.locator('jf-abschnitt').filter({
+				has: mutter.seite.getByRole('heading', { name: 'Braucht deine Antwort', exact: true }),
+			}),
+		).toHaveCount(0);
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
 
 		await mutter.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: 'Verlauf' }).click();
 		await mutter.seite.getByLabel('Nachricht schreiben').fill('Wo genau ist der Treffpunkt?');
@@ -668,6 +705,86 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await expect(zeileDu).toContainText('? Vielleicht');
 		await expect(zeileDu).toContainText('eingetragen von Lea L.');
 		await kind.kontext.close();
+	});
+
+	test('Leitung teilt den Stand', async ({ browser }) => {
+		// Zwischenablage nur mit Erlaubnis; 1280 x 800 ist ein feiner Zeiger, also kopiert die Seite, statt das Teilen-Blatt zu oeffnen.
+		const { kontext, seite } = await ausSitzung(browser, 'leitung', {
+			permissions: ['clipboard-read', 'clipboard-write'],
+			viewport: { width: 1280, height: 800 },
+		});
+		await seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		await seite.getByRole('button', { name: 'Stand teilen' }).click();
+		await expect(seite.getByRole('status').filter({ hasText: 'Kopiert' })).toBeVisible();
+		await expect(seite.getByLabel('Text zum Teilen')).toHaveCount(0);
+
+		const text = await seite.evaluate(() => navigator.clipboard.readText());
+		expect(text.startsWith('🎳 *Bowling* – Stand '), `Titelzeile:\n${text}`).toBe(true);
+		// Die Leitung sieht die Namen (3.4), also stehen sie im Text: Mia hat die Leitung nachgetragen, Mats die Mutter.
+		expect(text).toContain('🤔 Vielleicht (1): Mia M.');
+		expect(text).toContain('❌ Abgesagt (1): Mats M.');
+		expect(text.endsWith(`👉 Antworten: ${BASIS_URL}/${SLUG}/t/${bowling}`), `Linkzeile:\n${text}`).toBe(true);
+		await kontext.close();
+	});
+
+	test('Nach Fristende gibt es keinen Antwortknopf mehr, die Leitung traegt weiter nach', async ({ browser }) => {
+		await beendeFrist(SLUG, bowlingId, new Date());
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		const umfrage = mutter.seite.locator('jf-umfrage-modul');
+		// Erst die Zeilen: Ohne sie bestuende "kein Knopf" auch auf einer Seite, die noch laedt.
+		await expect(umfrage.locator('.zeile').filter({ hasText: 'Mia' })).toBeVisible();
+		await expect(umfrage.locator('.zeile').filter({ hasText: 'Mats' })).toBeVisible();
+		await expect(umfrage.locator('.frist')).toHaveText('Frist abgelaufen');
+		await expect(umfrage.locator('.zeile').getByRole('button')).toHaveCount(0);
+		await mutter.kontext.close();
+
+		const leitung = await ausSitzung(browser, 'leitung');
+		await leitung.seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}/antworten`);
+		await expect(leitung.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		const gruppe = (titel: string) =>
+			leitung.seite
+				.locator('section[data-gruppe]')
+				.filter({ has: leitung.seite.getByRole('heading', { name: titel }) });
+		// Bearbeiter tragen auch nach der Frist nach: Mia bleibt eintragbar ...
+		await expect(gruppe('? Vielleicht').getByRole('button', { name: 'Eintragen für Mia M.' })).toBeVisible();
+		// ... und fuer Mats geht es von "Abgesagt" auf "Dabei".
+		await gruppe('✗ Abgesagt').getByRole('button', { name: 'Eintragen für Mats M.' }).click();
+		await leitung.seite
+			.getByRole('group', { name: 'Antwort für Mats M.' })
+			.getByRole('button', { name: '✓ Dabei' })
+			.click();
+		await expect(gruppe('✓ Dabei')).toContainText('Mats M.');
+		await expect(gruppe('✓ Dabei')).toContainText('eingetragen von Lea L.');
+		await expect(gruppe('✗ Abgesagt').getByRole('heading')).toHaveText('✗ Abgesagt (0)');
+		await leitung.kontext.close();
+	});
+
+	test('Die Link-Vorschau nennt den Titel nur, wo die Familie ihn sehen darf', async () => {
+		// Ohne Sitzung: So holt ein Messenger die Seite. Der Kontext von Playwright traegt keine Cookies hinein.
+		const ohneSitzung = await request.newContext({ baseURL: BASIS_URL });
+		try {
+			const veroeffentlicht = await ohneSitzung.get(`/${SLUG}/t/${bowling}`);
+			expect(veroeffentlicht.status()).toBe(200);
+			expect(await veroeffentlicht.text()).toContain('property="og:title" content="🎳 Bowling"');
+
+			// Austausch (nur Jugendleiter) und eine unbekannte ID duerfen sich nicht unterscheiden, auch nicht um ein Byte.
+			const verborgen = await ohneSitzung.get(`/${SLUG}/t/${austausch}`);
+			const unbekannt = await ohneSitzung.get(`/${SLUG}/t/unbekannt`);
+			expect(verborgen.status()).toBe(unbekannt.status());
+			const verborgenBytes = await verborgen.body();
+			expect(verborgenBytes.equals(await unbekannt.body()), 'Austausch und unbekannte ID unterscheiden sich').toBe(
+				true,
+			);
+			const html = verborgenBytes.toString('utf8');
+			expect(html).toContain('property="og:title" content="Jungfischer Musterbach"');
+			expect(html).not.toContain('Jugendsprecher-Austausch');
+		} finally {
+			await ohneSitzung.dispose();
+		}
 	});
 
 	test('Leitung archiviert Bowling im Editor und stellt es auf der Thread-Seite wieder her', async ({ browser }) => {
