@@ -1,0 +1,429 @@
+# JuFi App — Teilprojekt 4: Weitere Module und Medien
+
+Stand: 21.10.2026 · Ergebnis des Brainstormings vom selben Tag · Status: zur Freigabe
+
+Teilprojekt 4 bringt die übrigen fünf Kernmodule **Helfer- und Mitbringliste, Fahrgemeinschaft, Kosten, Dateien und Fotos**, dazu die **Dateiablage** mit Upload-Verarbeitung, den **Medienbereich**, die **globalen Dokumente** und die **Foto-Einwilligung** (Rahmen-Spezifikation `2026-10-11-jufi-rahmen-design.md`, Abschnitt 11: „Alle acht Kernmodule“).
+
+Die Rahmen-Spezifikation, die Spezifikation zu Familie, Jugendsprecher und Kalender (`2026-10-12-jufi-familie-jugendsprecher-kalender-design.md`), die Fundament-Spezifikation (`2026-10-12-jufi-tp2-fundament-design.md`) und die Thread-Kern-Spezifikation (`2026-10-20-jufi-tp3-thread-kern-design.md`) gelten weiter. Diese Datei legt fest, was sie offen lassen, und hält die Entscheidungen mit ihren verworfenen Alternativen fest. Wo sie abweicht, steht das in Abschnitt 14; die Rahmen-Spezifikation ist entsprechend nachgezogen.
+
+Kürzel: **Rahmen**, **FAM**, **TP2**, **TP3** für die genannten Spezifikationen, **Entwurf** = `apps/entwurf` (Wegwerfcode, Vorlage nur für Fachregeln).
+
+---
+
+## 1. Ausgangslage und Ziel
+
+### 1.1 Ergebnis: das Zeltlager-Szenario
+
+Es ist zugleich der Ende-zu-Ende-Test (13.3). Personen wie in TP3 1.1.
+
+1. **Thomas** (Leitung) legt den Thread „⛺ Zeltlager“ an: „Alle · Jungfischer + Familie“, Modus „Aushang + Kommentare“. Module: Termin Fr–So, Teilnahme-Umfrage, Kosten 45 € (für Max per Ausnahme 35 €), Helferliste mit „Kuchen 0/4“ und „Zeltaufbau Fr 16 Uhr 0/3“ (pro Erwachsenem), Fahrgemeinschaft (hin und zurück), Dateien (Packliste.pdf, Anmeldebogen.pdf), Fotos mit „Alle Leser laden hoch“. Er veröffentlicht.
+2. **Sandra** sagt für Lena und Max zu. „Braucht deine Antwort“ zeigt „Lena: Zeltlager 45 € offen“ und „Max: Zeltlager 35 € offen“.
+3. Sandra trägt sich bei „Kuchen“ mit der Notiz „Marmorkuchen“ ein; die Position zeigt 1/4.
+4. Sandra bietet für die Hinfahrt ein Auto an (3 Plätze, Vereinsheim, 15:30) und setzt Lena und Max hinein. „Braucht noch Mitfahrt (hin)“ zeigt Mia. **Thomas** setzt Mia in Sandras Auto; Sandra sieht es ohne Neuladen.
+5. Sandra kopiert den Verwendungszweck und tippt für beide Kinder „Habe bezahlt“ (gemeldet). Thomas bestätigt Lena (bezahlt).
+6. Sandra öffnet die Packliste.
+7. Thomas teilt den Stand; der Text enthält die Fahrerzeilen und „💶 45 € pro Kind“.
+8. Nach dem Lager lädt Sandra drei Fotos hoch. Darüber steht „Von Tim S. dürfen keine Fotos gezeigt werden“. Die Fotos kommen verkleinert und ohne GPS-Daten an; Lena sieht sie ohne Neuladen; unter **Medien** erscheinen sie beim Thread.
+9. Thomas löscht ein Foto; Sandra speichert eines.
+10. Thomas lädt unter Verwaltung › Dokumente die „Jugendfischereiordnung.pdf“ in die Kategorie „Ordnungen“; Sandra findet sie unter Medien › Dokumente.
+
+### 1.2 Echte und erfundene Daten
+
+Wie TP3 1.2. Die Demo erzeugt ihre Fotos als Bilder aus Formen und Farben; es werden **nie echte Fotos** in Demo, Tests oder Browser-Prüfungen verwendet.
+
+### 1.3 Ansatz
+
+Wie TP3 1.3: Regeln als reine Funktionen in `libs/domain` mit `jetzt: Date`, testgetrieben; der Server entscheidet im Speicher nach `ladeUmfeld`, die Oberfläche blendet nur zusätzlich aus. Der Entwurf ist Vorlage für Fachregeln und Abläufe (Helferliste, Fahrgemeinschaft, Kosten, Medien, Dokumente), seine Bauteile werden neu gebaut.
+
+Neue Module folgen dem Muster von TP3 2.2: Kopfzeile `ThreadModul` mit erweitertem `ModulTyp`, je Typ eine 1:1-Tabelle, Eintragungen in eigenen Tabellen mit Datenbank-Regeln. Eintragungen laufen über eigene Routen nach dem Muster der Umfrage-Antwort (TP3 4.2), nicht über das Ersetzen des Threads.
+
+### 1.4 Etappen
+
+Jede Etappe ist für sich lauffähig, bekommt einen eigenen Plan und wird vom Eigentümer lokal abgenommen.
+
+| #   | Etappe                          | Inhalt                                                                                                                                                                          | Abschnitte  |
+| --- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 1   | Dateien-Grundlage und Dokumente | Speicher-Schnittstelle, Volume, Upload als Strom, Fotoverarbeitung, Ausliefern, Kontingent, Löschliste und Aufräumer, Sicherung des Volumes, globale Dokumente, Leiste „Medien“ | 2, 3, 9, 12 |
+| 2   | Dateien, Fotos, Einwilligung    | Module Dateien und Fotos, Foto-Einwilligung, Medienbereich „Fotos & Dateien“                                                                                                    | 3.2, 4      |
+| 3   | Helfer- und Mitbringliste       | Modul, Eintragen mit Notiz, Antworten-Übersicht                                                                                                                                 | 5, 8        |
+| 4   | Fahrgemeinschaft                | Autos, Mitfahrten, „Braucht noch Mitfahrt“, Umsetzen durch die Leitung                                                                                                          | 6, 8        |
+| 5   | Kosten                          | Betrag und Ausnahmen, offen → gemeldet → bezahlt, Verwendungszweck, „Braucht deine Antwort“                                                                                     | 7, 8        |
+| 6   | Teilen und Abschluss            | Teilen-Zeilen, Datenauszug, Entfernen, Datenschutzerklärung, Demo-Zeltlager, Ende-zu-Ende-Test, Doku                                                                            | 11, 12, 13  |
+
+Die Dateien-Grundlage kommt zuerst, weil dort das meiste Risiko liegt (Speicher im 256-MiB-Container, Volume und Sicherung brauchen einen Deploy). Jede neue Schreibroute pflegt ab ihrer Etappe den Änderungszähler und meldet an `deps.bus`.
+
+### 1.5 Nicht in Teilprojekt 4
+
+- **Teilprojekt 5**: Dokumente offline, Push (etwa bei zurückgezogenem Auto), Erinnerungen an offene Kosten.
+- Videos, ZIP-Download ganzer Galerien, Kommentare oder Reaktionen an Fotos, Gesichtserkennung.
+- Anzahlungen, Teilbeträge, Erstattungen, Kassen-Export (Rahmen 6.4.2).
+- Ersetzen einer Datei in einem Datei-Modul (löschen und neu hochladen); Dokumente lassen sich ersetzen (3.1).
+- Object Storage (S3); die Schnittstelle (2.2) lässt ihn später zu.
+
+---
+
+## 2. Dateiablage
+
+### 2.1 Datenmodell
+
+`Datei (id, vereinId, art, modulId?, dokumentId?, name, typ, groesse, breite?, hoehe?, sha256, vonId, hochgeladenAm)`:
+
+- `art`: `FOTO` oder `DATEI`.
+- Genau einer der Verweise `modulId` (Foto- oder Datei-Modul) und `dokumentId` ist gesetzt (CHECK).
+- `name`: Originalname bei Dateien (bereinigt, 1–120 Zeichen); bei Fotos leer.
+- `typ`: MIME-Typ nach Erkennung am Inhalt (2.3), nicht nach Angabe des Clients.
+- `groesse`: Bytes aller gespeicherten Fassungen (bei Fotos samt Vorschaubild); Grundlage des Kontingents (2.6).
+- `sha256`: beim Schreiben berechnet; die Restore-Probe vergleicht damit (12.4).
+- `vonId`: wer hochgeladen hat; Fremdschlüssel `NoAction` wie bei Antworten (TP3 2.3), angezeigt nach TP3 3.10.
+
+`DateiLoeschung (schluessel, geloeschtAm)`: die Löschliste (2.7). Plattformweit, ohne `vereinId`; sie trägt nur Speicherschlüssel.
+
+`Verein.speicherGrenze` (Bytes, Vorgabe 5 GiB).
+
+Die neuen Tabellen stehen in `VEREINS_MODELLE` (`libs/db`), außer `DateiLoeschung`, die nur der Aufräumer über den schlichten Client liest.
+
+### 2.2 Speicher
+
+Schnittstelle `DateiSpeicher` mit `schreibe(schluessel, quelle)`, `lies(schluessel)` (Strom), `loesche(schluessel)` und `liste()`. Version 1 ist ein Verzeichnis im Docker-Volume `jufi-dateien`, Pfad aus `DATEIEN_PFAD`. Schlüssel: `<vereinId>/<dateiId>` und `<vereinId>/<dateiId>.vorschau`; Temp-Dateien liegen unter `tmp/` im selben Volume, damit das Verschieben an den Zielort atomar ist.
+
+Verworfen: Bytes in Postgres wie beim Vereinslogo — bei 5 GB je Verein würde die Datenbank (384 MiB Speichergrenze) zum Dateiserver und der tägliche Dump wüchse auf Gigabytes, die restic schlecht dedupliziert. Verworfen: gleich Object Storage — eigenes Konto und Kosten schon im Testbetrieb, und ausgeliefert werden müsste trotzdem über die App (2.5).
+
+### 2.3 Hochladen
+
+Eine Datei je Anfrage, der Körper ist die Datei selbst (kein Multipart). Verworfen: Multipart mit mehreren Dateien — ein Fehler bei der zwölften Datei verwürfe die Anfrage, und Fortschritt und Wiederholung je Datei wären umständlicher. Der Logo-Upload (TP2) ist das Muster.
+
+Ablauf:
+
+1. **Vor dem Lesen des Körpers**: Sitzung, Recht und Sichtbarkeit (404), Rate-Limit (9.2), `Content-Length` vorhanden (sonst 411) und nicht über der Grenze (Foto 20 MB, Datei 25 MB; sonst 413 `GROESSE`), Kontingent mit `Content-Length` als Schätzung (sonst 413 `KONTINGENT`).
+2. Der Körper fließt als Strom in eine Temp-Datei; dabei zählt der Server mit und bricht über der Grenze mit 413 ab, falls die Angabe in `Content-Length` gelogen war, und berechnet `sha256`.
+3. **Typ am Inhalt** (`erkenneTyp(kopf, dateiname)` in `libs/domain`, rein):
+   - Fotos: JPEG, PNG, WebP (an den Magic Bytes).
+   - Dateien: PDF (`%PDF-`), JPEG, PNG; DOCX, XLSX, PPTX, ODT, ODS (ZIP-Signatur **und** passende Endung).
+   - Alles andere: 415 `TYP`. HEIC ebenfalls mit eigener Meldung („Bitte als JPEG senden“): Die vorgefertigten `sharp`-Binärdateien lesen HEIC nicht, und Safari am iPhone wandelt bei `accept="image/*"` in JPEG um; die Etappe prüft das an einem echten Gerät. SVG ist ausgeschlossen (Skript in Bildern).
+4. Fotos verarbeitet 2.4; Dateien bleiben, wie sie sind. Die fertigen Bytes werden **vor** dem Commit an ihren Zielort verschoben, damit keine Zeile je auf fehlende Bytes zeigt.
+5. In `mitAenderung` unter der Vereinssperre: Kontingent mit der echten Größe prüfen, Zeile anlegen, Änderung schreiben; nach dem Commit Meldung an `deps.bus`. Scheitert die Prüfung oder der Commit, sind die Bytes verwaist und fallen nach 2.7 weg.
+
+Der Dateiname kommt im Kopf `X-Dateiname` (Prozent-kodiertes UTF-8). Bereinigt werden Pfadtrenner, Steuerzeichen und Länge; die Endung bleibt.
+
+### 2.4 Fotoverarbeitung
+
+Mit `sharp`, aus der Temp-Datei, nicht aus einem Puffer:
+
+- Eingabe höchstens 50 Megapixel (`limitInputPixels`), sonst 413 `GROESSE`.
+- EXIF-Ausrichtung anwenden (`rotate()`), dann verkleinern auf **2560 px lange Seite** (nie vergrößern), JPEG Qualität 82; **Vorschaubild 480 px** lange Seite, JPEG Qualität 75. Transparenz (PNG, WebP) wird auf Weiß gelegt.
+- Neu kodiert ohne Metadaten: **EXIF und GPS fallen weg** (Rahmen 7.7).
+- **Das Original wird verworfen.** Verworfen: Original zusätzlich aufbewahren — 3–8 MB je Foto, die Sicherung wüchse entsprechend, und 2560 px reichen fürs Handy und für Abzüge bis etwa 20 × 30 cm.
+- **Immer nur eine Verarbeitung gleichzeitig** je Prozess (`sharp.concurrency(1)`, Cache aus, eigene Warteschlange). Bis zu 8 Fotos warten; darüber 503 `BESCHAEFTIGT`, der Client wiederholt nach kurzer Pause.
+
+**Abnahme von Etappe 1:** Ein 48-Megapixel-JPEG und ein 20-MB-PNG werden im gebauten Image unter `mem_limit: 256m` verarbeitet, ohne dass der Kernel die App beendet; der Spitzenverbrauch steht im Bericht. Reicht der Speicher nicht, wird das Limit angehoben, nicht die Fotogrenze gesenkt.
+
+### 2.5 Ausliefern
+
+`GET /dateien/:id` und `GET /dateien/:id/vorschau` (nur Fotos), nur mit Sitzung und nur, wenn die Person die Datei sehen darf: Modul in einem sichtbaren Thread (TP3 3.1; im Entwurf nur für Jugendleiter, TP3 3.6) oder Dokument (alle Mitglieder). Sonst 404 (Rahmen 8.3).
+
+Köpfe:
+
+- `Content-Type` aus `Datei.typ`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'` auf der Datei.
+- Fotos und PDF `inline`, alle anderen `attachment`; Dateiname über `filename*=UTF-8''…`. Mit `?herunterladen=1` immer `attachment` („Speichern“ am Rechner).
+- `Cache-Control: private, max-age=31536000, immutable`: Eine ID ändert nie ihren Inhalt (Ersetzen erzeugt eine neue Datei, 3.1).
+
+Die CSP der App bekommt `img-src 'self' blob:`, damit ausgewählte Fotos vor dem Hochladen als Vorschau erscheinen.
+
+### 2.6 Kontingent
+
+Verbrauch = Summe von `Datei.groesse` des Vereins (Abfrage, kein Zähler; verworfen: ein mitgeführter Zähler — er liefe bei jedem Fehler im Löschpfad auseinander). Bei vollem Kontingent lehnt der Server mit 413 `KONTINGENT` ab; die Meldung nennt Verbrauch und Grenze und wen man fragt.
+
+- Verwaltung › Einstellungen zeigt „1,2 von 5 GB belegt“, ab 90 % mit Hinweis.
+- Der Plattform-Admin sieht den Verbrauch je Verein (Rahmen 8.3) und ändert die Grenze. Später hängt sie am Tarif (Teilprojekt 7).
+
+### 2.7 Löschen und Aufräumen
+
+Das Löschen einer `Datei` (einzeln, mit ihrem Modul, Dokument oder Thread) entfernt in der Transaktion die Zeile und trägt ihre Schlüssel in `DateiLoeschung` ein. Die Datei ist damit sofort unerreichbar (2.5).
+
+Der vorhandene Aufräumer (`threads/aufraeumen.ts`, beim Start und alle 24 h) bekommt zwei Schritte:
+
+1. Schlüssel aus `DateiLoeschung`, die **mindestens 24 Stunden** alt sind: Bytes löschen, Zeile löschen.
+2. Bytes im Speicher ohne `Datei`-Zeile und ohne Eintrag in der Löschliste, deren Änderungszeit älter als 24 Stunden ist (abgebrochene Uploads): löschen; Temp-Dateien älter als 1 Stunde: löschen. Eine `Datei`-Zeile ohne Bytes wird nur als Fehler protokolliert, nie gelöscht.
+
+Der Abstand von 24 Stunden sorgt dafür, dass zwischen Datenbank-Dump und Sicherung des Volumes (12.4) keine Bytes verschwinden, deren Zeile im Dump noch steht. Verworfen: Bytes sofort nach dem Commit löschen — eine Wiederherstellung könnte dann Zeilen ohne Bytes enthalten. Verworfen: Löschen zu fester Nachtzeit — der Aufräumer läuft bewusst im Takt ab Prozessstart (`aufraeumen.ts`), und der Abstand hängt so nicht an der Uhrzeit der Sicherung.
+
+---
+
+## 3. Globale Dokumente und Medienbereich
+
+### 3.1 Globale Dokumente
+
+`DokumentKategorie (id, vereinId, name, position)`, Name 1–40 Zeichen, je Verein eindeutig. Neue Vereine (und per Migration die bestehenden) bekommen „Ordnungen“, „Merkblätter“, „Formulare“.
+
+`Dokument (id, vereinId, kategorieId, titel, position)` mit genau einer `Datei` (`art = DATEI`), Titel 1–120 Zeichen, vorbelegt mit dem Dateinamen ohne Endung.
+
+Rechte: Pflegen nur mit „Globale Dokumente verwalten“ (`DOKUMENTE`, Rahmen 4.2): Kategorien anlegen, umbenennen, sortieren, löschen (nur leere); Dokumente hochladen, umbenennen, verschieben, sortieren, **ersetzen** (neue `Datei`, die alte geht in die Löschliste) und löschen. Sehen: alle Mitglieder. Leere Kategorien sehen nur Pfleger.
+
+Die Kategorien pflegt der Verein (Rahmen 15). Verworfen: feste Kategorien — jeder Verein ordnet anders („Für Eltern“, „Gewässer“). Verworfen: freies Kategorie-Feld je Dokument — Tippfehler ergäben zwei Kategorien.
+
+Dokumente haben **keine Live-Aktualisierung**: Sie ändern sich selten und werden beim Öffnen geladen. Sie schreiben keine `Aenderung`.
+
+### 3.2 Medienbereich
+
+Untere Leiste: **Start · Threads · Termine · Medien · Mehr**. „Medien“ hat zwei Reiter:
+
+- **Fotos & Dateien**: je sichtbarem, veröffentlichtem Thread mit mindestens einem Foto oder einer Datei ein Block, sortiert nach letzter Aktivität; ein Block zeigt bis zu 6 Vorschaubilder, die Zahl aller Fotos, die Dateien (höchstens 10, dann „und n weitere“) und „Zum Thread“. Archivierte Threads erscheinen mit. Keine eigenen Daten (Rahmen 6.5); `GET /medien` rechnet aus den Modulen.
+- **Dokumente**: Kategorien in ihrer Reihenfolge, darin die Dokumente mit Titel, Typ und Größe; Antippen öffnet (PDF) oder lädt herunter.
+
+---
+
+## 4. Module Dateien und Fotos
+
+### 4.1 Datei-Modul
+
+`DateienModul (id)` ohne eigene Felder; die Dateien hängen über `Datei.modulId` daran, sortiert nach `hochgeladenAm`. Höchstens 20 je Modul.
+
+Hochladen, Umbenennen und Löschen: wer den Thread bearbeiten darf (TP3 3.5). Leser sehen Name, Typ und Größe.
+
+### 4.2 Foto-Modul
+
+`FotosModul (id, hochladen)` mit `hochladen` `JUGENDLEITER` (Vorgabe) oder `ALLE`. Höchstens 500 Fotos je Modul.
+
+- **Hochladen**: wer den Thread bearbeiten darf; bei `ALLE` außerdem jeder Leser, solange der Thread nicht im Archiv ist (wie Schreiben im Verlauf, TP3 3.5). Die Vorgabe „Nur Jugendleiter“ ist die vorsichtige; wer Fotos von allen will, stellt es bewusst um. Verworfen: feste Regel für alle Foto-Module (alle Leser, nur Erwachsene oder nur Leitung) — je nach Anlass passt etwas anderes.
+- **Löschen**: eigene Fotos immer, alle Fotos mit Bearbeitungsrecht.
+- **Ansicht**: Raster mit drei Spalten aus Vorschaubildern; Großansicht mit Wischen, Name des Hochladenden (TP3 3.10), „Speichern“ (am Handy Web Share mit der Datei, sonst Download) und „Löschen“, wo erlaubt.
+- **Mehrfachauswahl**: Jedes Foto wird einzeln hochgeladen, mit eigenem Fortschritt und eigener Wiederholung.
+
+### 4.3 Hochladen ist kein Teil des Entwurfs
+
+Fotos und Dateien wirken sofort, auch in einem Thread im Entwurf. Im Editor erscheint der Upload erst, wenn das Modul gespeichert ist („Erst speichern, dann hochladen“). Verworfen: Uploads als Teil des Entwurfs — der Editor ersetzt den Thread als Ganzes (TP3 4.2), Bytes passen nicht in diesen Weg.
+
+Ein Modul oder Thread mit Fotos oder Dateien lässt sich löschen; die Bestätigung nennt die Zahl („löscht 23 Fotos von 5 Personen“). Verworfen: Sperre wie bei Antworten (TP3 3.6) — die Leitung darf ohnehin jedes Foto einzeln löschen, eine Sperre brächte nur Klickarbeit.
+
+Hochladen und Löschen schreiben eine Änderung der Art `MODUL` (Live, „Neu“), aber **keinen Systemeintrag** im Verlauf; nach einem Zeltlager stünde er sonst voll davon.
+
+### 4.4 Foto-Einwilligung
+
+Zweite Art `FOTOS` im vorhandenen Modell `Einwilligung` (TP2: Zeitpunkt, `erteiltVon`, Widerruf, `textVersion`). Ohne Eintrag gilt **keine Einwilligung**.
+
+- **Pflege** unter „Meine Jungfischer“ durch alle, die nach `darfEinwilligen` einwilligen dürfen; volljährige Jungfischer pflegen sie selbst im Profil. Die Verwaltung zeigt sie bei der Person (Rahmen 6.6).
+- **Hinweis im Foto-Modul** für alle, die dort hochladen dürfen: „Von Tim S. und Mats K. dürfen keine Fotos gezeigt werden“. Gemeint sind die Jungfischer der Zielgruppe ohne gültige Foto-Einwilligung, bei einer Teilnahme-Umfrage nur die mit „Dabei“ (TP3 3.12); Namen nach TP3 3.10. Ohne solche Kinder entfällt der Hinweis.
+- Kein Filter, keine Sperre (Rahmen 6.6). Der Hinweis zeigt Hochladenden außerhalb der Leitung, welche Kinder keine Einwilligung haben; das ist der Zweck und so entschieden.
+
+Regel: `ohneFotoEinwilligung(thread, umfeld, jetzt)` in `libs/domain`.
+
+---
+
+## 5. Helfer- und Mitbringliste
+
+### 5.1 Datenmodell
+
+- `HelferModul (id, einheit, frist?)`: `einheit` wie bei Umfragen (`ERWACHSENER` als Vorgabe, `PERSON`, `JUNGFISCHER`; TP3 3.2), `frist` wie bei Umfragen (Zeitpunkt, Server-Uhr).
+- `HelferPosition (id, vereinId, modulId, text, anzahl, position, schluessel)`: Text 1–80 Zeichen, Anzahl 1–99, Schlüssel stabil und vom Server vergeben wie bei Umfrage-Optionen (TP3 2.2). 1–30 Positionen je Modul, Texte verschieden.
+- `HelferEintrag (id, vereinId, positionId, fuerId, vonId, notiz?, eingetragenAm, clientId)`, eindeutig je `(positionId, fuerId)`; Notiz höchstens 80 Zeichen. Fremdschlüssel zur Position `NoAction` (TP3 2.3).
+
+Eine Person kann sich für mehrere Positionen eintragen, je Position einmal. Verworfen: eine Anzahl je Eintrag („2 Kuchen“) — selten, und die Notiz deckt es ab.
+
+### 5.2 Regeln
+
+- **Eintragen** (`PUT`, Upsert mit Notiz) und **Austragen** (`DELETE`): wer für `fuerId` antworten darf (TP3 3.3), vor der Frist und nicht im Archiv; danach nur, wer den Thread bearbeiten darf (Nachtragen, „eingetragen von“).
+- **Platz**: Der Server zählt die Einträge unter der Vereinssperre (`mitAenderung`); ist die Position voll, 409 `VOLL`. Eine Notiz ändern belegt keinen neuen Platz.
+- **Anzeige**: Alle Leser sehen je Position Füllstand („Kuchen 1/4“) und die Eingetragenen mit Notiz („Sandra M. (Mutter von Lena und Max) – Marmorkuchen“). Eine Ergebnis-Einstellung wie bei Umfragen gibt es nicht; wer sich einträgt, will gesehen werden.
+- **Editor**: Eine Anzahl unter der Zahl der Eingetragenen lehnt er ab; eine Position mit Einträgen lässt sich nicht löschen; umbenennen und umsortieren geht (Schlüssel bleibt).
+- Die Antworten-Übersicht der Verwaltung zeigt die Helferliste mit Nachtragen.
+
+---
+
+## 6. Fahrgemeinschaft
+
+### 6.1 Datenmodell
+
+- `FahrtModul (id, threadId, hin, rueck)`: welche Richtungen es gibt (mindestens eine, Vorgabe beide). Höchstens eine Fahrgemeinschaft je Thread (Partial-Unique-Index wie bei der Teilnahme-Umfrage).
+- `Auto (id, vereinId, modulId, fahrerId, richtung, plaetze, abfahrtTag?, abfahrtZeit?, ort?, notiz?, angelegtAm)`: `richtung` `HIN` oder `RUECK`; `plaetze` 1–8 („Plätze für Kinder“, eigene Kinder mitgezählt); Tag als `@db.Date`, Zeit als `HH:MM` (Wandzeit wie TP3 2.2); Ort und Notiz höchstens 200 Zeichen. Eindeutig je `(modulId, fahrerId, richtung)`; höchstens 30 Autos je Richtung.
+- `Mitfahrt (id, vereinId, modulId, richtung, kindId, autoId?, vonId, eingetragenAm, clientId)`, eindeutig je `(modulId, richtung, kindId)`. **`autoId = null` heißt „kommt selbst“.** Ein zusammengesetzter Fremdschlüssel sichert, dass Auto, Modul und Richtung zusammenpassen.
+
+Ohne „kommt selbst“ stünde jedes Kind, das die Familie selbst bringt, für immer unter „Braucht noch Mitfahrt“.
+
+### 6.2 Regeln
+
+- **Wer betrachtet wird**: die Jungfischer der Zielgruppe, bei einer Teilnahme-Umfrage nur die mit „Dabei“ (Rahmen 6.4.1).
+- **Auto anbieten**: Erwachsene, die den Thread sehen; das Formular belegt den Tag mit Start (hin) bzw. Ende (rück) des ersten Termins vor. Der Fahrer ändert sein Auto; die Plätze nicht unter die Zahl der Mitfahrer.
+- **Kind einsetzen** (in ein Auto oder auf „kommt selbst“): Bezugspersonen, die für das Kind antworten dürfen (TP3 3.3); Jungfischer mit Zugang sich selbst. Eingesetzt werden nur betrachtete Kinder; ein „Vielleicht“ reserviert keinen Platz (409). Freie Plätze prüft der Server unter der Vereinssperre (409 `VOLL`).
+- **Kind herausnehmen**: wer es einsetzen darf, der Fahrer aus seinem eigenen Auto, die Leitung.
+- **Leitung** (Thread bearbeiten): verschiebt jedes Kind, ändert Plätze und löscht Autos.
+- **Auto zurückziehen** (Fahrer oder Leitung): erlaubt, auch mit Kindern darin; deren Mitfahrten werden gelöscht, sie stehen wieder unter „Braucht noch Mitfahrt“. Der Verlauf bekommt den Systemeintrag `AUTO_ZURUECKGEZOGEN`: „Auto von Sandra M. (Hinfahrt) zurückgezogen – Lena M. und Max M. brauchen wieder eine Mitfahrt.“ Ab Teilprojekt 5 folgt ein Push.
+- **Abgesagt, aber im Auto**: Ein Kind, das nicht mehr betrachtet wird (Absage, Zielgruppe geändert), bleibt im Auto und belegt den Platz; Karte und Leitung zeigen es mit „nicht mehr dabei“. Verworfen: automatisch herausnehmen — eine versehentliche Absage kostete den Platz.
+- **Archiv**: nur die Leitung ändert noch.
+- Die Fahrgemeinschaft zählt **nicht** zu „Braucht deine Antwort“. Verworfen: jedes Kind ohne Mitfahrt als offene Aufgabe — Familien, die selbst fahren, müssten erst „kommt selbst“ tippen, damit die Meldung verschwindet.
+
+### 6.3 Anzeige
+
+Umschalter Hin/Rück (nur bei beiden Richtungen). Je Auto eine Karte: Fahrer (TP3 3.10), Abfahrt, Ort, Notiz, „2 frei“, Mitfahrer („Lena M., Max M.“). Darunter „Braucht noch Mitfahrt“ und „Kommt selbst“. Alle Leser sehen alles davon. **Keine Telefonnummern**; abgestimmt wird im Verlauf (Rahmen 6.4.1).
+
+Kinder erscheinen als „Lena M.“ nach TP3 3.10, nicht nur mit Vornamen wie in Rahmen 6.4.1: Zwei Lenas wären sonst nicht zu unterscheiden.
+
+Regeln: `fahrtAnsicht(modul, umfeld, teilnahme, betrachter, jetzt)` und `brauchtMitfahrt(…)` in `libs/domain`.
+
+---
+
+## 7. Kosten
+
+### 7.1 Datenmodell
+
+- `KostenModul (id, threadId, betragCent, hinweis?, empfaenger?, iban?, paypal?)`: Betrag 0–100 000 Cent; Hinweis höchstens 500 Zeichen; Empfänger höchstens 100; IBAN mit Prüfziffer (`pruefeIban` in `libs/domain`), gespeichert ohne Leerzeichen; PayPal nur als `https://`-Link, höchstens 200 Zeichen. Höchstens ein Kosten-Modul je Thread (Partial-Unique-Index).
+- `KostenPosten (id, vereinId, modulId, kindId, betragCent?, status, gemeldetVonId?, gemeldetAm?, bestaetigtVonId?, bestaetigtAm?, clientId)`, eindeutig je `(modulId, kindId)`; `status` `OFFEN`, `GEMELDET`, `BEZAHLT`.
+
+Eine Zeile entsteht erst, wenn etwas vom Normalfall abweicht; ohne Zeile gilt „offen zum Modulbetrag“. **Ein Ausnahmebetrag von 0 heißt „befreit“.**
+
+Der Editor belegt Empfänger, IBAN und PayPal mit denen des zuletzt angelegten Kosten-Moduls im Verein vor. Verworfen: Bankdaten als Vereinseinstellung — je Veranstaltung kann das Konto ein anderes sein (Vereinskasse, Jugendkonto); die Vorbelegung spart das Abtippen trotzdem.
+
+### 7.2 Regeln
+
+- **Nur in Familien-Threads**: Ein Kosten-Modul ist nur bei Rollenfilter „Jungfischer + Familie“ oder „Nur Familie“ erlaubt; sonst Fehler im Editor (auch beim späteren Ändern der Zielgruppe). In den anderen Filtern gibt es keine Familie, die zahlt.
+- **Zahlungspflichtig**: bei einer Teilnahme-Umfrage die Kinder mit „Dabei“, sonst alle Jungfischer der Zielgruppe (Rahmen 6.4.2); Befreite nie.
+- **„Habe bezahlt“** (offen → gemeldet) und Zurücknehmen (gemeldet → offen): Bezugspersonen, die für das Kind antworten dürfen; nicht nach „bezahlt“. Jungfischer melden nicht selbst.
+- **Leitung** (Thread bearbeiten): bestätigen (→ bezahlt), Status direkt setzen (Barzahlung), zurücksetzen, Ausnahmebetrag setzen oder entfernen.
+- **Liste aller Kinder**: wer den Thread bearbeiten darf oder „Antworten im Detail“ hat (Rahmen 6.4.2). Bezugspersonen sehen nur ihre eigenen Kinder; andere Leser sehen nur Betrag und Bezahlhinweise.
+- **Nicht mehr zahlungspflichtig, aber bezahlt** (Absage nach Zahlung): Die Leitung sieht „bezahlt, nicht mehr dabei“; erstattet wird außerhalb der App.
+- **Betrag ändern** mit gemeldeten oder bezahlten Posten: Der Editor warnt; bestehende Stände bleiben.
+- **„Braucht deine Antwort“**: „Lena: Zeltlager 45 € offen“, solange das Kind zahlungspflichtig ist, der Betrag über 0 liegt und der Status „offen“ ist (Rahmen 5.2). Der Eintrag gilt der Bezugsperson, nicht dem Kind.
+
+### 7.3 Anzeige
+
+- **Familie**: je eigenem Kind Betrag, Status-Pille und „Habe bezahlt“; Verwendungszweck mit Kopier-Knopf; Empfänger und IBAN mit Kopier-Knopf; PayPal-Link; Hinweis.
+- **Verwendungszweck** (`verwendungszweck(thread, termin, kind)`): Thread-Titel **ohne Emojis**, Datum des ersten Termins als `TT.MM.` (ohne Termin entfällt es), „–“, Vor- und Nachname des Kindes; höchstens 140 Zeichen (SEPA), gekürzt wird der Titel. Beispiel „Zeltlager 23.10. – Lena Müller“. Voller Nachname, weil die Bank ihn braucht; er erscheint nur bei den eigenen Kindern.
+- **Leitung**: „12/18 bezahlt · 3 gemeldet“, aufklappbar mit Liste, Bestätigen, Ausnahmebetrag; die Antworten-Übersicht der Verwaltung zeigt dasselbe.
+
+---
+
+## 8. Gemeinsame Regeln der Antwort-Module
+
+Helfer-Einträge, Autos, Mitfahrten und Kostenposten heißen hier **Eintragungen**.
+
+- **Löschen**: Eintragungen zählen wie Antworten (TP3 3.6, 3.14): Ein Modul oder Thread mit Eintragungen lässt sich nicht löschen; die Fremdschlüssel sind `NoAction`. Ausnahme: Autos lassen sich zurückziehen (6.2).
+- **Entwurf**: keine Eintragungen (TP3 3.6).
+- **Archiv**: nur noch Leitung (TP3 3.7).
+- **Wiederholbarkeit**: Jede Eintragungs-Route nimmt eine `clientId` (je Verein eindeutig) wie die Umfrage-Antwort (TP3 2.3).
+- **Schreibpfad** wie TP3 4.2: Form (400), Ort des Moduls, Sichtbarkeit und Recht (404), Wiederholung über `clientId`, Entwurf/Frist/Archiv (409/410), dann `mitAenderung` mit Neuprüfung unter der Sperre, nach dem Commit `deps.bus`, Antwort mit frischer Ansicht des Moduls.
+- **Änderungsart**: Eintragungen schreiben `ANTWORT` mit `objektId` = Modul; Autos ebenso. Ansichten werden je Person neu berechnet; kein Zahlstand erreicht Fremde.
+- **„Neu“**: Eintragungen zählen wie Antworten (TP3 3.9).
+- **Gefragte und Antwortrecht** nutzen die vorhandene Logik aus `threads/antworten.ts` (`gefragte`, `darfAntworten`); sie wird dafür von `UmfrageDaten` gelöst und nimmt die Einheit als Parameter.
+
+---
+
+## 9. Server und API
+
+### 9.1 Routen
+
+Alle unter `/<slug>/api/v1`, mit `brauchtMitglied` und je einem Eintrag im Mandanten-Test (TP2 9). Wo eine Person etwas nicht sieht: 404.
+
+| Methode und Pfad                                             | Zweck                                                               |
+| ------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `POST /module/:modulId/fotos`                                | Foto hochladen (2.3, 4.2)                                           |
+| `POST /module/:modulId/dateien`                              | Datei hochladen (Kopf `X-Dateiname`)                                |
+| `PUT /dateien/:id`                                           | Datei umbenennen (Datei-Modul, Leitung)                             |
+| `DELETE /dateien/:id`                                        | Foto oder Datei löschen (2.7)                                       |
+| `GET /dateien/:id`, `GET /dateien/:id/vorschau`              | ausliefern (2.5)                                                    |
+| `GET /medien`                                                | Medienbereich (3.2)                                                 |
+| `GET /dokumente`                                             | Kategorien und Dokumente                                            |
+| `POST /dokumente?kategorie=`                                 | Dokument hochladen (Körper ist die Datei)                           |
+| `PUT /dokumente/:id`, `PUT /dokumente/:id/datei`             | Titel, Kategorie, Position ändern; Datei ersetzen                   |
+| `DELETE /dokumente/:id`                                      |                                                                     |
+| `POST /dokument-kategorien`, `PUT …/:id`, `DELETE …/:id`     | Kategorien pflegen; `PUT /dokument-kategorien/reihenfolge` sortiert |
+| `PUT /helfer/:positionId/eintraege/:fuerId`, `DELETE` ebenso | eintragen (mit Notiz), austragen                                    |
+| `POST /fahrten/:modulId/autos`, `PUT /autos/:id`, `DELETE`   | Auto anbieten, ändern, zurückziehen                                 |
+| `PUT /fahrten/:modulId/:richtung/:kindId`, `DELETE` ebenso   | Kind einsetzen (`{ autoId \| null, clientId }`), herausnehmen       |
+| `PUT /kosten/:modulId/:kindId/meldung`                       | Familie: `{ gemeldet: boolean, clientId }`                          |
+| `PUT /kosten/:modulId/:kindId`                               | Leitung: `{ status?, betragCent? \| null }`                         |
+| vorhandene Einwilligungs-Route der Jungfischer               | nimmt die Art (`DSGVO_ART8`, `FOTOS`)                               |
+| Plattform-Admin                                              | Verbrauch je Verein in der Vereinsliste, Speichergrenze ändern      |
+
+Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, Kostenbetrag und Bankdaten) laufen weiter über `POST /threads` und `PUT /threads/:id` (TP3 4.1); `ModulTyp` bekommt `HELFER`, `FAHRT`, `KOSTEN`, `DATEIEN`, `FOTOS`.
+
+### 9.2 Grenzen
+
+- Uploads: 60 je 10 Minuten je Person (Fensterzähler wie TP3 4.3); Foto 20 MB, Datei 25 MB; Kontingent 2.6.
+- Eintragungen: wie Antworten, 60 je Minute je Person.
+- Der globale JSON-Parser (100 KB) bleibt; Upload-Routen lesen den Körper selbst als Strom.
+
+### 9.3 Fehler
+
+Wie TP3 4.4, zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` (Warteschlange voll); 409 `VOLL` (Helfer-Position, Auto). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
+
+---
+
+## 10. Oberflächen
+
+- **Leiste**: fünf Einträge (3.2); gemessen bei 375 px ohne Umbruch und ohne Überlauf.
+- **Thread-Seite**: je Modultyp eine Komponente wie in TP3 6.3; Foto-Großansicht als Overlay (Escape, Wischen, Pfeiltasten).
+- **Editor**: neue Modultypen in „Modul hinzufügen“; Felder je Typ; Upload in gespeicherten Datei- und Foto-Modulen (4.3); Vorschau zeigt die neuen Module. `editor.ts` und `modul-felder.ts` sind schon groß (TP3-Rückstand): Die Felder der neuen Typen entstehen in eigenen Komponenten statt in `modul-felder.ts`.
+- **Verwaltung › Dokumente**: Kategorien und Dokumente pflegen (3.1).
+- **Verwaltung › Einstellungen**: Speicherverbrauch (2.6).
+- **Antworten-Übersicht**: Helferliste, Fahrgemeinschaft (nur Ansicht und Umsetzen), Kosten.
+- **Meine Jungfischer**: Foto-Einwilligung (4.4).
+- Gemessen wie TP3 6.7: 375 × 812 und 1280 × 800, hell und dunkel.
+
+---
+
+## 11. Teilen
+
+Der Teilen-Text (TP3 7.1) bekommt Zeilen, jeweils nur mit dem, was der Teilende sehen darf:
+
+- Fahrgemeinschaft, je Richtung: „🚗 Hin: Sandra M. (3 Plätze, 1 frei), Thomas K. (2)“ und, falls jemand fehlt, „🚗 Braucht noch Mitfahrt (hin): Mia S.“.
+- Helferliste: „🙋 Kuchen 1/4 · Zeltaufbau 0/3“, nur Zahlen.
+- Kosten: „💶 45 € pro Kind“, **ohne Zahlstände und Namen** — eine WhatsApp-Gruppe ist zu breit dafür.
+- Fotos und Dateien: keine Zeile (Rahmen 6.7: Fotos nie öffentlich teilbar).
+
+---
+
+## 12. Datenschutz und Betrieb
+
+### 12.1 Datenauszug
+
+Zusätzlich zu TP3 9.1: eigene Helfer-Einträge, eigene Autos, Mitfahrten der eigenen Person und der eigenen Kinder, Kostenposten der eigenen Kinder, Foto-Einwilligungen, Metadaten der selbst hochgeladenen Fotos und Dateien (ohne Bytes; die bleiben in der App erreichbar).
+
+### 12.2 Entfernen einer Person
+
+Wie Rahmen 8.4: Helfer-Einträge, Kostenposten und hochgeladene Fotos und Dateien bleiben, als „ehemaliges Mitglied“. **Autos und Mitfahrten der entfernten Person werden gelöscht**: Sie fährt nicht mehr und fährt nicht mehr mit. Für gelöschte Autos mit Kindern entsteht der Systemeintrag aus 6.2.
+
+### 12.3 Datenschutzerklärung
+
+Ergänzt um: Fotos (verkleinert, ohne EXIF und GPS, im Volume gespeichert, Bytes gelöschter Fotos nach 24 Stunden entfernt, in der Sicherung bis zu deren Aufbewahrungsende), Dateien und Dokumente, Zahlstände, Bankdaten des Vereins (können Daten eines Kassiers sein), Foto-Einwilligung, Fahrgemeinschaft (Namen der Mitfahrer für alle Leser).
+
+### 12.4 Betrieb
+
+- Volume `jufi-dateien` in `deploy/jufi-services.yml`, im Image ein Verzeichnis mit Besitzer `node`; `DATEIEN_PFAD` in der Umgebung.
+- `tools/backup.sh` sichert nach dem Dump das Volume mit restic; `restore-test.sh` und die Restore-Probe stellen beides wieder her und prüfen Stichproben gegen `sha256`.
+- `tools/pruefe-betrieb.sh` bekommt einen Abschnitt „Dateien“: Hochladen ohne Sitzung ergibt 401, `GET /dateien/<unbekannt>` ergibt 404.
+- CLAUDE.md: Stolpersteine zu Volume, Löschliste und Speicher-Abnahme.
+
+---
+
+## 13. Tests und Demo
+
+### 13.1 Regeln
+
+Testgetrieben in `libs/domain`: `erkenneTyp`, `ohneFotoEinwilligung`, Helfer-Plätze, `fahrtAnsicht`, `brauchtMitfahrt`, Zahlungspflicht, `verwendungszweck`, `pruefeIban`, „Braucht deine Antwort“ mit Kosten, Editor-Prüfungen der neuen Module, Teilen-Zeilen.
+
+### 13.2 Server
+
+Gegen die Testdatenbank: zwei gleichzeitige Einträge auf den letzten Platz (genau einer gewinnt), 411/413/415/503, Kontingent (auch zwei gleichzeitige Uploads an der Grenze), 404 bei fremdem Verein und unsichtbarem Thread, `Content-Security-Policy: sandbox` und `nosniff` an Dateien, Fotos ohne EXIF/GPS (Testbild mit GPS-Daten), Löschliste und Aufräumer (Bytes erst nach 24 Stunden weg), Entfernen einer Person mit Auto.
+
+### 13.3 Ende-zu-Ende
+
+Das Zeltlager-Szenario (1.1) mit erzeugten Testbildern; dazu die Leiste mit fünf Einträgen im Layout-Test.
+
+### 13.4 Demo
+
+`pnpm run demo` baut das Zeltlager mit allen Modulen auf: erzeugte Fotos, zwei Dateien, Helfer-Einträge, zwei Autos, Kostenposten in allen drei Zuständen und eine Befreiung; Tim ohne Foto-Einwilligung; Dokumente in den drei Kategorien.
+
+---
+
+## 14. Abweichungen von der Rahmen-Spezifikation
+
+Die Rahmen-Spezifikation ist an diesen Stellen nachgezogen:
+
+| Stelle           | Rahmen bisher                             | Jetzt                                                                                              |
+| ---------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 6.4 Fotos        | Hochladen durch alle Leser                | je Modul schaltbar, Vorgabe „Nur Jugendleiter“ (4.2)                                               |
+| 6.4.1 Namen      | Kinder nur mit Vornamen                   | „Lena M.“ nach TP3 3.10 (6.3); dazu „kommt selbst“ (6.1)                                           |
+| 6.4.2 Kosten     | Betrag pro Kind                           | Ausnahmebetrag je Kind, 0 heißt befreit; nur in Familien-Threads (7)                               |
+| 6.6 Einwilligung | Warnhinweis für Jugendleiter              | zusätzlich Hinweis für alle, die im Modul hochladen dürfen (4.4)                                   |
+| 7.7 Dateien      | Verkleinern, Vorschaubild, EXIF entfernen | 2560/480 px, Original verworfen, HEIC und SVG abgelehnt, Bytes nach 24 Stunden gelöscht (2.4, 2.7) |
+| 15 Kategorien    | in TP4 zu klären                          | vom Verein pflegbar (3.1)                                                                          |
+| neu              | —                                         | Speichergrenze je Verein (2.6), Medien als fünfter Eintrag der Leiste (3.2)                        |

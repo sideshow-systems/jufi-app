@@ -261,9 +261,9 @@ Alle acht gehören zu Version 1:
 | Umfrage                 | Ja/Nein/Vielleicht, Einfach- oder Mehrfachauswahl; Antwort-Einheit; Antwortfrist; Ergebnisse für alle sichtbar, nur als Summe oder nur für Jugendleiter; höchstens eine Teilnahme-Umfrage je Thread (TP3-Spec 3.4, 3.12) |
 | Helfer- & Mitbringliste | Plätze mit begrenzter Anzahl („Kuchen 3/5"); man trägt sich ein. Eigenes Modul neben der Umfrage, weil es um knappe Plätze geht.                                                                                         |
 | Fahrgemeinschaft        | Fahrer bieten Plätze für Hin- und/oder Rückfahrt an; Kinder werden eingetragen; Übersicht „Wer fährt mit wem" (6.4.1)                                                                                                    |
-| Kosten                  | Betrag pro Kind, Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt (6.4.2)                                                                                                                                        |
+| Kosten                  | Betrag pro Kind mit Ausnahmen je Kind (0 = befreit), Hinweis zur Bezahlung, Status offen → gemeldet → bezahlt; nur in Familien-Threads (6.4.2, TP4-Spec 7)                                                               |
 | Dateien                 | PDFs und Dokumente zum Herunterladen. Hochladen nur durch Jugendleiter.                                                                                                                                                  |
-| Fotos                   | Galerie im Thread. Hochladen durch alle Leser des Threads; Jugendleiter können jedes Foto löschen.                                                                                                                       |
+| Fotos                   | Galerie im Thread. Hochladen je Modul durch alle Leser oder nur Jugendleiter (Vorgabe, TP4-Spec 4.2); Jugendleiter können jedes Foto löschen.                                                                            |
 
 Später: Packliste/Checkliste, digitale Einverständniserklärung, Fangbuch/Ergebnisse, Wettbewerbe.
 
@@ -272,11 +272,11 @@ Später: Packliste/Checkliste, digitale Einverständniserklärung, Fangbuch/Erge
 - **Selbstbedienung, Jugendleiter können umsetzen.** Erwachsene bieten ein Auto an (Plätze, Abfahrtszeit, Abfahrtsort). Bezugspersonen setzen ihre Kinder in ein Auto, Jungfischer mit Zugang sich selbst. Jugendleiter verschieben Kinder zwischen Autos und ändern Plätze, etwa wenn ein Auto ausfällt. Verworfen: reine Zuteilung durch den Jugendleiter (Arbeit für ihn, Wartezeit für alle).
 - **Hin- und Rückfahrt sind getrennt**; ein Fahrer kann für beide anbieten.
 - Die Liste **„Braucht noch Mitfahrt"** zeigt Kinder ohne Platz — bei einem Thread mit Teilnahme-Umfrage nur die mit Zusage.
-- Wer ein Kind in ein Auto setzt, sieht nur Vornamen; Telefonnummern werden nicht gezeigt. Abstimmung läuft über den Verlauf.
+- Kinder erscheinen mit Vornamen und Kürzel („Lena M.“, TP3-Spec 3.10); Telefonnummern werden nicht gezeigt. Abstimmung läuft über den Verlauf. Wer sein Kind selbst bringt, setzt es auf „kommt selbst“ (TP4-Spec 6).
 
 #### 6.4.2 Kosten
 
-- Betrag pro Kind, freier Hinweis zur Bezahlung, optional Bankverbindung oder PayPal-Link. Ein Kopier-Knopf liefert den Verwendungszweck („Bowling 10.10. – Lena Huber").
+- Betrag pro Kind (die Leitung kann ihn je Kind ändern, 0 heißt befreit; TP4-Spec 7), freier Hinweis zur Bezahlung, optional Bankverbindung oder PayPal-Link. Ein Kopier-Knopf liefert den Verwendungszweck („Bowling 10.10. – Lena Huber").
 - Status pro Kind: **offen → gemeldet → bezahlt**. Bezugspersonen tippen „Habe bezahlt" (gemeldet), ein Jugendleiter bestätigt (bezahlt). Jugendleiter können auch direkt auf „bezahlt" setzen, etwa bei Barzahlung.
 - **Zahlungspflichtig** sind bei einem Thread mit Teilnahme-Umfrage die Kinder mit Zusage, sonst die ganze Zielgruppe.
 - Bezugspersonen sehen nur ihre eigenen Kinder; die Liste aller Kinder sieht nur, wer „Antworten im Detail sehen" hat.
@@ -299,7 +299,7 @@ Die Kosten zählen in „Braucht deine Antwort" (5.2), solange ein Kind auf „o
 
 ### 6.6 Foto-Einwilligung
 
-Jeder Jungfischer hat im Profil eine Foto-Einwilligung, die die Erziehungsberechtigten pflegen und die mit Zeitpunkt gespeichert wird. Jugendleiter sehen sie als Warnhinweis. Die App erkennt keine Gesichter; die Einwilligung ist eine sichtbare Erinnerung, kein Filter.
+Jeder Jungfischer hat im Profil eine Foto-Einwilligung, die die Erziehungsberechtigten pflegen und die mit Zeitpunkt gespeichert wird. Jugendleiter sehen sie als Warnhinweis; im Foto-Modul sehen alle, die dort hochladen dürfen, welche Kinder keine Einwilligung haben (TP4-Spec 4.4). Die App erkennt keine Gesichter; die Einwilligung ist eine sichtbare Erinnerung, kein Filter.
 
 ### 6.7 Teilen nach WhatsApp
 
@@ -417,7 +417,7 @@ Jede Anfrage an `/<slug>/api/v1/…`:
 
 ### 7.7 Dateien
 
-- Upload → Typprüfung (Bilder, PDF, Office) und Größengrenze (Foto 20 MB, Datei 25 MB) → bei Fotos `sharp`: verkleinern, Vorschaubild erzeugen, **EXIF- und GPS-Daten entfernen** → Speicher-Schnittstelle.
+- Upload → Typprüfung (Bilder, PDF, Office) und Größengrenze (Foto 20 MB, Datei 25 MB) → bei Fotos `sharp`: verkleinern (2560 px, Original verworfen), Vorschaubild erzeugen, **EXIF- und GPS-Daten entfernen** → Speicher-Schnittstelle. Bytes gelöschter Dateien entfernt ein Aufräumer nach 24 Stunden (TP4-Spec 2).
 - Speicher in Version 1: Docker-Volume. Die Schnittstelle erlaubt später Hetzner Object Storage (S3), ohne Aufrufer zu ändern.
 - Ausgeliefert werden Dateien nur über `/<slug>/api/v1/dateien/<id>` nach Prüfung von Session und Sichtbarkeit. Es gibt keine öffentlichen Datei-URLs.
 
@@ -595,12 +595,12 @@ Wie HWYD (`../hwyd/CLAUDE.md`):
 
 Diese Punkte sind bewusst nicht hier entschieden, sondern gehören in die genannte Spezifikation:
 
-| Punkt                                                                          | Teilprojekt                           |
-| ------------------------------------------------------------------------------ | ------------------------------------- |
-| Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen       | 2 (entschieden: TP2-Spec 5.6 und 5.8) |
-| Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar    | 4                                     |
-| Länge des offline gehaltenen Verlaufs pro Thread                               | 5                                     |
-| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5 (Teilnahme-Umfrage: TP3-Spec 3.12)  |
+| Punkt                                                                          | Teilprojekt                             |
+| ------------------------------------------------------------------------------ | --------------------------------------- |
+| Umgang mit Jungfischern, die volljährig werden oder die Gruppe verlassen       | 2 (entschieden: TP2-Spec 5.6 und 5.8)   |
+| Kategorien der globalen Dokumente: fest vorgegeben oder vom Verein pflegbar    | 4 (entschieden: pflegbar, TP4-Spec 3.1) |
+| Länge des offline gehaltenen Verlaufs pro Thread                               | 5                                       |
+| Termin-Erinnerung nur an Zusagende, wenn der Thread eine Teilnahme-Umfrage hat | 5 (Teilnahme-Umfrage: TP3-Spec 3.12)    |
 
 Die Gestaltung von Dashboard und Kalender, der Ablauf der Fahrgemeinschaft und das Kosten-Modul sind inzwischen entschieden (5.1.1, 6.4.1, 6.4.2); Feinheiten zeigen sich im Entwurf.
 
