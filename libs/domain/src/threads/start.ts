@@ -1,6 +1,19 @@
+import { naechsteTermine, type TerminDaten, type TerminEintrag } from '../module/termin/termin.js';
+import { antwortZeilen, ergebnisAnsicht } from './antworten.js';
+import { threadDatenAus } from './ansicht.js';
 import { istArchiviert } from './archiv.js';
-import { antwortZeilen } from './antworten.js';
-import type { ThreadDaten, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
+import type { ListenThread } from './liste.js';
+import { threadSegment } from './pfad.js';
+import { siehtThread } from './sichtbarkeit.js';
+import type {
+	AenderungArt,
+	ThreadDaten,
+	ThreadKopf,
+	ThreadModus,
+	ThreadPerson,
+	Umfeld,
+	UmfrageDaten,
+} from './typen.js';
 
 export interface OffenerPunkt {
 	threadId: string;
@@ -68,13 +81,78 @@ export function brauchtAntwort(
 	);
 }
 
+export interface NeuAenderung {
+	stand: number;
+	art: AenderungArt;
+	urheberId: string | null;
+	angelegtAm: Date;
+}
+
 export interface NeuEingabe {
 	personId: string;
 	zugangSeit: Date;
 	gelesenBis: number | null;
 	erstelltVonId: string | null;
 	veroeffentlichtAm: Date | null;
-	aenderungen: readonly { stand: number; urheberId: string | null; angelegtAm: Date }[];
+	aenderungen: readonly NeuAenderung[];
+	/** Ob die Person in mindestens einer Umfrage des Threads Ergebnisse sieht (siehtErgebnisse). */
+	antwortenSichtbar: boolean;
+}
+
+// Spec 3.9: Eine fremde Antwort ist nur dann etwas Neues, wenn die Person
+// Ergebnisse sieht. Bei "Ergebnisse: nur Jugendleiter" sieht eine Familie nach dem Öffnen
+// nichts Geändertes; der Punkt zeigte auf nichts und leuchtete mit jeder weiteren Antwort
+// wieder auf. Entschieden wird über ergebnisAnsicht, damit "sieht Ergebnisse" hier und in
+// der Auswertung dasselbe heißt.
+// Verworfen: je Antwort genau zu prüfen, ob die Person deren Umfrage auswerten darf —
+// dafür fehlt NeuAenderung der Weg von objektId zur Umfrage (Etappe 5). Kosten: Die
+// Antwort des anderen Elternteils für das eigene Kind in einer Nur-Jugendleiter-Umfrage
+// macht den Thread nicht neu, und sieht die Person Ergebnisse in einer anderen Umfrage
+// des Threads, zählt auch eine Antwort in der verborgenen.
+export function siehtErgebnisse(
+	ich: ThreadPerson,
+	kopf: ThreadKopf,
+	umfragen: readonly Pick<UmfrageDaten, 'ergebnisse'>[],
+): boolean {
+	return umfragen.some((u) => ergebnisAnsicht(ich, u, kopf) !== 'NICHTS');
+}
+
+// Die Eingabe für istNeu aus einem geladenen Thread. Liste und Startseite bauen sie hier,
+// damit beide dieselben Felder (auch antwortenSichtbar) gleich belegen.
+export function neuEingabeFuer(
+	ich: ThreadPerson,
+	t: Pick<ListenThread, 'kopf' | 'gelesenBis' | 'aenderungen'>,
+	umfragen: readonly Pick<UmfrageDaten, 'ergebnisse'>[],
+	zugangSeit: Date,
+): NeuEingabe {
+	return {
+		personId: ich.id,
+		zugangSeit,
+		gelesenBis: t.gelesenBis,
+		erstelltVonId: t.kopf.erstelltVonId,
+		veroeffentlichtAm: t.kopf.veroeffentlichtAm,
+		aenderungen: t.aenderungen,
+		antwortenSichtbar: siehtErgebnisse(ich, t.kopf, umfragen),
+	};
+}
+
+// Die Auswahl, die "neu" ausmacht: fremd, nicht LISTE, keine ANTWORT ohne sichtbare
+// Ergebnisse, über dem Stand (ohne Stand: ab dem Zugang). Eigene Funktion, weil die
+// Startseite aus denselben Änderungen ihre Kurzangabe bildet ("Neue Antworten") und sonst
+// eine zweite Auslegung von "fremd" entstünde.
+// LISTE (Anpinnen, Archivieren) ändert nichts am Inhalt: Wer einen Thread anpinnt, hat
+// ihn für die anderen nicht neu geschrieben. Verworfen: die Art erst in der Abfrage des
+// Servers auszufiltern — die Regel gehört hierher und ist so ohne Datenbank prüfbar.
+function fremdeNeueAenderungen(e: NeuEingabe): NeuAenderung[] {
+	const fremd = e.aenderungen.filter(
+		(a) => a.urheberId !== e.personId && a.art !== 'LISTE' && (a.art !== 'ANTWORT' || e.antwortenSichtbar),
+	);
+	if (e.gelesenBis !== null) {
+		const gelesen = e.gelesenBis;
+		return fremd.filter((a) => a.stand > gelesen);
+	}
+	const seit = e.zugangSeit.getTime();
+	return fremd.filter((a) => a.angelegtAm.getTime() >= seit);
 }
 
 // Spec 3.9. Nur fremde Aktivität macht einen Thread neu (Erkenntnis aus dem Entwurf):
@@ -91,15 +169,15 @@ export interface NeuEingabe {
 // sieht, und einen Entwurf sehen nur Jugendleiter, für die fremde Aktivität daran
 // berechtigt neu ist.
 export function istNeu(e: NeuEingabe): boolean {
-	const fremd = e.aenderungen.filter((a) => a.urheberId !== e.personId);
-	if (e.gelesenBis !== null) {
-		const gelesen = e.gelesenBis;
-		return fremd.some((a) => a.stand > gelesen);
-	}
-	const seit = e.zugangSeit.getTime();
-	const veroeffentlicht =
-		e.veroeffentlichtAm !== null && e.veroeffentlichtAm.getTime() >= seit && e.erstelltVonId !== e.personId;
-	return veroeffentlicht || fremd.some((a) => a.angelegtAm.getTime() >= seit);
+	return istNeuerThread(e) || fremdeNeueAenderungen(e).length > 0;
+}
+
+// Der Teil von istNeu, der keine Änderung braucht: die Veröffentlichung selbst. Eigene
+// Funktion, weil die Startseite "Neuer Thread" an genau dieser Bedingung festmacht und
+// sonst Kennzeichen und Angabe auseinanderliefen.
+function istNeuerThread(e: NeuEingabe): boolean {
+	if (e.gelesenBis !== null || e.veroeffentlichtAm === null) return false;
+	return e.veroeffentlichtAm.getTime() >= e.zugangSeit.getTime() && e.erstelltVonId !== e.personId;
 }
 
 export interface NachrichtenEingabe {
@@ -149,4 +227,125 @@ export function neuKurzangabe(
 	}
 	if (e.antworten) return 'Neue Antworten';
 	return 'Aushang geändert';
+}
+
+export interface StartThread extends ListenThread {
+	verlaufGelesenBis: number | null;
+	nachrichten: NachrichtenEingabe['nachrichten'];
+}
+
+export interface OffenerPunktAnsicht {
+	threadId: string;
+	segment: string;
+	titel: string;
+	modulId: string;
+	fuerId: string;
+	vorname: string | null;
+	/** ISO-Zeitpunkt, null ohne Frist. */
+	frist: string | null;
+}
+
+export interface NeuEintrag {
+	threadId: string;
+	segment: string;
+	titel: string;
+	angabe: string;
+}
+
+export interface TerminZeile {
+	threadId: string;
+	segment: string;
+	titel: string;
+	termin: TerminDaten;
+}
+
+export interface StartAnsicht {
+	brauchtAntwort: OffenerPunktAnsicht[];
+	alsNaechstes: TerminZeile[];
+	neu: NeuEintrag[];
+}
+
+export const ALS_NAECHSTES = 3;
+export const NEU_HOECHSTENS = 5;
+
+// Letzte Aktivität absteigend, dann ID. Kein localeCompare: Die Reihenfolge darf nicht von
+// der Sprache des Prozesses abhängen. Hier und nicht in liste.ts, weil liste.ts schon
+// start.ts einliest; umgekehrt entstünde ein Kreis.
+export function nachAktivitaet(
+	a: Pick<ListenThread, 'kopf' | 'letzteAktivitaetAm'>,
+	b: Pick<ListenThread, 'kopf' | 'letzteAktivitaetAm'>,
+): number {
+	return (
+		b.letzteAktivitaetAm.getTime() - a.letzteAktivitaetAm.getTime() ||
+		(a.kopf.id < b.kopf.id ? -1 : a.kopf.id > b.kopf.id ? 1 : 0)
+	);
+}
+
+// Spec 3.9 und 3.13, Plan-Entscheidungen 5 und 6: Alle drei Blöcke kennen nur
+// veröffentlichte, sichtbare und nicht archivierte Threads. Ein Entwurf zeigt Geplantes,
+// die Startseite aber, was stattfindet; im Archiv kann nur noch nachgetragen werden, also
+// weder gefragt noch angekündigt noch als neu gemeldet wird. Die Sichtbarkeit prüft diese
+// Funktion selbst (siehtThread) und überlässt sie nicht der Abfrage des Servers.
+// Verworfen: für "Als Nächstes" Entwürfe der Jugendleiter mitzuzeigen — sie hätten dann
+// einen anderen Kalender als die Familien, die ihre Termine ansagen.
+export function startAnsicht(e: {
+	ich: ThreadPerson;
+	threads: readonly StartThread[];
+	umfeld: Umfeld;
+	zugangSeit: Date;
+	jetzt: Date;
+}): StartAnsicht {
+	const aktiv = e.threads
+		.filter((t) => t.kopf.veroeffentlichtAm !== null && siehtThread(e.ich, t.kopf, e.umfeld))
+		.map((t) => ({ t, daten: threadDatenAus(t.kopf, t.module) }))
+		.filter(({ t, daten }) => !istArchiviert(t.kopf, daten.termine, e.jetzt));
+
+	const brauchtAntwortPunkte = brauchtAntwort(
+		e.ich,
+		aktiv.map(({ daten }) => daten),
+		e.umfeld,
+		e.jetzt,
+	).map((p): OffenerPunktAnsicht => ({
+		threadId: p.threadId,
+		segment: threadSegment(p.threadId, p.titel),
+		titel: p.titel,
+		modulId: p.modulId,
+		fuerId: p.fuerId,
+		vorname: p.vorname,
+		frist: p.frist?.toISOString() ?? null,
+	}));
+
+	const termine: TerminEintrag[] = aktiv.flatMap(({ t, daten }) =>
+		daten.termine.map((termin) => ({ threadId: t.kopf.id, titel: t.kopf.titel, termin })),
+	);
+	const alsNaechstes = naechsteTermine(termine, e.jetzt, ALS_NAECHSTES).map((n): TerminZeile => ({
+		threadId: n.threadId,
+		segment: threadSegment(n.threadId, n.titel),
+		titel: n.titel,
+		termin: n.termin,
+	}));
+
+	const neu: NeuEintrag[] = [];
+	for (const { t, daten } of aktiv.sort((a, b) => nachAktivitaet(a.t, b.t))) {
+		const eingabe = neuEingabeFuer(e.ich, t, daten.umfragen, e.zugangSeit);
+		if (!istNeu(eingabe)) continue;
+		neu.push({
+			threadId: t.kopf.id,
+			segment: threadSegment(t.kopf.id, t.kopf.titel),
+			titel: t.kopf.titel,
+			angabe: neuKurzangabe(t.kopf.modus, {
+				neuerThread: istNeuerThread(eingabe),
+				nachrichten: ungeleseneNachrichten({
+					personId: e.ich.id,
+					zugangSeit: e.zugangSeit,
+					verlaufGelesenBis: t.verlaufGelesenBis,
+					nachrichten: t.nachrichten,
+				}),
+				antworten: fremdeNeueAenderungen(eingabe).some((a) => a.art === 'ANTWORT'),
+			}),
+		});
+		if (neu.length === NEU_HOECHSTENS) break;
+	}
+
+	return { brauchtAntwort: brauchtAntwortPunkte, alsNaechstes, neu };
 }

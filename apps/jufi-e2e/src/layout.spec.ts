@@ -5,8 +5,10 @@ import { ZUSTAND } from './hilfen';
 import {
 	abstandUnterKopf,
 	keinWaagrechtesScrollen,
+	leisteHatVierEintraege,
 	leisteVerdecktNichts,
 	lesbar,
+	monatsrasterPasst,
 	verlaufUeberLeiste,
 	seitenGrund,
 	tippflaechen,
@@ -25,7 +27,7 @@ const SLUG = 'musterbach';
 
 type Rolle = 'oeffentlich' | 'leitung' | 'mutter' | 'kind';
 /**
- * mitglied: unter der Mitglieder-Huelle mit unterer .leiste (Start, Mehr, Profil, Meine Jungfischer).
+ * mitglied: unter der Mitglieder-Huelle mit unterer .leiste (Start, Threads, Termine, Mehr und ihre Unterseiten).
  * verwaltung: unter der Verwaltungs-Huelle mit Seitenleiste; dort gibt es keine .leiste.
  */
 type Art = 'oeffentlich' | 'mitglied' | 'verwaltung';
@@ -34,8 +36,8 @@ interface Seite {
 	rolle: Rolle;
 	art: Art;
 	/**
-	 * Ohne fuehrenden Schraegstrich unterhalb der Wurzel; die Platzhalter :mia, :bowling, :bowlingId und
-	 * :austausch stehen fuer die IDs und Thread-Segmente aus dem Ablauf. Eine Abfrage (?reiter=verlauf) gehoert zum Pfad.
+	 * Ohne fuehrenden Schraegstrich unterhalb der Wurzel; die Platzhalter :mia, :bowling, :bowlingId, :austausch
+	 * und :terminMonat (JJJJ-MM des Bowling-Termins) stehen fuer die IDs und Thread-Segmente aus dem Ablauf. Eine Abfrage (?reiter=verlauf) gehoert zum Pfad.
 	 */
 	pfad: string;
 	/** Die Seite zeigt den Verlauf mit festem Eingabefeld; gemessen wird, dass es nichts verdeckt und nichts davon verdeckt wird. */
@@ -62,6 +64,13 @@ const SEITEN: Seite[] = [
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/meine-jungfischer` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/` },
+	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/threads` },
+	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/threads` },
+	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/termine` },
+	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/termine` },
+	// Der Monat mit dem Bowling-Termin: ein markierter Tag und ein Eintrag in der Liste darunter.
+	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/termine?monat=:terminMonat` },
+	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/termine?monat=:terminMonat` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/t/:bowling` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/t/:bowling` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/t/:bowling?reiter=verlauf`, verlauf: true },
@@ -80,7 +89,7 @@ function sitzung(rolle: Rolle): string | { cookies: []; origins: [] } {
 	return rolle === 'oeffentlich' ? { cookies: [], origins: [] } : join(ZUSTAND, `${rolle}.json`);
 }
 
-const PLATZHALTER: readonly string[] = [':mia', ':bowling', ':bowlingId', ':austausch'];
+const PLATZHALTER: readonly string[] = [':mia', ':bowling', ':bowlingId', ':austausch', ':terminMonat'];
 
 /**
  * Erst im Test gelesen, nicht beim Laden der Datei: Playwright laedt alle Testdateien schon vor dem
@@ -137,6 +146,7 @@ for (const groesse of GROESSEN) {
 
 						if (handy) expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
 						if (seite.art === 'mitglied') await leisteVerdecktNichts(page);
+						if (seite.art === 'mitglied' && handy) await leisteHatVierEintraege(page);
 						if (seite.verlauf) await verlaufUeberLeiste(page);
 
 						if (seite.art === 'verwaltung') {
@@ -173,6 +183,59 @@ for (const groesse of GROESSEN) {
 		});
 	}
 }
+
+/**
+ * Start mit Bloecken und das Monatsraster der Termine am Handy. Der Seitentest oben misst jede Seite
+ * allgemein (kein Ueberlauf, Tippflaechen, Leiste); hier stehen die Zahlen, die nur diese zwei Seiten
+ * haben: Die Bloecke stehen wirklich da (sonst maesse der Seitentest eine leere Startseite), und das
+ * Raster laeuft bei 375 px nicht in sich ueber. Der Neu-Punkt der Leiste ist hier nicht zu messen:
+ * Der Ablauf hat Bowling dann schon gelesen; er misst ihn im Schritt, in dem er noch da ist.
+ */
+test.describe('Start und Termine am Handy', () => {
+	test.use({ storageState: sitzung('mutter'), viewport: { width: 375, height: 812 } });
+
+	for (const schema of SCHEMATA) {
+		test.describe(schema, () => {
+			test.use({ colorScheme: schema });
+
+			test('Start zeigt Bloecke ueber der Begruessung', async ({ page }) => {
+				await oeffne(page, `/${SLUG}/`);
+				// Bowling liegt sieben Tage voraus und ist veroeffentlicht: "Als Naechstes" ist nicht leer.
+				const block = page.locator('jf-start-bloecke jf-abschnitt').filter({
+					has: page.getByRole('heading', { name: 'Als Nächstes', exact: true }),
+				});
+				await expect(block.getByRole('link', { name: /Bowling/ })).toBeVisible();
+				const oben = await page.evaluate(() => ({
+					bloecke: document.querySelector('jf-start-bloecke')?.getBoundingClientRect().top ?? -1,
+					gruss: document.querySelector('h1')?.getBoundingClientRect().top ?? -1,
+				}));
+				expect(oben.bloecke, 'Bloecke beginnen unter der Begruessung').toBeGreaterThanOrEqual(0);
+				expect(oben.bloecke, 'Bloecke vor der Begruessung').toBeLessThan(oben.gruss);
+				await keinWaagrechtesScrollen(page);
+				await leisteHatVierEintraege(page);
+			});
+
+			test('Monatsraster ohne Ueberlauf, Reihen gleich hoch', async ({ page }) => {
+				await oeffne(page, adresse(`${SLUG}/termine?monat=:terminMonat`));
+				await expect(page.locator('jf-termine td.markiert').first()).toBeVisible();
+				const hoehen = await monatsrasterPasst(page);
+				expect(hoehen.mit.length, 'Reihen mit markiertem Tag').toBeGreaterThan(0);
+				// Nicht gefordert, aber gemeldet: Eine Reihe mit Punkt, die hoeher ist als eine ohne, liesse
+				// das Raster beim Blaettern wackeln.
+				test.info().annotations.push({
+					type: 'Reihenhoehen',
+					description: `mit Markierung ${hoehen.mit.join(', ')}; ohne ${hoehen.ohne.join(', ')}`,
+				});
+				// Leerer Monat: Auch dort steht das Raster in gleicher Form.
+				await page.getByRole('button', { name: 'Nächster Monat' }).click();
+				await page.getByRole('button', { name: 'Nächster Monat' }).click();
+				await expect(page.getByText('Keine Termine in diesem Monat.')).toBeVisible();
+				await monatsrasterPasst(page);
+				await keinWaagrechtesScrollen(page);
+			});
+		});
+	}
+});
 
 /**
  * Die Bruchstelle der Verwaltungs-Huelle bei 768 px. In Task 12 verteilte das Grid unter 768 px den

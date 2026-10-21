@@ -36,6 +36,8 @@
 	--schrift-gross: 1.25rem;
 	--schrift-titel: 1.5rem;
 	--tippflaeche: 44px;
+	/* Untere Leiste der Huelle: 56 px Tippflaeche plus 1 px Linie oben. */
+	--leiste-hoehe: 57px;
 
 	--sicher-oben: env(safe-area-inset-top, 0px);
 	--sicher-unten: env(safe-area-inset-bottom, 0px);

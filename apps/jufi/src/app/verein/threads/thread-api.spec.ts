@@ -25,6 +25,30 @@ describe('ThreadApi', () => {
 		expect(antwort).toEqual({ id: 'ck1' });
 	});
 
+	it('liste kodiert die Suche und schickt archiv nur, wenn es gesetzt ist', () => {
+		api.liste('demo', { suche: '100%', archiv: true }).subscribe();
+		const anfrage = http.expectOne('/demo/api/v1/threads?suche=100%25&archiv=1');
+		expect(anfrage.request.method).toBe('GET');
+		anfrage.flush({ threads: [], archiv: 0 });
+	});
+
+	it('liste ohne Filter hat keinen Abfrageteil', () => {
+		api.liste('demo', {}).subscribe();
+		http.expectOne('/demo/api/v1/threads').flush({ threads: [], archiv: 0 });
+	});
+
+	it('start ist GET /start', () => {
+		api.start('demo').subscribe();
+		const anfrage = http.expectOne('/demo/api/v1/start');
+		expect(anfrage.request.method).toBe('GET');
+		anfrage.flush({});
+	});
+
+	it('termine schickt den Monat', () => {
+		api.termine('demo', '2026-10').subscribe();
+		http.expectOne('/demo/api/v1/termine?monat=2026-10').flush({ termine: [] });
+	});
+
 	it('kodiert Slug und Id im Pfad', () => {
 		api.thread('a b', 'x/y').subscribe();
 		http.expectOne('/a%20b/api/v1/threads/x%2Fy').flush({});

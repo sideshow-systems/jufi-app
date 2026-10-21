@@ -1,3 +1,4 @@
+import type { TerminDaten } from '../module/termin/termin.js';
 import { naechsteTermine, terminZeit } from '../module/termin/termin.js';
 import { hatRecht } from '../rechte.js';
 import type { ThreadEntwurf } from './entwurf.js';
@@ -88,9 +89,18 @@ export function siehtAntworten(ich: ThreadPerson, kopf: ThreadKopf): boolean {
 	return darfBearbeiten(ich, kopf) || hatRecht(ich, 'ANTWORTEN_DETAIL');
 }
 
+// Der naechste Termin eines Threads als Anzeigetext, fuer Verwaltung und Thread-Liste
+// gemeinsam: beide muessen dasselbe nennen, sonst zeigte die Liste "Sa 24.10." und die
+// Verwaltung desselben Threads einen anderen Tag. Aus naechsteTermine und nicht aus dem
+// fruehesten Datum: ein laufendes Zeltlager bleibt der naechste, ein vergangener Termin nie.
+export function naechsterTerminText(kopf: ThreadKopf, termine: readonly TerminDaten[], jetzt: Date): string | null {
+	const eintraege = termine.map((termin) => ({ threadId: kopf.id, titel: kopf.titel, termin }));
+	const naechster = naechsteTermine(eintraege, jetzt, 1)[0];
+	return naechster ? terminZeit(naechster.termin) : null;
+}
+
 // Eine Zeile der Liste als reine Funktion, damit der Server nur noch laedt und nichts
-// herleitet. Der naechste Termin kommt aus naechsteTermine und nicht aus dem fruehesten
-// Datum: ein laufendes Zeltlager bleibt der naechste, ein vergangener Termin nie.
+// herleitet.
 export function verwaltungThread(
 	ich: ThreadPerson,
 	daten: ThreadDaten,
@@ -98,8 +108,6 @@ export function verwaltungThread(
 	jetzt: Date,
 ): VerwaltungThread {
 	const { kopf, termine, umfragen } = daten;
-	const eintraege = termine.map((termin) => ({ threadId: kopf.id, titel: kopf.titel, termin }));
-	const naechster = naechsteTermine(eintraege, jetzt, 1)[0];
 	return {
 		id: kopf.id,
 		segment: threadSegment(kopf.id, kopf.titel),
@@ -110,7 +118,7 @@ export function verwaltungThread(
 		angepinnt: kopf.angepinnt,
 		zielgruppe: zielgruppeText(kopf, namen),
 		keineZielgruppe: !kopf.alleUntergruppen && gewaehlteNamen(kopf, namen).length === 0,
-		naechsterTermin: naechster ? terminZeit(naechster.termin) : null,
+		naechsterTermin: naechsterTerminText(kopf, termine, jetzt),
 		darfBearbeiten: darfBearbeiten(ich, kopf),
 		darfAntwortenSehen: siehtAntworten(ich, kopf),
 		hatUmfrage: umfragen.length > 0,

@@ -214,16 +214,16 @@ const MAX_ZEICHEN = 2000;
 			height: 72px;
 		}
 		/*
-		 * Ueber der unteren Leiste der Huelle, unter ihr aber ueber dem Inhalt. Die Leiste ist 57 px hoch:
-		 * 56 px Tippflaeche plus 1 px Rand oben, dazu die Aussparung. Mit 56 px schob sich das Feld um den
-		 * Rand unter die Leiste (im Layouttest gemessen).
+		 * Ueber der unteren Leiste der Huelle, unter ihr aber ueber dem Inhalt. Die Hoehe der Leiste steht im
+		 * Token --leiste-hoehe (Tippflaeche plus Rand oben), dazu die Aussparung. Nur die Tippflaeche allein
+		 * schob das Feld um den Rand unter die Leiste (im Layouttest gemessen).
 		 */
 		.eingabe {
 			position: fixed;
 			z-index: 15;
 			left: 0;
 			right: 0;
-			bottom: calc(57px + var(--sicher-unten));
+			bottom: calc(var(--leiste-hoehe) + var(--sicher-unten));
 			display: flex;
 			flex-wrap: wrap;
 			align-items: center;

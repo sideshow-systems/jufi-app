@@ -3,6 +3,8 @@ import {
 	baueUmfeld,
 	type AntwortDaten,
 	type ModulDaten,
+	type NachrichtenEingabe,
+	type NeuAenderung,
 	type TerminDaten,
 	type ThreadKopf,
 	type Umfeld,
@@ -44,6 +46,8 @@ export async function ladeVereinsstand(db: VereinDb, vereinId: string): Promise<
 export interface GeladenerThread {
 	kopf: ThreadKopf;
 	module: ModulDaten[];
+	/** Sortierschluessel der Liste (Spalte des Threads); den Kopf braucht es dafuer nicht aufzublaehen. */
+	letzteAktivitaetAm: Date;
 }
 
 /** "JJJJ-MM-TT"; die Spalten sind @db.Date und kommen als Mitternacht UTC, ohne Zeitzonenversatz. */
@@ -149,6 +153,7 @@ export async function ladeThreads(db: VereinDb | VereinTx, threadIds?: readonly 
 	};
 
 	return threads.map((thread) => ({
+		letzteAktivitaetAm: thread.letzteAktivitaetAm,
 		kopf: {
 			id: thread.id,
 			art: thread.art,
@@ -188,4 +193,100 @@ export async function modulOrt(
 ): Promise<{ threadId: string; typ: 'INFO' | 'TERMIN' | 'UMFRAGE' } | null> {
 	const modul = await db.threadModul.findUnique({ where: { id: modulId }, select: { threadId: true, typ: true } });
 	return modul ?? null;
+}
+
+export interface NeuKandidaten {
+	gelesenBis: number | null;
+	verlaufGelesenBis: number | null;
+	aenderungen: NeuAenderung[];
+	nachrichten: NachrichtenEingabe['nachrichten'][number][];
+}
+
+/**
+ * Die Aenderungen (und mit `mitNachrichten` die Nachrichten), aus denen die Domaene "neu"
+ * bestimmt, fuer eine Liste von Threads, je Thread-ID ein Eintrag. Drei Abfragen, egal wie
+ * viele Threads: die Gelesen-Staende der Person, die Aenderungen und die Nachrichten, die
+ * beiden letzten mit einer OR-Bedingung je Thread.
+ *
+ * Es sind Kandidaten, kein Ergebnis: Je Thread kommen die Aenderungen ueber dem Gelesen-Stand
+ * (`gt`, wie fremdeNeueAenderungen), ohne Gelesen-Zeile die ab dem Zugang (`gte`, ebenso),
+ * und zwar von jedem Urheber und jeder Art. Ob eine fremd ist und zaehlt, entscheidet allein
+ * die Domaene. Verworfen: `urheberId: { not: ich }` in der Abfrage -- `NULL <> x` ist in SQL
+ * nicht wahr, Systemaenderungen ohne Urheber fielen still heraus, und die Regel stuende an
+ * zwei Stellen. Die Grenzen muessen aber so weit sein wie die der Domaene, nie enger.
+ *
+ * Anders als bei der Ansicht eines Threads (ladeThreadAnsicht lehnt dort einen Zugangsfilter in
+ * der Abfrage ab) filtert diese Abfrage nach Stand und Zugang: Die Liste betrifft alle Threads
+ * des Vereins, und alle Aenderungen zu laden wuchse mit jeder Antwort der Vereinsgeschichte
+ * (bis zum Aufraeumen nach 90 Tagen). Die Regel bleibt trotzdem in der Domaene; hier wird nur
+ * vorsortiert.
+ */
+export async function ladeNeuKandidaten(
+	db: VereinDb,
+	personId: string,
+	zugangSeit: Date,
+	threadIds: readonly string[],
+	mitNachrichten: boolean,
+): Promise<Map<string, NeuKandidaten>> {
+	const ergebnis = new Map<string, NeuKandidaten>();
+	if (threadIds.length === 0) return ergebnis;
+
+	const gelesen = await db.gelesenStand.findMany({
+		where: { personId, threadId: { in: [...threadIds] } },
+		select: { threadId: true, gelesenBis: true, verlaufGelesenBis: true },
+	});
+	const staende = new Map(gelesen.map((g) => [g.threadId, g]));
+	for (const threadId of threadIds) {
+		const stand = staende.get(threadId);
+		ergebnis.set(threadId, {
+			gelesenBis: stand?.gelesenBis ?? null,
+			verlaufGelesenBis: stand?.verlaufGelesenBis ?? null,
+			aenderungen: [],
+			nachrichten: [],
+		});
+	}
+
+	const [aenderungen, nachrichten] = await Promise.all([
+		db.aenderung.findMany({
+			where: {
+				OR: threadIds.map((threadId) => {
+					const bis = ergebnis.get(threadId)?.gelesenBis ?? null;
+					return bis !== null ? { threadId, stand: { gt: bis } } : { threadId, angelegtAm: { gte: zugangSeit } };
+				}),
+			},
+			select: { threadId: true, stand: true, art: true, urheberId: true, angelegtAm: true },
+		}),
+		mitNachrichten
+			? db.verlaufEintrag.findMany({
+					where: {
+						art: 'NACHRICHT',
+						OR: threadIds.map((threadId) => {
+							const bis = ergebnis.get(threadId)?.verlaufGelesenBis ?? null;
+							return bis !== null ? { threadId, stand: { gt: bis } } : { threadId, angelegtAm: { gte: zugangSeit } };
+						}),
+					},
+					select: { threadId: true, art: true, stand: true, autorId: true, angelegtAm: true, geloeschtAm: true },
+				})
+			: Promise.resolve([]),
+	]);
+	for (const a of aenderungen) {
+		if (a.threadId === null) continue;
+		ergebnis.get(a.threadId)?.aenderungen.push({
+			stand: a.stand,
+			art: a.art,
+			urheberId: a.urheberId,
+			angelegtAm: a.angelegtAm,
+		});
+	}
+	for (const n of nachrichten) {
+		ergebnis.get(n.threadId)?.nachrichten.push({
+			// Die Abfrage holt nur NACHRICHT; SYSTEM kommt in der Eingabe der Domaene vor, hier nie.
+			art: 'NACHRICHT',
+			stand: n.stand,
+			autorId: n.autorId,
+			angelegtAm: n.angelegtAm,
+			geloeschtAm: n.geloeschtAm,
+		});
+	}
+	return ergebnis;
 }

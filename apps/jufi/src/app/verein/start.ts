@@ -8,6 +8,7 @@ import { type ApiFehler, fehlerVon, fehlertext } from '../gemeinsam/api-fehler';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
 import { type Ansprechpartner, type KindAnsicht, MitgliederApi, type PersonListe } from './mitglieder-api';
 import { MitgliedSitzung } from './mitglied-waechter';
+import { StartBloeckeComponent } from './start-bloecke';
 import { beiAbgelaufenerSitzung, istNichtAngemeldet } from './sitzung-abgelaufen';
 import { warnhinweisText } from './verwaltung/texte';
 import { VereinKontext } from './verein-kontext';
@@ -52,16 +53,19 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
 }
 
 /**
- * Startseite der Mitglieder: Begruessung, die eigenen Jungfischer, was in der Verwaltung
- * wartet und die Ansprechpartner. Jeder Abschnitt holt seine Daten selbst und scheitert
+ * Startseite der Mitglieder: die Bloecke aus GET /start (eigenes Bauteil), Begruessung, die eigenen
+ * Jungfischer, was in der Verwaltung wartet und die Ansprechpartner. Jeder Abschnitt holt seine Daten selbst und scheitert
  * allein; verworfen: ein gemeinsamer Aufruf (forkJoin), bei dem ein Netzfehler im
  * Abschnitt Ansprechpartner auch die Begruessung und die Kinder mitnaehme.
  */
 @Component({
 	selector: 'jf-start',
-	imports: [AbschnittComponent, KarteComponent, NgTemplateOutlet, RouterLink],
+	imports: [AbschnittComponent, KarteComponent, NgTemplateOutlet, RouterLink, StartBloeckeComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
+		<!-- Oberhalb der Begruessung: Was Antwort braucht oder bald stattfindet, soll ohne Scrollen da sein. Eigener Fehlerzustand, Begruessung und Karten bleiben davon unberuehrt. -->
+		<jf-start-bloecke [slug]="slug()" />
+
 		@if (sitzung.ich(); as ich) {
 			<jf-karte>
 				<div class="gruss">

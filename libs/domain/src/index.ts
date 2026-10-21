@@ -10,5 +10,6 @@ export * from './weiter.js';
 export * from './zeit.js';
 export * from './module/termin/termin.js';
 export * from './module/termin/kalender.js';
+export * from './module/termin/monat.js';
 export * from './module/umfrage/umfrage.js';
 export * from './threads/index.js';

@@ -77,6 +77,112 @@ export async function leisteVerdecktNichts(page: Page): Promise<void> {
 }
 
 /**
+ * Die vier Eintraege der unteren Leiste: jeder mindestens 44 px hoch, in einer Reihe nebeneinander und
+ * ganz innerhalb des Fensters. tippflaechen misst die Hoehe schon fuer jeden Link; hier kommt dazu, dass
+ * die Eintraege einander nicht ueberlappen und nicht aus der Leiste ragen, was eine Hoehe nicht zeigt.
+ * Gemessen wird die Zahl vier mit: Ein fuenfter Eintrag sprengte bei 375 px die Spaltenbreite.
+ */
+export async function leisteHatVierEintraege(page: Page): Promise<void> {
+	const m = await page.evaluate(() => {
+		const eintraege = Array.from(document.querySelectorAll('jf-mitglieder-huelle > .leiste > a')).map((a) => {
+			const r = a.getBoundingClientRect();
+			return { text: a.textContent?.trim() ?? '', links: r.left, rechts: r.right, oben: r.top, hoehe: r.height };
+		});
+		return { eintraege, fenster: window.innerWidth };
+	});
+	const { eintraege, fenster } = m;
+	expect(
+		eintraege.map((e) => e.text.replace(/\s*neu$/, '')),
+		'Eintraege der Leiste',
+	).toEqual(['Start', 'Threads', 'Termine', 'Mehr']);
+	for (const [i, e] of eintraege.entries()) {
+		expect(e.hoehe, `${e.text} ist ${e.hoehe} px hoch`).toBeGreaterThanOrEqual(44);
+		expect(e.links, `${e.text} beginnt bei ${e.links}`).toBeGreaterThanOrEqual(0);
+		expect(e.rechts, `${e.text} endet bei ${e.rechts} im Fenster von ${fenster} px`).toBeLessThanOrEqual(fenster);
+		if (i > 0) {
+			const davor = eintraege[i - 1];
+			// Halbe Pixel aus gebrochenen Spaltenbreiten sind keine Ueberlappung.
+			expect(
+				e.links,
+				`${e.text} beginnt bei ${e.links}, ${davor.text} endet bei ${davor.rechts}`,
+			).toBeGreaterThanOrEqual(davor.rechts - 0.5);
+			expect(e.oben, `${e.text} liegt nicht in einer Reihe mit ${davor.text}`).toBeCloseTo(davor.oben, 0);
+		}
+	}
+}
+
+/**
+ * Der Neu-Punkt an "Threads" schneidet den Text darunter nicht. Mit dem Icon darf er sich ueberlagern, das
+ * ist gewollt (er sitzt an dessen oberer rechter Ecke, der Ring in der Farbe der Leiste hebt ihn ab); das
+ * Icon wird deshalb nur gemeldet, nicht verlangt. Der Ring muss die Farbe der Leiste haben, sonst blitzte
+ * im dunklen Schema ein hellerer Rand um den Punkt. Rueckgabe: die Ueberlappung mit dem Icon in px^2.
+ */
+export async function punktUeberdecktTextNicht(page: Page): Promise<number> {
+	const m = await page.evaluate(() => {
+		const link = Array.from(document.querySelectorAll('jf-mitglieder-huelle > .leiste > a')).find((a) =>
+			a.textContent?.includes('Threads'),
+		);
+		const punkt = link?.querySelector('.punkt');
+		const text = link?.querySelector(':scope > span:not(.punkt)');
+		const icon = link?.querySelector('jf-icon');
+		const leiste = document.querySelector('jf-mitglieder-huelle > .leiste');
+		if (!punkt || !text || !icon || !leiste) throw new Error('Leiste ohne Punkt an Threads, Text oder Icon');
+		const r = (el: Element) => {
+			const b = el.getBoundingClientRect();
+			return { links: b.left, rechts: b.right, oben: b.top, unten: b.bottom };
+		};
+		return {
+			punkt: r(punkt),
+			text: r(text),
+			icon: r(icon),
+			ring: getComputedStyle(punkt).borderTopColor,
+			leiste: getComputedStyle(leiste).backgroundColor,
+		};
+	});
+	const schnitt = (a: typeof m.punkt, b: typeof m.punkt) =>
+		Math.max(0, Math.min(a.rechts, b.rechts) - Math.max(a.links, b.links)) *
+		Math.max(0, Math.min(a.unten, b.unten) - Math.max(a.oben, b.oben));
+	expect(
+		schnitt(m.punkt, m.text),
+		`Punkt ${JSON.stringify(m.punkt)} schneidet den Text ${JSON.stringify(m.text)}`,
+	).toBe(0);
+	expect(m.ring, 'Ring des Punkts in der Farbe der Leiste').toBe(m.leiste);
+	return schnitt(m.punkt, m.icon);
+}
+
+/**
+ * Das Monatsraster der Termine-Seite: Die Tabelle laeuft nicht in sich ueber (scrollWidth, das ein
+ * table-layout fixed mit zu breitem Inhalt sonst still abschneidet), und die Reihen sind gleich hoch,
+ * ob ein Tag markiert ist oder nicht; sonst spraenge die Liste darunter beim Blaettern. Rueckgabe:
+ * die Hoehen aller Reihen des Rasters, getrennt nach Reihen mit und ohne markierten Tag.
+ */
+export async function monatsrasterPasst(page: Page): Promise<{ mit: number[]; ohne: number[] }> {
+	const m = await page.evaluate(() => {
+		const tabelle = document.querySelector('jf-termine table');
+		if (!tabelle) throw new Error('keine Tabelle auf der Seite');
+		const reihen = Array.from(tabelle.querySelectorAll('tbody > tr')).map((tr) => ({
+			markiert: tr.querySelector('td.markiert') !== null,
+			hoehe: tr.getBoundingClientRect().height,
+		}));
+		return {
+			scroll: tabelle.scrollWidth,
+			breite: tabelle.clientWidth,
+			rechts: tabelle.getBoundingClientRect().right,
+			fenster: window.innerWidth,
+			zellen: tabelle.querySelectorAll('tbody td').length,
+			reihen,
+		};
+	});
+	expect(m.zellen, 'Felder im Raster').toBe(42);
+	expect(m.scroll, `Raster ist ${m.scroll} px breit bei clientWidth ${m.breite}`).toBeLessThanOrEqual(m.breite);
+	expect(m.rechts, `Raster endet bei ${m.rechts} im Fenster von ${m.fenster} px`).toBeLessThanOrEqual(m.fenster);
+	return {
+		mit: m.reihen.filter((r) => r.markiert).map((r) => r.hoehe),
+		ohne: m.reihen.filter((r) => !r.markiert).map((r) => r.hoehe),
+	};
+}
+
+/**
  * Der Verlauf eines Threads: Das Eingabefeld sitzt fest ueber der unteren Leiste und die letzte
  * Nachricht muss nach dem Scrollen ans Seitenende ueber ihm enden. Beides gemessen statt aus dem CSS
  * gerechnet (56 px Leiste, 72 px Abstandhalter): Eine Rechnung sagt nichts ueber die Aussparung am

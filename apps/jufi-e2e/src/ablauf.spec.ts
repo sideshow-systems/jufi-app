@@ -1,8 +1,9 @@
 import { type Browser, type BrowserContext, expect, type Locator, type Page, test } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { berlinerTag, tagPlus, threadSegment } from '@jufi/domain';
+import { berlinerTag, MONATSNAMEN, tagPlus, threadSegment } from '@jufi/domain';
 import { passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
+import { leisteHatVierEintraege, punktUeberdecktTextNicht } from './messen';
 import { fuelleAustausch, personIdMitMail } from './threads';
 
 /**
@@ -27,6 +28,8 @@ let kindLink = '';
 let bowling = '';
 let bowlingId = '';
 let austausch = '';
+/** Der Tag des Bowling-Termins (der Editor legt ihn sieben Berliner Tage nach jetzt an); sein Monat ist der, in dem der Kalender Bowling zeigt. */
+let terminTag = '';
 
 /** Ein neuer Kontext mit eigenem virtuellen Authenticator und seiner ersten Seite. */
 async function person(browser: Browser): Promise<{ kontext: BrowserContext; seite: Page }> {
@@ -229,6 +232,8 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		const { kontext, seite } = await ausSitzung(browser, 'leitung');
 		// Die Frist wie bisher in threads.ts: sieben Berliner Tage nach jetzt, 18 Uhr (die Vorgabe des Felds).
 		const fristTag = tagPlus(berlinerTag(new Date()), 7);
+		// Der Termin behaelt die Vorgabe des Editors (sieben Berliner Tage nach jetzt), also den Tag der Frist.
+		terminTag = fristTag;
 
 		await seite.goto(`/${SLUG}/verwaltung/threads`);
 		await seite.getByRole('link', { name: 'Neuer Thread' }).click();
@@ -286,7 +291,70 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		const leitungId = await personIdMitMail(SLUG, LEITUNG_MAIL);
 		austausch = await fuelleAustausch(SLUG, leitungId, new Date());
 		const ids = JSON.parse(await readFile(join(ZUSTAND, 'ids.json'), 'utf8')) as Record<string, string>;
-		await writeFile(join(ZUSTAND, 'ids.json'), JSON.stringify({ ...ids, bowling, bowlingId, austausch }, null, '\t'));
+		await writeFile(
+			join(ZUSTAND, 'ids.json'),
+			JSON.stringify({ ...ids, bowling, bowlingId, austausch, terminMonat: terminTag.slice(0, 7) }, null, '\t'),
+		);
+	});
+
+	test('Mutter sieht Bowling auf Start, am Punkt der Leiste, in der Liste und im Kalender', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'mutter');
+		// Handymass: Die Leiste und der Punkt sind dafuer gebaut, und gemessen wird an dem, was da ist.
+		await seite.setViewportSize({ width: 375, height: 812 });
+		await seite.goto(`/${SLUG}/`);
+		await expect(seite.getByRole('heading', { name: 'Hallo Mara' })).toBeVisible();
+
+		const leiste = hauptnavigation(seite);
+		await expect(leiste.getByRole('link')).toHaveCount(4);
+		for (const name of ['Start', 'Threads', 'Termine', 'Mehr']) {
+			await expect(leiste.getByRole('link', { name: new RegExp(`^${name}`) })).toBeVisible();
+		}
+
+		// Die Zeile ist die offene Umfrage fuer Mia (mit ihrem Namen davor), nicht irgendein Text mit Bowling.
+		const bereich = (titel: string) =>
+			seite.locator('jf-abschnitt').filter({ has: seite.getByRole('heading', { name: titel, exact: true }) });
+		await expect(bereich('Braucht deine Antwort').getByRole('link', { name: /Bowling noch offen/ })).toBeVisible();
+		await expect(bereich('Neu seit deinem letzten Besuch').getByRole('link', { name: /Bowling/ })).toContainText(
+			'Neuer Thread',
+		);
+
+		// Der Punkt an "Threads", hell und dunkel; die Ueberlappung mit dem Icon ist gewollt und wird nur genannt.
+		const punkt = leiste.getByRole('link', { name: /^Threads/ }).getByRole('img', { name: 'neu' });
+		await expect(punkt).toBeVisible();
+		for (const schema of ['dark', 'light'] as const) {
+			await seite.emulateMedia({ colorScheme: schema });
+			await leisteHatVierEintraege(seite);
+			await punktUeberdecktTextNicht(seite);
+		}
+
+		await leiste.getByRole('link', { name: /^Threads/ }).click();
+		await expect(seite.getByRole('heading', { name: 'Threads', level: 1 })).toBeVisible();
+		const zeile = seite.getByRole('main').getByRole('link', { name: /Bowling/ });
+		await expect(zeile.getByRole('img', { name: 'neu' })).toBeVisible();
+
+		// Das Oeffnen meldet den Stand als gelesen; erst nach dieser Antwort ist "Zurueck" ein faires Urteil.
+		const gelesen = seite.waitForResponse(
+			(r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith('/gelesen'),
+		);
+		await zeile.click();
+		await expect(seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		await gelesen;
+		await seite.getByRole('link', { name: 'Zurück zur Thread-Liste' }).click();
+		await expect(seite).toHaveURL(new RegExp(`/${SLUG}/threads$`));
+		await expect(zeile).toBeVisible();
+		await expect(zeile.getByRole('img', { name: 'neu' })).toHaveCount(0);
+		await expect(leiste.getByRole('img', { name: 'neu' })).toHaveCount(0);
+
+		// Der Termin liegt sieben Tage voraus, also im laufenden oder im naechsten Monat.
+		await leiste.getByRole('link', { name: /^Termine/ }).click();
+		await expect(seite.getByRole('heading', { name: 'Termine', level: 1 })).toBeVisible();
+		const [jahr, monat] = terminTag.split('-').map(Number);
+		const ueberschrift = seite.getByRole('heading', { name: `${MONATSNAMEN[monat - 1]} ${jahr}`, level: 2 });
+		if ((await ueberschrift.count()) === 0) await seite.getByRole('button', { name: 'Nächster Monat' }).click();
+		await expect(ueberschrift).toBeVisible();
+		await expect(seite.getByRole('main').getByRole('link', { name: /Bowling/ })).toBeVisible();
+		await expect(seite.locator('jf-termine td.markiert').first()).toBeVisible();
+		await kontext.close();
 	});
 
 	test('Mutter antwortet fuer Mia und schreibt im Verlauf, Mia und Leitung sehen es', async ({ browser }) => {
@@ -374,6 +442,26 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		// Der Knopf wechselt erst mit der Antwort des Servers; vorher waere "Thread ansehen" ein Wettlauf.
 		await expect(seite.getByRole('button', { name: 'Wiederherstellen' })).toBeVisible();
 
+		// Die Liste in einer zweiten Seite, damit der Editor fuer "Thread ansehen" stehen bleibt.
+		const liste = await kontext.newPage();
+		await liste.goto(`/${SLUG}/threads`);
+		await expect(liste.getByRole('heading', { name: 'Threads', level: 1 })).toBeVisible();
+		const abschnitt = (titel: string) =>
+			liste.locator('jf-abschnitt').filter({ has: liste.getByRole('heading', { name: titel, exact: true }) });
+		const bowlingZeile = liste.getByRole('main').getByRole('link', { name: /Bowling/ });
+		// Archiv zu: keine Zeile, nur die Zahl; "Aktiv" kennt Bowling nicht mehr.
+		await expect(liste.getByText('Archiv · 1', { exact: true })).toBeVisible();
+		await expect(bowlingZeile).toHaveCount(0);
+		await expect(abschnitt('Aktiv').getByRole('link', { name: /Bowling/ })).toHaveCount(0);
+		await liste.getByText('Archiv · 1', { exact: true }).click();
+		await expect(liste.locator('details.archiv').getByRole('link', { name: /Bowling/ })).toBeVisible();
+
+		// Die Suche findet auch den archivierten Thread und klappt das Archiv dafuer auf.
+		await liste.goto(`/${SLUG}/threads`);
+		await liste.getByLabel('Threads durchsuchen').fill('bowl');
+		await expect(liste).toHaveURL(/suche=bowl/);
+		await expect(liste.locator('details.archiv').getByRole('link', { name: /Bowling/ })).toBeVisible();
+
 		await seite.getByRole('link', { name: 'Thread ansehen' }).click();
 		await expect(seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
 		const marke = seite.locator('header').getByText('Archiviert', { exact: true });
@@ -381,6 +469,10 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await seite.getByRole('button', { name: 'Wiederherstellen' }).click();
 		await expect(marke).toHaveCount(0);
 		await expect(seite.getByRole('button', { name: 'Wiederherstellen' })).toHaveCount(0);
+
+		await liste.goto(`/${SLUG}/threads`);
+		await expect(abschnitt('Aktiv').getByRole('link', { name: /Bowling/ })).toBeVisible();
+		await expect(liste.getByText(/^Archiv · /)).toHaveCount(0);
 		await kontext.close();
 	});
 

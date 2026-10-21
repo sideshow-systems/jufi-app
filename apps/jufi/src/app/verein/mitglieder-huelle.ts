@@ -1,10 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { NichtGefundenComponent } from '../seiten/nicht-gefunden';
 import { IconComponent, type IconName } from '../gestaltung/icon';
 import { KarteComponent } from '../gestaltung/ui';
+import { ThreadUebersicht } from './threads/thread-uebersicht';
 import { VereinKontext } from './verein-kontext';
 import { VereinsLogoComponent } from './vereins-logo';
 
@@ -18,11 +19,13 @@ interface Eintrag {
 }
 
 /**
- * Zwei Eintraege in TP2 (Spec 6.2). Threads, Termine und Medien kommen mit ihren
- * Teilprojekten dazu; bis dahin waere jeder weitere Eintrag ein Link ins Leere.
+ * Vier Eintraege seit TP3 (Spec 6.2). Medien kommt mit TP4 dazu; bis dahin waere jeder
+ * weitere Eintrag ein Link ins Leere. Einzelne Threads (t/...) gehoeren zu Threads.
  */
 const EINTRAEGE: Eintrag[] = [
 	{ pfad: '', text: 'Start', icon: 'start', auch: [] },
+	{ pfad: 'threads', text: 'Threads', icon: 'threads', auch: ['t'] },
+	{ pfad: 'termine', text: 'Termine', icon: 'termine', auch: [] },
 	{ pfad: 'mehr', text: 'Mehr', icon: 'mehr', auch: ['profil', 'meine-jungfischer'] },
 ];
 
@@ -42,6 +45,7 @@ const EINTRAEGE: Eintrag[] = [
 	selector: 'jf-mitglieder-huelle',
 	imports: [IconComponent, KarteComponent, NichtGefundenComponent, RouterLink, RouterOutlet, VereinsLogoComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
+	providers: [ThreadUebersicht],
 	template: `
 		@if (kontext.ladefehler()) {
 			<main>
@@ -73,6 +77,9 @@ const EINTRAEGE: Eintrag[] = [
 					>
 						<jf-icon [name]="e.icon" />
 						<span>{{ e.text }}</span>
+						@if (e.pfad === 'threads' && uebersicht.punkt()) {
+							<span class="punkt" role="img" aria-label="neu"></span>
+						}
 					</a>
 				}
 			</nav>
@@ -112,7 +119,7 @@ const EINTRAEGE: Eintrag[] = [
 			right: 0;
 			bottom: 0;
 			display: grid;
-			grid-template-columns: repeat(2, 1fr);
+			grid-template-columns: repeat(4, 1fr);
 			max-width: 480px;
 			margin: 0 auto;
 			padding-bottom: var(--sicher-unten);
@@ -120,12 +127,13 @@ const EINTRAEGE: Eintrag[] = [
 			border-top: 1px solid var(--linie);
 		}
 		.leiste a {
+			position: relative;
 			display: flex;
 			flex-direction: column;
 			align-items: center;
 			justify-content: center;
 			gap: 2px;
-			min-height: 56px;
+			min-height: calc(var(--leiste-hoehe) - 1px);
 			color: var(--text-gedaempft);
 			text-decoration: none;
 			font-size: 0.6875rem;
@@ -133,6 +141,18 @@ const EINTRAEGE: Eintrag[] = [
 		}
 		.leiste jf-icon {
 			font-size: 1.375rem;
+		}
+		/* Der Ring in der Farbe der Leiste hebt den Punkt vom Icon ab, auch wenn beide die Akzentfarbe haben. */
+		.punkt {
+			position: absolute;
+			top: 8px;
+			left: calc(50% + 6px);
+			width: 10px;
+			height: 10px;
+			border-radius: 50%;
+			background: var(--akzent);
+			border: 2px solid var(--karte);
+			box-sizing: content-box;
 		}
 		.leiste a.aktiv {
 			color: var(--akzent);
@@ -149,6 +169,7 @@ export class MitgliederHuelle {
 	protected readonly kontext = inject(VereinKontext);
 	private readonly router = inject(Router);
 	protected readonly eintraege = EINTRAEGE;
+	protected readonly uebersicht = inject(ThreadUebersicht);
 
 	/**
 	 * Kommt aus dem Pfad (withComponentInputBinding). Verworfen: kontext.slug(), das
@@ -156,6 +177,31 @@ export class MitgliederHuelle {
 	 * Links auf die Plattform statt auf den Verein.
 	 */
 	readonly slug = input.required<string>();
+
+	constructor() {
+		// Die Ressource haengt am Slug; ohne ihn (vor dem ersten Bau) fragt sie nichts.
+		effect(() => this.uebersicht.slug.set(this.slug()));
+		// Lesen und Antworten aendern "neu"; nach jeder Navigation neu zu fragen ist einfacher als
+		// jede Seite zu bitten, den Punkt nachzuziehen (verworfen: Rueckmeldung der Seiten an die Huelle).
+		// Einzige Ausnahme ist der Gelesen-Stand der Thread-Seite: Sie fragt nach dessen Ankunft selbst
+		// neu (ThreadUebersicht.neuLaden), weil die Anfrage dieses Pfadwechsels ihn ueberholen kann.
+		// Eine Navigation, die nur die Parameter der Adresse aendert (die Suche der Thread-Liste, der Reiter
+		// eines Threads), fragt deshalb nicht: Sonst kostete jede Suche eine Anfrage, deren Antwort die
+		// Seite gar nicht zeigt; ein Gelesen-Stand beim Reiterwechsel kommt ueber die Thread-Seite.
+		let letzterPfad: string | undefined;
+		this.router.events
+			.pipe(
+				filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+				map((e) => e.urlAfterRedirects.split(/[?#]/)[0]),
+				filter((pfad) => {
+					const anderer = pfad !== letzterPfad;
+					letzterPfad = pfad;
+					return anderer;
+				}),
+				takeUntilDestroyed(),
+			)
+			.subscribe(() => this.uebersicht.neuLaden());
+	}
 
 	private readonly url = toSignal(
 		this.router.events.pipe(

@@ -1,6 +1,19 @@
 import type { TerminDaten } from '../module/termin/termin.js';
-import { brauchtAntwort, istNeu, neuKurzangabe, ungeleseneNachrichten, type OffenerPunkt } from './start.js';
-import type { AntwortDaten, ThreadDaten, ThreadKopf, UmfrageDaten } from './typen.js';
+import type { ModulDaten } from './ansicht.js';
+import {
+	ALS_NAECHSTES,
+	brauchtAntwort,
+	istNeu,
+	NEU_HOECHSTENS,
+	neuKurzangabe,
+	siehtErgebnisse,
+	startAnsicht,
+	ungeleseneNachrichten,
+	type NeuAenderung,
+	type OffenerPunkt,
+	type StartThread,
+} from './start.js';
+import type { AenderungArt, AntwortDaten, ThreadDaten, ThreadKopf, UmfrageDaten } from './typen.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
 
 const umfeld = bowlingUmfeld();
@@ -172,10 +185,17 @@ describe('istNeu', () => {
 		gelesenBis: 4 as number | null,
 		erstelltVonId: 'thomas' as string | null,
 		veroeffentlichtAm: new Date('2026-10-21T10:00:00Z') as Date | null,
-		aenderungen: [] as { stand: number; urheberId: string | null; angelegtAm: Date }[],
+		aenderungen: [] as NeuAenderung[],
+		antwortenSichtbar: true,
 	};
-	const aenderung = (stand: number, urheberId: string | null, angelegtAm = '2026-10-21T10:00:00Z') => ({
+	const aenderung = (
+		stand: number,
+		urheberId: string | null,
+		angelegtAm = '2026-10-21T10:00:00Z',
+		art: AenderungArt = 'THREAD',
+	): NeuAenderung => ({
 		stand,
+		art,
 		urheberId,
 		angelegtAm: new Date(angelegtAm),
 	});
@@ -194,6 +214,34 @@ describe('istNeu', () => {
 
 	it('zaehlt eine Aenderung ohne Urheber (System) als fremd', () => {
 		expect(istNeu({ ...basis, aenderungen: [aenderung(5, null)] })).toBe(true);
+	});
+
+	it('ignoriert eine fremde LISTE-Aenderung ueber dem Gelesen-Stand', () => {
+		expect(istNeu({ ...basis, aenderungen: [aenderung(5, 'thomas', undefined, 'LISTE')] })).toBe(false);
+	});
+
+	it('ignoriert eine fremde LISTE-Aenderung nach dem Zugang ohne Gelesen-Stand', () => {
+		expect(
+			istNeu({
+				...basis,
+				gelesenBis: null,
+				veroeffentlichtAm: new Date('2026-09-20T10:00:00Z'),
+				aenderungen: [aenderung(1, 'thomas', '2026-10-05T00:00:00Z', 'LISTE')],
+			}),
+		).toBe(false);
+	});
+
+	it('zaehlt eine Systemaenderung ohne Urheber vom Typ VERLAUF als fremd', () => {
+		expect(istNeu({ ...basis, aenderungen: [aenderung(5, null, undefined, 'VERLAUF')] })).toBe(true);
+	});
+
+	it('zaehlt neben einer LISTE-Aenderung eine andere fremde Aenderung', () => {
+		expect(
+			istNeu({
+				...basis,
+				aenderungen: [aenderung(5, 'thomas', undefined, 'LISTE'), aenderung(6, 'thomas', undefined, 'ANTWORT')],
+			}),
+		).toBe(true);
 	});
 
 	it('beachtet mit Gelesen-Stand die Veroeffentlichung nicht', () => {
@@ -236,6 +284,45 @@ describe('istNeu', () => {
 
 	it('ist ein Entwurf ohne Gelesen-Stand nicht durch die Veroeffentlichung neu', () => {
 		expect(istNeu({ ...basis, gelesenBis: null, veroeffentlichtAm: null })).toBe(false);
+	});
+
+	it('zaehlt eine fremde ANTWORT nur, wenn die Person Ergebnisse sieht', () => {
+		const antwort = [aenderung(5, 'peter', undefined, 'ANTWORT')];
+		expect(istNeu({ ...basis, aenderungen: antwort })).toBe(true);
+		expect(istNeu({ ...basis, aenderungen: antwort, antwortenSichtbar: false })).toBe(false);
+	});
+
+	it('zaehlt ohne sichtbare Ergebnisse andere fremde Aenderungen weiter', () => {
+		expect(
+			istNeu({
+				...basis,
+				antwortenSichtbar: false,
+				aenderungen: [aenderung(5, 'peter', undefined, 'ANTWORT'), aenderung(6, 'thomas', undefined, 'MODUL')],
+			}),
+		).toBe(true);
+	});
+});
+
+describe('siehtErgebnisse', () => {
+	const bowling = kopf();
+
+	it('verneint fuer eine Familie, wenn nur Jugendleiter Ergebnisse sehen', () => {
+		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'JUGENDLEITER' })])).toBe(false);
+	});
+
+	it('bejaht fuer eine Familie bei Ergebnissen fuer alle oder als Summe', () => {
+		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'ALLE' })])).toBe(true);
+		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'SUMME' })])).toBe(true);
+	});
+
+	it('bejaht fuer eine Jugendleiterin, auch wenn nur Jugendleiter Ergebnisse sehen', () => {
+		expect(siehtErgebnisse(person('petra'), bowling, [umfrage({ ergebnisse: 'JUGENDLEITER' })])).toBe(true);
+	});
+
+	it('bejaht, sobald eine von mehreren Umfragen Ergebnisse zeigt, und verneint ohne Umfrage', () => {
+		const zwei = [umfrage({ ergebnisse: 'JUGENDLEITER' }), umfrage({ modulId: 'm-2', ergebnisse: 'SUMME' })];
+		expect(siehtErgebnisse(person('sandra'), bowling, zwei)).toBe(true);
+		expect(siehtErgebnisse(person('sandra'), bowling, [])).toBe(false);
 	});
 });
 
@@ -318,5 +405,229 @@ describe('neuKurzangabe', () => {
 
 	it('nennt sonst den geaenderten Aushang', () => {
 		expect(neuKurzangabe('AUSHANG', e)).toBe('Aushang geändert');
+	});
+});
+
+describe('startAnsicht', () => {
+	const ZUGANG = new Date('2026-10-01T00:00:00Z');
+	const umfrageModul = (daten: Partial<UmfrageDaten> = {}): ModulDaten => ({
+		typ: 'UMFRAGE',
+		id: 'm-bowling',
+		titel: null,
+		umfrage: umfrage(daten),
+	});
+	const terminModul = (startDatum: string, daten: Partial<TerminDaten> = {}): ModulDaten => ({
+		typ: 'TERMIN',
+		id: `m-${startDatum}`,
+		titel: null,
+		termin: {
+			modulId: `m-${startDatum}`,
+			startDatum,
+			endDatum: null,
+			beginn: '15:00',
+			ende: null,
+			ort: null,
+			treffpunkt: null,
+			...daten,
+		},
+	});
+	const startThread = (
+		k: Partial<ThreadKopf>,
+		module: ModulDaten[] = [],
+		rest: Partial<StartThread> = {},
+	): StartThread => ({
+		kopf: kopf(k),
+		module,
+		letzteAktivitaetAm: new Date('2026-10-21T10:00:00Z'),
+		gelesenBis: 4,
+		aenderungen: [],
+		verlaufGelesenBis: null,
+		nachrichten: [],
+		...rest,
+	});
+	const ansicht = (ich: string, threads: StartThread[]) =>
+		startAnsicht({ ich: person(ich), threads, umfeld, zugangSeit: ZUGANG, jetzt: JETZT });
+	const aenderung = (stand: number, art: AenderungArt, urheberId: string | null = 'thomas'): NeuAenderung => ({
+		stand,
+		art,
+		urheberId,
+		angelegtAm: new Date('2026-10-21T11:00:00Z'),
+	});
+	const nachricht = (stand: number, autorId: string) => ({
+		art: 'NACHRICHT' as const,
+		stand,
+		autorId,
+		angelegtAm: new Date('2026-10-21T11:00:00Z'),
+		geloeschtAm: null,
+	});
+
+	describe('brauchtAntwort', () => {
+		it('nennt Lena und Max mit Segment und ISO-Frist, nach Lenas Antwort nur Max', () => {
+			const offen = ansicht('sandra', [startThread({}, [umfrageModul()])]).brauchtAntwort;
+			expect(offen).toEqual([
+				{
+					threadId: 'bowling',
+					segment: 'bowling-bowling',
+					titel: '🎳 Bowling',
+					modulId: 'm-bowling',
+					fuerId: 'lena',
+					vorname: 'Lena',
+					frist: '2026-10-22T16:00:00.000Z',
+				},
+				expect.objectContaining({ fuerId: 'max', vorname: 'Max' }),
+			]);
+			const nachLena = ansicht('sandra', [startThread({}, [umfrageModul({ antworten: [antwort('lena', 'sandra')] })])]);
+			expect(nachLena.brauchtAntwort.map((p) => p.vorname)).toEqual(['Max']);
+		});
+
+		it('gibt ohne Frist null', () => {
+			const offen = ansicht('thomas', [startThread({}, [umfrageModul({ frist: null })])]).brauchtAntwort;
+			expect(offen[0].frist).toBeNull();
+		});
+	});
+
+	it('zeigt einen Entwurf mit Umfrage und Termin in keinem Block', () => {
+		const entwurf = startThread(
+			{ veroeffentlichtAm: null, erstelltVonId: 'petra' },
+			[umfrageModul(), terminModul('2026-10-24')],
+			{
+				gelesenBis: null,
+				aenderungen: [aenderung(1, 'THREAD', 'petra')],
+			},
+		);
+		expect(ansicht('thomas', [entwurf])).toEqual({ brauchtAntwort: [], alsNaechstes: [], neu: [] });
+	});
+
+	it('zeigt Sandra nichts aus einem Nur-Jugendleiter-Thread', () => {
+		const intern = startThread({ rollenfilter: 'NUR_JUGENDLEITER' }, [umfrageModul(), terminModul('2026-10-24')], {
+			aenderungen: [aenderung(5, 'THREAD')],
+		});
+		expect(ansicht('sandra', [intern])).toEqual({ brauchtAntwort: [], alsNaechstes: [], neu: [] });
+	});
+
+	describe('alsNaechstes', () => {
+		const mitTermin = (id: string, tag: string, k: Partial<ThreadKopf> = {}, daten: Partial<TerminDaten> = {}) =>
+			startThread({ id, titel: `T ${id}`, ...k }, [terminModul(tag, daten)]);
+
+		it('nennt die ersten drei von vier kuenftigen Terminen', () => {
+			const threads = [
+				mitTermin('d', '2026-10-27'),
+				mitTermin('a', '2026-10-24'),
+				mitTermin('c', '2026-10-26'),
+				mitTermin('b', '2026-10-25'),
+			];
+			const naechste = ansicht('sandra', threads).alsNaechstes;
+			expect(ALS_NAECHSTES).toBe(3);
+			expect(naechste.map((t) => t.threadId)).toEqual(['a', 'b', 'c']);
+			expect(naechste[0]).toEqual({
+				threadId: 'a',
+				segment: 'a-t-a',
+				titel: 'T a',
+				termin: expect.objectContaining({ startDatum: '2026-10-24' }),
+			});
+		});
+
+		it('nennt einen laufenden mehrtaegigen Termin', () => {
+			const laufend = mitTermin('zelt', '2026-10-21', {}, { endDatum: '2026-10-23', beginn: null });
+			const naechste = ansicht('sandra', [mitTermin('a', '2026-10-24'), laufend]).alsNaechstes;
+			expect(naechste.map((t) => t.threadId)).toEqual(['zelt', 'a']);
+		});
+
+		it('nennt keinen Termin aus einem archivierten Thread', () => {
+			const archiviert = mitTermin('alt', '2026-10-24', { archivModus: 'ARCHIVIERT' });
+			expect(ansicht('sandra', [archiviert]).alsNaechstes).toEqual([]);
+		});
+	});
+
+	describe('neu', () => {
+		const neuFuer = (ich: string, threads: StartThread[]) => ansicht(ich, threads).neu;
+		const angaben = (ich: string, threads: StartThread[]) => neuFuer(ich, threads).map((n) => n.angabe);
+
+		it('nennt einen Thread ohne Gelesen-Zeile, den Thomas nach dem Zugang veroeffentlichte, Neuer Thread', () => {
+			const t = startThread({}, [], { gelesenBis: null });
+			expect(neuFuer('sandra', [t])).toEqual([
+				{ threadId: 'bowling', segment: 'bowling-bowling', titel: '🎳 Bowling', angabe: 'Neuer Thread' },
+			]);
+		});
+
+		it('nennt einen neuen Thread nur als solchen, auch mit Nachrichten darin', () => {
+			const t = startThread({}, [], { gelesenBis: null, nachrichten: [nachricht(1, 'thomas')] });
+			expect(angaben('sandra', [t])).toEqual(['Neuer Thread']);
+		});
+
+		it('zaehlt zwei fremde Nachrichten ueber dem Verlauf-Stand als Kommentare', () => {
+			const t = startThread({ modus: 'KOMMENTARE' }, [], {
+				aenderungen: [aenderung(5, 'VERLAUF')],
+				verlaufGelesenBis: 3,
+				nachrichten: [nachricht(4, 'thomas'), nachricht(5, 'tim'), nachricht(6, 'sandra'), nachricht(2, 'thomas')],
+			});
+			expect(angaben('sandra', [t])).toEqual(['2 neue Kommentare']);
+		});
+
+		it('nennt bei nur einer fremden ANTWORT-Aenderung Neue Antworten', () => {
+			const t = startThread({}, [umfrageModul()], { aenderungen: [aenderung(5, 'ANTWORT')] });
+			expect(angaben('sandra', [t])).toEqual(['Neue Antworten']);
+		});
+
+		describe('Antworten in einer Umfrage mit Ergebnissen nur fuer Jugendleiter', () => {
+			const nurLeiter = (aenderungen: NeuAenderung[]) =>
+				startThread({}, [umfrageModul({ ergebnisse: 'JUGENDLEITER' })], { aenderungen });
+
+			it('nennt Sandra den Thread nach Peters Antwort nicht', () => {
+				expect(neuFuer('sandra', [nurLeiter([aenderung(5, 'ANTWORT', 'peter')])])).toEqual([]);
+			});
+
+			it('nennt Sandra bei Antwort und geaendertem Aushang nur den Aushang', () => {
+				const t = nurLeiter([aenderung(5, 'ANTWORT', 'peter'), aenderung(6, 'MODUL')]);
+				expect(angaben('sandra', [t])).toEqual(['Aushang geändert']);
+			});
+
+			it('nennt Petra Neue Antworten', () => {
+				expect(angaben('petra', [nurLeiter([aenderung(5, 'ANTWORT', 'peter')])])).toEqual(['Neue Antworten']);
+			});
+		});
+
+		it('nennt Sandra Neue Antworten, wenn sie Ergebnisse als Summe sieht', () => {
+			const t = startThread({}, [umfrageModul({ ergebnisse: 'SUMME' })], {
+				aenderungen: [aenderung(5, 'ANTWORT', 'peter')],
+			});
+			expect(angaben('sandra', [t])).toEqual(['Neue Antworten']);
+		});
+
+		it('nennt bei nur einer fremden MODUL-Aenderung Aushang geaendert', () => {
+			const t = startThread({}, [], { aenderungen: [aenderung(5, 'MODUL')] });
+			expect(angaben('sandra', [t])).toEqual(['Aushang geändert']);
+		});
+
+		it('zaehlt eine eigene ANTWORT-Aenderung nicht als Neue Antworten', () => {
+			const t = startThread({}, [], { aenderungen: [aenderung(5, 'MODUL'), aenderung(6, 'ANTWORT', 'sandra')] });
+			expect(angaben('sandra', [t])).toEqual(['Aushang geändert']);
+		});
+
+		it('zaehlt eine ANTWORT unter dem Gelesen-Stand nicht', () => {
+			const t = startThread({}, [], { aenderungen: [aenderung(4, 'ANTWORT'), aenderung(5, 'MODUL')] });
+			expect(angaben('sandra', [t])).toEqual(['Aushang geändert']);
+		});
+
+		it('nennt einen Thread, den Sandra selbst veroeffentlichte, ohne fremde Aenderung nicht', () => {
+			const eigener = startThread({ erstelltVonId: 'sandra' }, [], { gelesenBis: null });
+			expect(neuFuer('sandra', [eigener])).toEqual([]);
+		});
+
+		it('nennt einen archivierten Thread nicht', () => {
+			const t = startThread({ archivModus: 'ARCHIVIERT' }, [], { aenderungen: [aenderung(5, 'MODUL')] });
+			expect(neuFuer('sandra', [t])).toEqual([]);
+		});
+
+		it('nennt sieben neue Threads als fuenf, neueste Aktivitaet zuerst', () => {
+			const threads = Array.from({ length: 7 }, (_, i) =>
+				startThread({ id: `t${i}`, titel: `Thread ${i}` }, [], {
+					gelesenBis: null,
+					letzteAktivitaetAm: new Date(Date.UTC(2026, 9, 10 + i)),
+				}),
+			);
+			expect(NEU_HOECHSTENS).toBe(5);
+			expect(neuFuer('sandra', threads).map((n) => n.threadId)).toEqual(['t6', 't5', 't4', 't3', 't2']);
+		});
 	});
 });

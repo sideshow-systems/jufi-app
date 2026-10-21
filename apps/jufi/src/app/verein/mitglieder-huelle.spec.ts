@@ -1,6 +1,7 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
+import type { ThreadListe, ThreadZeile } from '@jufi/domain';
 import { adminTestAnbieter } from '../admin/test-hilfen';
 
 const API = '/demo/api/v1';
@@ -16,13 +17,28 @@ const ICH = {
 
 const VEREIN = { slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false, logoStand: null };
 
+const LEERE_LISTE: ThreadListe = { threads: [], archiv: 0 };
+
+function zeile(neu: boolean): ThreadZeile {
+	return {
+		id: 't1',
+		titel: 'Kegeln',
+		segment: 't1-kegeln',
+		angepinnt: false,
+		archiviert: false,
+		entwurf: false,
+		naechsterTermin: null,
+		neu,
+	};
+}
+
 describe('Mitglieder-Huelle', () => {
 	let http: HttpTestingController;
 	let harness: RouterTestingHarness;
 	let seite: HTMLElement;
 
 	beforeEach(() => {
-		TestBed.configureTestingModule({ providers: adminTestAnbieter() });
+		TestBed.configureTestingModule({ providers: adminTestAnbieter({ eigeneThreadListe: true }) });
 		http = TestBed.inject(HttpTestingController);
 		document.documentElement.removeAttribute('style');
 	});
@@ -37,11 +53,13 @@ describe('Mitglieder-Huelle', () => {
 	/**
 	 * Der Waechter fragt GET /ich, danach laedt der Kontext den Verein. Die Seiten unter
 	 * der Huelle holen eigene Daten; wer eine solche Seite oeffnet, beantwortet sie in kinder.
+	 * Die Huelle selbst fragt die Thread-Liste fuer den Punkt an der Leiste; liste ist ihre Antwort.
 	 */
 	async function oeffne(
 		url: string,
 		verein: object | Error = VEREIN,
 		kinder: (() => Promise<void>) | undefined = url === '/demo' ? startDaten : undefined,
+		liste: ThreadListe = LEERE_LISTE,
 	): Promise<void> {
 		harness = await RouterTestingHarness.create();
 		const navigation = harness.navigateByUrl(url);
@@ -51,9 +69,17 @@ describe('Mitglieder-Huelle', () => {
 		const anfrage = http.expectOne(`${API}/verein`);
 		if (verein instanceof Error) anfrage.error(new ProgressEvent('error'));
 		else anfrage.flush(verein);
+		await threadListe(liste);
 		await stabil();
 		seite = harness.routeNativeElement as HTMLElement;
 	}
+
+	// Der Effekt der Ressource schickt die Anfrage erst im naechsten Durchlauf.
+	const threadListe = (liste: ThreadListe = LEERE_LISTE) =>
+		vi.waitFor(() => {
+			harness.detectChanges();
+			http.expectOne(`${API}/threads`).flush(liste);
+		});
 
 	// Die Startseite holt ihre Abschnitte selbst; ICH hat Kinder und keine Rechte.
 	async function startDaten(): Promise<void> {
@@ -76,11 +102,13 @@ describe('Mitglieder-Huelle', () => {
 		return a;
 	}
 
-	it('zeigt auf der Startseite genau zwei Eintraege, und Start ist aktiv', async () => {
+	it('zeigt auf der Startseite vier Eintraege, und Start ist aktiv', async () => {
 		await oeffne('/demo');
 
-		expect(leiste().map((a) => a.textContent?.trim())).toEqual(['Start', 'Mehr']);
+		expect(leiste().map((a) => a.textContent?.trim())).toEqual(['Start', 'Threads', 'Termine', 'Mehr']);
 		expect(eintrag('Start').getAttribute('href')).toBe('/demo');
+		expect(eintrag('Threads').getAttribute('href')).toBe('/demo/threads');
+		expect(eintrag('Termine').getAttribute('href')).toBe('/demo/termine');
 		expect(eintrag('Mehr').getAttribute('href')).toBe('/demo/mehr');
 		expect(eintrag('Start').getAttribute('aria-current')).toBe('page');
 		expect(eintrag('Mehr').hasAttribute('aria-current')).toBe(false);
@@ -103,11 +131,12 @@ describe('Mitglieder-Huelle', () => {
 		seite = harness.routeNativeElement as HTMLElement;
 
 		expect(seite.querySelector('main jf-start')).not.toBeNull();
-		expect(leiste().length).toBe(2);
+		expect(leiste().length).toBe(4);
 		expect(seite.querySelector('header .name')).toBeNull();
 
 		await startDaten();
 		http.expectOne(`${API}/verein`).flush(VEREIN);
+		await threadListe();
 		await stabil();
 		expect(seite.querySelector('header .name')?.textContent).toContain('Jungfischer Demo');
 	});
@@ -121,6 +150,46 @@ describe('Mitglieder-Huelle', () => {
 
 		expect(eintrag('Mehr').getAttribute('aria-current')).toBe('page');
 		expect(eintrag('Start').hasAttribute('aria-current')).toBe(false);
+	});
+
+	it('macht auf einer Thread-Seite den Eintrag Threads aktiv', async () => {
+		// Die Seite fragt den Thread; ein 404 genuegt, es geht nur um die Leiste.
+		await oeffne('/demo/t/abc-x', VEREIN, () =>
+			vi.waitFor(() =>
+				http
+					.expectOne(`${API}/threads/abc`)
+					.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' }),
+			),
+		);
+
+		expect(eintrag('Threads').getAttribute('aria-current')).toBe('page');
+		expect(eintrag('Start').hasAttribute('aria-current')).toBe(false);
+	});
+
+	it('zeigt an Threads einen Punkt neu, wenn eine Zeile neu ist', async () => {
+		await oeffne('/demo', VEREIN, startDaten, { threads: [zeile(false), zeile(true)], archiv: 0 });
+
+		const punkt = eintrag('Threads').querySelector('[aria-label="neu"]');
+		expect(punkt).not.toBeNull();
+		expect(seite.querySelectorAll('[aria-label="neu"]').length).toBe(1);
+	});
+
+	it('zeigt an Threads keinen Punkt, wenn nichts neu ist', async () => {
+		await oeffne('/demo', VEREIN, startDaten, { threads: [zeile(false)], archiv: 0 });
+
+		expect(seite.querySelector('[aria-label="neu"]')).toBeNull();
+	});
+
+	it('fragt die Thread-Liste nach einem Seitenwechsel neu, nach einer reinen Aenderung der Adresse-Parameter nicht', async () => {
+		await oeffne('/demo', VEREIN, startDaten);
+
+		await harness.navigateByUrl('/demo?x=1');
+		harness.detectChanges();
+		http.expectNone(`${API}/threads`);
+
+		await harness.navigateByUrl('/demo/mehr');
+		await threadListe();
+		await stabil();
 	});
 
 	it('zeigt mit Logo das Bild aus dem Kontext statt des Abzeichens', async () => {
@@ -149,6 +218,7 @@ describe('Mitglieder-Huelle', () => {
 		// Die Startseite ist schon da und fragt; ein 404 baut sie erst danach ab.
 		await startDaten();
 		http.expectOne(`${API}/verein`).flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+		await threadListe();
 		await stabil();
 		seite = harness.routeNativeElement as HTMLElement;
 
@@ -179,7 +249,7 @@ describe('Mitglieder-Huelle', () => {
 		await stabil();
 
 		expect(seite.textContent).not.toContain('Keine Verbindung');
-		expect(leiste().length).toBe(2);
+		expect(leiste().length).toBe(4);
 	});
 
 	// Entscheidung 8: Der alte Pfad wurde nie ausgeliefert, deshalb gibt es keine Weiterleitung.
@@ -188,6 +258,7 @@ describe('Mitglieder-Huelle', () => {
 		await harness.navigateByUrl('/demo/jungfischer');
 		harness.detectChanges();
 		http.match(`${API}/verein`);
+		http.match(`${API}/threads`);
 
 		expect(harness.routeNativeElement?.textContent).toContain('Nicht gefunden oder keine Berechtigung');
 		expect(harness.routeNativeElement?.querySelector('nav')).toBeNull();
