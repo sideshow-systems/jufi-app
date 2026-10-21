@@ -183,9 +183,19 @@ export class MitgliederHuelle {
 		effect(() => this.uebersicht.slug.set(this.slug()));
 		// Lesen und Antworten aendern "neu"; nach jeder Navigation neu zu fragen ist einfacher als
 		// jede Seite zu bitten, den Punkt nachzuziehen (verworfen: Rueckmeldung der Seiten an die Huelle).
+		// Eine Navigation, die nur die Parameter der Adresse aendert (die Suche der Thread-Liste, der Reiter
+		// eines Threads), liest und antwortet nichts und fragt deshalb nicht: Sonst kostete jede Suche
+		// eine Anfrage, deren Antwort die Seite gar nicht zeigt.
+		let letzterPfad: string | undefined;
 		this.router.events
 			.pipe(
 				filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+				map((e) => e.urlAfterRedirects.split(/[?#]/)[0]),
+				filter((pfad) => {
+					const anderer = pfad !== letzterPfad;
+					letzterPfad = pfad;
+					return anderer;
+				}),
 				takeUntilDestroyed(),
 			)
 			.subscribe(() => this.uebersicht.neuLaden());

@@ -180,6 +180,18 @@ describe('Mitglieder-Huelle', () => {
 		expect(seite.querySelector('[aria-label="neu"]')).toBeNull();
 	});
 
+	it('fragt die Thread-Liste nach einem Seitenwechsel neu, nach einer reinen Aenderung der Adresse-Parameter nicht', async () => {
+		await oeffne('/demo', VEREIN, startDaten);
+
+		await harness.navigateByUrl('/demo?x=1');
+		harness.detectChanges();
+		http.expectNone(`${API}/threads`);
+
+		await harness.navigateByUrl('/demo/mehr');
+		await threadListe();
+		await stabil();
+	});
+
 	it('zeigt mit Logo das Bild aus dem Kontext statt des Abzeichens', async () => {
 		await oeffne('/demo', { ...VEREIN, hatLogo: true, logoStand: '2026-10-01T10:00:00.000Z' });
 
