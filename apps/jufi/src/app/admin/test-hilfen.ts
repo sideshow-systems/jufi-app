@@ -6,12 +6,13 @@ import {
 	withInterceptors,
 } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { EnvironmentProviders, Provider } from '@angular/core';
+import { type EnvironmentProviders, Injectable, type Provider, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { routerFeatures, routes } from '../app.routes';
+import { Echtzeit, type EchtzeitEreignis } from '../verein/echtzeit';
 
 /**
  * Die Huelle fragt die Thread-Liste fuer den Punkt an der Leiste, auf jeder Seite des Vereins. Diese
@@ -38,9 +39,48 @@ const leereStart: HttpInterceptorFn = (anfrage, weiter) =>
 		? of(new HttpResponse({ status: 200, body: { brauchtAntwort: [], alsNaechstes: [], neu: [] } }))
 		: weiter(anfrage);
 
-/** Gemeinsame Bereitstellung der Admin-Tests: echte Routen, gespielte HTTP-Antworten. */
+/**
+ * Steht fuer den Echtzeit-Dienst der Mitglieder-Huelle: oeffnet keinen Socket, stellt keinen Zeitgeber
+ * und fragt nicht GET /sync. Sonst haette jede Spec unter der Huelle einen Socket gegen jsdom und eine
+ * offene Abgleich-Anfrage, die sie nicht betrifft (verworfen: in allen Specs einen falschen WebSocket
+ * bereitstellen, dann liefe dort trotzdem der Zeitgeber fuer den Hinweis "Nicht verbunden").
+ * Ohne Verbindung (verbunden falsch): So laedt die Huelle bei Navigation wie bisher neu.
+ * Specs steuern sie ueber die beschreibbaren Signale und schicken Ereignisse ueber quelle;
+ * TestBed.inject(EchtzeitAttrappe) liefert dieselbe Instanz, die die Huelle bekommt.
+ */
+@Injectable()
+export class EchtzeitAttrappe implements Pick<
+	Echtzeit,
+	'verbunden' | 'getrennt' | 'vordergrund' | 'ereignisse' | 'starte' | 'stoppe'
+> {
+	readonly verbunden = signal(false);
+	readonly getrennt = signal(false);
+	readonly vordergrund = signal(true);
+	readonly quelle = new Subject<EchtzeitEreignis>();
+	readonly ereignisse = this.quelle.asObservable();
+	/** Der Slug des letzten starte; null nach stoppe. */
+	gestartet: string | null = null;
+
+	starte(slug: string): void {
+		this.gestartet = slug;
+	}
+
+	stoppe(): void {
+		this.gestartet = null;
+	}
+}
+
+/** Die Attrappe als Echtzeit, fuer Specs ohne adminTestAnbieter (etwa ThreadUebersicht allein). */
+export function echtzeitAttrappe(): Provider[] {
+	return [EchtzeitAttrappe, { provide: Echtzeit, useExisting: EchtzeitAttrappe }];
+}
+
+/**
+ * Gemeinsame Bereitstellung der Admin-Tests: echte Routen, gespielte HTTP-Antworten. Wer den echten
+ * Echtzeit-Dienst braucht, setzt eigeneEchtzeit und stellt WEB_SOCKET selbst bereit.
+ */
 export function adminTestAnbieter(
-	optionen: { eigeneThreadListe?: boolean; eigeneStart?: boolean } = {},
+	optionen: { eigeneThreadListe?: boolean; eigeneStart?: boolean; eigeneEchtzeit?: boolean } = {},
 ): Array<Provider | EnvironmentProviders> {
 	const interceptoren = [
 		...(optionen.eigeneThreadListe ? [] : [leereThreadListe]),
@@ -50,6 +90,7 @@ export function adminTestAnbieter(
 		provideRouter(routes, ...routerFeatures),
 		provideHttpClient(withFetch(), withInterceptors(interceptoren)),
 		provideHttpClientTesting(),
+		...(optionen.eigeneEchtzeit ? [] : echtzeitAttrappe()),
 	];
 }
 

@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting, type TestRequest } fro
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import type { SchreibSperre, VerlaufAnsicht } from '@jufi/domain';
+import { EchtzeitAttrappe, echtzeitAttrappe } from '../../admin/test-hilfen';
 import { zeitpunktBerlin } from '../../gestaltung/format';
 import { Verlauf } from './verlauf';
 
@@ -31,7 +32,7 @@ describe('Verlauf', () => {
 
 	beforeEach(() => {
 		TestBed.configureTestingModule({
-			providers: [provideRouter([]), provideHttpClient(withFetch()), provideHttpClientTesting()],
+			providers: [provideRouter([]), provideHttpClient(withFetch()), provideHttpClientTesting(), ...echtzeitAttrappe()],
 		});
 		http = TestBed.inject(HttpTestingController);
 	});
@@ -635,6 +636,234 @@ describe('Verlauf', () => {
 
 			expect(el.lastElementChild?.classList).toContain('abstand');
 			expect(el.querySelector('form.eingabe')).not.toBeNull();
+		});
+	});
+
+	describe('Live', () => {
+		const inhalte = () => zeilen().map((z) => text(z).match(/Erste|Zweite|Dritte|Vierte|gelöscht/)?.[0]);
+
+		it('fuegt einen Eintrag nach Stand und Id ein und ersetzt einen bekannten, statt ihn doppelt zu zeigen', async () => {
+			zeige();
+			await ladeSeite([nachricht('e3', 'Dritte', { stand: 30 }), nachricht('e1', 'Erste', { stand: 10 })]);
+
+			fixture.componentInstance.uebernimm(nachricht('e2', 'Zweite', { stand: 20 }));
+			fixture.componentInstance.uebernimm(nachricht('e4', 'Vierte', { stand: 40 }));
+			fixture.componentInstance.uebernimm(nachricht('e3', 'Dritte', { stand: 30 }));
+			fixture.componentInstance.uebernimm(
+				nachricht('e1', null as unknown as string, { stand: 10, geloescht: 'SELBST' }),
+			);
+			fixture.detectChanges();
+
+			expect(inhalte()).toEqual(['gelöscht', 'Zweite', 'Dritte', 'Vierte']);
+		});
+
+		it('laesst einen unbekannten Eintrag aelter als die geladene Seite aus, wenn es fruehere gibt', async () => {
+			zeige();
+			await ladeSeite([nachricht('e3', 'Dritte', { stand: 30 })], true);
+
+			fixture.componentInstance.uebernimm(nachricht('e1', 'Erste', { stand: 10 }));
+			fixture.detectChanges();
+
+			// Sonst stuende er ueber einer Luecke, die Fruehere laden erst fuellt.
+			expect(inhalte()).toEqual(['Dritte']);
+		});
+
+		it('behaelt einen Eintrag, der waehrend des ersten Ladens kam', async () => {
+			zeige();
+			const offen = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1/verlauf'));
+			fixture.componentInstance.uebernimm(nachricht('e4', 'Vierte', { stand: 40 }));
+			offen.flush({ eintraege: [nachricht('e1', 'Erste', { stand: 10 })], weitere: false });
+			await quittiereGelesen();
+			await fertig();
+
+			expect(inhalte()).toEqual(['Erste', 'Vierte']);
+		});
+
+		it('meldet einen hoeheren Stand erneut, einen gleichen oder niedrigeren nicht', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste')]);
+
+			fixture.componentRef.setInput('stand', 44);
+			fixture.detectChanges();
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 44 });
+			await fertig();
+			expect(gelesen).toBe(2);
+
+			fixture.componentRef.setInput('stand', 44);
+			fixture.componentRef.setInput('stand', 43);
+			await fertig();
+			http.expectNone('/demo/api/v1/threads/ck1/gelesen');
+		});
+
+		it('meldet im Hintergrund nichts und genau einmal, sobald das Dokument wieder sichtbar ist', async () => {
+			const echtzeit = TestBed.inject(EchtzeitAttrappe);
+			echtzeit.vordergrund.set(false);
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste')], false, undefined, false);
+			fixture.componentRef.setInput('stand', 44);
+			await fertig();
+			http.expectNone('/demo/api/v1/threads/ck1/gelesen');
+
+			echtzeit.vordergrund.set(true);
+			fixture.detectChanges();
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 44 });
+			await fertig();
+			http.expectNone('/demo/api/v1/threads/ck1/gelesen');
+		});
+
+		it('frischt mit der neuesten Seite auf, ohne die Liste zu leeren und ohne doppelte Zeilen', async () => {
+			zeige();
+			await ladeSeite([nachricht('e2', 'Zweite', { stand: 20 }), nachricht('e1', 'Erste', { stand: 10 })]);
+
+			const fertigGefrischt = fixture.componentInstance.frischeAuf();
+			fixture.detectChanges();
+			// Waehrend der Anfrage bleibt die Liste stehen, kein Wird geladen.
+			expect(inhalte()).toEqual(['Erste', 'Zweite']);
+			expect(text()).not.toContain('Wird geladen');
+			http.expectOne('/demo/api/v1/threads/ck1/verlauf').flush({
+				eintraege: [nachricht('e3', 'Dritte', { stand: 30 }), nachricht('e2', 'Zweite', { stand: 20 })],
+				weitere: true,
+			});
+			await fertigGefrischt;
+			await fertig();
+
+			expect(inhalte()).toEqual(['Erste', 'Zweite', 'Dritte']);
+			// Weitere gilt fuer die aelteren Seiten, und die sind schon da.
+			expect(el.querySelector('.frueher')).toBeNull();
+		});
+
+		it('ersetzt beim Auffrischen ohne Anschluss die Liste und bietet Fruehere laden an', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste', { stand: 10 })]);
+
+			const fertigGefrischt = fixture.componentInstance.frischeAuf();
+			http.expectOne('/demo/api/v1/threads/ck1/verlauf').flush({
+				eintraege: [nachricht('e4', 'Vierte', { stand: 40 }), nachricht('e3', 'Dritte', { stand: 30 })],
+				weitere: true,
+			});
+			await fertigGefrischt;
+			await fertig();
+
+			// Zwischen Erste und Dritte fehlt etwas; die Liste zeigt keine Luecke, Fruehere laden holt den Rest.
+			expect(inhalte()).toEqual(['Dritte', 'Vierte']);
+			expect(el.querySelector('.frueher')).not.toBeNull();
+		});
+
+		it('meldet nichts, solange ein Auffrischen aussteht oder nachdem es gescheitert ist', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste')]);
+
+			const gescheitert = fixture.componentInstance.frischeAuf();
+			fixture.componentRef.setInput('stand', 44);
+			await new Promise((r) => setTimeout(r));
+			fixture.detectChanges();
+			http.expectNone('/demo/api/v1/threads/ck1/gelesen');
+			http
+				.expectOne('/demo/api/v1/threads/ck1/verlauf')
+				.flush({ fehler: 'Unerwarteter Fehler' }, { status: 500, statusText: 'Fehler' });
+			await gescheitert;
+			await fertig();
+			http.expectNone('/demo/api/v1/threads/ck1/gelesen');
+			expect(el.querySelector('[role="alert"]')).toBeNull();
+
+			const gelungen = fixture.componentInstance.frischeAuf();
+			http
+				.expectOne('/demo/api/v1/threads/ck1/verlauf')
+				.flush({ eintraege: [nachricht('e1', 'Erste')], weitere: false });
+			await gelungen;
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 44 });
+			await fertig();
+		});
+
+		it('laesst eine live geloeschte Nachricht geloescht, auch wenn ein aelteres Auffrischen sie mit Text liefert', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste')]);
+
+			const fertigGefrischt = fixture.componentInstance.frischeAuf();
+			fixture.componentInstance.uebernimm(nachricht('e1', null as unknown as string, { geloescht: 'MODERATION' }));
+			http
+				.expectOne('/demo/api/v1/threads/ck1/verlauf')
+				.flush({ eintraege: [nachricht('e1', 'Erste')], weitere: false });
+			await fertigGefrischt;
+			await fertig();
+
+			expect(text()).not.toContain('Erste');
+			expect(text()).toContain('Von einem Jugendleiter entfernt');
+		});
+
+		it('laesst eine waehrend des ersten Ladens geloeschte Nachricht geloescht', async () => {
+			zeige();
+			const offen = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1/verlauf'));
+			fixture.componentInstance.uebernimm(nachricht('e1', null as unknown as string, { geloescht: 'MODERATION' }));
+			offen.flush({ eintraege: [nachricht('e1', 'Erste')], weitere: false });
+			await quittiereGelesen();
+			await fertig();
+
+			expect(text()).not.toContain('Erste');
+			expect(text()).toContain('Von einem Jugendleiter entfernt');
+		});
+
+		it('verwirft Fruehere laden, wenn ein Auffrischen die Liste waehrenddessen ersetzt hat', async () => {
+			zeige();
+			await ladeSeite([nachricht('e3', 'Dritte', { stand: 30 })], true);
+
+			knopf(el, 'Frühere laden').click();
+			const frueher = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1/verlauf?vor=e3'));
+			const fertigGefrischt = fixture.componentInstance.frischeAuf();
+			http
+				.expectOne('/demo/api/v1/threads/ck1/verlauf')
+				.flush({ eintraege: [nachricht('e4', 'Vierte', { stand: 40 })], weitere: true });
+			await fertigGefrischt;
+			frueher.flush({ eintraege: [nachricht('e2', 'Zweite', { stand: 20 })], weitere: false });
+			await fertig();
+
+			// Zweite gehoerte vor Dritte, nicht vor Vierte; dazwischen fehlt etwas.
+			expect(inhalte()).toEqual(['Vierte']);
+			expect(el.querySelector('.frueher')).not.toBeNull();
+		});
+
+		it('ordnet die eigene Nachricht nach Stand ein, wenn vor der Antwort eine juengere live kam', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste', { stand: 10 })]);
+			tippe('Zweite');
+			sendeKnopf().click();
+			const a = schreibeAnfrage();
+
+			fixture.componentInstance.uebernimm(nachricht('e3', 'Dritte', { stand: 30 }));
+			a.flush({ eintrag: nachricht('e2', 'Zweite', { eigen: true, stand: 20 }), stand: 20 });
+			await fertig();
+
+			expect(inhalte()).toEqual(['Erste', 'Zweite', 'Dritte']);
+		});
+
+		it('zeigt die eigene Nachricht einmal, auch wenn ihr Echo vor der Antwort kam', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste', { stand: 10 })]);
+			tippe('Zweite');
+			sendeKnopf().click();
+			const a = schreibeAnfrage();
+			const eigene = nachricht('e2', 'Zweite', { eigen: true, stand: 20 });
+
+			fixture.componentInstance.uebernimm(eigene);
+			a.flush({ eintrag: eigene, stand: 20 });
+			await fertig();
+
+			expect(inhalte()).toEqual(['Erste', 'Zweite']);
+		});
+
+		it('schickt beim Auffrischen mit abgelaufener Sitzung zur Anmeldung', async () => {
+			const navigieren = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste')]);
+
+			const fertigGefrischt = fixture.componentInstance.frischeAuf();
+			http
+				.expectOne('/demo/api/v1/threads/ck1/verlauf')
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+			await fertigGefrischt;
+
+			expect(navigieren).toHaveBeenCalledWith(expect.stringContaining('/demo/anmelden?weiter='));
+			expect(inhalte()).toEqual(['Erste']);
 		});
 	});
 });

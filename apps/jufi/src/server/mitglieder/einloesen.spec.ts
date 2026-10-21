@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebauthnPruefer } from '../abhaengigkeiten.js';
 import { createApp } from '../app.js';
+import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { erzeugeEinladung } from '../einladung.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
@@ -23,6 +24,7 @@ describe('Einladung einloesen', () => {
 	const t0 = new Date('2026-10-13T08:00:00Z');
 	let uhr = t0;
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 	let verein: { id: string; slug: string };
 	let fremd: { id: string; slug: string };
 
@@ -43,6 +45,7 @@ describe('Einladung einloesen', () => {
 				umgebung: TEST_UMGEBUNG,
 				jetzt: () => uhr,
 				webauthn: { verifyRegistration, verifyAuthentication },
+				bus: ereignisse.bus,
 			}),
 		);
 	});
@@ -711,5 +714,32 @@ describe('Einladung einloesen', () => {
 		expect((await prisma.passkey.findUniqueOrThrow({ where: { credentialId: belegt.credentialId } })).zugangId).toBe(
 			besitzer.zugangId,
 		);
+	});
+
+	describe('Umfeld-Aenderungen auf dem Bus', () => {
+		it('Einloesen: eine Aenderung ohne Thread mit der eingeladenen Person, ein Ereignis mit demselben Stand', async () => {
+			const v = await legeVereinAn(prisma, { slug: `einloesen-bus-${randomUUID().slice(0, 8)}` });
+			const { token, personId } = await lege(v, { art: 'ERWACHSENER', vorname: 'Thomas' });
+
+			const r = await einloesen(v, { token, kennung: adresse(), passwort: PASSWORT });
+
+			expect(r.status).toBe(200);
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.id, [personId])).toBe(1);
+		});
+
+		it('abgelehnte Einloesungen (404 unbekannter Link, 400 ohne Weg, 409 ohne Einwilligung) melden nichts', async () => {
+			const v = await legeVereinAn(prisma, { slug: `einloesen-bus-${randomUUID().slice(0, 8)}` });
+			const erwachsener = await lege(v, { art: 'ERWACHSENER' });
+			const kind = await lege(v, { art: 'JUNGFISCHER' });
+
+			expect((await einloesen(v, { token: 'gibt-es-nicht', kennung: adresse(), passwort: PASSWORT })).status).toBe(404);
+			expect((await einloesen(v, { token: erwachsener.token, kennung: adresse() })).status).toBe(400);
+			expect(
+				(await einloesen(v, { token: kind.token, kennung: `kind-${randomUUID().slice(0, 8)}`, passwort: PASSWORT }))
+					.status,
+			).toBe(409);
+
+			await erwarteNichts(prisma, ereignisse, v.id);
+		});
 	});
 });

@@ -161,7 +161,7 @@ export async function schreibeNachricht(
 
 /** GET/POST /threads/:id/verlauf und DELETE /verlauf/:eintragId. */
 export function verlaufRouten(router: Router, deps: VolleAppDeps): void {
-	const { jetzt, nachrichtenFenster } = deps;
+	const { jetzt, nachrichtenFenster, bus } = deps;
 
 	router.get(
 		'/threads/:id/verlauf',
@@ -257,7 +257,7 @@ export function verlaufRouten(router: Router, deps: VolleAppDeps): void {
 
 			let fehler: unknown;
 			try {
-				const { ergebnis } = await db.$transaction((tx) =>
+				const { stand, ergebnis, aenderungen } = await db.$transaction((tx) =>
 					mitAenderung(tx, verein.id, person.id, zeit, (stand) =>
 						schreibeNachricht(
 							tx,
@@ -266,6 +266,9 @@ export function verlaufRouten(router: Router, deps: VolleAppDeps): void {
 						),
 					),
 				);
+				// Nur hier, nie auf den Wiederholungspfaden: Dort hat sich nichts geaendert, und ein
+				// zweites Signal liesse jeden Chat die Nachricht doppelt zeigen.
+				bus.melde({ typ: 'aenderung', vereinId: verein.id, stand, aenderungen, eintraege: [ergebnis] });
 				return void res.status(201).json(antwort(ergebnis));
 			} catch (error) {
 				fehler = error;
@@ -309,7 +312,7 @@ export function verlaufRouten(router: Router, deps: VolleAppDeps): void {
 
 			const zeit = jetzt();
 			try {
-				await db.$transaction((tx) =>
+				const { stand, ergebnis, aenderungen } = await db.$transaction((tx) =>
 					mitAenderung(tx, verein.id, person.id, zeit, async () => {
 						// Bedingt auf "noch nicht geloescht" und unter der Sperre: Von zwei gleichzeitigen
 						// Loeschungen findet die zweite nichts mehr und rollt ihren Stand zurueck.
@@ -319,14 +322,18 @@ export function verlaufRouten(router: Router, deps: VolleAppDeps): void {
 							data: { text: null, geloeschtAm: zeit, geloeschtVonId: person.id },
 						});
 						if (count === 0) throw new Wiederholung(null);
+						// Der Eintrag, wie er jetzt gespeichert ist: Der Hub rechnet ihn fuer jede Person in
+						// ihre Ansicht um, mit geloeschtAm, damit der Chat die Nachricht ersetzt.
+						const geloescht = await tx.verlaufEintrag.findUniqueOrThrow({ where: { id: eintragId }, select: AUSWAHL });
 						// VERLAUF statt GELOESCHT (Entscheidung 9): die Zeile bleibt stehen, und das
 						// Loeschen zaehlt als Aktivitaet des Threads.
 						return {
-							ergebnis: null,
+							ergebnis: geloescht,
 							aenderungen: [{ threadId: eintrag.threadId, art: 'VERLAUF' as const, objektId: eintragId }],
 						};
 					}),
 				);
+				bus.melde({ typ: 'aenderung', vereinId: verein.id, stand, aenderungen, eintraege: [ergebnis] });
 			} catch (error) {
 				if (!(error instanceof Wiederholung)) return void antworteThreadFehler(res, error);
 			}

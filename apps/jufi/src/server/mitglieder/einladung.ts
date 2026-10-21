@@ -1,5 +1,5 @@
 import { challengeAusAntwort, hashPassword, hashToken, passkeyLabel, registrationOptions } from '@jufi/auth';
-import { sperreVereinszeile, type VereinDb } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld, type VereinDb } from '@jufi/db';
 import {
 	anmeldenameVorschlag,
 	darfEinwilligen,
@@ -14,6 +14,7 @@ import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { relyingParty } from '../admin/passkeys.js';
 import { asynchron, text } from '../admin/asynchron.js';
+import { meldeUmfeld } from '../echtzeit/umfeld.js';
 import { vereinsKontext } from '../verein.js';
 import { nimmChallenge, speichereChallenge } from './challenges.js';
 import { entzieheZugang, hatEinwilligung } from './zugang.js';
@@ -118,8 +119,11 @@ async function offeneEinladung(db: VereinDb, token: string, jetzt: Date) {
  * von vereinsApi (kein Unter-Router, der Mandanten-Test liest die Liste von dort).
  * Kein Backoff: das Token hat 256 Bit, Raten lohnt nicht.
  */
-export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' | 'umgebung' | 'webauthn'>): void {
-	const { jetzt, webauthn } = deps;
+export function einladungsRouten(
+	router: Router,
+	deps: Pick<VolleAppDeps, 'jetzt' | 'umgebung' | 'webauthn' | 'bus'>,
+): void {
+	const { jetzt, webauthn, bus } = deps;
 
 	// Prueft nur, verbraucht nichts: die Seite zeigt vor dem Einrichten, fuer wen
 	// der Link ist und welche Kennung gilt.
@@ -309,12 +313,15 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 			const userAgent = req.get('user-agent');
 
 			// 3. Entscheiden und schreiben.
-			let sitzungsToken: string;
+			let ergebnis: { sitzungsToken: string; vermerk: Awaited<ReturnType<typeof vermerkeUmfeld>> };
 			try {
-				sitzungsToken = await db.$transaction(async (tx) => {
+				ergebnis = await db.$transaction(async (tx) => {
 					// Haelt Slug-Korrektur, Sperren und Erneuern (admin/daten.ts) an, bis
 					// hier fertig ist; die lesen danach den neuen Zugang.
 					await sperreVereinszeile(tx, verein.id);
+					// Die eingeladene Person ist die Urheberin und das Objekt: mit dem Zugang aendert sich, wer sie ist
+					// und was sie sieht. Eine abgelehnte Einloesung rollt die Aenderung mit der Transaktion zurueck.
+					const vermerk = await vermerkeUmfeld(tx, verein.id, person.id, zeit, [person.id]);
 					// Erneut lesen: zwischen vereinAusSlug und der Sperre kann der Admin den
 					// Slug korrigiert oder den Verein gesperrt haben.
 					const stand = await tx.verein.findFirst({ select: { slug: true, status: true } });
@@ -424,7 +431,7 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 							PASSKEY_VERGEBEN,
 						);
 					}
-					return legeSitzungAn(tx, { zugangId, jetzt: zeit, userAgent });
+					return { sitzungsToken: await legeSitzungAn(tx, { zugangId, jetzt: zeit, userAgent }), vermerk };
 				});
 			} catch (error) {
 				if (error instanceof Abbruch) {
@@ -433,7 +440,8 @@ export function einladungsRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt
 				}
 				throw error;
 			}
-			setzeMitgliederCookie(req, res, verein.slug, sitzungsToken);
+			meldeUmfeld(bus, verein.id, ergebnis.vermerk);
+			setzeMitgliederCookie(req, res, verein.slug, ergebnis.sitzungsToken);
 			res.json({ vorname: person.vorname });
 		}),
 	);

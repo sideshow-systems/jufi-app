@@ -80,7 +80,7 @@ export function listeRouten(router: Router, deps: VolleAppDeps): void {
 
 			const { db } = vereinsKontext(res);
 			const { person, zugang } = mitgliedKontext(res);
-			const [umfeld, geladen] = await Promise.all([ladeThreadUmfeld(db), ladeThreads(db)]);
+			const [umfeld, geladen] = await Promise.all([ladeThreadUmfeld(db), ladeThreads(db, { mitAntworten: false })]);
 			const mich = umfeld.personen.get(person.id);
 			if (!mich) return void res.status(404).json(NICHT_GEFUNDEN);
 
@@ -126,16 +126,22 @@ export function listeRouten(router: Router, deps: VolleAppDeps): void {
 			const { db } = vereinsKontext(res);
 			const { person, zugang } = mitgliedKontext(res);
 			const jetztWert = jetzt();
-			const [umfeld, geladen] = await Promise.all([ladeThreadUmfeld(db), ladeThreads(db)]);
+			const [umfeld, geladen] = await Promise.all([ladeThreadUmfeld(db), ladeThreads(db, { mitAntworten: false })]);
 			const mich = umfeld.personen.get(person.id);
 			if (!mich) return void res.status(404).json(NICHT_GEFUNDEN);
 
-			const aktiv = geladen.filter(
-				(t) =>
-					t.kopf.veroeffentlichtAm !== null &&
-					siehtThread(mich, t.kopf, umfeld) &&
-					!istArchiviert(t.kopf, threadDatenAus(t.kopf, t.module).termine, jetztWert),
-			);
+			const aktivIds = geladen
+				.filter(
+					(t) =>
+						t.kopf.veroeffentlichtAm !== null &&
+						siehtThread(mich, t.kopf, umfeld) &&
+						!istArchiviert(t.kopf, threadDatenAus(t.kopf, t.module).termine, jetztWert),
+				)
+				.map((t) => t.kopf.id);
+			// Die Antworten braucht nur "Braucht deine Antwort", und das nur fuer aktive Threads: Archiv,
+			// Entwuerfe und fremde Threads sollen ihre Antworten nicht laden. Verworfen: gleich alles mit
+			// Antworten laden -- die Zahl der Antworten waechst mit dem Verein, die der aktiven Threads nicht.
+			const aktiv = aktivIds.length === 0 ? [] : await ladeThreads(db, { threadIds: aktivIds, mitAntworten: true });
 			// Mit Nachrichten: Die Kurzangabe "2 neue Kommentare" braucht die ungelesenen Eintraege des Verlaufs.
 			const kandidaten = await ladeNeuKandidaten(
 				db,
@@ -181,7 +187,7 @@ export function listeRouten(router: Router, deps: VolleAppDeps): void {
 
 			const { db } = vereinsKontext(res);
 			const { person } = mitgliedKontext(res);
-			const [umfeld, geladen] = await Promise.all([ladeThreadUmfeld(db), ladeThreads(db)]);
+			const [umfeld, geladen] = await Promise.all([ladeThreadUmfeld(db), ladeThreads(db, { mitAntworten: false })]);
 			const mich = umfeld.personen.get(person.id);
 			if (!mich) return void res.status(404).json(NICHT_GEFUNDEN);
 

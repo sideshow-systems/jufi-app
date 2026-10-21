@@ -17,7 +17,9 @@ import { kontrast } from '../../jufi/src/app/gestaltung/farben';
  */
 export async function keinWaagrechtesScrollen(page: Page): Promise<void> {
 	const { breite, fenster, taeter } = await page.evaluate(() => {
-		const fenster = window.innerWidth;
+		// clientWidth statt innerWidth: Ein klassischer Scrollbalken zaehlt in innerWidth mit, und um seine
+		// Breite liesse die Pruefung sonst Ueberlauf durch. Headless sind die Balken ueberlagert, beide gleich.
+		const fenster = document.documentElement.clientWidth;
 		// Die innersten Elemente, die rechts hinausragen: Sie nennt die Meldung, damit ein roter Lauf
 		// gleich sagt, wo es liegt, statt nur um wie viel.
 		const raus = Array.from(document.body.querySelectorAll('*')).filter(
@@ -30,9 +32,7 @@ export async function keinWaagrechtesScrollen(page: Page): Promise<void> {
 		});
 		return { breite: document.documentElement.scrollWidth, fenster, taeter };
 	});
-	expect(breite, `scrollWidth ${breite} bei Fensterbreite ${fenster}: ${taeter.join(', ')}`).toBeLessThanOrEqual(
-		fenster,
-	);
+	expect(breite, `scrollWidth ${breite} bei clientWidth ${fenster}: ${taeter.join(', ')}`).toBeLessThanOrEqual(fenster);
 }
 
 /**
@@ -214,6 +214,44 @@ export async function verlaufUeberLeiste(page: Page): Promise<void> {
 		m.nachrichtUnten,
 		`letzte Nachricht endet bei ${m.nachrichtUnten}, das Eingabefeld beginnt bei ${m.eingabeOben}`,
 	).toBeLessThanOrEqual(m.eingabeOben + 0.5);
+}
+
+/**
+ * Der Hinweis "Nicht verbunden" im Kopf der Mitglieder-Huelle schneidet den Vereinsnamen nicht und
+ * bleibt im Fenster. Gemessen am Namen und nicht am ganzen Kopf: Der Hinweis steht im Kopf, und
+ * worauf es ankommt, ist, dass der Name lesbar bleibt, wenn beide sich die Zeile teilen. Rueckgabe:
+ * Hoehe des Hinweises und des Kopfs in px, damit ein Umbruch im Bericht zu sehen ist.
+ */
+export async function hinweisUeberdecktNamenNicht(page: Page): Promise<{ hinweis: number; kopf: number }> {
+	const m = await page.evaluate(() => {
+		const kopf = document.querySelector('jf-mitglieder-huelle > header.kopf');
+		const hinweis = kopf?.querySelector('.hinweis');
+		const name = kopf?.querySelector('.name');
+		if (!kopf || !hinweis || !name) throw new Error('Kopf ohne Hinweis oder Vereinsnamen');
+		const r = (el: Element) => {
+			const b = el.getBoundingClientRect();
+			return { links: b.left, rechts: b.right, oben: b.top, unten: b.bottom };
+		};
+		return {
+			hinweis: r(hinweis),
+			name: r(name),
+			kopf: r(kopf),
+			text: hinweis.textContent?.trim() ?? '',
+			fenster: window.innerWidth,
+		};
+	});
+	// Ohne Text gaebe es nichts zu messen; dann ist der Hinweis gar nicht erschienen.
+	expect(m.text, 'Hinweis im Kopf').toBe('Nicht verbunden – Inhalte evtl. veraltet');
+	const schnitt =
+		Math.max(0, Math.min(m.hinweis.rechts, m.name.rechts) - Math.max(m.hinweis.links, m.name.links)) *
+		Math.max(0, Math.min(m.hinweis.unten, m.name.unten) - Math.max(m.hinweis.oben, m.name.oben));
+	expect(schnitt, `Hinweis ${JSON.stringify(m.hinweis)} schneidet den Namen ${JSON.stringify(m.name)}`).toBe(0);
+	expect(m.hinweis.rechts, `Hinweis endet bei ${m.hinweis.rechts} im Fenster von ${m.fenster} px`).toBeLessThanOrEqual(
+		m.fenster,
+	);
+	// Halbe Pixel aus gebrochenen Hoehen sind kein Ueberstand.
+	expect(m.hinweis.unten, `Hinweis ragt unten aus dem Kopf (${m.kopf.unten})`).toBeLessThanOrEqual(m.kopf.unten + 0.5);
+	return { hinweis: m.hinweis.unten - m.hinweis.oben, kopf: m.kopf.unten - m.kopf.oben };
 }
 
 /**

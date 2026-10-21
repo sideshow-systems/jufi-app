@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import type { ThreadListe, ThreadZeile } from '@jufi/domain';
-import { adminTestAnbieter, tippe } from '../../admin/test-hilfen';
+import { adminTestAnbieter, EchtzeitAttrappe, tippe } from '../../admin/test-hilfen';
 
 const API = '/demo/api/v1';
 
@@ -392,6 +392,51 @@ describe('Thread-Liste', () => {
 			harness.detectChanges();
 
 			expect(titel(abschnitt('Aktiv') as HTMLElement)).toEqual(['Bowling', 'Kegeln · Entwurf']);
+		});
+	});
+
+	describe('Echtzeit', () => {
+		it('laedt bei offenem Archiv nach einem Ereignis auch die Archivzeilen neu', async () => {
+			await oeffne();
+			klappeArchivAuf();
+			await antworteGefiltert('archiv=1', { threads: [ALT], archiv: 1 });
+
+			TestBed.inject(EchtzeitAttrappe).quelle.next({ typ: 'alles' });
+			// Die Grundliste laedt die Huelle neu (ThreadUebersicht), das Archiv die Seite.
+			await antworteGrundliste(GRUNDLISTE);
+			await antworteGefiltert('archiv=1', { threads: [ALT, ALT2], archiv: 2 });
+
+			expect(titel(archiv())).toEqual(['Bowling 2025', 'Zeltlager 2025']);
+		});
+
+		it('laedt mit einer Suche nach einem Ereignis die Treffer neu', async () => {
+			harness = await RouterTestingHarness.create();
+			const navigation = harness.navigateByUrl('/demo/threads?suche=bowl');
+			await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
+			await navigation;
+			await antworteGefiltert('suche=bowl&archiv=1', { threads: [BOWLING], archiv: 0 }, false);
+			await antworteGrundliste(GRUNDLISTE);
+			await stabil();
+
+			TestBed.inject(EchtzeitAttrappe).quelle.next({
+				typ: 'signal',
+				signal: { stand: 43, threadId: 't4', art: 'THREAD', objektId: 't4' },
+			});
+			await antworteGrundliste(GRUNDLISTE);
+			await antworteGefiltert('suche=bowl&archiv=1', { threads: [BOWLING, ALT], archiv: 1 });
+
+			expect(titel(archiv())).toEqual(['Bowling 2025']);
+		});
+
+		it('fragt ohne Suche und ohne Archiv nur die Liste der Huelle', async () => {
+			await oeffne();
+
+			TestBed.inject(EchtzeitAttrappe).quelle.next({ typ: 'alles' });
+			await antworteGrundliste(GRUNDLISTE);
+			await new Promise((r) => setTimeout(r, 300));
+			await stabil();
+
+			http.expectNone((r) => r.params.has('archiv'));
 		});
 	});
 });

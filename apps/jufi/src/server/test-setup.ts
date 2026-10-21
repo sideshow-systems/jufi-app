@@ -24,6 +24,8 @@ export const TEST_UMGEBUNG: Umgebung = {
 	mailAbsender: 'app@jufi.test',
 	mailAntwort: 'kontakt@jufi.test',
 	mailBetreffPraefix: '',
+	// Gleichgueltig: Kein Test startet die App unter ng serve.
+	wsDevPort: 4201,
 };
 
 const LESENDE_METHODEN = ['GET', 'HEAD', 'OPTIONS'];

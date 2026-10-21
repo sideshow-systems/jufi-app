@@ -5,7 +5,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { createPrismaClient, mitAenderung, vereinDb } from './index.js';
+import { createPrismaClient, mitAenderung, vereinDb, vermerkeUmfeld } from './index.js';
 
 const prisma = createPrismaClient();
 
@@ -223,5 +223,64 @@ describe('mitAenderung', () => {
 		expect(erg.ergebnis.stand).toBe(erg.stand);
 		const gespeichert = await prisma.verlaufEintrag.findUniqueOrThrow({ where: { id: erg.ergebnis.id } });
 		expect(gespeichert.stand).toBe(3);
+	});
+});
+
+describe('vermerkeUmfeld', () => {
+	it('erhoeht den Stand um eins und schreibt je ID eine Aenderung ohne Thread', async () => {
+		const v = await verein();
+		const p = await leiter(v.id);
+		const t = await thread(v.id, p.id);
+		const db = vereinDb(prisma, v.id);
+
+		const { stand, aenderungen } = await db.$transaction((tx) =>
+			vermerkeUmfeld(tx, v.id, p.id, JETZT, ['person-a', 'person-b']),
+		);
+
+		expect(stand).toBe(1);
+		expect(aenderungen).toEqual([
+			{ threadId: null, art: 'SICHTBARKEIT', objektId: 'person-a' },
+			{ threadId: null, art: 'SICHTBARKEIT', objektId: 'person-b' },
+		]);
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: v.id } })).aenderungsstand).toBe(1);
+		const zeilen = await prisma.aenderung.findMany({ where: { vereinId: v.id }, orderBy: { objektId: 'asc' } });
+		expect(zeilen.map((z) => [z.stand, z.threadId, z.art, z.objektId, z.urheberId])).toEqual([
+			[1, null, 'SICHTBARKEIT', 'person-a', p.id],
+			[1, null, 'SICHTBARKEIT', 'person-b', p.id],
+		]);
+		// Ohne Thread gibt es keinen, dessen Aktivitaet steigt.
+		const danach = await prisma.thread.findUniqueOrThrow({ where: { id: t.id } });
+		expect(danach.letzteAktivitaetStand).toBe(0);
+		expect(danach.letzteAktivitaetAm).toEqual(new Date('2026-01-01T00:00:00Z'));
+	});
+
+	it('ohne Urheber (null) und mit zweitem Aufruf fortlaufend', async () => {
+		const v = await verein();
+		const db = vereinDb(prisma, v.id);
+
+		await db.$transaction((tx) => vermerkeUmfeld(tx, v.id, null, JETZT, ['x']));
+		const zweite = await db.$transaction((tx) => vermerkeUmfeld(tx, v.id, null, JETZT, ['y']));
+
+		expect(zweite.stand).toBe(2);
+		const zeilen = await prisma.aenderung.findMany({ where: { vereinId: v.id }, orderBy: { stand: 'asc' } });
+		expect(zeilen.map((z) => [z.stand, z.urheberId])).toEqual([
+			[1, null],
+			[2, null],
+		]);
+	});
+
+	it('eine zurueckgerollte Transaktion verbraucht keinen Stand und laesst keine Zeile', async () => {
+		const v = await verein();
+		const db = vereinDb(prisma, v.id);
+
+		await expect(
+			db.$transaction(async (tx) => {
+				await vermerkeUmfeld(tx, v.id, null, JETZT, ['x']);
+				throw new Error('Abbruch');
+			}),
+		).rejects.toThrow('Abbruch');
+
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: v.id } })).aenderungsstand).toBe(0);
+		expect(await prisma.aenderung.count({ where: { vereinId: v.id } })).toBe(0);
 	});
 });

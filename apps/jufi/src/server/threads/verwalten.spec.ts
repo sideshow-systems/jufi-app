@@ -3,6 +3,7 @@ import type { ThreadAnsicht, ThreadBearbeitung } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
@@ -32,6 +33,7 @@ const MODULE: TestModul[] = [
 describe('Veroeffentlichen, Archiv, Anpinnen und Loeschen', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
@@ -40,6 +42,7 @@ describe('Veroeffentlichen, Archiv, Anpinnen und Loeschen', () => {
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
 				jetzt: () => JETZT,
+				bus: ereignisse.bus,
 			}),
 		);
 	});
@@ -130,6 +133,7 @@ describe('Veroeffentlichen, Archiv, Anpinnen und Loeschen', () => {
 			thread,
 			austausch,
 			nachricht,
+			ereignisse: () => ereignisse.fuer(verein.id),
 		};
 	}
 
@@ -593,6 +597,113 @@ describe('Veroeffentlichen, Archiv, Anpinnen und Loeschen', () => {
 			const s = await szenario();
 			const t = await s.thread({ veroeffentlicht: false });
 			expect((await s.loesche(t.threadId, s.lars.cookie)).status).toBe(204);
+		});
+	});
+
+	describe('Ereignisse auf dem Bus', () => {
+		type Aend = { threadId: string | null; art: string; objektId: string };
+		const nachSchluessel = (a: Aend, b: Aend) => `${a.art}${a.objektId}`.localeCompare(`${b.art}${b.objektId}`);
+		/**
+		 * Das eine erwartete Ereignis: Stand und Aenderungen wie in der Datenbank, keine Verlaufseintraege.
+		 * Die Reihenfolge der Aenderungen ist nicht zugesichert (die Datenbank sortiert Arten nach der
+		 * Enum-Reihenfolge), darum werden beide Seiten sortiert.
+		 */
+		const aenderungEreignis = async (s: Awaited<ReturnType<typeof szenario>>) => {
+			const stand = await s.stand();
+			const geschrieben = await s.aenderungen(stand);
+			return {
+				typ: 'aenderung',
+				vereinId: s.verein.id,
+				stand,
+				aenderungen: geschrieben
+					.map((a) => ({ threadId: a.threadId, art: a.art, objektId: a.objektId }))
+					.sort(nachSchluessel),
+				eintraege: [],
+			};
+		};
+		const gemeldet = (s: Awaited<ReturnType<typeof szenario>>) =>
+			s
+				.ereignisse()
+				.map((e) => (e.typ === 'aenderung' ? { ...e, aenderungen: [...e.aenderungen].sort(nachSchluessel) } : e));
+
+		it('Veroeffentlichen meldet THREAD, SICHTBARKEIT und VERLAUF; ein zweites Mal nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread({ veroeffentlicht: false });
+
+			expect((await s.veroeffentliche(t.threadId, s.thomas.cookie)).status).toBe(200);
+			expect((await s.veroeffentliche(t.threadId, s.thomas.cookie)).status).toBe(200);
+
+			const erwartet = await aenderungEreignis(s);
+			expect(erwartet.aenderungen.map((a) => a.art).sort()).toEqual(['SICHTBARKEIT', 'THREAD', 'VERLAUF']);
+			expect(gemeldet(s)).toEqual([erwartet]);
+		});
+
+		it('Veroeffentlichen ohne Zielgruppe (409) und ohne Recht (404) meldet nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread({ veroeffentlicht: false, untergruppenIds: [] });
+
+			expect((await s.veroeffentliche(t.threadId, s.thomas.cookie)).status).toBe(409);
+			expect((await s.veroeffentliche(t.threadId, s.sandra.cookie)).status).toBe(404);
+
+			expect(s.ereignisse()).toEqual([]);
+		});
+
+		it('Archiv meldet LISTE; derselbe Wunsch noch einmal nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+
+			expect((await s.archiviere(t.threadId, { archiviert: true }, s.thomas.cookie)).status).toBe(200);
+			expect((await s.archiviere(t.threadId, { archiviert: true }, s.thomas.cookie)).status).toBe(200);
+
+			const erwartet = await aenderungEreignis(s);
+			expect(erwartet.aenderungen).toEqual([{ threadId: t.threadId, art: 'LISTE', objektId: t.threadId }]);
+			expect(gemeldet(s)).toEqual([erwartet]);
+		});
+
+		it('Anpinnen meldet LISTE; der Doppelklick nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+
+			expect((await s.pinne(t.threadId, { angepinnt: true }, s.thomas.cookie)).status).toBe(200);
+			expect((await s.pinne(t.threadId, { angepinnt: true }, s.thomas.cookie)).status).toBe(200);
+
+			const erwartet = await aenderungEreignis(s);
+			expect(erwartet.aenderungen).toEqual([{ threadId: t.threadId, art: 'LISTE', objektId: t.threadId }]);
+			expect(gemeldet(s)).toEqual([erwartet]);
+		});
+
+		it('Archiv und Anpinnen mit kaputtem Koerper (400) oder ohne Recht (404) melden nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+
+			expect((await s.archiviere(t.threadId, {}, s.thomas.cookie)).status).toBe(400);
+			expect((await s.pinne(t.threadId, {}, s.thomas.cookie)).status).toBe(400);
+			expect((await s.archiviere(t.threadId, { archiviert: true }, s.sandra.cookie)).status).toBe(404);
+			expect((await s.pinne(t.threadId, { angepinnt: true }, s.tina.cookie)).status).toBe(404);
+
+			expect(s.ereignisse()).toEqual([]);
+		});
+
+		it('Loeschen meldet GELOESCHT mit der ID des Threads; ein zweites Loeschen ist 404 und meldet nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+
+			expect((await s.loesche(t.threadId, s.thomas.cookie)).status).toBe(204);
+			expect((await s.loesche(t.threadId, s.thomas.cookie)).status).toBe(404);
+
+			const erwartet = await aenderungEreignis(s);
+			expect(erwartet.aenderungen).toEqual([{ threadId: t.threadId, art: 'GELOESCHT', objektId: t.threadId }]);
+			expect(gemeldet(s)).toEqual([erwartet]);
+		});
+
+		it('Loeschen mit Nachricht (409) meldet nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await s.nachricht(t.threadId);
+
+			expect((await s.loesche(t.threadId, s.thomas.cookie)).status).toBe(409);
+
+			expect(s.ereignisse()).toEqual([]);
 		});
 	});
 });

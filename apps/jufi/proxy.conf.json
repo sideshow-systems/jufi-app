@@ -1,0 +1,6 @@
+{
+	"^/[^/]+/ws$": {
+		"target": "http://localhost:4201",
+		"ws": true
+	}
+}

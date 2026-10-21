@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { ZUSTAND } from './hilfen';
 import {
 	abstandUnterKopf,
+	hinweisUeberdecktNamenNicht,
 	keinWaagrechtesScrollen,
 	leisteHatVierEintraege,
 	leisteVerdecktNichts,
@@ -234,6 +235,42 @@ test.describe('Start und Termine am Handy', () => {
 				await keinWaagrechtesScrollen(page);
 			});
 		});
+	}
+});
+
+/**
+ * Der Hinweis "Nicht verbunden" im Kopf der Mitglieder-Huelle. Der Seitentest oben sieht ihn nie: Dort
+ * ist die Seite verbunden, und der Hinweis kaeme erst nach 2 s. Hier wird jeder Socket sofort
+ * geschlossen, und gemessen wird erst, wenn der Hinweis dasteht. Die Startseite der Mutter, weil der
+ * Kopf auf jeder Mitgliederseite derselbe ist.
+ */
+test.describe('Hinweis ohne Verbindung', () => {
+	test.use({ storageState: sitzung('mutter') });
+
+	for (const groesse of GROESSEN) {
+		for (const schema of SCHEMATA) {
+			test.describe(`${groesse.name} ${schema}`, () => {
+				test.use({ viewport: groesse.viewport, colorScheme: schema });
+
+				test('kein waagrechtes Scrollen, der Vereinsname bleibt frei', async ({ page }) => {
+					// Vor dem ersten Aufruf, sonst stuende der erste Socket schon.
+					await page.routeWebSocket(/\/ws$/, (ws) => ws.close());
+					await oeffne(page, `/${SLUG}/`);
+					await expect(page.locator('jf-mitglieder-huelle > header.kopf').getByRole('status')).toHaveText(
+						'Nicht verbunden – Inhalte evtl. veraltet',
+						{ timeout: 5000 },
+					);
+					await keinWaagrechtesScrollen(page);
+					const hoehen = await hinweisUeberdecktNamenNicht(page);
+					// Nicht gefordert, aber gemeldet: Bricht der Hinweis um, waechst der Kopf.
+					test.info().annotations.push({
+						type: 'Kopfhoehe',
+						description: `Hinweis ${hoehen.hinweis} px, Kopf ${hoehen.kopf} px`,
+					});
+					await leisteVerdecktNichts(page);
+				});
+			});
+		}
 	}
 });
 

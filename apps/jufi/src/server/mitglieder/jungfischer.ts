@@ -1,4 +1,4 @@
-import { sperreVereinszeile } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld } from '@jufi/db';
 import {
 	darfEinwilligen,
 	darfFuerKindHandeln,
@@ -9,6 +9,7 @@ import {
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
+import { meldeUmfeld } from '../echtzeit/umfeld.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 import { alsSicht } from './verwaltung.js';
@@ -56,26 +57,40 @@ function lesBoolean(body: unknown, feld: string): boolean {
 	return wert;
 }
 
-export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' | 'umgebung'>): void {
-	const { jetzt, umgebung } = deps;
+export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' | 'umgebung' | 'bus'>): void {
+	const { jetzt, umgebung, bus } = deps;
 
-	/** Gemeinsamer Rahmen der Schreib-Routen: Sperre, Entscheidung, Abbruch als Antwort. */
+	/**
+	 * Gemeinsamer Rahmen der Schreib-Routen: Sperre, Entscheidung, Abbruch als Antwort. Die Arbeit
+	 * ruft `vermerke` mit den geaenderten Personen auf, sobald feststeht, dass sie schreibt; gemeldet
+	 * wird hier, nach dem Commit. Eine Arbeit, die nie vermerkt (Einladen), meldet nichts.
+	 */
 	async function unterSperre<T>(
 		res: Parameters<typeof vereinsKontext>[0],
-		arbeit: (tx: Transaktion, verein: { slug: string; anzeigename: string }) => Promise<T>,
+		handelnderId: string,
+		zeit: Date,
+		arbeit: (
+			tx: Transaktion,
+			verein: { slug: string; anzeigename: string },
+			vermerke: (objektIds: readonly string[]) => Promise<void>,
+		) => Promise<T>,
 	): Promise<{ status: number; antwort: object } | { ok: T }> {
 		const { verein, db } = vereinsKontext(res);
 		try {
-			return {
-				ok: await db.$transaction(async (tx) => {
-					await sperreVereinszeile(tx, verein.id);
-					// Erneut gelesen: der Slug steht im Link, und der Admin kann ihn zwischen vereinAusSlug
-					// und der Sperre korrigiert oder den Verein gesperrt haben.
-					const stand = await tx.verein.findFirst({ select: { slug: true, anzeigename: true, status: true } });
-					if (!stand || stand.status !== 'AKTIV') throw new Abbruch(404, NICHT_GEFUNDEN);
-					return arbeit(tx, stand);
-				}),
-			};
+			// Ein Objekt statt einer Variable: TypeScript verfolgt die Zuweisung im Rueckruf nicht.
+			const gemerkt: { vermerk?: Awaited<ReturnType<typeof vermerkeUmfeld>> } = {};
+			const ergebnis = await db.$transaction(async (tx) => {
+				await sperreVereinszeile(tx, verein.id);
+				// Erneut gelesen: der Slug steht im Link, und der Admin kann ihn zwischen vereinAusSlug
+				// und der Sperre korrigiert oder den Verein gesperrt haben.
+				const stand = await tx.verein.findFirst({ select: { slug: true, anzeigename: true, status: true } });
+				if (!stand || stand.status !== 'AKTIV') throw new Abbruch(404, NICHT_GEFUNDEN);
+				return arbeit(tx, stand, async (objektIds) => {
+					gemerkt.vermerk = await vermerkeUmfeld(tx, verein.id, handelnderId, zeit, objektIds);
+				});
+			});
+			if (gemerkt.vermerk) meldeUmfeld(bus, verein.id, gemerkt.vermerk);
+			return { ok: ergebnis };
 		} catch (error) {
 			if (error instanceof Abbruch) return { status: error.status, antwort: error.antwort };
 			throw error;
@@ -149,9 +164,10 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 			const { person: handelnder } = mitgliedKontext(res);
 			const kindId = req.params['kindId'] ?? '';
 			const zeit = jetzt();
-			const r = await unterSperre(res, async (tx) => {
+			const r = await unterSperre(res, handelnder.id, zeit, async (tx, _stand, vermerke) => {
 				const { kind } = await ladeErziehungsberechtigt(tx, handelnder.id, kindId, zeit);
 				const erlaubt = lesBoolean(req.body, 'erlaubt');
+				await vermerke([kind.id]);
 				if (!erlaubt) {
 					await entzieheZugang(tx, kind.id);
 				} else {
@@ -172,7 +188,7 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 			const { person: handelnder } = mitgliedKontext(res);
 			const kindId = req.params['kindId'] ?? '';
 			const zeit = jetzt();
-			const r = await unterSperre(res, async (tx, stand) => {
+			const r = await unterSperre(res, handelnder.id, zeit, async (tx, stand) => {
 				const { ich, kind } = await ladeErziehungsberechtigt(tx, handelnder.id, kindId, zeit);
 				// Das Kind hat meist keine Adresse und die Familie reicht den Link selbst weiter: keine Mail.
 				return erzeugeEinladungFuerKind(tx, { ich, ziel: kind, stand, mail: false, zeit, basisUrl: umgebung.basisUrl });
@@ -189,7 +205,7 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 			const { person: handelnder } = mitgliedKontext(res);
 			const kindId = req.params['kindId'] ?? '';
 			const zeit = jetzt();
-			const r = await unterSperre(res, async (tx) => {
+			const r = await unterSperre(res, handelnder.id, zeit, async (tx, _stand, vermerke) => {
 				const { ich, kind } = await ladeErziehungsberechtigt(tx, handelnder.id, kindId, zeit);
 				const erteilen = lesBoolean(req.body, 'erteilen');
 				if (erteilen) {
@@ -198,6 +214,7 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 						where: { jungfischerId: kind.id, erteiltVon: ich.id, widerrufenAm: null },
 					});
 					if (offen === 0) {
+						await vermerke([kind.id]);
 						await tx.einwilligung.create({
 							data: {
 								jungfischerId: kind.id,
@@ -211,6 +228,8 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 				} else {
 					// Nur die eigenen: die Einwilligung des Vaters widerruft die Mutter nicht. Die Zeilen
 					// bleiben als Nachweis stehen, verworfen: sie zu loeschen.
+					// Immer vermerkt, auch ohne offene Zeile: der Haken danach kann dem Kind den Zugang nehmen.
+					await vermerke([kind.id]);
 					await tx.einwilligung.updateMany({
 						where: { jungfischerId: kind.id, erteiltVon: ich.id, widerrufenAm: null },
 						data: { widerrufenAm: zeit },

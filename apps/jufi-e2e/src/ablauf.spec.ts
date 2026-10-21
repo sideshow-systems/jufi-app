@@ -1,4 +1,12 @@
-import { type Browser, type BrowserContext, expect, type Locator, type Page, test } from '@playwright/test';
+import {
+	type Browser,
+	type BrowserContext,
+	expect,
+	type Locator,
+	type Page,
+	test,
+	type WebSocket,
+} from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { berlinerTag, MONATSNAMEN, tagPlus, threadSegment } from '@jufi/domain';
@@ -63,6 +71,61 @@ async function ausSitzung(browser: Browser, rolle: string): Promise<{ kontext: B
 async function speichereSitzung(kontext: BrowserContext, rolle: string): Promise<void> {
 	await kontext.storageState({ path: join(ZUSTAND, `${rolle}.json`) });
 }
+
+/**
+ * Oeffnet die Seite und wartet auf den ersten Abgleich der Huelle. Ein gelungener Abgleich allein
+ * belegt keine Verbindung: Scheitert das Upgrade, gleicht der Client nach jedem Abbruch ebenfalls ab
+ * und holt Aenderungen im Takt des Backoffs nach (1, 2, 4 s), was ein Live-Schritt mit 5 s Frist
+ * nicht vom Signal unterschiede. Darum muss der Socket danach noch offen sein, und die Schritte
+ * pruefen am Ende, dass er es geblieben ist und ein Signal ueber ihn kam. Verworfen: auf den Hinweis
+ * im Kopf zu schauen -- leer ist er in den ersten 2 s auch ohne Hub.
+ */
+async function oeffneVerbunden(seite: Page, pfad: string): Promise<WebSocket> {
+	// Mit eigener Frist: Ohne sie endete ein Lauf ohne Socket erst mit dem Test, ohne zu sagen, worauf er wartete.
+	const socket = seite.waitForEvent('websocket', {
+		predicate: (ws) => new URL(ws.url()).pathname === `/${SLUG}/ws`,
+		timeout: 5000,
+	});
+	const abgleich = seite.waitForResponse(
+		(r) => new URL(r.url()).pathname === `/${SLUG}/api/v1/sync` && r.status() === 200,
+	);
+	await seite.goto(pfad);
+	// Beide zusammen: Scheitert das Warten auf den Socket, bliebe das auf den Abgleich sonst unbeachtet
+	// stehen und meldete sich spaeter als unbehandelte Ablehnung neben der eigentlichen Meldung.
+	const [ws] = await Promise.all([socket, abgleich]);
+	expect(ws.isClosed(), 'Socket nach dem ersten Abgleich zu; nimmt der Server das Upgrade an?').toBe(false);
+	return ws;
+}
+
+/**
+ * Das Signal kam ueber denselben Socket, der seit dem Oeffnen steht. Ohne Abbruch gab es keinen
+ * Abgleich nach Neuverbinden, also hat das Signal die Seite aktualisiert, nicht ein Nachholen. Der
+ * dritte Anlass fuer einen Abgleich, die Rueckkehr in den Vordergrund, kommt hier nicht vor: Jeder
+ * Kontext hat seine eigene, stets sichtbare Seite, und gewechselt wird zwischen ihnen nicht.
+ */
+async function kamLive<T>(ws: WebSocket, signal: Promise<T>): Promise<T> {
+	const wert = await signal;
+	expect(ws.isClosed(), 'Socket zwischendurch zu; kam die Aenderung ueber den Abgleich statt live?').toBe(false);
+	return wert;
+}
+
+/** Ein Signal des Hubs aus einem Frame, oder null, wenn der Frame keines ist. */
+function alsSignal(payload: string | Buffer): { stand: number; threadId: string | null; art: string } | null {
+	try {
+		const wert = JSON.parse(typeof payload === 'string' ? payload : payload.toString('utf8')) as unknown;
+		return wert && typeof wert === 'object' && 'stand' in wert && 'art' in wert
+			? (wert as { stand: number; threadId: string | null; art: string })
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Entprellen der Nachlader (Entscheidung 10). Nur fuer den Beweis, dass etwas ausbleibt: Laedt ein
+ * Fehler die Ansicht ueber einen Nachlader nach, geht die Anfrage erst nach dieser Zeit hinaus.
+ */
+const ENTPRELLEN_MS = 250;
 
 test.describe.serial('Ablauf von Verein bis Kind', () => {
 	test('Admin richtet sich ein und legt den Verein an', async ({ browser }) => {
@@ -397,6 +460,179 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await leitung.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: 'Verlauf' }).click();
 		await expect(leitung.seite.getByLabel('Nachricht schreiben')).toBeVisible();
 		await leitung.kontext.close();
+	});
+
+	// Live (Spec 5): Zwei Personen haben gleichzeitig offen, keine Seite wird neu geladen. Die Frist
+	// von 5 s ist grosszuegig fuer ein Signal, schliesst aber den langsamen Weg ueber Neuverbinden und
+	// Abgleich nicht aus; das tut erst kamLive.
+
+	test('Live: Leitung sieht die Nachricht der Mutter im offenen Verlauf, der Zaehler bleibt bei 0', async ({
+		browser,
+	}) => {
+		const leitung = await ausSitzung(browser, 'leitung');
+		const ws = await oeffneVerbunden(leitung.seite, `/${SLUG}/t/${bowling}?reiter=verlauf`);
+		const reiter = leitung.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: /^Verlauf/ });
+		await expect(leitung.seite.getByRole('listitem').filter({ hasText: 'Wo genau ist der Treffpunkt?' })).toBeVisible();
+		// Die Frage der Mutter war fuer die Leitung ungelesen; das Oeffnen des Verlaufs hat sie gemeldet.
+		await expect(reiter.locator('.zahl')).toHaveCount(0);
+
+		// Zu beweisen ist, dass etwas nicht geschieht: Der Zaehler darf nicht einmal kurz erscheinen.
+		// toHaveCount(0) am Ende bestuende auch, wenn er auf 1 sprang und nach dem Melden wieder fiel.
+		// Ein Beobachter im Browser haelt jedes Erscheinen fest.
+		await leitung.seite.evaluate(() => {
+			const fenster = window as unknown as { zahlGesehen: boolean };
+			fenster.zahlGesehen = false;
+			new MutationObserver(() => {
+				if (document.querySelector('nav[aria-label="Ansicht"] .zahl')) fenster.zahlGesehen = true;
+			}).observe(document.body, { childList: true, subtree: true, characterData: true });
+		});
+		// Der Zaehler kaeme nur mit einer neu geladenen Ansicht (GET /threads/<id>); fuer eine Live-Nachricht
+		// im offenen Verlauf laedt die Seite weder sie noch den Verlauf. Gezaehlt wird ab dem Signal: Der
+		// Abgleich beim Oeffnen laedt beides einmal, und das ist laengst vorbei, wenn die Mutter sendet.
+		let nachSignal = false;
+		const ladenNachSignal: string[] = [];
+		leitung.seite.on('request', (r) => {
+			const pfad = new URL(r.url()).pathname;
+			if (nachSignal && r.method() === 'GET' && pfad.startsWith(`/${SLUG}/api/v1/threads/${bowlingId}`)) {
+				ladenNachSignal.push(pfad);
+			}
+		});
+		// Alle Gelesen-Meldungen des Verlaufs mit ihrem Stand; die beim Oeffnen hat einen kleineren.
+		const meldungen: { bis: number; status: number }[] = [];
+		leitung.seite.on('response', (r) => {
+			if (r.request().method() !== 'PUT' || !new URL(r.url()).pathname.endsWith(`/threads/${bowlingId}/gelesen`)) {
+				return;
+			}
+			const koerper = r.request().postDataJSON() as { bereich?: string; bis?: number };
+			if (koerper.bereich === 'verlauf' && typeof koerper.bis === 'number') {
+				meldungen.push({ bis: koerper.bis, status: r.status() });
+			}
+		});
+		const istNachricht = (payload: string | Buffer) => {
+			const s = alsSignal(payload);
+			return s?.art === 'VERLAUF' && s.threadId === bowlingId;
+		};
+		// Vor waitForEvent angemeldet, also vor ihm gerufen: Ab diesem Frame zaehlt jedes Laden.
+		ws.on('framereceived', (f) => {
+			if (istNachricht(f.payload)) nachSignal = true;
+		});
+		const signal = ws.waitForEvent('framereceived', { predicate: (f) => istNachricht(f.payload) });
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}?reiter=verlauf`);
+		await mutter.seite.getByLabel('Nachricht schreiben').fill('Wir kommen zu zweit');
+		await mutter.seite.getByRole('button', { name: 'Senden' }).click();
+		await expect(mutter.seite.getByRole('listitem').filter({ hasText: 'Wir kommen zu zweit' })).toBeVisible();
+
+		await expect(leitung.seite.getByRole('listitem').filter({ hasText: 'Wir kommen zu zweit' })).toBeVisible({
+			timeout: 5000,
+		});
+		const frame = await kamLive(ws, signal);
+		const stand = alsSignal(frame.payload)?.stand;
+		expect(stand, 'Signal ohne Stand').toBeDefined();
+		// Genau der Stand der Live-Nachricht: Die Seite meldet ihn, ohne die Ansicht neu zu laden (Entscheidung 8).
+		await expect
+			.poll(() => meldungen.find((m) => m.bis === stand)?.status, {
+				message: `keine Gelesen-Meldung bis ${stand}, gemeldet: ${JSON.stringify(meldungen)}`,
+				timeout: 5000,
+			})
+			.toBe(204);
+		// Die eine feste Wartezeit des Ablaufs, denn zu zeigen ist ein Ausbleiben: Ein Neuladen aus dem
+		// Signal ginge sofort hinaus (die Seite ruft ohne Entprellen), ueber einen Nachlader erst nach
+		// ENTPRELLEN_MS. Gewartet wird darueber hinaus und nicht auf die Antwort: Es zaehlt schon, ob die
+		// Anfrage hinausging. Verworfen: ohne Wartezeit pruefen -- ein entprelltes Neuladen fiele durch.
+		await leitung.seite.waitForTimeout(ENTPRELLEN_MS * 2);
+		expect(ladenNachSignal, 'Ansicht oder Verlauf nach dem Signal neu geladen').toEqual([]);
+		await expect(reiter.locator('.zahl')).toHaveCount(0);
+		const gesehen = await leitung.seite.evaluate(() => (window as unknown as { zahlGesehen: boolean }).zahlGesehen);
+		expect(gesehen, 'Zaehler am Reiter Verlauf erschien').toBe(false);
+		await mutter.kontext.close();
+		await leitung.kontext.close();
+	});
+
+	test('Live: Leitung pinnt Bowling an, die offene Liste der Mutter zeigt es unter Angepinnt', async ({ browser }) => {
+		const mutter = await ausSitzung(browser, 'mutter');
+		const ws = await oeffneVerbunden(mutter.seite, `/${SLUG}/threads`);
+		const abschnitt = (titel: string) =>
+			mutter.seite
+				.locator('jf-abschnitt')
+				.filter({ has: mutter.seite.getByRole('heading', { name: titel, exact: true }) });
+		await expect(abschnitt('Aktiv').getByRole('link', { name: /Bowling/ })).toBeVisible();
+		await expect(abschnitt('Angepinnt')).toHaveCount(0);
+
+		const leitung = await ausSitzung(browser, 'leitung');
+		await leitung.seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}`);
+		await expect(leitung.seite.getByRole('heading', { name: 'Thread bearbeiten', level: 1 })).toBeVisible();
+		const angepinnt = ws.waitForEvent('framereceived');
+		await leitung.seite.getByRole('button', { name: 'Anpinnen' }).click();
+		await expect(leitung.seite.getByRole('button', { name: 'Lösen' })).toBeVisible();
+
+		await expect(abschnitt('Angepinnt').getByRole('link', { name: /Bowling/ })).toBeVisible({ timeout: 5000 });
+		await expect(abschnitt('Aktiv').getByRole('link', { name: /Bowling/ })).toHaveCount(0);
+		await kamLive(ws, angepinnt);
+
+		// Wieder loesen: Der Rest des Ablaufs erwartet Bowling unter Aktiv. Auch das kommt live an.
+		const geloest = ws.waitForEvent('framereceived');
+		await leitung.seite.getByRole('button', { name: 'Lösen' }).click();
+		await expect(leitung.seite.getByRole('button', { name: 'Anpinnen' })).toBeVisible();
+		await expect(abschnitt('Aktiv').getByRole('link', { name: /Bowling/ })).toBeVisible({ timeout: 5000 });
+		await expect(abschnitt('Angepinnt')).toHaveCount(0);
+		await kamLive(ws, geloest);
+		await leitung.kontext.close();
+		await mutter.kontext.close();
+	});
+
+	test('Live: Leitung stellt einen Thread auf Nur Jugendleiter, die offene Seite der Mutter zeigt Nicht gefunden', async ({
+		browser,
+	}) => {
+		// Ein eigener Thread statt Bowling: Bowling braucht der Rest des Ablaufs fuer die Familie sichtbar.
+		const titel = 'Zielgruppe (Test)';
+		const leitung = await ausSitzung(browser, 'leitung');
+		await leitung.seite.goto(`/${SLUG}/verwaltung/threads/neu`);
+		await expect(leitung.seite.getByRole('heading', { name: 'Neuer Thread', level: 1 })).toBeVisible();
+		await leitung.seite.getByLabel('Titel', { exact: true }).fill(titel);
+		await leitung.seite
+			.getByRole('group', { name: 'Modul hinzufügen' })
+			.getByRole('button', { name: 'Info-Text' })
+			.click();
+		await leitung.seite.getByRole('textbox', { name: 'Text', exact: true }).fill('Ein Thread nur für diesen Test.');
+		// Der Editor beginnt mit allen Untergruppen und Jungfischer + Familie, die Mutter gehoert also dazu.
+		await expect(leitung.seite.getByLabel('Rollen')).toHaveValue('JUNGFISCHER_FAMILIE');
+		await leitung.seite.getByRole('button', { name: 'Veröffentlichen' }).click();
+		await expect(leitung.seite.getByRole('status').filter({ hasText: 'Veröffentlicht' })).toBeVisible();
+		await expect(leitung.seite).toHaveURL(new RegExp(`/${SLUG}/verwaltung/threads/(?!neu$)[^/]+$`));
+		const id = new URL(leitung.seite.url()).pathname.split('/').pop() ?? '';
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		const ws = await oeffneVerbunden(mutter.seite, `/${SLUG}/t/${threadSegment(id, titel)}`);
+		await expect(mutter.seite.getByRole('heading', { name: titel, level: 1 })).toBeVisible();
+
+		const signal = ws.waitForEvent('framereceived');
+		await leitung.seite.getByLabel('Rollen').selectOption({ label: 'Nur Jugendleiter' });
+		await leitung.seite.getByRole('button', { name: 'Speichern', exact: true }).click();
+		await expect(leitung.seite.getByRole('status').filter({ hasText: 'Gespeichert' })).toBeVisible();
+
+		await expect(mutter.seite.getByRole('heading', { name: 'Nicht gefunden oder keine Berechtigung' })).toBeVisible({
+			timeout: 5000,
+		});
+		await expect(mutter.seite.getByRole('heading', { name: titel })).toHaveCount(0);
+		await kamLive(ws, signal);
+		await mutter.kontext.close();
+		await leitung.kontext.close();
+	});
+
+	test('Ohne Verbindung steht nach 2 s der Hinweis im Kopf', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'mutter');
+		// Vor dem ersten Aufruf: Jeder Versuch wird sofort geschlossen, der Client bleibt im Backoff.
+		await seite.routeWebSocket(/\/ws$/, (ws) => ws.close());
+		const kopf = seite.locator('jf-mitglieder-huelle > header.kopf');
+		const beginn = Date.now();
+		await seite.goto(`/${SLUG}/`);
+		await expect(seite.getByRole('heading', { name: 'Hallo Mara' })).toBeVisible();
+		await expect(kopf.getByRole('status')).toHaveText('Nicht verbunden – Inhalte evtl. veraltet', { timeout: 5000 });
+		// Nicht vor den 2 s: Ein kurzer Aussetzer beim Verbinden soll nichts anzeigen.
+		expect(Date.now() - beginn, 'Hinweis frueher als nach 2 s').toBeGreaterThanOrEqual(2000);
+		await kontext.close();
 	});
 
 	test('Leitung traegt fuer Mia nach, Mia sieht es', async ({ browser }) => {

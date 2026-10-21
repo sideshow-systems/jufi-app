@@ -1,5 +1,15 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
-import { rxResource } from '@angular/core/rxjs-interop';
+import {
+	ChangeDetectionStrategy,
+	Component,
+	computed,
+	effect,
+	inject,
+	Injector,
+	input,
+	signal,
+	untracked,
+} from '@angular/core';
+import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import {
 	berlinerTag,
@@ -14,7 +24,9 @@ import {
 import { fehlertext, fehlertextNichtGefunden, fehlerVon } from '../gemeinsam/api-fehler';
 import { IconComponent } from '../gestaltung/icon';
 import { KarteComponent } from '../gestaltung/ui';
+import { Echtzeit, type EchtzeitEreignis } from './echtzeit';
 import { beiAbgelaufenerSitzung, istNichtAngemeldet } from './sitzung-abgelaufen';
+import { nachlader } from './threads/nachladen';
 import { ThreadApi } from './threads/thread-api';
 
 const WOCHENTAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -22,6 +34,16 @@ const WOCHENTAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 /** value() wirft im Fehlerzustand; hasValue() fragt gefahrlos. */
 function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T | undefined {
 	return ressource.hasValue() ? ressource.value() : undefined;
+}
+
+/**
+ * Nachrichten und Antworten aendern keinen Termin: Die Seite zeigt nur Zeit, Ort und Titel, und
+ * Zusagen stehen nicht darin. Alles andere kann es (Modul, Titel, Zielgruppe, Archiv, Loeschen,
+ * Umfeld, Abgleich). Verworfen: auf jedes Ereignis neu laden wie die Liste; in einem lebhaften
+ * Chat fragte die Seite dann je Nachricht den ganzen Monat ab.
+ */
+function aendertTermine(e: EchtzeitEreignis): boolean {
+	return e.typ !== 'signal' || (e.signal.art !== 'VERLAUF' && e.signal.art !== 'ANTWORT');
 }
 
 function monatsSchluessel(jahr: number, monat: number): string {
@@ -259,6 +281,7 @@ export class TermineComponent {
 		stream: ({ params }) => this.api.termine(params.slug, params.monat),
 	});
 	private readonly fehlerRoh = fehlerVon(this.ressource);
+	private readonly nachladen = nachlader(this.ressource, inject(Injector));
 
 	/** Gesetzt, sobald der Fehler zur Anmeldung schickt; dann zeigt die Seite keinen Fehlerblock mehr. */
 	private readonly abgelaufen = signal(false);
@@ -292,6 +315,12 @@ export class TermineComponent {
 	);
 
 	constructor() {
+		inject(Echtzeit)
+			.ereignisse.pipe(takeUntilDestroyed())
+			.subscribe((e) => {
+				if (aendertTermine(e)) this.nachladen();
+			});
+
 		// Der Waechter prueft die Sitzung nur beim Betreten; ein 401 danach schickt zur Anmeldung (wie die Startseite).
 		effect(() => {
 			const f = this.fehlerRoh();

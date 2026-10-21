@@ -1,10 +1,16 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
+import type { EchtzeitSignal } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
+import { Bus } from './echtzeit/bus.js';
+import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
 import { Nachlauf } from './nachlauf.js';
@@ -522,6 +528,20 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Der Termin aus fremd steht nicht im Kalender von eigen; der eigene schon, er ist also nicht nur leer.
 		expect(titel).not.toContain('Fremder Termin');
 		expect(titel).toContain('Eigener Termin');
+	},
+	'GET /sync': async (k) => {
+		// Der Stand vor dem Schreiben: seit=0 koennte vor einem aufgeraeumten Verlauf liegen und "vollstaendig" ohne Listen liefern.
+		const vorher = (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.eigen.id } })).aenderungsstand;
+		const eigener = await eigenerThread(k);
+		const pfad = `/api/v1/sync?seit=${vorher}`;
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const antwort = (await r.json()) as { geaendert: string[]; unsichtbar: string[] };
+		// Die Aenderungen aus fremd tauchen in eigen weder als sichtbar noch als unsichtbar auf; der eigene Thread schon.
+		expect([...antwort.geaendert, ...antwort.unsichtbar]).not.toContain(k.fremderThread.threadId);
+		expect(antwort.geaendert).toContain(eigener);
 	},
 	'GET /threads/:id': async (k) => {
 		const vorher = await fremdeThreadZeilen(k);
@@ -1173,4 +1193,75 @@ describe('Mandanten-Test', () => {
 	});
 
 	it.each(Object.entries(FAELLE))('%s gibt nichts aus fremden Vereinen preis', async (_name, fall) => fall(kontext));
+});
+
+/**
+ * Die Sockets sind keine Vereins-Route und stehen darum nicht in FAELLE: Der Hub haelt die
+ * Sockets je Verein, und ein Ereignis aus Verein A darf keinen Socket aus Verein B erreichen.
+ */
+describe('Mandanten-Test Echtzeit', () => {
+	const prisma = createPrismaClientFromEnv();
+	const bus = new Bus();
+	const jetzt = new Date();
+	let server: Server;
+	let hub: Hub;
+	let url = '';
+	const sockets: WebSocket[] = [];
+
+	beforeAll(async () => {
+		const app = createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, bus });
+		server = createServer(app);
+		hub = new Hub({ prisma, umgebung: TEST_UMGEBUNG, jetzt: () => new Date(), bus });
+		hub.haengeAn(server);
+		await new Promise<void>((fertig) => server.listen(0, '127.0.0.1', fertig));
+		url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	});
+
+	afterAll(async () => {
+		for (const ws of sockets) ws.terminate();
+		await hub.schliesseAlle();
+		server.closeAllConnections();
+		await new Promise<void>((fertig, fehler) => server.close((err) => (err ? fehler(err) : fertig())));
+		await prisma.$disconnect();
+	});
+
+	/** Ein offener Socket, der alles mitschreibt, was der Hub ihm schickt. */
+	async function oeffne(slug: string, cookie: string): Promise<EchtzeitSignal[]> {
+		const ws = new WebSocket(`${url.replace('http', 'ws')}/${slug}/ws`, {
+			headers: { Cookie: cookie, Origin: TEST_UMGEBUNG.basisUrl },
+		});
+		sockets.push(ws);
+		const signale: EchtzeitSignal[] = [];
+		ws.on('message', (daten) => signale.push(JSON.parse(String(daten)) as EchtzeitSignal));
+		await new Promise<void>((fertig, fehler) => {
+			ws.once('open', () => fertig());
+			ws.once('error', fehler);
+		});
+		return signale;
+	}
+
+	it('ein Socket aus Verein B bekommt bei einer Nachricht in Verein A nichts', async () => {
+		const kuerzel = randomUUID().slice(0, 8);
+		const a = await legeVereinAn(prisma, { slug: `mandant-ws-a-${kuerzel}` });
+		const b = await legeVereinAn(prisma, { slug: `mandant-ws-b-${kuerzel}` });
+		// In beiden Vereinen ein Jugendleiter: Er saehe jeden Thread seines Vereins, eine
+		// Stille in B liegt also an der Vereinsgrenze und nicht an der Zielgruppe.
+		const leiterA = await legeMitgliedAn(prisma, a, { art: 'ERWACHSENER', rechte: ['THREADS_ERSTELLEN'], jetzt });
+		const leiterB = await legeMitgliedAn(prisma, b, { art: 'ERWACHSENER', rechte: ['THREADS_ERSTELLEN'], jetzt });
+		const { threadId } = await legeThreadAn(prisma, a, jetzt, { erstelltVonId: leiterA.personId });
+		const inA = await oeffne(a.slug, leiterA.cookie);
+		const inB = await oeffne(b.slug, leiterB.cookie);
+
+		const r = await sende(url, `/${a.slug}/api/v1/threads/${threadId}/verlauf`, {
+			methode: 'POST',
+			body: { text: 'Nur fuer Verein A', clientId: randomUUID() },
+			cookie: leiterA.cookie,
+		});
+		expect(r.status).toBe(201);
+		// Erst die Zustellung in A, dann die Stille in B: Bis A sein Signal hat, hat der Hub
+		// ueber alle Sockets entschieden.
+		await expect.poll(() => inA.map((s) => s.threadId)).toEqual([threadId]);
+		await new Promise((fertig) => setTimeout(fertig, 300));
+		expect(inB).toEqual([]);
+	});
 });

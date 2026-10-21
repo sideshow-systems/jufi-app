@@ -1,8 +1,9 @@
-import { sperreVereinszeile } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld } from '@jufi/db';
 import { beziehungVorbelegung, hatRecht, istJugendleiter, type Beziehung } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron, text } from '../admin/asynchron.js';
+import { meldeUmfeld } from '../echtzeit/umfeld.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 import { statt404 } from './verwaltung.js';
@@ -37,6 +38,8 @@ function ungueltig(fehler: string, feld: string): Abbruch {
 }
 
 export function familieRouten(router: Router, deps: VolleAppDeps): void {
+	const { bus } = deps;
+
 	router.put(
 		'/personen/:jungfischerId/familie/:erwachsenerId',
 		brauchtMitglied,
@@ -48,10 +51,13 @@ export function familieRouten(router: Router, deps: VolleAppDeps): void {
 			const erwId = req.params['erwachsenerId'] ?? '';
 			const body = (req.body ?? {}) as Record<string, unknown>;
 			try {
-				const antwort = await db.$transaction(async (tx) => {
+				const { antwort, vermerk } = await db.$transaction(async (tx) => {
 					// Angenommen oder nicht haengt an Rechten und Entfernt-Stand beider Personen; die
 					// Sperre haelt gleichzeitiges Entfernen oder Rechtevergeben an, bis hier fertig ist.
 					await sperreVereinszeile(tx, verein.id);
+					// Jede angenommene Anfrage schreibt, auch eine mit unveraenderten Werten: kein Vergleich
+					// mit dem Vorhandenen, die Aenderung steht darum gleich hier. Sie gehoert zu beiden Enden.
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, deps.jetzt(), [kindId, erwId]);
 					const [kind, erw] = await Promise.all([
 						tx.person.findFirst({ where: { id: kindId, art: 'JUNGFISCHER', entferntAm: null } }),
 						tx.person.findFirst({ where: { id: erwId, art: 'ERWACHSENER', entferntAm: null } }),
@@ -95,8 +101,9 @@ export function familieRouten(router: Router, deps: VolleAppDeps): void {
 					if (vorhanden?.erziehungsberechtigt && !erziehungsberechtigt) {
 						await entzieheZugangWennUngueltig(tx, kind, deps.jetzt());
 					}
-					return { erziehungsberechtigt };
+					return { antwort: { erziehungsberechtigt }, vermerk };
 				});
+				meldeUmfeld(bus, verein.id, vermerk);
 				res.json(antwort);
 			} catch (error) {
 				if (error instanceof Abbruch) return void res.status(error.status).json(error.antwort);
@@ -115,7 +122,7 @@ export function familieRouten(router: Router, deps: VolleAppDeps): void {
 			const kindId = req.params['jungfischerId'] ?? '';
 			const erwId = req.params['erwachsenerId'] ?? '';
 			try {
-				await db.$transaction(async (tx) => {
+				const vermerk = await db.$transaction(async (tx) => {
 					await sperreVereinszeile(tx, verein.id);
 					const [kind, erw] = await Promise.all([
 						tx.person.findFirst({ where: { id: kindId, art: 'JUNGFISCHER', entferntAm: null } }),
@@ -124,10 +131,16 @@ export function familieRouten(router: Router, deps: VolleAppDeps): void {
 					if (!kind || !erw || (istJugendleiter(erw) && !hatRecht(handelnder, 'JUGENDLEITER_RECHTE'))) {
 						throw new Abbruch(404, NICHT_GEFUNDEN);
 					}
-					// Idempotent: deleteMany meldet auch "nichts da" ohne Fehler.
-					const geloest = await tx.bezugsperson.deleteMany({ where: { erwachsenerId: erwId, jungfischerId: kindId } });
-					if (geloest.count > 0) await entzieheZugangWennUngueltig(tx, kind, deps.jetzt());
+					// Idempotent: gibt es die Verknuepfung nicht, ist nichts zu loesen und nichts zu melden.
+					// Erst nachgesehen und dann geloescht, damit die Aenderung vor dem Schreiben steht.
+					const vorhanden = await tx.bezugsperson.count({ where: { erwachsenerId: erwId, jungfischerId: kindId } });
+					if (vorhanden === 0) return undefined;
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, deps.jetzt(), [kindId, erwId]);
+					await tx.bezugsperson.deleteMany({ where: { erwachsenerId: erwId, jungfischerId: kindId } });
+					await entzieheZugangWennUngueltig(tx, kind, deps.jetzt());
+					return vermerk;
 				});
+				if (vermerk) meldeUmfeld(bus, verein.id, vermerk);
 				res.status(204).end();
 			} catch (error) {
 				if (error instanceof Abbruch) return void res.status(error.status).json(error.antwort);

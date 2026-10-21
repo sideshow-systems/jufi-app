@@ -3,7 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { ladeNeuKandidaten, ladeThread, ladeThreadUmfeld, ladeVereinsstand, modulOrt } from './laden.js';
+import {
+	ladeKoepfe,
+	ladeNeuKandidaten,
+	ladeThread,
+	ladeThreads,
+	ladeThreadUmfeld,
+	ladeVereinsstand,
+	modulOrt,
+} from './laden.js';
 import { legeThreadAn, ordneZu, steckeInUntergruppe } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00Z');
@@ -121,6 +129,110 @@ describe('Threads laden', () => {
 				abgegebenAm: new Date('2026-10-22T09:00:00Z'),
 			},
 		]);
+	});
+
+	it('ladeThreads ohne Antworten laesst die Antworten leer, behaelt aber Optionen und Ergebnisse', async () => {
+		const { verein, db } = await neuerVerein();
+		const lena = await legeMitgliedAn(prisma, verein, { art: 'JUNGFISCHER', vorname: 'Lena' });
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const { threadId, modulIds, optionIds } = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [{ typ: 'UMFRAGE', teilnahme: true, ergebnisse: 'SUMME', einheit: 'PERSON' }],
+		});
+		for (const fuerId of [lena.personId, sandra.personId]) {
+			await db.umfrageAntwort.create({
+				data: {
+					umfrageId: modulIds[0],
+					fuerId,
+					vonId: sandra.personId,
+					abgegebenAm: JETZT,
+					clientId: randomUUID(),
+					optionen: { create: [{ optionId: optionIds['dabei'] }] },
+				},
+			});
+		}
+
+		const ohne = (await ladeThreads(db, { threadIds: [threadId], mitAntworten: false }))[0];
+		const mit = (await ladeThreads(db, { threadIds: [threadId] }))[0];
+
+		const umfrageOhne = ohne?.module[0];
+		const umfrageMit = mit?.module[0];
+		if (umfrageOhne?.typ !== 'UMFRAGE' || umfrageMit?.typ !== 'UMFRAGE') throw new Error('Umfrage erwartet');
+		expect(umfrageOhne.umfrage.antworten).toEqual([]);
+		expect(umfrageOhne.umfrage.ergebnisse).toBe('SUMME');
+		expect(umfrageOhne.umfrage.optionen).toEqual(umfrageMit.umfrage.optionen);
+		expect(umfrageOhne.umfrage.optionen.length).toBeGreaterThan(0);
+		expect(umfrageMit.umfrage.antworten).toHaveLength(2);
+		expect(ohne?.kopf).toEqual(mit?.kopf);
+	});
+
+	it('ordnet jeder Umfrage genau ihre Antworten zu, auch bei mehreren Threads in einer Abfrage', async () => {
+		const { verein, db } = await neuerVerein();
+		const lena = await legeMitgliedAn(prisma, verein, { art: 'JUNGFISCHER', vorname: 'Lena' });
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const eins = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' }],
+		});
+		const zwei = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' }],
+		});
+		const antworte = (t: typeof eins, fuerId: string, schluessel: string) =>
+			db.umfrageAntwort.create({
+				data: {
+					umfrageId: t.modulIds[0],
+					fuerId,
+					vonId: sandra.personId,
+					abgegebenAm: JETZT,
+					clientId: randomUUID(),
+					optionen: { create: [{ optionId: t.optionIds[schluessel] }] },
+				},
+			});
+		await antworte(eins, lena.personId, 'dabei');
+		await antworte(zwei, sandra.personId, 'abgesagt');
+
+		const geladen = await ladeThreads(db, { threadIds: [eins.threadId, zwei.threadId] });
+
+		const antwortenVon = (threadId: string) => {
+			const modul = geladen.find((t) => t.kopf.id === threadId)?.module[0];
+			if (modul?.typ !== 'UMFRAGE') throw new Error('Umfrage erwartet');
+			return modul.umfrage.antworten;
+		};
+		expect(antwortenVon(eins.threadId)).toEqual([
+			{ fuerId: lena.personId, vonId: sandra.personId, optionIds: [eins.optionIds['dabei']], abgegebenAm: JETZT },
+		]);
+		expect(antwortenVon(zwei.threadId)).toEqual([
+			{ fuerId: sandra.personId, vonId: sandra.personId, optionIds: [zwei.optionIds['abgesagt']], abgegebenAm: JETZT },
+		]);
+	});
+
+	it('ladeKoepfe liefert den Kopf wie ladeThread, mit sortierten Untergruppen, und laesst unbekannte IDs weg', async () => {
+		const { verein, db } = await neuerVerein();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const gross = await steckeInUntergruppe(prisma, verein, sandra.personId, 'Gross');
+		const klein = await steckeInUntergruppe(prisma, verein, sandra.personId, 'Klein');
+		const a = await legeThreadAn(prisma, verein, JETZT, {
+			titel: 'Bowling',
+			erstelltVonId: sandra.personId,
+			untergruppenIds: [klein, gross],
+			module: [{ typ: 'INFO', text: 'Socken' }],
+		});
+
+		const koepfe = await ladeKoepfe(db, [a.threadId, 'unbekannt']);
+
+		expect([...koepfe.keys()]).toEqual([a.threadId]);
+		expect(koepfe.get(a.threadId)).toEqual((await ladeThread(db, a.threadId))?.kopf);
+		expect(koepfe.get(a.threadId)?.untergruppenIds).toEqual([gross, klein].sort());
+	});
+
+	it('ladeKoepfe liefert fuer eine leere Liste eine leere Map und sieht keinen fremden Verein', async () => {
+		const eigener = await neuerVerein();
+		const fremder = await neuerVerein();
+		const { threadId } = await legeThreadAn(prisma, fremder.verein, JETZT, {});
+
+		expect((await ladeKoepfe(eigener.db, [])).size).toBe(0);
+		expect((await ladeKoepfe(eigener.db, [threadId])).size).toBe(0);
 	});
 
 	it('nimmt die Module in der Reihenfolge der IDs, wenn Positionen gleich sind', async () => {

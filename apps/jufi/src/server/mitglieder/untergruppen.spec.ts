@@ -2,6 +2,7 @@ import { createPrismaClientFromEnv } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
@@ -9,10 +10,11 @@ import { legeMitgliedAn } from './test-mitglieder.js';
 describe('Untergruppen', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
-			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, bus: ereignisse.bus }),
 		);
 	});
 
@@ -222,5 +224,65 @@ describe('Untergruppen', () => {
 		const v = await neuerVerein();
 		const eltern = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
 		expect((await v.liste(eltern.cookie)).status).toBe(404);
+	});
+
+	describe('Umfeld-Aenderungen auf dem Bus', () => {
+		it('POST: eine Aenderung ohne Thread mit der neuen Untergruppe, ein Ereignis mit demselben Stand', async () => {
+			const v = await neuerVerein();
+
+			const r = await v.lege('Hechte');
+
+			expect(r.status).toBe(201);
+			const { id } = (await r.json()) as { id: string };
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [id])).toBe(1);
+		});
+
+		it('POST: 400 und 409 melden nichts', async () => {
+			const v = await neuerVerein();
+			await v.gruppe('Hechte');
+
+			expect((await v.lege('')).status).toBe(400);
+			expect((await v.lege('hechte')).status).toBe(409);
+
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+		});
+
+		it('PATCH: eine Aenderung mit der Untergruppe; 404 und 409 nicht', async () => {
+			const v = await neuerVerein();
+			const hechte = await v.gruppe('Hechte');
+			const barsche = await v.gruppe('Barsche');
+			expect((await v.benenne('gibt-es-nicht', 'X')).status).toBe(404);
+			expect((await v.benenne(hechte.id, 'barsche')).status).toBe(409);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+
+			expect((await v.benenne(barsche.id, 'Forellen')).status).toBe(204);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [barsche.id])).toBe(1);
+		});
+
+		it('DELETE: eine Aenderung mit der geloeschten Untergruppe; das zweite Loeschen (404) nicht', async () => {
+			const v = await neuerVerein();
+			const hechte = await v.gruppe('Hechte');
+
+			expect((await v.loesche(hechte.id)).status).toBe(204);
+			expect((await v.loesche(hechte.id)).status).toBe(404);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [hechte.id])).toBe(1);
+		});
+
+		it('PUT /personen/:id/untergruppen: eine Aenderung mit der Person; 404 und 400 nicht', async () => {
+			const v = await neuerVerein();
+			const kind = await v.person('JUNGFISCHER');
+			const erw = await v.person('ERWACHSENER');
+			const hechte = await v.gruppe('Hechte');
+			expect((await v.ordne(erw.id, [hechte.id])).status).toBe(404);
+			expect((await v.ordne(kind.id, ['gibt-es-nicht'])).status).toBe(404);
+			expect((await v.ordne(kind.id, 'keine-liste')).status).toBe(400);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+
+			expect((await v.ordne(kind.id, [hechte.id])).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.id])).toBe(1);
+		});
 	});
 });

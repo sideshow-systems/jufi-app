@@ -2,6 +2,7 @@ import { createPrismaClientFromEnv } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
@@ -11,6 +12,7 @@ describe('Meine Jungfischer', () => {
 	let server: TestServer;
 	// Die Uhr der App; nur der Volljaehrigkeitstest stellt sie.
 	let uhr: Date | null = null;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
@@ -19,6 +21,7 @@ describe('Meine Jungfischer', () => {
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
 				jetzt: () => uhr ?? new Date(),
+				bus: ereignisse.bus,
 			}),
 		);
 	});
@@ -325,5 +328,48 @@ describe('Meine Jungfischer', () => {
 		await prisma.bezugsperson.deleteMany({ where: { erwachsenerId: v.mutter.personId } });
 		expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false })).status).toBe(404);
 		expect(await prisma.einwilligung.count({ where: { jungfischerId: v.kind.personId, widerrufenAm: null } })).toBe(1);
+	});
+
+	describe('Umfeld-Aenderungen auf dem Bus', () => {
+		it('einwilligung erteilen: eine Aenderung ohne Thread mit dem Kind, der zweite Klick (keine neue Zeile) meldet nichts mehr', async () => {
+			const v = await neuerVerein();
+
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true })).status).toBe(200);
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true })).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [v.kind.personId])).toBe(1);
+		});
+
+		it('einwilligung widerrufen: eine Aenderung mit dem Kind', async () => {
+			const v = await neuerVerein();
+			await v.willigtEin(v.kind.personId, v.mutter.personId);
+
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false })).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [v.kind.personId])).toBe(1);
+		});
+
+		it('zugang: eine Aenderung ohne Thread mit dem Kind', async () => {
+			const v = await neuerVerein();
+			await v.willigtEin(v.kind.personId, v.mutter.personId);
+
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'zugang', { erlaubt: false })).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [v.kind.personId])).toBe(1);
+		});
+
+		it('400, 404 und 409 melden nichts', async () => {
+			const v = await neuerVerein();
+			const fremdes = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: 'ja' })).status).toBe(400);
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'zugang', { erlaubt: 'ja' })).status).toBe(400);
+			expect((await v.post(v.mutter.cookie, fremdes.personId, 'einwilligung', { erteilen: true })).status).toBe(404);
+			expect((await v.post(v.mutter.cookie, 'gibt-es-nicht', 'zugang', { erlaubt: false })).status).toBe(404);
+			// Erlauben ohne Einwilligung des Kindes.
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'zugang', { erlaubt: true })).status).toBe(409);
+
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+		});
 	});
 });

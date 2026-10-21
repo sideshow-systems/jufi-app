@@ -5,6 +5,7 @@ import { generate } from 'otplib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebauthnPruefer } from '../abhaengigkeiten.js';
 import { createApp } from '../app.js';
+import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { legeSitzungAn } from './sitzung.js';
@@ -33,6 +34,7 @@ describe('Profil', () => {
 	let server: TestServer;
 	let verein: V;
 	let versuche: AttemptTracker;
+	const ereignisse = sammleEreignisse();
 	const verifyRegistration = vi.fn<WebauthnPruefer['verifyRegistration']>();
 	const verifyAuthentication = vi.fn<WebauthnPruefer['verifyAuthentication']>();
 
@@ -51,6 +53,7 @@ describe('Profil', () => {
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
 				anmeldeVersuche: versuche,
+				bus: ereignisse.bus,
 				webauthn: { verifyRegistration, verifyAuthentication },
 			}),
 		);
@@ -598,5 +601,64 @@ describe('Profil', () => {
 		] as const) {
 			expect((await api(pfad, { methode, body: {} })).status, `${methode} ${pfad}`).toBe(401);
 		}
+	});
+
+	describe('Pruefanlaesse auf dem Bus', () => {
+		// Alle Tests dieser Datei teilen den Verein: gezaehlt wird, was ein Aufruf hinzufuegt.
+		const pruefen = () => ereignisse.fuer(verein.id).filter((e) => e.typ === 'pruefen');
+
+		it('POST /abmelden meldet pruefen mit der Vereins-ID, ohne Aenderung zu schreiben', async () => {
+			const m = await erwachsener();
+			const vorher = pruefen().length;
+			const aenderungen = await prisma.aenderung.count({ where: { vereinId: verein.id } });
+
+			expect((await api('/abmelden', { methode: 'POST', cookie: m.cookie })).status).toBe(204);
+
+			expect(pruefen().slice(vorher)).toEqual([{ typ: 'pruefen', vereinId: verein.id }]);
+			expect(await prisma.aenderung.count({ where: { vereinId: verein.id } })).toBe(aenderungen);
+		});
+
+		it('POST /abmelden/alle meldet pruefen', async () => {
+			const m = await erwachsener();
+			const vorher = pruefen().length;
+
+			expect((await api('/abmelden/alle', { methode: 'POST', cookie: m.cookie })).status).toBe(204);
+
+			expect(pruefen().slice(vorher)).toEqual([{ typ: 'pruefen', vereinId: verein.id }]);
+		});
+
+		it('POST /abmelden ohne Sitzung (401) meldet nichts', async () => {
+			const vorher = pruefen().length;
+
+			expect((await api('/abmelden', { methode: 'POST' })).status).toBe(401);
+
+			expect(pruefen()).toHaveLength(vorher);
+		});
+
+		it('POST /profil/passwort: die Aenderung meldet pruefen, 400 und 401 nicht', async () => {
+			const m = await erwachsener();
+			const vorher = pruefen().length;
+
+			expect((await api('/profil/passwort', { methode: 'POST', cookie: m.cookie, body: { neu: 'kurz' } })).status).toBe(
+				400,
+			);
+			expect(
+				(
+					await api('/profil/passwort', {
+						methode: 'POST',
+						cookie: m.cookie,
+						body: { neu: NEU, alt: 'falsches-passwort-123' },
+					})
+				).status,
+			).toBe(401);
+			expect(pruefen()).toHaveLength(vorher);
+
+			expect(
+				(await api('/profil/passwort', { methode: 'POST', cookie: m.cookie, body: { neu: NEU, alt: PASSWORT } }))
+					.status,
+			).toBe(200);
+
+			expect(pruefen().slice(vorher)).toEqual([{ typ: 'pruefen', vereinId: verein.id }]);
+		});
 	});
 });

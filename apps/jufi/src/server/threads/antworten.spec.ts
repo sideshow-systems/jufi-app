@@ -3,6 +3,7 @@ import type { ThreadAnsicht, UmfrageAnsicht } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
@@ -31,9 +32,16 @@ describe('PUT /umfragen/:modulId/antworten/:fuerId', () => {
 	// Eigene App mit verstellbarer Uhr, fuer die Wiederholung ueber die Frist hinweg.
 	let uhr = JETZT;
 	let gestellt: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
-		const deps = { prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, jetzt: () => JETZT };
+		const deps = {
+			prisma,
+			version: { version: '1.2.3', commit: 'abc' },
+			umgebung: TEST_UMGEBUNG,
+			jetzt: () => JETZT,
+			bus: ereignisse.bus,
+		};
 		server = await starteTestServer(createApp(deps));
 		eng = await starteTestServer(
 			createApp({ ...deps, antwortenFenster: new Fensterzaehler(2, 60_000, () => JETZT.getTime()) }),
@@ -118,6 +126,7 @@ describe('PUT /umfragen/:modulId/antworten/:fuerId', () => {
 			gib,
 			stand,
 			zeilen,
+			ereignisse: () => ereignisse.fuer(verein.id),
 		};
 	}
 
@@ -468,6 +477,54 @@ describe('PUT /umfragen/:modulId/antworten/:fuerId', () => {
 	 * oder den Thread in der Datenbank geaendert hat (der Editor zwischen Pruefung und
 	 * Schreiben). Verworfen: ein Testhaken in deps -- Produktionscode nur fuer den Test.
 	 */
+	describe('Ereignisse auf dem Bus', () => {
+		it('eine Antwort meldet genau ein Ereignis mit ANTWORT und ohne Verlaufseintraege', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+
+			const { stand } = await s.gib(u.modulId, s.max.personId, [u.o['dabei']], s.sandra.cookie);
+
+			const geschrieben = await prisma.aenderung.findMany({ where: { vereinId: s.verein.id, stand } });
+			expect(s.ereignisse()).toEqual([
+				{
+					typ: 'aenderung',
+					vereinId: s.verein.id,
+					stand,
+					aenderungen: geschrieben.map((a) => ({ threadId: a.threadId, art: a.art, objektId: a.objektId })),
+					eintraege: [],
+				},
+			]);
+			expect(s.ereignisse()[0]).toMatchObject({ aenderungen: [{ threadId: u.threadId, art: 'ANTWORT' }] });
+		});
+
+		it('die Wiederholung (200) meldet nichts', async () => {
+			const s = await szenario();
+			const u = await s.umfrage();
+			const body = { optionIds: [u.o['dabei']], clientId: 'bus-doppelt-1' };
+			expect((await s.antworte(u.modulId, s.max.personId, body, s.sandra.cookie)).status).toBe(200);
+
+			expect((await s.antworte(u.modulId, s.max.personId, body, s.sandra.cookie)).status).toBe(200);
+
+			expect(s.ereignisse()).toHaveLength(1);
+		});
+
+		it('400, 404, 409 und 410 melden nichts', async () => {
+			const s = await szenario();
+			const u = await s.umfrage({ frist: new Date(JETZT.getTime() - 1000) });
+			const offen = await s.umfrage();
+			const body = (optionIds: string[], clientId: string) => ({ optionIds, clientId });
+
+			const antworten = [
+				await s.antworte(u.modulId, s.max.personId, body([u.o['dabei']], 'bus-frist'), s.sandra.cookie),
+				await s.antworte(offen.modulId, s.max.personId, body([], 'bus-leer'), s.sandra.cookie),
+				await s.antworte(offen.modulId, s.jonas.personId, body([offen.o['dabei']], 'bus-fremd'), s.sandra.cookie),
+			];
+
+			expect(antworten.map((r) => r.status)).toEqual([410, 400, 404]);
+			expect(s.ereignisse()).toEqual([]);
+		});
+	});
+
 	describe('schreibeAntwort unter der Sperre', () => {
 		type Szenario = Awaited<ReturnType<typeof szenario>>;
 

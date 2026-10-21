@@ -1,5 +1,7 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
-import { rxResource } from '@angular/core/rxjs-interop';
+import { computed, inject, Injectable, Injector, signal } from '@angular/core';
+import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Echtzeit } from '../echtzeit';
+import { nachlader } from './nachladen';
 import { ThreadApi } from './thread-api';
 
 /**
@@ -10,8 +12,10 @@ import { ThreadApi } from './thread-api';
  * zweites Mal zu fragen (verworfen: je eine eigene Anfrage von Leiste und Seite, das waeren zwei
  * Antworten, die sich widersprechen koennen).
  *
- * Neu laden muss nach jeder Navigation, weil Lesen und Antworten den Stand "neu" aendern; ein
- * Zeitgeber oder eine Verbindung zum Server kaeme erst mit TP4 und waere hier mehr als noetig.
+ * Neu geladen wird auf jedes Ereignis der Echtzeit: Jede Aenderung an einem Thread, den die Person
+ * sieht, kann Zeile, Reihenfolge oder "neu" aendern, und ein Abgleich nennt nur Threads. Verworfen:
+ * nur Ereignisse zu Threads der geladenen Liste, denn ein neu sichtbarer Thread steht dort noch nicht.
+ * Ohne Verbindung laedt die Huelle bei Navigation neu (Entscheidung 9).
  */
 @Injectable()
 export class ThreadUebersicht {
@@ -28,8 +32,19 @@ export class ThreadUebersicht {
 	/** Irgendeine Zeile ist neu. Waehrend des Neuladens bleibt der alte Wert stehen, der Punkt blinkt nicht. */
 	readonly punkt = computed(() => (this.liste.hasValue() ? this.liste.value().threads.some((t) => t.neu) : false));
 
-	/** Eine laufende Anfrage bleibt, die Ressource startet keine zweite; ohne Slug passiert nichts. */
+	private readonly nachladen = nachlader(this.liste, inject(Injector));
+
+	constructor() {
+		inject(Echtzeit)
+			.ereignisse.pipe(takeUntilDestroyed())
+			.subscribe(() => this.nachladen());
+	}
+
+	/**
+	 * Entprellt und vorgemerkt (Entscheidung 10): Laeuft gerade eine Anfrage, folgt nach ihr genau
+	 * eine weitere; ohne Slug passiert nichts.
+	 */
 	neuLaden(): void {
-		this.liste.reload();
+		this.nachladen();
 	}
 }

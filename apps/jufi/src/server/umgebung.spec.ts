@@ -23,7 +23,18 @@ describe('umgebungAusEnv', () => {
 			mailAbsender: 'app@jufi.test',
 			mailAntwort: 'kontakt@jufi.test',
 			mailBetreffPraefix: '',
+			wsDevPort: 4201,
 		});
+	});
+
+	it('liest JUFI_WS_DEV_PORT; leer gilt als nicht gesetzt', () => {
+		expect(umgebungAusEnv({ ...GUELTIG, JUFI_WS_DEV_PORT: '4301' }).wsDevPort).toBe(4301);
+		expect(umgebungAusEnv({ ...GUELTIG, JUFI_WS_DEV_PORT: '' }).wsDevPort).toBe(4201);
+	});
+
+	it.each(['abc', '0', '65536', '4201.5'])('wirft bei JUFI_WS_DEV_PORT %s, ohne den Wert zu nennen', (wert) => {
+		expect(() => umgebungAusEnv({ ...GUELTIG, JUFI_WS_DEV_PORT: wert })).toThrow(/JUFI_WS_DEV_PORT/);
+		expect(() => umgebungAusEnv({ ...GUELTIG, JUFI_WS_DEV_PORT: wert })).not.toThrow(wert);
 	});
 
 	it('uebernimmt gesetzte WebAuthn-Werte', () => {

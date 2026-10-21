@@ -2,6 +2,7 @@ import { createPrismaClientFromEnv, type Recht } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
@@ -9,10 +10,11 @@ import { legeMitgliedAn } from './test-mitglieder.js';
 describe('Familie verknuepfen', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
-			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, bus: ereignisse.bus }),
 		);
 	});
 
@@ -255,5 +257,56 @@ describe('Familie verknuepfen', () => {
 		await v.put(kind.id, erw.id, { beziehung: 'MUTTER' });
 		expect((await v.loesche(kind.id, erw.id, betreuer.cookie)).status).toBe(404);
 		expect(await v.zeilen(kind.id)).toHaveLength(1);
+	});
+
+	describe('Umfeld-Aenderungen auf dem Bus', () => {
+		it('PUT: eine Aenderung ohne Thread mit Kind und Erwachsenem, ein Ereignis mit demselben Stand', async () => {
+			const v = await neuerVerein();
+			const kind = await v.kind();
+			const mutter = await v.erwachsener();
+
+			expect((await v.put(kind.id, mutter.id, { beziehung: 'MUTTER' })).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.id, mutter.id])).toBe(1);
+		});
+
+		it('PUT: 400 und 404 schreiben nichts und melden nichts', async () => {
+			const v = await neuerVerein();
+			const kind = await v.kind();
+			const mutter = await v.erwachsener();
+
+			expect((await v.put(kind.id, mutter.id, { beziehung: 'FREUND' })).status).toBe(400);
+			expect((await v.put(kind.id, 'gibt-es-nicht', { beziehung: 'MUTTER' })).status).toBe(404);
+
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+		});
+
+		it('DELETE: 404 und eine Verknuepfung, die es nicht gibt (idempotent), melden nichts', async () => {
+			const v = await neuerVerein();
+			const kind = await v.kind();
+			const mutter = await v.erwachsener();
+			expect((await v.loesche(kind.id, 'gibt-es-nicht')).status).toBe(404);
+			expect((await v.loesche(kind.id, mutter.id)).status).toBe(204);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+		});
+
+		it('DELETE einer bestehenden Verknuepfung: eine Aenderung mit beiden', async () => {
+			const v = await neuerVerein();
+			const kind = await v.kind();
+			const mutter = await v.erwachsener();
+			await prisma.bezugsperson.create({
+				data: {
+					vereinId: v.verein.id,
+					erwachsenerId: mutter.id,
+					jungfischerId: kind.id,
+					beziehung: 'MUTTER',
+					erziehungsberechtigt: true,
+				},
+			});
+
+			expect((await v.loesche(kind.id, mutter.id)).status).toBe(204);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.id, mutter.id])).toBe(1);
+		});
 	});
 });

@@ -5,17 +5,20 @@ import {
 	DestroyRef,
 	effect,
 	inject,
+	Injector,
 	input,
 	signal,
 	untracked,
 } from '@angular/core';
-import { rxResource } from '@angular/core/rxjs-interop';
+import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import type { ThreadListe } from '@jufi/domain';
 import { fehlertext, fehlertextNichtGefunden, fehlerVon } from '../../gemeinsam/api-fehler';
 import { AbschnittComponent, KarteComponent } from '../../gestaltung/ui';
+import { Echtzeit } from '../echtzeit';
 import { beiAbgelaufenerSitzung, istNichtAngemeldet } from '../sitzung-abgelaufen';
+import { nachlader } from './nachladen';
 import { ThreadApi } from './thread-api';
 import { ThreadUebersicht } from './thread-uebersicht';
 
@@ -267,6 +270,14 @@ export class ThreadListeComponent {
 			this.api.liste(params.slug, { ...(params.suche ? { suche: params.suche } : {}), archiv: true }),
 	});
 
+	/**
+	 * Die erweiterte Ressource laedt auf jedes Ereignis neu, wie die Liste der Huelle (ThreadUebersicht,
+	 * die den Grundzustand selbst nachlaedt): Ein Treffer oder eine Archivzeile kann sich mit jeder
+	 * Aenderung aendern oder dazukommen. Ruht sie (keine Suche, Archiv nie aufgeklappt), bewirkt das
+	 * Neuladen nichts und schickt keine Anfrage.
+	 */
+	private readonly nachladen = nachlader(this.erweitert, inject(Injector));
+
 	private readonly grundFehlerRoh = fehlerVon(this.uebersicht.liste);
 	private readonly erweitertFehlerRoh = fehlerVon(this.erweitert);
 
@@ -302,6 +313,9 @@ export class ThreadListeComponent {
 
 	constructor() {
 		inject(DestroyRef).onDestroy(() => clearTimeout(this.zeitgeber));
+		inject(Echtzeit)
+			.ereignisse.pipe(takeUntilDestroyed())
+			.subscribe(() => this.nachladen());
 
 		// Nur eine Adresse, die wir nicht selbst geschrieben haben, ueberschreibt das Feld: Sonst setzte die
 		// Antwort der eigenen Navigation den Text zurueck, den die Person inzwischen weitergetippt hat.

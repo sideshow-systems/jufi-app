@@ -1,10 +1,16 @@
 import { inject, Injectable, signal } from '@angular/core';
 import type { CanActivateFn } from '@angular/router';
 import { Router } from '@angular/router';
-import { catchError, firstValueFrom, map, of, throwError } from 'rxjs';
+import { catchError, firstValueFrom, map, type Observable, of, Subject, throwError } from 'rxjs';
 import { alsApiFehler } from '../gemeinsam/api-fehler';
 import { type MitgliedIch, MitgliederApi } from './mitglieder-api';
 import { istNichtAngemeldet } from './sitzung-abgelaufen';
+
+/** Ein Abmelden in einem Verein beginnt oder ist gescheitert (die Person ist dann noch angemeldet). */
+export interface Abmeldung {
+	slug: string;
+	phase: 'beginnt' | 'gescheitert';
+}
 
 /**
  * Was der Waechter zuletzt ueber die Person erfahren hat. Die Startseite braucht daraus
@@ -17,6 +23,16 @@ export class MitgliedSitzung {
 
 	private readonly api = inject(MitgliederApi);
 	private readonly router = inject(Router);
+	private readonly abmeldungQuelle = new Subject<Abmeldung>();
+
+	/**
+	 * Beginn und Scheitern jedes Abmeldens; Echtzeit haelt darauf an und verbindet sich nach einem
+	 * Scheitern wieder. Ein Ereignis statt eines Aufrufs, weil dieser Dienst an der Wurzel steht und
+	 * Echtzeit je Huelle: Von hier aus gibt es keine Instanz, die er rufen koennte. Verworfen: Mehr und
+	 * Profil halten Echtzeit selbst an -- jede weitere Stelle zum Abmelden muesste daran denken, und
+	 * eine vergessene liesse den Wettlauf zurueckkommen (siehe abmelden).
+	 */
+	readonly abmeldung: Observable<Abmeldung> = this.abmeldungQuelle.asObservable();
 
 	/**
 	 * Meldet ab (nur hier, Mehr und Profil rufen es) und geht zur Anmeldung des Vereins. 401
@@ -25,12 +41,22 @@ export class MitgliedSitzung {
 	 * damit die Seite sie zeigt. Erst navigieren, dann ich leeren: Sonst verlore die Seite
 	 * ihre Zeilen (Verwaltung, Meine Jungfischer), bevor sie weg ist. Verworfen: die Logik je
 	 * Seite, sie lief schon einmal auseinander (nur Mehr kannte den 401-Fall).
+	 *
+	 * Vor der Anfrage meldet es den Beginn (abmeldung), und Echtzeit schliesst den Socket. Sonst
+	 * schloss der Hub ihn nach dem Abmelden, der Abgleich danach bekam 401 und schickte zur Anmeldung
+	 * mit weiter auf die alte Seite, gelegentlich schneller als die Navigation hier; nach dem
+	 * naechsten Anmelden stand die Person dann auf Mehr statt auf Start. Scheitert die Anfrage, bleibt
+	 * die Person angemeldet, und das Ereignis "gescheitert" laesst Echtzeit wieder verbinden.
 	 */
 	async abmelden(slug: string, ueberall = false): Promise<void> {
+		this.abmeldungQuelle.next({ slug, phase: 'beginnt' });
 		try {
 			await firstValueFrom(ueberall ? this.api.abmeldenAlle(slug) : this.api.abmelden(slug));
 		} catch (ursache) {
-			if (!istNichtAngemeldet(alsApiFehler(ursache))) throw ursache;
+			if (!istNichtAngemeldet(alsApiFehler(ursache))) {
+				this.abmeldungQuelle.next({ slug, phase: 'gescheitert' });
+				throw ursache;
+			}
 		}
 		try {
 			await this.router.navigateByUrl(`/${encodeURIComponent(slug)}/anmelden`);

@@ -3,6 +3,7 @@ import type { ModulEntwurf, ThreadBearbeitung, ThreadEntwurf } from '@jufi/domai
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
@@ -46,6 +47,7 @@ describe('neuerSchluessel', () => {
 describe('Threads anlegen und ersetzen', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
@@ -54,6 +56,7 @@ describe('Threads anlegen und ersetzen', () => {
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
 				jetzt: () => JETZT,
+				bus: ereignisse.bus,
 			}),
 		);
 	});
@@ -188,6 +191,7 @@ describe('Threads anlegen und ersetzen', () => {
 			bowling,
 			bowlingThread,
 			austausch,
+			ereignisse: () => ereignisse.fuer(verein.id),
 		};
 	}
 
@@ -339,6 +343,62 @@ describe('Threads anlegen und ersetzen', () => {
 				feld: 'module.3.teilnahme',
 			});
 			expect(await s.stand()).toBe(vorher);
+		});
+	});
+
+	describe('Ereignisse auf dem Bus', () => {
+		it('POST meldet genau ein Ereignis mit THREAD und je Modul MODUL, ohne Verlaufseintraege', async () => {
+			const s = await szenario();
+
+			const r = await s.lege(s.bowling(), s.thomas.cookie);
+
+			expect(r.status).toBe(201);
+			const stand = await s.stand();
+			const geschrieben = await prisma.aenderung.findMany({ where: { vereinId: s.verein.id, stand } });
+			expect(geschrieben.map((a) => a.art).sort()).toEqual(['MODUL', 'MODUL', 'MODUL', 'THREAD']);
+			expect(s.ereignisse()).toEqual([
+				{
+					typ: 'aenderung',
+					vereinId: s.verein.id,
+					stand,
+					aenderungen: geschrieben.map((a) => ({ threadId: a.threadId, art: a.art, objektId: a.objektId })),
+					eintraege: [],
+				},
+			]);
+		});
+
+		it('PUT meldet genau ein Ereignis mit den Aenderungen des Speicherns', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ veroeffentlicht: false });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+
+			const r = await s.ersetze(t.threadId, b.version, { ...b.entwurf, titel: 'Kegeln' }, s.thomas.cookie);
+
+			expect(r.status).toBe(200);
+			const stand = await s.stand();
+			expect(s.ereignisse()).toEqual([
+				{
+					typ: 'aenderung',
+					vereinId: s.verein.id,
+					stand,
+					aenderungen: [{ threadId: t.threadId, art: 'THREAD', objektId: t.threadId }],
+					eintraege: [],
+				},
+			]);
+		});
+
+		it('PUT mit alter Version (409), ohne Recht (404) und mit kaputtem Koerper (400) meldet nichts', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ veroeffentlicht: false });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+
+			expect((await s.ersetze(t.threadId, b.version - 1, s.bowling(), s.thomas.cookie)).status).toBe(409);
+			expect((await s.ersetze(t.threadId, b.version, s.bowling(), s.sandra.cookie)).status).toBe(404);
+			expect((await s.ersetze(t.threadId, 'x', s.bowling(), s.thomas.cookie)).status).toBe(400);
+			expect((await s.lege(s.bowling(), s.sandra.cookie)).status).toBe(404);
+			expect((await s.lege({}, s.thomas.cookie)).status).toBe(400);
+
+			expect(s.ereignisse()).toEqual([]);
 		});
 	});
 

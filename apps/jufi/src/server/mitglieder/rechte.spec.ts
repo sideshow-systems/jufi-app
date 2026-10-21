@@ -3,6 +3,7 @@ import { RECHTE_VORLAGEN } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
@@ -10,10 +11,11 @@ import { legeMitgliedAn } from './test-mitglieder.js';
 describe('Rechte vergeben', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
-			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, bus: ereignisse.bus }),
 		);
 	});
 
@@ -136,5 +138,28 @@ describe('Rechte vergeben', () => {
 			expect((await v.setze(ziel.personId, rechte)).status).toBe(400);
 		}
 		expect(await v.rechteVon(ziel.personId)).toEqual([]);
+	});
+
+	describe('Umfeld-Aenderungen auf dem Bus', () => {
+		it('PUT: eine Aenderung ohne Thread mit der Person, ein Ereignis mit demselben Stand', async () => {
+			const v = await neuerVerein();
+			const ziel = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+
+			expect((await v.setze(ziel.personId, ['DOKUMENTE'])).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [ziel.personId])).toBe(1);
+		});
+
+		it('PUT: 400, 404 und 409 melden nichts', async () => {
+			const v = await neuerVerein();
+			const ziel = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+
+			expect((await v.setze(ziel.personId, ['GIBT_ES_NICHT'])).status).toBe(400);
+			expect((await v.setze(ziel.personId, ['DOKUMENTE'], v.verwalter.cookie)).status).toBe(404);
+			expect((await v.setze('gibt-es-nicht', ['DOKUMENTE'])).status).toBe(404);
+			expect((await v.setze(v.inhaber.personId, ['MITGLIEDER'])).status).toBe(409);
+
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+		});
 	});
 });

@@ -13,3 +13,4 @@ export * from './entwurf.js';
 export * from './vergleich.js';
 export * from './verwaltung.js';
 export * from './liste.js';
+export * from './echtzeit.js';

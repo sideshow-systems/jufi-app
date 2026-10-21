@@ -49,6 +49,18 @@ describe('ThreadApi', () => {
 		http.expectOne('/demo/api/v1/termine?monat=2026-10').flush({ termine: [] });
 	});
 
+	it('sync schickt seit nur, wenn ein Stand bekannt ist', () => {
+		let antwort: unknown;
+		api.sync('demo', null).subscribe((a) => (antwort = a));
+		const ohne = http.expectOne('/demo/api/v1/sync');
+		expect(ohne.request.method).toBe('GET');
+		ohne.flush({ stand: 3, geaendert: [], unsichtbar: [], vollstaendig: true });
+		expect(antwort).toEqual({ stand: 3, geaendert: [], unsichtbar: [], vollstaendig: true });
+
+		api.sync('demo', 7).subscribe();
+		http.expectOne('/demo/api/v1/sync?seit=7').flush({ stand: 7, geaendert: [], unsichtbar: [], vollstaendig: false });
+	});
+
 	it('kodiert Slug und Id im Pfad', () => {
 		api.thread('a b', 'x/y').subscribe();
 		http.expectOne('/a%20b/api/v1/threads/x%2Fy').flush({});

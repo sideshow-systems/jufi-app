@@ -2,6 +2,7 @@ import { generateLinkToken, hashToken } from '@jufi/auth';
 import { createPrismaClientFromEnv, Recht, sperreVereinszeile } from '@jufi/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { leitungsEinladungsText, notfallLinkText } from '../einladung.js';
 import { einladungsMail } from '../mail/texte.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
@@ -20,12 +21,19 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 	const prisma = createPrismaClientFromEnv();
 	const uhr = new Date('2026-10-13T08:00:00Z');
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 	let cookie = '';
 	let adminId = '';
 
 	beforeAll(async () => {
 		server = await starteTestServer(
-			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, jetzt: () => uhr }),
+			createApp({
+				prisma,
+				version: { version: '1.2.3', commit: 'abc' },
+				umgebung: TEST_UMGEBUNG,
+				jetzt: () => uhr,
+				bus: ereignisse.bus,
+			}),
 		);
 		const angemeldet = await meldeAdminAn(prisma, uhr);
 		cookie = angemeldet.cookie;
@@ -73,6 +81,18 @@ describe('Admin: sperren, Slug korrigieren, Einladung erneuern, Notfall-Link', (
 	}
 
 	describe('sperren und entsperren', () => {
+		it('sperren meldet pruefen mit der ID des Vereins; ein zweites Sperren, Entsperren und ein unbekannter Verein nicht', async () => {
+			const { id } = await legeAn('aktion-sperren-bus');
+
+			expect((await post(`/vereine/${id}/sperren`)).status).toBe(200);
+			expect(ereignisse.fuer(id)).toEqual([{ typ: 'pruefen', vereinId: id }]);
+
+			expect((await post(`/vereine/${id}/sperren`)).status).toBe(200);
+			expect((await post('/vereine/gibt-es-nicht/sperren')).status).toBe(404);
+			expect((await post(`/vereine/${id}/entsperren`)).status).toBe(200);
+			expect(ereignisse.fuer(id)).toEqual([{ typ: 'pruefen', vereinId: id }]);
+		});
+
 		it('sperren macht die Vereins-API 404 und entsperren wieder 200', async () => {
 			const { id } = await legeAn('aktion-sperren');
 			expect((await fetch(`${server.url}/aktion-sperren/api/v1/verein`)).status).toBe(200);

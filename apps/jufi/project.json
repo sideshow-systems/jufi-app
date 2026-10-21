@@ -45,7 +45,8 @@
 					"otplib",
 					"express",
 					"nodemailer",
-					"sharp"
+					"sharp",
+					"ws"
 				],
 				"security": {
 					"allowedHosts": ["test.jufi-app.de", "localhost", "127.0.0.1"]
@@ -80,12 +81,14 @@
 			}
 		},
 		"serve": {
+			"//options.proxyConfig": "Leitet /<slug>/ws an den Hub, der unter ng serve auf JUFI_WS_DEV_PORT lauscht (Plan-Entscheidung 12, server.ts starteDevHub); an den Server von Vite kommt er nicht heran. Die Datei ist statisch: Wer JUFI_WS_DEV_PORT aendert, aendert dort das Ziel mit. Verworfen: proxy.conf.mjs, das den Port aus der Umgebung liest -- Code in der Konfiguration fuer einen Fall, der lokal kaum vorkommt (4201 belegt), und die Vorgabe stuende an einer dritten Stelle.",
 			"continuous": true,
 			"dependsOn": ["stamp"],
 			"executor": "@angular/build:dev-server",
 			"defaultConfiguration": "development",
 			"options": {
-				"port": 4200
+				"port": 4200,
+				"proxyConfig": "apps/jufi/proxy.conf.json"
 			},
 			"configurations": {
 				"production": {

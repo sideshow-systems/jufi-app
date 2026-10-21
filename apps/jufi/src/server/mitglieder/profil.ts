@@ -133,7 +133,7 @@ function sitzungBeendet(res: Response): void {
  * Passkey, auch im selben Verein, ist "nicht gefunden" (404, Rahmen-Spec 8).
  */
 export function profilRouten(router: Router, deps: VolleAppDeps): void {
-	const { jetzt, anmeldeVersuche: versuche, webauthn } = deps;
+	const { jetzt, anmeldeVersuche: versuche, webauthn, bus } = deps;
 
 	router.get(
 		'/ich',
@@ -188,6 +188,9 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 			const { sitzungId } = mitgliedKontext(res);
 			// deleteMany: ein Doppelklick auf Abmelden soll nicht mit 500 enden.
 			await db.session.deleteMany({ where: { id: sitzungId } });
+			// Nur pruefen, keine Aenderung: Die Sockets dieser Sitzung sollen sich schliessen, den Stand
+			// des Vereins hat das nicht angefasst (Plan-Entscheidung 4).
+			bus.melde({ typ: 'pruefen', vereinId: verein.id });
 			loescheMitgliederCookie(req, res, verein.slug);
 			res.status(204).end();
 		}),
@@ -200,6 +203,7 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 			const { verein, db } = vereinsKontext(res);
 			const { zugang } = mitgliedKontext(res);
 			await db.session.deleteMany({ where: { zugangId: zugang.id } });
+			bus.melde({ typ: 'pruefen', vereinId: verein.id });
 			loescheMitgliederCookie(req, res, verein.slug);
 			res.status(204).end();
 		}),
@@ -215,6 +219,7 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 		'/profil/passwort',
 		brauchtMitglied,
 		asynchron(async (req, res) => {
+			const { verein } = vereinsKontext(res);
 			const { zugang, sitzungId } = mitgliedKontext(res);
 			const neu = text(req.body?.neu);
 			const pruefung = pruefePasswort(neu);
@@ -274,6 +279,8 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 				res.status(409).json(PASSWORT_GEAENDERT);
 				return;
 			}
+			// Die anderen Sitzungen dieses Zugangs sind weg: ihre Sockets pruefen sich neu.
+			bus.melde({ typ: 'pruefen', vereinId: verein.id });
 			res.json({ ok: true });
 		}),
 	);

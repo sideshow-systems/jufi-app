@@ -6,6 +6,7 @@ import { provideRouter, Router } from '@angular/router';
 import { provideHttpClient, withFetch } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { type StartAnsicht, terminZeit } from '@jufi/domain';
+import { EchtzeitAttrappe, echtzeitAttrappe } from '../admin/test-hilfen';
 import { StartBloeckeComponent } from './start-bloecke';
 
 const URL = '/demo/api/v1/start';
@@ -30,7 +31,7 @@ describe('Start-Bloecke', () => {
 		vi.useFakeTimers({ toFake: ['Date'] });
 		vi.setSystemTime(new Date('2026-10-19T08:00:00.000Z'));
 		TestBed.configureTestingModule({
-			providers: [provideRouter([]), provideHttpClient(withFetch()), provideHttpClientTesting()],
+			providers: [provideRouter([]), provideHttpClient(withFetch()), provideHttpClientTesting(), ...echtzeitAttrappe()],
 		});
 		http = TestBed.inject(HttpTestingController);
 	});
@@ -201,6 +202,30 @@ describe('Start-Bloecke', () => {
 			await vi.waitFor(() => expect(navigiert).toHaveBeenCalledTimes(1));
 			expect(String(navigiert.mock.calls[0][0])).toMatch(/^\/demo\/anmelden\?weiter=/);
 			expect(seite.querySelector('[role="alert"]')).toBeNull();
+		});
+	});
+
+	describe('Echtzeit', () => {
+		it('fragt nach einem Signal 250 ms spaeter erneut und zeigt die neue Antwort', async () => {
+			const seite = await oeffne(LEER);
+
+			TestBed.inject(EchtzeitAttrappe).quelle.next({
+				typ: 'signal',
+				signal: { stand: 43, threadId: 't3', art: 'THREAD', objektId: 't3' },
+			});
+			fixture.detectChanges();
+			// Entprellt: sofort noch keine Anfrage.
+			http.expectNone(URL);
+			await vi.waitFor(() => {
+				fixture.detectChanges();
+				http
+					.expectOne(URL)
+					.flush({ ...LEER, neu: [{ threadId: 't3', segment: 't3-k', titel: 'Kegeln', angabe: 'Neuer Thread' }] });
+			});
+			await fixture.whenStable();
+			fixture.detectChanges();
+
+			expect(abschnitt(seite, 'Neu seit deinem letzten Besuch')).toBeTruthy();
 		});
 	});
 });

@@ -50,6 +50,43 @@ export interface GeladenerThread {
 	letzteAktivitaetAm: Date;
 }
 
+/** Die Untergruppen nach ID sortiert, damit der Kopf nicht von der Reihenfolge der Datenbank abhaengt. */
+const kopfEinbezug = {
+	untergruppen: { select: { untergruppeId: true }, orderBy: { untergruppeId: 'asc' } },
+} as const;
+
+/**
+ * Die Abbildung einer Thread-Zeile auf den Kopf, an einer Stelle: ladeThreads und ladeKoepfe
+ * muessen denselben Kopf liefern, sonst deutet ein Signal einen Thread anders als die Seite.
+ */
+function kopfAus(thread: {
+	id: string;
+	art: ThreadKopf['art'];
+	titel: string;
+	modus: ThreadKopf['modus'];
+	rollenfilter: ThreadKopf['rollenfilter'];
+	alleUntergruppen: boolean;
+	angepinnt: boolean;
+	archivModus: ThreadKopf['archivModus'];
+	veroeffentlichtAm: Date | null;
+	erstelltVonId: string | null;
+	untergruppen: { untergruppeId: string }[];
+}): ThreadKopf {
+	return {
+		id: thread.id,
+		art: thread.art,
+		titel: thread.titel,
+		modus: thread.modus,
+		rollenfilter: thread.rollenfilter,
+		alleUntergruppen: thread.alleUntergruppen,
+		untergruppenIds: thread.untergruppen.map((g) => g.untergruppeId),
+		angepinnt: thread.angepinnt,
+		archivModus: thread.archivModus,
+		veroeffentlichtAm: thread.veroeffentlichtAm,
+		erstelltVonId: thread.erstelltVonId,
+	};
+}
+
 /** "JJJJ-MM-TT"; die Spalten sind @db.Date und kommen als Mitternacht UTC, ohne Zeitzonenversatz. */
 function tag(datum: Date): string {
 	return datum.toISOString().slice(0, 10);
@@ -64,15 +101,24 @@ function tag(datum: Date): string {
  * Verwaltung ruft ladeThread je Thread -- bei dreissig Threads waere das ein paar hundert
  * Abfragen fuer eine Seite.
  *
+ * `mitAntworten: false` laesst die Antworten weg (`UmfrageDaten.antworten` ist dann leer, Optionen
+ * und `ergebnisse` bleiben). Liste und Kalender zeigen keine Antworten, und deren Zahl waechst mit
+ * jeder Abgabe; die Startseite laedt sie nur fuer die Threads nach, die sie nach dem Filter wirklich
+ * braucht. Verworfen: eigene schmale Abfragen je Route -- die Abbildung der Module stuende dreimal.
+ *
  * Welche Untertabelle gilt, entscheidet `typ` des Moduls. Verworfen: die vorhandene
  * Untertabelle nehmen -- hinge an einem INFO-Modul von Hand eine Terminzeile, bestimmte
  * die Reihenfolge der Pruefungen, was die Karte zeigt. Ein Modul ohne die Zeile seines
  * Typs (kaputte Daten) wird uebersprungen, damit ein Thread nicht an einer Zeile haengt.
  */
-export async function ladeThreads(db: VereinDb | VereinTx, threadIds?: readonly string[]): Promise<GeladenerThread[]> {
+export async function ladeThreads(
+	db: VereinDb | VereinTx,
+	auswahl: { threadIds?: readonly string[]; mitAntworten?: boolean } = {},
+): Promise<GeladenerThread[]> {
+	const { threadIds, mitAntworten = true } = auswahl;
 	const threads = await db.thread.findMany({
 		where: threadIds ? { id: { in: [...threadIds] } } : undefined,
-		include: { untergruppen: { select: { untergruppeId: true }, orderBy: { untergruppeId: 'asc' } } },
+		include: kopfEinbezug,
 		orderBy: [{ angelegtAm: 'desc' }, { id: 'asc' }],
 	});
 	if (threads.length === 0) return [];
@@ -93,17 +139,33 @@ export async function ladeThreads(db: VereinDb | VereinTx, threadIds?: readonly 
 			where: { umfrageId: { in: umfrageIds } },
 			orderBy: [{ position: 'asc' }, { id: 'asc' }],
 		}),
-		db.umfrageAntwort.findMany({
-			where: { umfrageId: { in: umfrageIds } },
-			include: { optionen: { select: { optionId: true } } },
-			orderBy: [{ abgegebenAm: 'asc' }, { id: 'asc' }],
-		}),
+		mitAntworten
+			? db.umfrageAntwort.findMany({
+					where: { umfrageId: { in: umfrageIds } },
+					include: { optionen: { select: { optionId: true } } },
+					orderBy: [{ abgegebenAm: 'asc' }, { id: 'asc' }],
+				})
+			: Promise.resolve([]),
 	]);
 
 	const infoVon = new Map(infos.map((i) => [i.id, i]));
 	const terminVon = new Map(termine.map((t) => [t.id, t]));
 	const umfrageVon = new Map(umfragen.map((u) => [u.id, u]));
 	const rang = new Map(optionen.map((o, i) => [o.id, i]));
+	// Einmal nach Umfrage gruppiert statt je Umfrage die ganze Liste zu filtern: Der Aufwand waechst so
+	// mit der Zahl der Antworten, nicht mit Umfragen mal Antworten. Die Reihenfolge der Abfrage bleibt erhalten.
+	const antwortenVon = new Map<string, AntwortDaten[]>();
+	for (const a of antworten) {
+		const liste = antwortenVon.get(a.umfrageId) ?? [];
+		liste.push({
+			fuerId: a.fuerId,
+			vonId: a.vonId,
+			// In der Reihenfolge der Optionen, nicht der Datenbank: die Ansicht ist so unabhaengig vom Zufall.
+			optionIds: a.optionen.map((o) => o.optionId).sort((x, y) => (rang.get(x) ?? 0) - (rang.get(y) ?? 0)),
+			abgegebenAm: a.abgegebenAm,
+		});
+		antwortenVon.set(a.umfrageId, liste);
+	}
 
 	const modulVon = (m: (typeof moduleZeilen)[number]): ModulDaten | null => {
 		const titel = m.titel;
@@ -139,34 +201,14 @@ export async function ladeThreads(db: VereinDb | VereinTx, threadIds?: readonly 
 			optionen: optionen
 				.filter((o) => o.umfrageId === u.id)
 				.map((o) => ({ id: o.id, schluessel: o.schluessel, text: o.text })),
-			antworten: antworten
-				.filter((a) => a.umfrageId === u.id)
-				.map((a): AntwortDaten => ({
-					fuerId: a.fuerId,
-					vonId: a.vonId,
-					// In der Reihenfolge der Optionen, nicht der Datenbank: die Ansicht ist so unabhaengig vom Zufall.
-					optionIds: a.optionen.map((o) => o.optionId).sort((x, y) => (rang.get(x) ?? 0) - (rang.get(y) ?? 0)),
-					abgegebenAm: a.abgegebenAm,
-				})),
+			antworten: antwortenVon.get(u.id) ?? [],
 		};
 		return { typ: 'UMFRAGE', id: m.id, titel, umfrage };
 	};
 
 	return threads.map((thread) => ({
 		letzteAktivitaetAm: thread.letzteAktivitaetAm,
-		kopf: {
-			id: thread.id,
-			art: thread.art,
-			titel: thread.titel,
-			modus: thread.modus,
-			rollenfilter: thread.rollenfilter,
-			alleUntergruppen: thread.alleUntergruppen,
-			untergruppenIds: thread.untergruppen.map((g) => g.untergruppeId),
-			angepinnt: thread.angepinnt,
-			archivModus: thread.archivModus,
-			veroeffentlichtAm: thread.veroeffentlichtAm,
-			erstelltVonId: thread.erstelltVonId,
-		},
+		kopf: kopfAus(thread),
 		module: moduleZeilen
 			.filter((m) => m.threadId === thread.id)
 			.flatMap((m) => {
@@ -183,7 +225,23 @@ export async function ladeThreads(db: VereinDb | VereinTx, threadIds?: readonly 
  * geladen, damit Pruefung und Schreiben denselben Stand sehen (Plan-Entscheidung 3).
  */
 export async function ladeThread(db: VereinDb | VereinTx, threadId: string): Promise<GeladenerThread | null> {
-	return (await ladeThreads(db, [threadId]))[0] ?? null;
+	return (await ladeThreads(db, { threadIds: [threadId] }))[0] ?? null;
+}
+
+/**
+ * Nur die Koepfe der genannten Threads, je ID einer; unbekannte IDs (auch die eines fremden
+ * Vereins, ueber vereinDb) fehlen in der Map. Eine Abfrage samt Untergruppen, ohne Module und
+ * Antworten: Wer nur wissen will, ob jemand einen Thread sehen darf, soll dafuer nicht alle
+ * Module laden. Verworfen: ladeThreads und den Kopf herausziehen -- das laedt bei jedem Signal
+ * Module, Optionen und Antworten mit, die niemand liest.
+ */
+export async function ladeKoepfe(db: VereinDb, threadIds: readonly string[]): Promise<Map<string, ThreadKopf>> {
+	if (threadIds.length === 0) return new Map();
+	const threads = await db.thread.findMany({
+		where: { id: { in: [...threadIds] } },
+		include: kopfEinbezug,
+	});
+	return new Map(threads.map((thread) => [thread.id, kopfAus(thread)]));
 }
 
 /** Zu welchem Thread ein Modul gehoert und welcher Art es ist; null, wenn es im Verein kein solches Modul gibt. */

@@ -20,6 +20,7 @@ import { BestaetigungComponent } from '../../admin/bestaetigung';
 import { type ApiFehler, alsApiFehler, fehlertextNichtGefunden } from '../../gemeinsam/api-fehler';
 import { zeitpunktBerlin } from '../../gestaltung/format';
 import { IconComponent } from '../../gestaltung/icon';
+import { Echtzeit } from '../echtzeit';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { ThreadApi } from './thread-api';
 
@@ -36,6 +37,31 @@ interface Zeile {
 /** Spiegelt die Grenze des Servers (verlauf.ts, MAX_ZEICHEN); der Server entscheidet, die Zahl steht nur im Hinweis. */
 const MAX_ZEICHEN = 2000;
 
+/** So nah am Seitenende gilt die Person als "unten"; eine Live-Nachricht nimmt sie dann mit. */
+const UNTEN_PX = 80;
+
+/** Die Ordnung des Servers (stand, dann id), aufsteigend; die aelteste zuerst. */
+function vergleiche(a: VerlaufAnsicht, b: VerlaufAnsicht): number {
+	return a.stand - b.stand || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/**
+ * Fuehrt zwei Listen nach Id zusammen; bei gleicher Id gilt neu, ausser alt ist geloescht und neu
+ * nicht. Loeschen ist endgueltig, eine geloeschte Nachricht wird nie wieder lebendig: Kommt das
+ * Loeschen live, waehrend eine Seite unterwegs ist, die der Server davor gelesen hat, holte deren
+ * Antwort die Nachricht sonst mit Text zurueck, bis der Verlauf neu geoeffnet wird (Review Task 10).
+ * Verworfen: die neuere Fassung am Stand erkennen; beide tragen den Stand der Nachricht, nicht den
+ * des Loeschens.
+ */
+function mische(alt: readonly VerlaufAnsicht[], neu: readonly VerlaufAnsicht[]): VerlaufAnsicht[] {
+	const nachId = new Map(alt.map((e) => [e.id, e]));
+	for (const e of neu) {
+		const vorher = nachId.get(e.id);
+		nachId.set(e.id, vorher?.geloescht && !e.geloescht ? vorher : e);
+	}
+	return [...nachId.values()].sort(vergleiche);
+}
+
 /**
  * Der Verlauf eines Threads (Spec 6.2): Nachrichten und Systemzeilen, aelteste oben, darunter
  * das Eingabefeld. Die Seite entscheidet nichts hier: Ob die Person schreiben (schreibSperre)
@@ -47,6 +73,11 @@ const MAX_ZEICHEN = 2000;
  * Stand als gelesen und sagt es der Seite erst, wenn der Server es angenommen hat; sie setzt den
  * Zaehler am Reiter dann zurueck. Ein spaeteres Nachladen aelterer Seiten meldet nichts mehr:
  * Sie sind ohnehin aelter als der Stand.
+ *
+ * Live (Entscheidung 8): Die Seite reicht Nachrichten aus Signalen ueber uebernimm herein und
+ * laesst den Verlauf nach Aenderungen ohne mitgelieferten Eintrag frischeAuf aufrufen. stand ist
+ * der bekannte Stand der Seite; steigt er ueber den zuletzt gemeldeten, meldet der Verlauf erneut,
+ * aber nur, wenn das Dokument sichtbar ist und kein Auffrischen aussteht.
  */
 @Component({
 	selector: 'jf-verlauf',
@@ -253,7 +284,7 @@ const MAX_ZEICHEN = 2000;
 export class Verlauf {
 	readonly slug = input.required<string>();
 	readonly threadId = input.required<string>();
-	/** Der Stand des geladenen Threads; bis dahin meldet der Verlauf alles als gelesen. */
+	/** Der bekannte Stand der Seite (bekannterStand, Entscheidung 8); bis dahin meldet der Verlauf alles als gelesen. */
 	readonly stand = input.required<number>();
 	/** null heisst: Die Person darf schreiben. Alles andere blendet das Eingabefeld aus, die Liste bleibt. */
 	readonly schreibSperre = input.required<SchreibSperre | null>();
@@ -264,6 +295,7 @@ export class Verlauf {
 	private readonly router = inject(Router);
 	private readonly dokument = inject(DOCUMENT);
 	private readonly injector = inject(Injector);
+	private readonly echtzeit = inject(Echtzeit);
 
 	protected readonly zustand = signal<Zustand>('laedt');
 	protected readonly ladefehler = signal<string>('');
@@ -304,6 +336,22 @@ export class Verlauf {
 	 * Nachricht doppelt im Verlauf stehen. Aendert die Person den Text, ist es eine andere Nachricht.
 	 */
 	private versuch: { text: string; clientId: string } | null = null;
+	/** Bis zu diesem Stand ist gemeldet (oder die Meldung unterwegs); null: fuer diesen Thread noch nichts. */
+	private gemeldetBis: number | null = null;
+	/**
+	 * Falsch, solange ein Auffrischen aussteht oder das letzte gescheitert ist: Dann kennt die Seite
+	 * womoeglich einen Stand, zu dem die Zeilen fehlen, und nichts davon gilt als gelesen. Verworfen:
+	 * trotzdem melden; eine Nachricht aus der Zeit ohne Verbindung galte als gelesen, bevor sie da ist.
+	 */
+	private readonly vollstaendig = signal(true);
+	/** Nur das zuletzt begonnene Auffrischen entscheidet ueber vollstaendig. */
+	private frischNr = 0;
+	/**
+	 * Zaehlt, wie oft ein Auffrischen die Liste wegen einer Luecke ersetzt hat. Fruehere laden prueft
+	 * ihn: Sein Cursor gehoerte zur alten Liste, und seine Zeilen landeten sonst ueber der neuen Seite,
+	 * mit genau der unsichtbaren Luecke, die das Ersetzen vermeiden soll.
+	 */
+	private ersetzt = 0;
 
 	constructor() {
 		inject(DestroyRef).onDestroy(() => this.lauf++);
@@ -314,6 +362,71 @@ export class Verlauf {
 			this.threadId();
 			untracked(() => void this.ladeErste());
 		});
+
+		// Gemeldet wird erst nach dem ersten Laden, nur nach oben und nur im Vordergrund (Entscheidung 8):
+		// Ein Hintergrund-Tab hat nichts gelesen, auch wenn Nachrichten darin ankommen.
+		effect(() => {
+			const bis = this.stand();
+			if (this.zustand() !== 'bereit' || !this.vollstaendig() || !this.echtzeit.vordergrund()) return;
+			if (this.gemeldetBis !== null && bis <= this.gemeldetBis) return;
+			this.gemeldetBis = bis;
+			untracked(() => void this.meldeGelesen(this.lauf, this.slug(), this.threadId(), bis));
+		});
+	}
+
+	/**
+	 * Setzt einen Eintrag aus einem Signal ein oder ersetzt den mit derselben Id: die eigene Nachricht,
+	 * die nach dem Senden schon dasteht, oder eine geloeschte. Ein unbekannter Eintrag, der aelter ist
+	 * als die geladene Seite, bleibt draussen, solange es fruehere gibt: Er stuende sonst ueber einer
+	 * Luecke, die erst Fruehere laden fuellt. Kommt er waehrend des ersten Ladens, mischt ladeErste
+	 * ihn nach der Antwort ein.
+	 */
+	uebernimm(eintrag: VerlaufAnsicht): void {
+		const alle = this.eintraege();
+		const bekannt = alle.some((e) => e.id === eintrag.id);
+		const aeltester = alle[0];
+		if (!bekannt && this.weitere() && aeltester !== undefined && vergleiche(eintrag, aeltester) < 0) return;
+		const unten = this.istUnten();
+		this.eintraege.set(mische(alle, [eintrag]));
+		if (!bekannt && unten && this.zustand() === 'bereit') this.zumEnde();
+	}
+
+	/**
+	 * Holt die neueste Seite und mischt sie nach Id ein, ohne die Liste zu leeren oder "Wird geladen"
+	 * zu zeigen: fuer Aenderungen, deren Eintraege kein Signal mitbrachte (Systemeintrag, Abgleich,
+	 * alles neu). Hat die neue Seite keinen Anschluss an die gezeigten Zeilen (mehr Neues, als auf
+	 * eine Seite passt), ersetzt sie sie, und Fruehere laden holt den Rest. Verworfen: auch dann
+	 * mischen, die Liste haette eine unsichtbare Luecke. Vor dem ersten gelungenen Laden laedt sie
+	 * einfach neu.
+	 */
+	async frischeAuf(): Promise<void> {
+		if (this.zustand() !== 'bereit') return this.ladeErste();
+		const lauf = this.lauf;
+		const nr = ++this.frischNr;
+		const slug = this.slug();
+		this.vollstaendig.set(false);
+		try {
+			const seite = await firstValueFrom(this.api.verlauf(slug, this.threadId()));
+			if (lauf !== this.lauf) return;
+			const neu = [...seite.eintraege].reverse();
+			const alle = this.eintraege();
+			const bekannt = new Set(alle.map((e) => e.id));
+			const luecke = seite.weitere && alle.length > 0 && !neu.some((e) => bekannt.has(e.id));
+			// Bei einer Luecke bleibt nur, was juenger ist als die neue Seite: was nach ihrer Antwort live kam.
+			const aeltester = neu[0];
+			const behalten = luecke && aeltester !== undefined ? alle.filter((e) => vergleiche(e, aeltester) > 0) : alle;
+			if (luecke) this.ersetzt++;
+			// Wie bei uebernimm: neue Zeilen nehmen die Person nur mit, wenn sie schon unten war.
+			const unten = this.istUnten();
+			this.eintraege.set(mische(behalten, neu));
+			this.weitere.set(luecke || alle.length === 0 ? seite.weitere : this.weitere() && seite.weitere);
+			if (unten && neu.some((e) => !bekannt.has(e.id))) this.zumEnde();
+			if (nr === this.frischNr) this.vollstaendig.set(true);
+		} catch (ursache) {
+			if (lauf !== this.lauf) return;
+			// Kein Fehlerblock: Die Person hat nichts ausgeloest, und die Liste steht weiter.
+			await beiAbgelaufenerSitzung(this.router, slug, alsApiFehler(ursache));
+		}
 	}
 
 	protected wert(ereignis: Event): string {
@@ -328,10 +441,19 @@ export class Verlauf {
 		this.eintraege.set([]);
 		this.weitere.set(false);
 		this.listenfehler.set(null);
+		this.gemeldetBis = null;
+		this.frischNr++;
+		this.vollstaendig.set(true);
 		try {
 			const seite = await firstValueFrom(this.api.verlauf(slug, threadId));
 			if (lauf !== this.lauf) return;
-			this.eintraege.set([...seite.eintraege].reverse());
+			// Was jetzt schon dasteht, kam waehrend der Anfrage ueber uebernimm; die Antwort kann aelter sein.
+			const geladen = [...seite.eintraege].reverse();
+			const aeltester = geladen[0];
+			const live = this.eintraege().filter(
+				(e) => !seite.weitere || aeltester === undefined || vergleiche(e, aeltester) > 0,
+			);
+			this.eintraege.set(mische(live, geladen));
 			this.weitere.set(seite.weitere);
 			this.zustand.set('bereit');
 			this.zumEnde();
@@ -341,19 +463,17 @@ export class Verlauf {
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
 			this.ladefehler.set(fehlertextNichtGefunden(fehler));
 			this.zustand.set('fehler');
-			return;
 		}
-		await this.meldeGelesen(lauf, slug, threadId);
 	}
 
 	/**
 	 * Schlaegt das Melden fehl, bleibt es unbemerkt: Der Stand holt sich beim naechsten Oeffnen
-	 * nach, und ein Fehlerblock fuer etwas, das die Person nicht ausgeloest hat, waere falscher Alarm.
-	 * Der Zaehler bleibt dann stehen, wie der Server ihn kennt.
+	 * oder mit dem naechsten hoeheren Stand nach, und ein Fehlerblock fuer etwas, das die Person
+	 * nicht ausgeloest hat, waere falscher Alarm. Der Zaehler bleibt dann stehen, wie der Server ihn kennt.
 	 */
-	private async meldeGelesen(lauf: number, slug: string, threadId: string): Promise<void> {
+	private async meldeGelesen(lauf: number, slug: string, threadId: string, bis: number): Promise<void> {
 		try {
-			await firstValueFrom(this.api.gelesen(slug, threadId, { bereich: 'verlauf', bis: this.stand() }));
+			await firstValueFrom(this.api.gelesen(slug, threadId, { bereich: 'verlauf', bis }));
 		} catch {
 			return;
 		}
@@ -364,11 +484,12 @@ export class Verlauf {
 		const aeltester = this.eintraege()[0];
 		if (this.laedtFrueher() || aeltester === undefined) return;
 		const lauf = this.lauf;
+		const ersetzt = this.ersetzt;
 		this.laedtFrueher.set(true);
 		this.listenfehler.set(null);
 		try {
 			const seite = await firstValueFrom(this.api.verlauf(this.slug(), this.threadId(), aeltester.id));
-			if (lauf !== this.lauf) return;
+			if (lauf !== this.lauf || ersetzt !== this.ersetzt) return;
 			const bekannt = new Set(this.eintraege().map((e) => e.id));
 			this.eintraege.update((alle) => [...[...seite.eintraege].reverse().filter((e) => !bekannt.has(e.id)), ...alle]);
 			this.weitere.set(seite.weitere);
@@ -399,7 +520,9 @@ export class Verlauf {
 			);
 			if (lauf !== this.lauf) return;
 			this.versuch = null;
-			this.eintraege.update((alle) => (alle.some((e) => e.id === eintrag.id) ? alle : [...alle, eintrag]));
+			// Nach Stand eingeordnet: Kam vor der Antwort eine fremde Nachricht live, steht die eigene davor.
+			// War das eigene Echo schon da (oder schon geloescht), bleibt es bei einer Zeile.
+			this.eintraege.update((alle) => mische(alle, [eintrag]));
 			// Hat die Person waehrend des Sendens weitergetippt, gehoert der neue Text ihr.
 			if (this.text().trim() === text) this.text.set('');
 			this.zumEnde();
@@ -444,6 +567,15 @@ export class Verlauf {
 		const fehler = alsApiFehler(ursache);
 		if (await beiAbgelaufenerSitzung(this.router, this.slug(), fehler)) return;
 		ziel.set(uebersetze(fehler));
+	}
+
+	/**
+	 * Liest die Person gerade weiter oben, bleibt die Seite stehen, wenn unten etwas dazukommt.
+	 * Verworfen: bei jeder Live-Nachricht ans Ende springen, das risse sie aus dem Lesen.
+	 */
+	private istUnten(): boolean {
+		const seite = this.dokument.scrollingElement;
+		return !seite || seite.scrollTop + seite.clientHeight >= seite.scrollHeight - UNTEN_PX;
 	}
 
 	/**

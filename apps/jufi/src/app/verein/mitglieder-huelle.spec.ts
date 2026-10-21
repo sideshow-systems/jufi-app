@@ -2,7 +2,9 @@ import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
 import type { ThreadListe, ThreadZeile } from '@jufi/domain';
-import { adminTestAnbieter } from '../admin/test-hilfen';
+import { adminTestAnbieter, EchtzeitAttrappe } from '../admin/test-hilfen';
+import { WEB_SOCKET } from './echtzeit';
+import { ThreadUebersicht } from './threads/thread-uebersicht';
 
 const API = '/demo/api/v1';
 
@@ -18,6 +20,13 @@ const ICH = {
 const VEREIN = { slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false, logoStand: null };
 
 const LEERE_LISTE: ThreadListe = { threads: [], archiv: 0 };
+
+/**
+ * Ob die Huelle neu laden laesst, steht am Aufruf von neuLaden: Die Anfrage selbst kommt entprellt
+ * 250 ms spaeter, und "keine Anfrage" sagte erst nach dieser Zeit etwas. Verworfen: echt warten
+ * (zeitabhaengig) und falsche Zeitgeber, die Router und whenStable des Harness mit anhalten.
+ */
+const neuLadenSpion = () => vi.spyOn(ThreadUebersicht.prototype, 'neuLaden');
 
 function zeile(neu: boolean): ThreadZeile {
 	return {
@@ -36,14 +45,19 @@ describe('Mitglieder-Huelle', () => {
 	let http: HttpTestingController;
 	let harness: RouterTestingHarness;
 	let seite: HTMLElement;
+	let echtzeit: EchtzeitAttrappe;
 
 	beforeEach(() => {
 		TestBed.configureTestingModule({ providers: adminTestAnbieter({ eigeneThreadListe: true }) });
 		http = TestBed.inject(HttpTestingController);
+		echtzeit = TestBed.inject(EchtzeitAttrappe);
 		document.documentElement.removeAttribute('style');
 	});
 
-	afterEach(() => http.verify());
+	afterEach(() => {
+		http.verify();
+		vi.restoreAllMocks();
+	});
 
 	async function stabil(): Promise<void> {
 		await harness.fixture.whenStable();
@@ -182,14 +196,62 @@ describe('Mitglieder-Huelle', () => {
 
 	it('fragt die Thread-Liste nach einem Seitenwechsel neu, nach einer reinen Aenderung der Adresse-Parameter nicht', async () => {
 		await oeffne('/demo', VEREIN, startDaten);
+		const neuLaden = neuLadenSpion();
 
 		await harness.navigateByUrl('/demo?x=1');
 		harness.detectChanges();
-		http.expectNone(`${API}/threads`);
+		expect(neuLaden).not.toHaveBeenCalled();
 
 		await harness.navigateByUrl('/demo/mehr');
+		expect(neuLaden).toHaveBeenCalledTimes(1);
 		await threadListe();
 		await stabil();
+	});
+
+	// Entscheidung 9: Mit Verbindung kommen Aenderungen als Ereignisse, eine Navigation fragt nicht.
+	it('fragt die Thread-Liste nach einem Seitenwechsel nur ohne Verbindung neu', async () => {
+		// Die Navigation, die die Huelle baut, fragt nicht: Die Liste laedt mit dem Slug ohnehin.
+		const neuLaden = neuLadenSpion();
+		await oeffne('/demo', VEREIN, startDaten);
+		expect(neuLaden).not.toHaveBeenCalled();
+
+		echtzeit.verbunden.set(true);
+		await harness.navigateByUrl('/demo/mehr');
+		harness.detectChanges();
+		expect(neuLaden).not.toHaveBeenCalled();
+
+		echtzeit.verbunden.set(false);
+		echtzeit.getrennt.set(true);
+		const navigation = harness.navigateByUrl('/demo/meine-jungfischer');
+		await jungfischerDaten();
+		await navigation;
+		expect(neuLaden).toHaveBeenCalledTimes(1);
+		await threadListe();
+		await stabil();
+	});
+
+	it('startet die Echtzeit mit dem Slug', async () => {
+		await oeffne('/demo');
+
+		expect(echtzeit.gestartet).toBe('demo');
+	});
+
+	// Die Live-Region bleibt stehen, nur ihr Text wechselt; so kuendigen Screenreader die Aenderung an.
+	it('zeigt ohne Verbindung rechts im Kopf den Hinweis, mit Verbindung nicht', async () => {
+		await oeffne('/demo');
+		const hinweis = seite.querySelector('header [role="status"]');
+		expect(hinweis).not.toBeNull();
+		expect(hinweis?.textContent?.trim()).toBe('');
+
+		echtzeit.getrennt.set(true);
+		harness.detectChanges();
+		expect(seite.querySelector('header [role="status"]')).toBe(hinweis);
+		expect(hinweis?.textContent?.trim()).toBe('Nicht verbunden – Inhalte evtl. veraltet');
+
+		echtzeit.getrennt.set(false);
+		harness.detectChanges();
+		expect(seite.querySelector('header [role="status"]')).toBe(hinweis);
+		expect(hinweis?.textContent?.trim()).toBe('');
 	});
 
 	it('zeigt mit Logo das Bild aus dem Kontext statt des Abzeichens', async () => {
@@ -263,5 +325,63 @@ describe('Mitglieder-Huelle', () => {
 		expect(harness.routeNativeElement?.textContent).toContain('Nicht gefunden oder keine Berechtigung');
 		expect(harness.routeNativeElement?.querySelector('nav')).toBeNull();
 		http.expectNone(`${API}/ich`);
+	});
+});
+
+/** Der echte Dienst in der Huelle, mit einem falschen WebSocket: Die Huelle baut ihn auf und wieder ab. */
+describe('Mitglieder-Huelle mit Echtzeit', () => {
+	class FalscherSocket {
+		static alle: FalscherSocket[] = [];
+		onopen: WebSocket['onopen'] = null;
+		onmessage: WebSocket['onmessage'] = null;
+		onclose: WebSocket['onclose'] = null;
+		geschlossenMit: number | null = null;
+
+		constructor(readonly url: string) {
+			FalscherSocket.alle.push(this);
+		}
+
+		close(code?: number): void {
+			this.geschlossenMit = code ?? 1005;
+		}
+	}
+
+	let http: HttpTestingController;
+
+	beforeEach(() => {
+		FalscherSocket.alle = [];
+		TestBed.configureTestingModule({
+			providers: [
+				...adminTestAnbieter({ eigeneThreadListe: true, eigeneEchtzeit: true }),
+				{ provide: WEB_SOCKET, useValue: FalscherSocket },
+			],
+		});
+		http = TestBed.inject(HttpTestingController);
+	});
+
+	afterEach(() => http.verify());
+
+	it('verbindet sich mit dem Verein und schliesst beim Verlassen der Huelle, ohne neu zu verbinden', async () => {
+		const harness = await RouterTestingHarness.create();
+		const navigation = harness.navigateByUrl('/demo/mehr');
+		await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ICH));
+		await navigation;
+		http.expectOne(`${API}/verein`).flush(VEREIN);
+		await vi.waitFor(() => {
+			harness.detectChanges();
+			http.expectOne(`${API}/threads`).flush(LEERE_LISTE);
+		});
+
+		expect(FalscherSocket.alle.map((s) => s.url)).toEqual([`ws://${location.host}/demo/ws`]);
+
+		await harness.navigateByUrl('/datenschutz');
+		await harness.fixture.whenStable();
+
+		const alt = FalscherSocket.alle[0];
+		expect(alt.geschlossenMit).toBe(1000);
+		// Ein spaeter Abbruch des geschlossenen Sockets loest weder Abgleich noch neuen Socket aus.
+		alt.onclose?.call(alt as never, { code: 1006 } as CloseEvent);
+		http.expectNone(`${API}/sync`);
+		expect(FalscherSocket.alle.length).toBe(1);
 	});
 });

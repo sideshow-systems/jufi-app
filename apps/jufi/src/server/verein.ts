@@ -27,24 +27,28 @@ export interface VereinsLocals {
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
 
 /**
- * Macht aus dem Slug im Pfad den Verein der Anfrage. Gesperrte, unbekannte und
- * unmoegliche Slugs sind alle "nicht gefunden" (404, nie 403, Rahmen-Spec 8):
- * Wer nichts sehen darf, erfaehrt auch nicht, dass es etwas gibt.
+ * Der Verein zum Slug, oder null fuer alles, was "nicht gefunden" ist: gesperrte,
+ * unbekannte und unmoegliche Slugs (404, nie 403, Rahmen-Spec 8). Wer nichts sehen
+ * darf, erfaehrt auch nicht, dass es etwas gibt. Eigene Funktion, weil das Upgrade
+ * des Hubs (echtzeit/hub.ts) dieselbe Regel braucht und keine Express-Anfrage hat.
  *
  * pruefeSlug laeuft zuerst, damit ein Slug, den es nie geben kann (Grossbuchstaben,
  * Umlaute, reservierte Namen), die Datenbank gar nicht erreicht: ein Fehler dort
  * endete als 500 mit Log-Eintrag, obwohl die Anfrage schlicht ins Leere ging.
  */
+export async function ladeVereinAusSlug(prisma: PrismaClient, slug: string): Promise<Verein | null> {
+	if (!pruefeSlug(slug).ok) return null;
+	const verein = await prisma.verein.findUnique({ where: { slug } });
+	if (!verein || verein.status === 'GESPERRT') return null;
+	return verein;
+}
+
+/** Macht aus dem Slug im Pfad den Verein der Anfrage (ladeVereinAusSlug), sonst 404. */
 export function vereinAusSlug(prisma: PrismaClient): RequestHandler {
 	return async (req, res, next) => {
 		try {
-			const slug = req.params['slug'] ?? '';
-			if (!pruefeSlug(slug).ok) {
-				res.status(404).json(NICHT_GEFUNDEN);
-				return;
-			}
-			const verein = await prisma.verein.findUnique({ where: { slug } });
-			if (!verein || verein.status === 'GESPERRT') {
+			const verein = await ladeVereinAusSlug(prisma, req.params['slug'] ?? '');
+			if (!verein) {
 				res.status(404).json(NICHT_GEFUNDEN);
 				return;
 			}

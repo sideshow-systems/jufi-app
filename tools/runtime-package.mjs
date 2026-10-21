@@ -34,7 +34,8 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
  * beim Aufraeumen niemand raten muss:
  *
  * - Server (apps/jufi/project.json, externalDependencies): @node-rs/argon2,
- *   @prisma/client, @prisma/adapter-pg, pg, otplib, express, nodemailer, sharp.
+ *   @prisma/client, @prisma/adapter-pg, pg, otplib, express, nodemailer, sharp,
+ *   ws.
  * - CLI (apps/cli/package.json, external): @prisma/client, @prisma/adapter-pg,
  *   pg, @node-rs/argon2. Dazu otplib und @simplewebauthn/server, die nirgends
  *   ausdruecklich als extern stehen: @nx/esbuild laesst die Abhaengigkeiten der
@@ -43,6 +44,10 @@ const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
  * - sharp: native Bildverarbeitung (Logo, Icons). Die Plattformpakete
  *   (@img/sharp-linuxmusl-*) holt `npm install` in Stufe 3 selbst, passend zur
  *   Architektur des Images; die Versionsangabe hier legt nur sharp fest.
+ * - ws: die WebSockets des Hubs (TP3 Etappe 5). Extern wie express: CommonJS,
+ *   das optionale native Beschleuniger (bufferutil, utf-8-validate) zur
+ *   Laufzeit per require sucht -- eingebuendelt muesste der Bundler diese
+ *   Suche umschreiben, und dann liefe im Image nicht mehr das getestete Paket.
  * - pg: Peer von @prisma/adapter-pg, auch wo kein Buendel es direkt importiert.
  * - prisma: die Kommandozeile fuer `prisma migrate deploy` im Dienst
  *   jufi-migrate. Seit Prisma 7 ohne Rust-Engines und klein genug fuer dasselbe
@@ -64,6 +69,7 @@ const RUNTIME_PACKAGES = [
 	'pg',
 	'prisma',
 	'sharp',
+	'ws',
 ];
 
 /**

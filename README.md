@@ -43,6 +43,13 @@ Die App läuft dann unter <http://localhost:4200/>, der Demo-Verein unter <http:
 fängt Mailpit unter <http://127.0.0.1:8025> ab. Nach jeder Schemaänderung ist `pnpm run db:generate` erneut nötig. `pnpm run demo` spielt den Demo-Verein jedes Mal frisch ein; andere
 Vereine bleiben unberührt.
 
+**Live-Verbindung (WebSocket):** Unter `pnpm run dev` gibt Vite den eigenen Server nicht heraus, der Hub lauscht darum
+auf Port 4201, und [`apps/jufi/proxy.conf.json`](apps/jufi/proxy.conf.json) leitet `/<slug>/ws` dorthin; der Browser
+spricht weiter nur mit 4200. Lädt der Dev-Server `server.ts` neu, schließt der neue Hub den alten samt Port. Ist 4201
+belegt, meldet der Start „JuFi-Hub (Entwicklung) nicht gestartet“ und die App läuft ohne Live weiter. Ein anderer Port:
+`JUFI_WS_DEV_PORT` in der `.env` **und** das Ziel in `proxy.conf.json` ändern, die Datei ist statisch. Im Betrieb hängt
+der Hub am Server der App selbst, dort gibt es keinen zweiten Port.
+
 Der Demo-Verein enthält zwei Untergruppen, drei Jungfischer (einer ohne Einwilligung, einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
 
 Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<projekt>` und brauchen deshalb das
@@ -191,6 +198,11 @@ Der Probelauf prüft Format, Tests und Typen, baut das Image und startet es gege
 echte Lauf prüft zusätzlich, dass Compose-Block und `JUFI_`-Variablen auf dem Server stehen, überträgt das Image, setzt
 `JUFI_IMAGE_TAG` auf den Commit, startet nur `jufi` (Datenbank, Migration und Mailpit kommen über `depends_on` mit)
 und vergleicht den Commit in `/healthz` von innen und von außen.
+
+**Live-Verbindung:** Der WebSocket unter `/<slug>/ws` läuft über denselben Port 4000 wie die Seiten; Traefik reicht den
+Upgrade ohne eigene Regel durch. Ob er die App erreicht, prüft `tools/pruefe-betrieb.sh --slug <slug>` (Abschnitt
+„Betrieb prüfen“). Beim Herunterfahren schließt die App die Sockets mit 1012, die Clients verbinden sich danach neu.
+Änderungen älter als 90 Tage räumt die App beim Start und dann täglich selbst auf.
 
 Die Tore im Einzelnen: 1 sauberer Stand, 2 Format, Tests und Typen, 3 Image bauen, 4 Rauchtest (dazu gehört das
 Initialen-Icon: `fc-match` muss DejaVu Sans Bold im Image finden, und das ausgelieferte Icon in 192 und 512 px muss
@@ -360,7 +372,8 @@ bash tools/pruefe-texte.sh
 einmal, statt beim ersten `✗` abzubrechen; Exit 1, sobald eines steht: `/healthz` mit Version und Commit, die
 Plattformseite `/` (die App, nicht der Entwurf), den Entwurf unter `/entwurf/` samt Gegenprobe, dass `/` nicht der
 Entwurf ist, bei `test.jufi-app.de` den Umzug (`app-test` → 301 mit Pfad und Anfrage), die Content-Security-Policy, mit
-`--slug` Manifest und Icons (192 und 512 px, mit Zeichnung), mit `--mail` SPF, DMARC und mit `--dkim-selector` DKIM
+`--slug` Manifest und Icons (192 und 512 px, mit Zeichnung) sowie den WebSocket (ein Upgrade ohne Cookie auf
+`/<slug>/ws` muss mit 401 abgelehnt werden: dann hat er Traefik und die App erreicht), mit `--mail` SPF, DMARC und mit `--dkim-selector` DKIM
 (Abfrage über 1.1.1.1). Es braucht `curl`, `node` und `dig`. Der Selektor kommt von Hetzner.
 
 `pruefe-texte.sh` zeigt mit Zeilennummern, was Impressum, Datenschutzerklärung und der Einwilligungstext (Fassung 1) noch
