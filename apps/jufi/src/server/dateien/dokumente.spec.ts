@@ -16,7 +16,7 @@ import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { dateiSchluessel, VerzeichnisSpeicher } from './speicher.js';
+import { dateiSchluessel, VerzeichnisSpeicher, type DateiSpeicher } from './speicher.js';
 
 const PDF = (laenge = 40) => Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(Math.max(0, laenge - 9), 0x20)]);
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20, 1)]);
@@ -27,18 +27,47 @@ describe('Dokumente-API', () => {
 	const prisma: PrismaClient = createPrismaClientFromEnv();
 	let wurzel: string;
 	let server: TestServer;
+	/**
+	 * Haelt jeden Upload in uebernimm an, solange gesetzt: Zwischen Vorpruefung und Transaktion
+	 * liegt genau dieser Aufruf, so laesst sich das Rennen herstellen statt darauf zu hoffen.
+	 */
+	let anUebernimm: (() => Promise<void>) | undefined;
 
 	beforeAll(async () => {
 		wurzel = await mkdtemp(join(tmpdir(), 'jufi-dokumente-'));
+		const speicher = new VerzeichnisSpeicher(wurzel);
+		const weiche = new Proxy<DateiSpeicher>(speicher, {
+			get: (ziel, name, empfaenger) =>
+				name === 'uebernimm' && anUebernimm
+					? async (...args: Parameters<DateiSpeicher['uebernimm']>) => {
+							await anUebernimm?.();
+							return ziel.uebernimm(...args);
+						}
+					: Reflect.get(ziel, name, empfaenger),
+		});
 		server = await starteTestServer(
 			createApp({
 				prisma,
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
-				dateiSpeicher: new VerzeichnisSpeicher(wurzel),
+				dateiSpeicher: weiche,
 			}),
 		);
 	});
+
+	/** Eine Barriere fuer `n` Uploads: `angekommen` loest auf, wenn alle n in uebernimm warten. */
+	function barriere(n: number) {
+		let ankommend = 0;
+		let meldeAngekommen!: () => void;
+		let gebeFrei!: () => void;
+		const angekommen = new Promise<void>((ok) => (meldeAngekommen = ok));
+		const frei = new Promise<void>((ok) => (gebeFrei = ok));
+		anUebernimm = async () => {
+			if (++ankommend === n) meldeAngekommen();
+			await frei;
+		};
+		return { angekommen, gebeFrei };
+	}
 
 	afterAll(async () => {
 		await server.schliessen();
@@ -522,19 +551,52 @@ describe('Dokumente-API', () => {
 			expect(passt.status).toBe(201);
 		});
 
-		it('nimmt von zwei gleichzeitigen Uploads, die einzeln passen, genau einen an', async () => {
+		it('nimmt von zwei Uploads, die beide die Vorpruefung bestanden haben, genau einen an', async () => {
 			const s = await szenario();
 			await prisma.verein.update({ where: { id: s.verein.id }, data: { speicherGrenzeMb: 100 } });
 			await s.fuelle(100 * MB - 1000);
-			const antworten = await Promise.all(
-				['a.pdf', 'b.pdf'].map((name) =>
-					s.lade(`/dokumente?kategorie=${s.kategorien[0]!.id}`, { name, body: PDF(600) }),
-				),
-			);
-			expect(antworten.map((r) => r.status).sort()).toEqual([201, 413]);
-			const abgelehnt = antworten.find((r) => r.status === 413)!;
-			expect(((await abgelehnt.json()) as { code: string }).code).toBe('KONTINGENT');
-			expect(await s.db.datei.count({ where: { name: { in: ['a.pdf', 'b.pdf'] } } })).toBe(1);
+			// Ohne Barriere koennte der zweite Upload erst nach dem Commit des ersten die Vorpruefung
+			// erreichen und schon dort scheitern; dann bewiese der Test die zweite Pruefung nicht.
+			const tor = barriere(2);
+			try {
+				const alle = Promise.all(
+					['a.pdf', 'b.pdf'].map((name) =>
+						s.lade(`/dokumente?kategorie=${s.kategorien[0]!.id}`, { name, body: PDF(600) }),
+					),
+				);
+				await tor.angekommen;
+				tor.gebeFrei();
+				const antworten = await alle;
+				expect(antworten.map((r) => r.status).sort()).toEqual([201, 413]);
+				const abgelehnt = antworten.find((r) => r.status === 413)!;
+				expect(((await abgelehnt.json()) as { code: string }).code).toBe('KONTINGENT');
+				expect(await s.db.datei.count({ where: { name: { in: ['a.pdf', 'b.pdf'] } } })).toBe(1);
+			} finally {
+				tor.gebeFrei();
+				anUebernimm = undefined;
+			}
+		});
+
+		it('liest die Grenze in der Transaktion neu, wenn sie sinkt, waehrend der Upload wartet', async () => {
+			const s = await szenario();
+			// Die Mindestgrenze ist 100 MB (Check-Constraint), also von 200 auf 100 senken.
+			await prisma.verein.update({ where: { id: s.verein.id }, data: { speicherGrenzeMb: 200 } });
+			await s.fuelle(150 * MB);
+			const tor = barriere(1);
+			try {
+				const antwort = s.lade(`/dokumente?kategorie=${s.kategorien[0]!.id}`, { name: 'x.pdf', body: PDF(600) });
+				await tor.angekommen;
+				// Die Vorpruefung hat mit 200 MB bestanden; mit 100 MB ist der Verein ueber der Grenze.
+				await prisma.verein.update({ where: { id: s.verein.id }, data: { speicherGrenzeMb: 100 } });
+				tor.gebeFrei();
+				const r = await antwort;
+				expect(r.status).toBe(413);
+				expect(((await r.json()) as { code: string }).code).toBe('KONTINGENT');
+				expect(await s.db.datei.count({ where: { name: 'x.pdf' } })).toBe(0);
+			} finally {
+				tor.gebeFrei();
+				anUebernimm = undefined;
+			}
 		});
 
 		it('rechnet beim Ersetzen die alte Datei nicht doppelt', async () => {
