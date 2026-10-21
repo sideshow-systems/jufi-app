@@ -646,7 +646,7 @@ Jede Funktion aus Abschnitt 3 testgetrieben mit Grenzfällen: Fristsekunde, Arch
 
 ### 10.3 Ende-zu-Ende
 
-Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kontexten (Thomas und Sandra), darunter die Antwort für zwei Kinder (Rahmen 13), die Live-Aktualisierung, der Austausch mit 404 für die Mutter und der Teilen-Text (Kopieren über die Zwischenablage, nicht das Teilen-Blatt). Etappe 6 ergänzt zwei Kinder der Mutter (Mia und Mats antworten je für sich) und das Fristende (die Mutter kann nicht mehr antworten, die Leitung trägt nach), die Link-Vorschau mit Titel für Familien und neutral für alles andere sowie die Layout-Messung des Thread-Kopfs mit langem Titel. Dazu Layout-Messungen der neuen Seiten.
+Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kontexten (Thomas und Sandra), darunter die Antwort für zwei Kinder (Rahmen 13), die Live-Aktualisierung, der Austausch mit 404 für die Mutter und der Teilen-Text (Kopieren über die Zwischenablage, nicht das Teilen-Blatt). Etappe 6 ergänzt ein zweites Kind der Mutter (sie antwortet für Mia und Mats) und das Fristende (die Mutter kann nicht mehr antworten, die Leitung trägt nach), die Link-Vorschau mit Titel für Familien und neutral für alles andere sowie die Layout-Messung des Thread-Kopfs mit langem Titel. Dazu Layout-Messungen der neuen Seiten.
 
 ### 10.4 Demo
 
