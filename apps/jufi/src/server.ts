@@ -11,6 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 import { createApp } from './server/app.js';
+import { VerzeichnisSpeicher } from './server/dateien/speicher.js';
 import { Bus } from './server/echtzeit/bus.js';
 import { Hub } from './server/echtzeit/hub.js';
 import { fehlerbehandlung } from './server/fehler.js';
@@ -111,12 +112,17 @@ function betriebsApp(): { app: express.Express; betrieb: Betrieb } {
 	const nachlauf = new Nachlauf();
 	// Ein Bus fuer Routen und Hub: Was die Routen melden, muss beim Hub ankommen (Plan-Entscheidung 1).
 	const bus = new Bus();
+	// Einmal hier erzeugt und beiden gegeben: Routen und Aufraeumer muessen dasselbe Verzeichnis
+	// meinen, sonst raeumte der Aufraeumer ein anderes auf, als die Routen fuellen. Der Konstruktor
+	// legt nichts an, es bleibt also bei "im Bau nichts mit Nebenwirkung" (betriebsApp laeuft nur im Hauptthread).
+	const dateiSpeicher = new VerzeichnisSpeicher(umgebung.dateienPfad);
 	const app = createApp({
 		prisma,
 		version: VERSION,
 		umgebung,
 		nachlauf,
 		bus,
+		dateiSpeicher,
 		// Erst bei einer Anfrage gerufen, nie beim Bau. null: Angular beansprucht den Pfad nicht.
 		seitenHtml: async (req) => htmlAusAntwort(await angularApp.handle(req)),
 	});
@@ -138,7 +144,7 @@ function betriebsApp(): { app: express.Express; betrieb: Betrieb } {
 				jetzt: () => new Date(),
 			});
 			// Neben dem Mail-Arbeiter und aus demselben Grund erst nach SELECT 1 (Plan-Entscheidung 13).
-			const aufraeumen = starteAufraeumen({ prisma, jetzt: () => new Date() });
+			const aufraeumen = starteAufraeumen({ prisma, jetzt: () => new Date(), speicher: dateiSpeicher });
 			// Ein laufender Versand soll nicht mitten im SMTP-Gespraech abbrechen und
 			// ein Nachlauf ("Passwort vergessen?") nicht mitten in seiner Transaktion;
 			// ohne diese Handler beendete SIGTERM den Prozess sofort. Danach

@@ -2,6 +2,7 @@ import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
 import type { EchtzeitSignal } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';
@@ -9,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
+import { dateiSchluessel, VerzeichnisSpeicher } from './dateien/speicher.js';
 import { Bus } from './echtzeit/bus.js';
 import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
@@ -1038,6 +1040,40 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect(((await r.json()) as { notfallLinks: unknown[] }).notfallLinks).toEqual([
 			{ am: expect.any(String), vorname: null, nachname: null },
 		]);
+	},
+	'GET /dateien/:id': async (k) => {
+		// Die Bytes liegen wirklich im Speicher der App: Das 404 aus eigen kommt von der Vereinsgrenze
+		// und nicht davon, dass es nichts auszuliefern gaebe.
+		const db = vereinDb(k.prisma, k.fremd.id);
+		const kategorie = await db.dokumentKategorie.findFirstOrThrow();
+		const dokument = await db.dokument.create({
+			data: { kategorieId: kategorie.id, titel: 'Fremdes Dokument', angelegtAm: new Date() },
+		});
+		const datei = await db.datei.create({
+			data: {
+				art: 'DATEI',
+				dokumentId: dokument.id,
+				name: 'fremd.pdf',
+				typ: 'application/pdf',
+				groesse: 5,
+				sha256: 'x',
+				vonId: k.fremdePersonId,
+				hochgeladenAm: new Date(),
+			},
+		});
+		const speicher = new VerzeichnisSpeicher(TEST_UMGEBUNG.dateienPfad);
+		const temp = await speicher.neueTempDatei();
+		await writeFile(temp, '%PDF-');
+		await speicher.uebernimm(temp, dateiSchluessel(k.fremd.id, datei.id));
+
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/dateien/${datei.id}`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+		expect((await hole(k.eigen.slug, k.eigenesCookie)).status).toBe(404);
+		expect((await hole(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		// Gegenprobe: In fremd selbst kommt dieselbe Datei an.
+		const fremdesMitglied = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
+		expect((await hole(k.fremd.slug, fremdesMitglied.cookie)).status).toBe(200);
 	},
 	'POST /abmelden/alle': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden/alle`, { methode: 'POST' })).status).toBe(404);

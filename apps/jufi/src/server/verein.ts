@@ -2,6 +2,7 @@ import { vereinDb, type PrismaClient, type Verein, type VereinDb } from '@jufi/d
 import { pruefeSlug } from '@jufi/domain';
 import { Router, type RequestHandler, type Response } from 'express';
 import type { VolleAppDeps } from './abhaengigkeiten.js';
+import { dateiRouten } from './dateien/ausliefern.js';
 import { anmeldeRouten } from './mitglieder/anmeldung.js';
 import { einladungsRouten } from './mitglieder/einladung.js';
 import { familieRouten } from './mitglieder/familie.js';
@@ -144,6 +145,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	einstellungenRouten(router, deps);
 	startRouten(router, deps);
 	threadRouten(router, deps);
+	dateiRouten(router, deps);
 
 	return router;
 }
