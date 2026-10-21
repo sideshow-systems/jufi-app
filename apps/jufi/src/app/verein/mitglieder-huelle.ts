@@ -1,10 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, untracked } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { NichtGefundenComponent } from '../seiten/nicht-gefunden';
 import { IconComponent, type IconName } from '../gestaltung/icon';
 import { KarteComponent } from '../gestaltung/ui';
+import { Echtzeit, echtzeitDerHuelle } from './echtzeit';
 import { ThreadUebersicht } from './threads/thread-uebersicht';
 import { VereinKontext } from './verein-kontext';
 import { VereinsLogoComponent } from './vereins-logo';
@@ -45,7 +46,7 @@ const EINTRAEGE: Eintrag[] = [
 	selector: 'jf-mitglieder-huelle',
 	imports: [IconComponent, KarteComponent, NichtGefundenComponent, RouterLink, RouterOutlet, VereinsLogoComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
-	providers: [ThreadUebersicht],
+	providers: [ThreadUebersicht, echtzeitDerHuelle],
 	template: `
 		@if (kontext.ladefehler()) {
 			<main>
@@ -63,6 +64,9 @@ const EINTRAEGE: Eintrag[] = [
 						<jf-vereins-logo />
 						<span class="name">{{ v.anzeigename }}</span>
 					}
+				}
+				@if (echtzeit.getrennt()) {
+					<span class="hinweis" role="status">Nicht verbunden – Inhalte evtl. veraltet</span>
 				}
 			</header>
 			<main>
@@ -106,6 +110,14 @@ const EINTRAEGE: Eintrag[] = [
 		}
 		.name {
 			font-weight: 700;
+		}
+		/* Rechts, auch ohne Name (Verein laedt noch); bei langem Namen bricht der Hinweis um statt den Kopf zu sprengen. */
+		.hinweis {
+			margin-left: auto;
+			min-width: 0;
+			color: var(--text-gedaempft);
+			font-size: var(--schrift-klein);
+			text-align: right;
 		}
 		main {
 			max-width: 480px;
@@ -170,6 +182,7 @@ export class MitgliederHuelle {
 	private readonly router = inject(Router);
 	protected readonly eintraege = EINTRAEGE;
 	protected readonly uebersicht = inject(ThreadUebersicht);
+	protected readonly echtzeit = inject(Echtzeit);
 
 	/**
 	 * Kommt aus dem Pfad (withComponentInputBinding). Verworfen: kontext.slug(), das
@@ -181,22 +194,30 @@ export class MitgliederHuelle {
 	constructor() {
 		// Die Ressource haengt am Slug; ohne ihn (vor dem ersten Bau) fragt sie nichts.
 		effect(() => this.uebersicht.slug.set(this.slug()));
-		// Lesen und Antworten aendern "neu"; nach jeder Navigation neu zu fragen ist einfacher als
-		// jede Seite zu bitten, den Punkt nachzuziehen (verworfen: Rueckmeldung der Seiten an die Huelle).
-		// Einzige Ausnahme ist der Gelesen-Stand der Thread-Seite: Sie fragt nach dessen Ankunft selbst
-		// neu (ThreadUebersicht.neuLaden), weil die Anfrage dieses Pfadwechsels ihn ueberholen kann.
+		// Ein Dienst je Huelle; ein anderer Slug schliesst den alten Socket und oeffnet einen neuen.
+		effect(() => {
+			const slug = this.slug();
+			untracked(() => this.echtzeit.starte(slug));
+		});
+		// Ohne Verbindung fragt die Huelle nach jeder Navigation neu, denn Lesen und Antworten aendern
+		// "neu" (verworfen: Rueckmeldung der Seiten an die Huelle). Mit Verbindung kommen Aenderungen
+		// als Ereignisse, und die Liste laedt darauf selbst (Entscheidung 9; verworfen: weiter bei jeder
+		// Navigation, das war eine Anfrage je Seitenwechsel ohne neue Aussage). Der Gelesen-Stand der
+		// Thread-Seite schreibt keine Aenderung, also kommt dafuer kein Ereignis: Die Seite fragt nach
+		// dessen Ankunft selbst neu (ThreadUebersicht.neuLaden).
 		// Eine Navigation, die nur die Parameter der Adresse aendert (die Suche der Thread-Liste, der Reiter
-		// eines Threads), fragt deshalb nicht: Sonst kostete jede Suche eine Anfrage, deren Antwort die
-		// Seite gar nicht zeigt; ein Gelesen-Stand beim Reiterwechsel kommt ueber die Thread-Seite.
+		// eines Threads), fragt nicht: Sonst kostete jede Suche eine Anfrage, deren Antwort die Seite gar
+		// nicht zeigt. Die erste Navigation ist die, die die Huelle gebaut hat; die Liste laedt mit dem Slug
+		// ohnehin, und vorgemerkt (Entscheidung 10) folgte sonst eine zweite gleiche Anfrage.
 		let letzterPfad: string | undefined;
 		this.router.events
 			.pipe(
 				filter((e): e is NavigationEnd => e instanceof NavigationEnd),
 				map((e) => e.urlAfterRedirects.split(/[?#]/)[0]),
 				filter((pfad) => {
-					const anderer = pfad !== letzterPfad;
+					const anderer = letzterPfad !== undefined && pfad !== letzterPfad;
 					letzterPfad = pfad;
-					return anderer;
+					return anderer && !this.echtzeit.verbunden();
 				}),
 				takeUntilDestroyed(),
 			)

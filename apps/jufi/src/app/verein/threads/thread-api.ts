@@ -2,6 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import type {
 	StartAnsicht,
+	SyncAntwort,
 	TerminZeile,
 	ThreadAnsicht,
 	ThreadListe,
@@ -53,6 +54,14 @@ export class ThreadApi {
 
 	start(slug: string): Observable<StartAnsicht> {
 		return this.holen(slug, '/start');
+	}
+
+	/**
+	 * Was seit dem Stand seit geaendert wurde. Ohne seit (erster Abgleich der Huelle) antwortet der
+	 * Server mit vollstaendig, der Client laedt alles (Entscheidung 7).
+	 */
+	sync(slug: string, seit: number | null): Observable<SyncAntwort> {
+		return this.holen(slug, seit === null ? '/sync' : `/sync?seit=${seit}`);
 	}
 
 	/** monat ist JJJJ-MM. */
