@@ -11,13 +11,16 @@ import {
 	input,
 	signal,
 	untracked,
+	viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { idAusSegment, type ThreadAnsicht, threadSegment, type UmfrageAnsicht } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext, fehlertextNichtGefunden } from '../../gemeinsam/api-fehler';
 import { IconComponent } from '../../gestaltung/icon';
 import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
+import { betrifft, Echtzeit, type EchtzeitEreignis } from '../echtzeit';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { VerwaltungThreadsApi } from '../verwaltung/threads/threads-api';
 import { InfoModul } from './info-modul';
@@ -42,6 +45,13 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
  * Task 9 ersetzt den Thread nach einer Antwort durch die neue Ansicht. Eine Ressource haelt
  * ihren Wert schreibgeschuetzt. Wechselt die Thread-ID waehrend einer Anfrage, gewinnt die
  * letzte (lauf); die Antwort der alten wird verworfen.
+ *
+ * Live: Ereignisse der Echtzeit, die diesen Thread betreffen, aktualisieren die Seite still
+ * (aktualisiereStill), ohne "Wird geladen" und ohne die Karten neu aufzubauen. Eine Nachricht
+ * mit mitgeliefertem Eintrag geht bei offenem Verlauf direkt hinein, ohne Anfrage. Geloescht
+ * oder unsichtbar zeigt die Seite ohne Anfrage "Nicht gefunden" (Rahmen-Spec 8). Gelesen
+ * meldet sie nur bei sichtbarem Dokument und nie ueber das hinaus, was sie geladen hat
+ * (bekannterStand, Entscheidung 8).
  */
 @Component({
 	selector: 'jf-thread-seite',
@@ -120,7 +130,7 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 							id="verlauf"
 							[slug]="slug()"
 							[threadId]="t.id"
-							[stand]="t.stand"
+							[stand]="bekannterStand()"
 							[schreibSperre]="t.schreibSperre"
 							(gelesen)="verlaufGelesen()"
 						/>
@@ -266,6 +276,9 @@ export class ThreadSeite {
 	private readonly injector = inject(Injector);
 	/** Die Liste der Huelle (Punkt an "Threads"); optional, weil die Seite auch ohne Huelle steht (Tests). */
 	private readonly uebersicht = inject(ThreadUebersicht, { optional: true });
+	private readonly echtzeit = inject(Echtzeit);
+	/** Nur gesetzt, solange der Reiter Verlauf offen ist. */
+	private readonly verlauf = viewChild(Verlauf);
 
 	protected readonly zustand = signal<Zustand>('laedt');
 	protected readonly thread = signal<ThreadAnsicht | null>(null);
@@ -273,6 +286,13 @@ export class ThreadSeite {
 	protected readonly hervor = signal<string | null>(null);
 	protected readonly stelltWieder = signal(false);
 	protected readonly wiederherstellFehler = signal<string | null>(null);
+	/**
+	 * Bis hierhin hat die Seite den Thread (Entscheidung 8): der Stand der zuletzt geladenen Ansicht,
+	 * gehoben um den Stand einer Live-Nachricht, solange keine Ladung aussteht. Steht eine aus, kann
+	 * unter dem Stand der Nachricht eine andere Aenderung liegen, die noch nicht da ist; dann hebt
+	 * erst die Antwort den Stand. Der Verlauf meldet bis hierhin.
+	 */
+	protected readonly bekannterStand = signal(0);
 
 	protected readonly fehlertext = computed(() => {
 		const f = this.fehler();
@@ -311,6 +331,8 @@ export class ThreadSeite {
 	 * denn der Zaehler schuetzt auch die Nachlaeufer nach dem await.
 	 */
 	private lauf = 0;
+	/** Eine Ladung oder stille Aktualisierung des juengsten lauf steht aus. */
+	private laeuft = false;
 	/** Die Ansicht, deren Stand schon als gelesen gemeldet ist; eine neu geladene meldet sich erneut. */
 	private gemeldet: ThreadAnsicht | null = null;
 	/**
@@ -337,12 +359,15 @@ export class ThreadSeite {
 			untracked(() => void this.lade(slug, id));
 		});
 
+		this.echtzeit.ereignisse.pipe(takeUntilDestroyed()).subscribe((e) => this.beiEreignis(e));
+
 		// Der Gelesen-Stand der Uebersicht geht erst raus, wenn die Person sie sieht: Wer direkt
-		// im Verlauf landet, hat die Module nicht gesehen. Der Stand ist der des geladenen Threads,
-		// nicht ein spaeterer, damit nichts als gelesen gilt, das nicht angekommen ist (Rahmen 1).
+		// im Verlauf landet, hat die Module nicht gesehen, und ein Hintergrund-Tab zeigt sie
+		// niemandem (Entscheidung 8). Der Stand ist der des geladenen Threads, nicht ein spaeterer,
+		// damit nichts als gelesen gilt, das nicht angekommen ist (Rahmen 1).
 		effect(() => {
 			const t = this.thread();
-			if (t === null || this.zeigtVerlauf() || t === this.gemeldet) return;
+			if (t === null || this.zeigtVerlauf() || t === this.gemeldet || !this.echtzeit.vordergrund()) return;
 			this.gemeldet = t;
 			untracked(() => void this.meldeGelesen(t));
 		});
@@ -374,6 +399,7 @@ export class ThreadSeite {
 
 	private async lade(slug: string, id: string | null): Promise<void> {
 		const lauf = ++this.lauf;
+		this.laeuft = id !== null;
 		this.thread.set(null);
 		this.fehler.set(null);
 		this.hervor.set(null);
@@ -388,11 +414,14 @@ export class ThreadSeite {
 		try {
 			const ansicht = await firstValueFrom(this.api.thread(slug, id));
 			if (lauf !== this.lauf) return;
+			this.laeuft = false;
 			this.thread.set(ansicht);
+			this.bekannterStand.set(ansicht.stand);
 			this.zustand.set('bereit');
 			this.korrigiereAdresse(slug, ansicht);
 		} catch (ursache) {
 			if (lauf !== this.lauf) return;
+			this.laeuft = false;
 			const fehler = alsApiFehler(ursache);
 			// Der Waechter prueft die Sitzung nur beim Betreten; sie kann bei offener Seite ablaufen.
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
@@ -402,6 +431,80 @@ export class ThreadSeite {
 			}
 			this.fehler.set(fehler);
 			this.zustand.set('fehler');
+		}
+	}
+
+	/**
+	 * Was ein Ereignis fuer diesen Thread bedeutet (Plan Task 10). Ein Signal ohne Thread (Umfeld)
+	 * betrifft jeden und fuehrt zur stillen Aktualisierung, die dann 404 bekommt oder nicht.
+	 */
+	private beiEreignis(e: EchtzeitEreignis): void {
+		const id = this.id();
+		if (id === null || !betrifft(e, id)) return;
+		if ((e.typ === 'signal' && e.signal.art === 'GELOESCHT') || (e.typ === 'sync' && e.unsichtbar.includes(id))) {
+			this.verschwunden();
+			return;
+		}
+		const verlauf = this.zeigtVerlauf() ? this.verlauf() : undefined;
+		if (e.typ === 'signal' && e.signal.art === 'VERLAUF' && e.signal.eintrag) {
+			// In der Uebersicht genuegt der Eintrag nicht: Der Zaehler am Reiter kommt vom Server.
+			if (!verlauf) {
+				void this.aktualisiereStill();
+				return;
+			}
+			verlauf.uebernimm(e.signal.eintrag);
+			const stand = e.signal.stand;
+			if (!this.laeuft) this.bekannterStand.update((s) => Math.max(s, stand));
+			return;
+		}
+		void this.aktualisiereStill();
+		// Ohne mitgelieferte Eintraege (Systemeintrag, Abgleich, alles neu) muss der Verlauf selbst fragen.
+		if (e.typ !== 'signal' || e.signal.art === 'VERLAUF') void verlauf?.frischeAuf();
+	}
+
+	/**
+	 * Der Thread ist geloescht oder nicht mehr sichtbar: kein Nachfragen, die Antwort waere 404.
+	 * lauf zaehlt weiter, damit eine noch laufende Anfrage die Seite nicht zurueckholt.
+	 */
+	private verschwunden(): void {
+		this.lauf++;
+		this.laeuft = false;
+		this.thread.set(null);
+		this.fehler.set(null);
+		this.zustand.set('nicht-gefunden');
+	}
+
+	/**
+	 * Laedt den Thread neu, ohne die Seite auf "Wird geladen" zu setzen: Die Karten bleiben stehen
+	 * (Umfrage-Auswahl, Scrollstelle), nur der Inhalt wechselt. Derselbe lauf wie lade, damit eine
+	 * aeltere Antwort keine neuere ueberschreibt. Ein Fehler ausser 401 und 404 laesst den alten
+	 * Stand stehen, ohne Fehlerblock: Die Person hat nichts ausgeloest, und das naechste Ereignis
+	 * oder Oeffnen holt es nach. Ist die Seite nicht bereit (laedt noch, Fehler, nicht gefunden),
+	 * laedt sie richtig; eine laufende erste Anfrage koennte vor der Aenderung beantwortet sein.
+	 */
+	private async aktualisiereStill(): Promise<void> {
+		const slug = this.slug();
+		const id = this.id();
+		if (id === null) return;
+		if (this.zustand() !== 'bereit') return this.lade(slug, id);
+		const lauf = ++this.lauf;
+		this.laeuft = true;
+		try {
+			const ansicht = await firstValueFrom(this.api.thread(slug, id));
+			if (lauf !== this.lauf) return;
+			this.laeuft = false;
+			// Gleicher Stand, gleiche Meldung: Ein zweites PUT mit demselben Stand aenderte nichts.
+			const alt = this.thread();
+			if (alt !== null && alt === this.gemeldet && alt.stand === ansicht.stand) this.gemeldet = ansicht;
+			this.thread.set(ansicht);
+			this.bekannterStand.set(ansicht.stand);
+			this.korrigiereAdresse(slug, ansicht);
+		} catch (ursache) {
+			if (lauf !== this.lauf) return;
+			this.laeuft = false;
+			const fehler = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
+			if (fehler.status === 404 && lauf === this.lauf) this.verschwunden();
 		}
 	}
 

@@ -1,9 +1,21 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
-import { rxResource } from '@angular/core/rxjs-interop';
+import {
+	ChangeDetectionStrategy,
+	Component,
+	computed,
+	effect,
+	inject,
+	Injector,
+	input,
+	signal,
+	untracked,
+} from '@angular/core';
+import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { fristText, type StartAnsicht, terminZeit } from '@jufi/domain';
 import { fehlertext, fehlerVon } from '../gemeinsam/api-fehler';
 import { AbschnittComponent, KarteComponent } from '../gestaltung/ui';
+import { Echtzeit } from './echtzeit';
+import { nachlader } from './threads/nachladen';
 import { ThreadApi } from './threads/thread-api';
 import { beiAbgelaufenerSitzung, istNichtAngemeldet } from './sitzung-abgelaufen';
 
@@ -23,6 +35,11 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
  * "Nichts zu tun"): Die Startseite soll an einem ruhigen Tag ruhig sein. Waehrend des Ladens
  * steht ebenfalls nichts da; verworfen: ein "Wird geladen", das bei jedem Besuch kurz aufblitzte
  * und dann meist gleich wieder wegfiele.
+ *
+ * Neu geladen wird auf jedes Ereignis der Echtzeit, entprellt und vorgemerkt (nachlader): Jede
+ * Aenderung an einem sichtbaren Thread kann einen der drei Bloecke aendern, auch Nachrichten
+ * (Neu) und Antworten (Braucht deine Antwort). Verworfen: nach Arten filtern wie die Termine,
+ * hier faellt keine Art sicher heraus. Waehrend des Neuladens bleibt die alte Antwort stehen.
  */
 @Component({
 	selector: 'jf-start-bloecke',
@@ -135,6 +152,7 @@ export class StartBloeckeComponent {
 		stream: ({ params }) => this.api.start(params),
 	});
 	private readonly fehlerRoh = fehlerVon(this.ressource);
+	private readonly nachladen = nachlader(this.ressource, inject(Injector));
 
 	/** Gesetzt, sobald der Fehler zur Anmeldung schickt; dann zeigt das Bauteil keinen Fehlerblock mehr. */
 	private readonly abgelaufen = signal(false);
@@ -181,6 +199,10 @@ export class StartBloeckeComponent {
 	protected readonly neu = computed(() => this.antwort()?.neu ?? []);
 
 	constructor() {
+		inject(Echtzeit)
+			.ereignisse.pipe(takeUntilDestroyed())
+			.subscribe(() => this.nachladen());
+
 		// Der Waechter prueft die Sitzung nur beim Betreten; ein 401 danach schickt zur Anmeldung (wie die Startseite).
 		effect(() => {
 			const f = this.fehlerRoh();

@@ -2,8 +2,16 @@ import { HttpTestingController, type TestRequest } from '@angular/common/http/te
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { type ModulAnsicht, type ThreadAnsicht, threadSegment, type UmfrageAnsicht } from '@jufi/domain';
-import { adminTestAnbieter } from '../../admin/test-hilfen';
+import {
+	type EchtzeitSignal,
+	type ModulAnsicht,
+	type ThreadAnsicht,
+	threadSegment,
+	type UmfrageAnsicht,
+	type VerlaufAnsicht,
+} from '@jufi/domain';
+import { adminTestAnbieter, EchtzeitAttrappe, tippe } from '../../admin/test-hilfen';
+import type { EchtzeitEreignis } from '../echtzeit';
 
 const VEREIN = { slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false, logoStand: null };
 
@@ -126,13 +134,17 @@ describe('Thread-Seite', () => {
 		return koerper;
 	}
 
-	/** Beantwortet GET /threads/:id/verlauf und quittiert die Meldung des Verlaufs; gibt deren Koerper zurueck. */
-	async function antworteVerlauf(id = 'ck1'): Promise<unknown> {
+	/**
+	 * Beantwortet GET /threads/:id/verlauf und quittiert die Meldung des Verlaufs; gibt deren Koerper zurueck.
+	 * Ohne melden bleibt es bei der Antwort (etwa im Hintergrund, wo der Verlauf nichts meldet).
+	 */
+	async function antworteVerlauf(id = 'ck1', eintraege: VerlaufAnsicht[] = [], melden = true): Promise<unknown> {
 		await vi.waitFor(() => {
 			const anfrage = http.expectOne(`/demo/api/v1/threads/${id}/verlauf`);
 			expect(anfrage.request.method).toBe('GET');
-			anfrage.flush({ eintraege: [], weitere: false });
+			anfrage.flush({ eintraege, weitere: false });
 		});
+		if (!melden) return undefined;
 		const url = `/demo/api/v1/threads/${id}/gelesen`;
 		let koerper: unknown;
 		await vi.waitFor(() => {
@@ -655,6 +667,292 @@ describe('Thread-Seite', () => {
 
 			expect(seite.querySelector('[role="alert"]')?.textContent).toContain('Nicht gefunden oder keine Berechtigung');
 			expect(wiederherstellen(seite)).toBeTruthy();
+		});
+	});
+
+	describe('Echtzeit', () => {
+		const THREAD_URL = '/demo/api/v1/threads/ck1';
+		const GELESEN_URL = '/demo/api/v1/threads/ck1/gelesen';
+
+		function nachricht(id: string, inhalt: string, zusatz: Partial<VerlaufAnsicht> = {}): VerlaufAnsicht {
+			return {
+				id,
+				art: 'NACHRICHT',
+				text: inhalt,
+				absender: 'Lena M.',
+				eigen: false,
+				angelegtAm: '2026-10-21T12:05:00.000Z',
+				stand: 43,
+				geloescht: null,
+				darfLoeschen: false,
+				...zusatz,
+			};
+		}
+
+		function sende(e: EchtzeitEreignis): void {
+			TestBed.inject(EchtzeitAttrappe).quelle.next(e);
+		}
+
+		function signal(art: EchtzeitSignal['art'], stand: number, zusatz: Partial<EchtzeitSignal> = {}): EchtzeitEreignis {
+			return { typ: 'signal', signal: { stand, threadId: 'ck1', art, objektId: 'x', ...zusatz } };
+		}
+
+		/** Ohne whenStable: Eine offene Anfrage hielte es an. */
+		async function kurz(harness: RouterTestingHarness): Promise<void> {
+			await new Promise((r) => setTimeout(r));
+			harness.detectChanges();
+		}
+
+		async function oeffneVerlauf(
+			eintraege: VerlaufAnsicht[] = [],
+		): Promise<{ harness: RouterTestingHarness; seite: HTMLElement }> {
+			const { harness, seite } = await oeffne(
+				'/demo/t/ck1-bowling?reiter=verlauf',
+				{ id: 'ck1', koerper: thread() },
+				false,
+			);
+			await antworteVerlauf('ck1', eintraege);
+			await beendeSeite(harness);
+			return { harness, seite };
+		}
+
+		const nachrichten = (seite: HTMLElement) =>
+			[...seite.querySelectorAll('jf-verlauf ol > li.nachricht')].map((li) => text(li as HTMLElement));
+
+		it('zeigt eine Live-Nachricht im offenen Verlauf und meldet ihn bis zum Stand des Signals', async () => {
+			const { harness, seite } = await oeffneVerlauf();
+
+			sende(signal('VERLAUF', 43, { eintrag: nachricht('v1', 'Wir kommen zu zweit') }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 43 });
+			await beendeSeite(harness);
+
+			expect(nachrichten(seite)).toEqual([expect.stringContaining('Wir kommen zu zweit')]);
+			// Keine Anfrage nach dem Thread: Die Nachricht kam fertig mit.
+			http.expectNone(THREAD_URL);
+		});
+
+		it('zeigt die eigene Nachricht nach Senden und eigenem Signal genau einmal', async () => {
+			const { harness, seite } = await oeffneVerlauf();
+			const eigene = nachricht('v1', 'Wir kommen zu zweit', { eigen: true });
+
+			tippe(seite, 'form.eingabe input', 'Wir kommen zu zweit');
+			harness.detectChanges();
+			(seite.querySelector('form.eingabe button[type=submit]') as HTMLButtonElement).click();
+			await vi.waitFor(() => {
+				const a = http.expectOne((r) => r.method === 'POST' && r.url === '/demo/api/v1/threads/ck1/verlauf');
+				a.flush({ eintrag: eigene, stand: 43 });
+			});
+			await beendeSeite(harness);
+			sende(signal('VERLAUF', 43, { eintrag: eigene }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 43 });
+			await beendeSeite(harness);
+
+			expect(nachrichten(seite)).toHaveLength(1);
+		});
+
+		it('meldet eine Nachricht nach einer Modul-Aenderung erst, wenn die stille Aktualisierung zurueck ist', async () => {
+			const { harness } = await oeffneVerlauf();
+
+			sende(signal('MODUL', 43));
+			const offen = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			sende(signal('VERLAUF', 44, { eintrag: nachricht('v1', 'Hallo', { stand: 44 }) }));
+			await kurz(harness);
+			// Bis 44 gemeldet, galte die Modul-Aenderung als gelesen, bevor sie geladen ist (Entscheidung 8).
+			http.expectNone(GELESEN_URL);
+
+			offen.flush(thread({ stand: 44 }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 44 });
+			await beendeSeite(harness);
+		});
+
+		it('meldet im Hintergrund nichts und genau einmal, sobald das Dokument sichtbar wird', async () => {
+			const echtzeit = TestBed.inject(EchtzeitAttrappe);
+			echtzeit.vordergrund.set(false);
+			const { harness } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() }, false);
+			await kurz(harness);
+			http.expectNone(GELESEN_URL);
+
+			echtzeit.vordergrund.set(true);
+			harness.detectChanges();
+			expect(await quittiereGelesen()).toEqual({ bereich: 'uebersicht', bis: 42 });
+			await beendeSeite(harness);
+			http.expectNone(GELESEN_URL);
+		});
+
+		it('meldet eine Live-Nachricht im Hintergrund nicht und im Vordergrund genau einmal', async () => {
+			const echtzeit = TestBed.inject(EchtzeitAttrappe);
+			echtzeit.vordergrund.set(false);
+			const { harness } = await oeffne('/demo/t/ck1-bowling?reiter=verlauf', { id: 'ck1', koerper: thread() }, false);
+			await antworteVerlauf('ck1', [], false);
+			await beendeSeite(harness);
+
+			sende(signal('VERLAUF', 43, { eintrag: nachricht('v1', 'Hallo') }));
+			await beendeSeite(harness);
+			http.expectNone(GELESEN_URL);
+
+			echtzeit.vordergrund.set(true);
+			harness.detectChanges();
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 43 });
+			await beendeSeite(harness);
+			http.expectNone(GELESEN_URL);
+		});
+
+		it('zeigt nach GELOESCHT Nicht gefunden, ohne zu fragen', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('GELOESCHT', 43));
+			await beendeSeite(harness);
+
+			expect(text(seite)).toContain('Nicht gefunden oder keine Berechtigung');
+			http.expectNone(THREAD_URL);
+		});
+
+		it('zeigt Nicht gefunden, ohne zu fragen, wenn ein Abgleich den Thread unsichtbar nennt', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende({ typ: 'sync', geaendert: [], unsichtbar: ['ck1'] });
+			await beendeSeite(harness);
+
+			expect(text(seite)).toContain('Nicht gefunden oder keine Berechtigung');
+			http.expectNone(THREAD_URL);
+		});
+
+		it('uebergeht Ereignisse anderer Threads', async () => {
+			const { harness } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('GELOESCHT', 43, { threadId: 'ck2' }));
+			sende(signal('MODUL', 43, { threadId: 'ck2' }));
+			sende({ typ: 'sync', geaendert: ['ck2'], unsichtbar: ['ck3'] });
+			await beendeSeite(harness);
+
+			expect((harness.routeNativeElement as HTMLElement).querySelector('h1')?.textContent).toBe('🎳 Bowling');
+			http.expectNone(THREAD_URL);
+		});
+
+		it('aktualisiert still: kein Wird geladen, die Karte bleibt, danach der neue Stand und die Meldung', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+			const karte = seite.querySelector('#modul-m1');
+
+			sende(signal('MODUL', 43));
+			const offen = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			await kurz(harness);
+			expect(text(seite)).not.toContain('Wird geladen');
+			expect(seite.querySelector('#modul-m1')).toBe(karte);
+
+			offen.flush(
+				thread({ stand: 43, module: [{ typ: 'INFO', id: 'm1', titel: 'Worum es geht', text: 'Wir gehen bowlen.' }] }),
+			);
+			expect(await quittiereGelesen()).toEqual({ bereich: 'uebersicht', bis: 43 });
+			await beendeSeite(harness);
+
+			expect(text(seite.querySelector('#modul-m1') as HTMLElement)).toContain('Wir gehen bowlen.');
+		});
+
+		it('aktualisiert in der Uebersicht auch bei einer Nachricht still, damit der Zaehler am Reiter stimmt', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('VERLAUF', 43, { eintrag: nachricht('v1', 'Hallo') }));
+			await vi.waitFor(() =>
+				http.expectOne(THREAD_URL).flush(thread({ stand: 43, verlauf: { eintraege: 4, ungelesen: 3 } })),
+			);
+			await quittiereGelesen();
+			await beendeSeite(harness);
+
+			expect(seite.querySelector('nav.reiter .zahl')?.textContent).toBe('3');
+		});
+
+		it('meldet eine stille Aktualisierung mit gleichem Stand nicht noch einmal', async () => {
+			const { harness } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('ANTWORT', 42));
+			await vi.waitFor(() => http.expectOne(THREAD_URL).flush(thread()));
+			await beendeSeite(harness);
+
+			http.expectNone(GELESEN_URL);
+		});
+
+		it('zeigt Nicht gefunden, wenn die stille Aktualisierung 404 bekommt', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('SICHTBARKEIT', 43, { threadId: null }));
+			await vi.waitFor(() =>
+				http.expectOne(THREAD_URL).flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' }),
+			);
+			await beendeSeite(harness);
+
+			expect(text(seite)).toContain('Nicht gefunden oder keine Berechtigung');
+		});
+
+		it('schickt zur Anmeldung, wenn die stille Aktualisierung 401 bekommt', async () => {
+			const { harness } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('THREAD', 43));
+			await vi.waitFor(() =>
+				http.expectOne(THREAD_URL).flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' }),
+			);
+			await beendeSeite(harness);
+
+			await vi.waitFor(() => expect(router.url).toBe('/demo/anmelden?weiter=%2Fdemo%2Ft%2Fck1-bowling'));
+		});
+
+		it('behaelt bei einem anderen Fehler der stillen Aktualisierung den alten Stand, ohne Fehlerblock', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('THREAD', 43));
+			await vi.waitFor(() =>
+				http.expectOne(THREAD_URL).flush({ fehler: 'Unerwarteter Fehler' }, { status: 500, statusText: 'Fehler' }),
+			);
+			await beendeSeite(harness);
+
+			expect(seite.querySelector('h1')?.textContent).toBe('🎳 Bowling');
+			expect(seite.querySelector('[role="alert"]')).toBeNull();
+		});
+
+		it('verwirft eine aeltere stille Aktualisierung, die nach einer neueren eintrifft', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			sende(signal('THREAD', 43));
+			const alt = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			sende(signal('THREAD', 44));
+			const neu = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			neu.flush(thread({ stand: 44, titel: 'Neu' }));
+			alt.flush(thread({ stand: 43, titel: 'Alt' }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'uebersicht', bis: 44 });
+			await beendeSeite(harness);
+
+			expect(seite.querySelector('h1')?.textContent).toBe('Neu');
+		});
+
+		it('frischt bei alles den offenen Verlauf auf, ohne einen gezeigten Eintrag doppelt zu zeigen', async () => {
+			const { harness, seite } = await oeffneVerlauf([nachricht('v1', 'Erste', { stand: 40 })]);
+
+			sende({ typ: 'alles' });
+			await vi.waitFor(() => http.expectOne(THREAD_URL).flush(thread()));
+			await vi.waitFor(() =>
+				http.expectOne('/demo/api/v1/threads/ck1/verlauf').flush({
+					eintraege: [nachricht('v2', 'Zweite', { stand: 41 }), nachricht('v1', 'Erste', { stand: 40 })],
+					weitere: false,
+				}),
+			);
+			await beendeSeite(harness);
+
+			expect(nachrichten(seite)).toEqual([expect.stringContaining('Erste'), expect.stringContaining('Zweite')]);
+		});
+
+		it('frischt den Verlauf nach einem Systemeintrag auf und meldet den neuen Stand erst danach', async () => {
+			const { harness, seite } = await oeffneVerlauf();
+
+			sende(signal('VERLAUF', 43));
+			await vi.waitFor(() => http.expectOne(THREAD_URL).flush(thread({ stand: 43 })));
+			const verlauf = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1/verlauf'));
+			await kurz(harness);
+			// Der Stand ist bekannt, die Zeilen dazu noch nicht: nichts melden, was die Seite nicht hat.
+			http.expectNone(GELESEN_URL);
+			verlauf.flush({ eintraege: [nachricht('v1', 'Erste')], weitere: false });
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 43 });
+			await beendeSeite(harness);
+
+			expect(nachrichten(seite)).toHaveLength(1);
 		});
 	});
 });

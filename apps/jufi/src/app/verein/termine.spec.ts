@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { type TerminZeile, terminZeit } from '@jufi/domain';
-import { adminTestAnbieter } from '../admin/test-hilfen';
+import { adminTestAnbieter, EchtzeitAttrappe } from '../admin/test-hilfen';
 
 const API = '/demo/api/v1';
 
@@ -265,6 +265,39 @@ describe('Termine', () => {
 			await antworte('2026-10', { termine: [BOWLING] });
 
 			expect(ueberschrift()).toBe('Oktober 2026');
+			expect(eintraege()).toHaveLength(1);
+		});
+	});
+
+	describe('Echtzeit', () => {
+		const signal = (art: 'VERLAUF' | 'ANTWORT' | 'THREAD') => ({
+			typ: 'signal' as const,
+			signal: { stand: 43, threadId: 't1', art, objektId: 'x' },
+		});
+
+		it('fragt bei Nachrichten und Antworten nicht neu, bei einer Aenderung am Thread schon', async () => {
+			await oeffne('/demo/termine', '2026-11', { termine: [] });
+			const echtzeit = TestBed.inject(EchtzeitAttrappe);
+
+			echtzeit.quelle.next(signal('VERLAUF'));
+			echtzeit.quelle.next(signal('ANTWORT'));
+			// Laenger als das Entprellen: Haette die Seite nachgeladen, stuende die Anfrage jetzt offen.
+			await new Promise((r) => setTimeout(r, 300));
+			await stabil();
+			http.expectNone(`${API}/termine?monat=2026-11`);
+
+			echtzeit.quelle.next(signal('THREAD'));
+			await antworte('2026-11', { termine: [BOWLING] });
+
+			expect(eintraege()).toHaveLength(1);
+		});
+
+		it('fragt nach einem Abgleich neu', async () => {
+			await oeffne('/demo/termine', '2026-11', { termine: [] });
+
+			TestBed.inject(EchtzeitAttrappe).quelle.next({ typ: 'sync', geaendert: ['t1'], unsichtbar: [] });
+			await antworte('2026-11', { termine: [BOWLING] });
+
 			expect(eintraege()).toHaveLength(1);
 		});
 	});
