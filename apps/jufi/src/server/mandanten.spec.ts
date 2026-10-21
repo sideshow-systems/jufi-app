@@ -523,6 +523,18 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect(titel).not.toContain('Fremder Termin');
 		expect(titel).toContain('Eigener Termin');
 	},
+	'GET /sync': async (k) => {
+		const eigener = await eigenerThread(k);
+		const pfad = '/api/v1/sync?seit=0';
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const antwort = (await r.json()) as { geaendert: string[]; unsichtbar: string[] };
+		// Die Aenderungen aus fremd tauchen in eigen weder als sichtbar noch als unsichtbar auf; der eigene Thread schon.
+		expect([...antwort.geaendert, ...antwort.unsichtbar]).not.toContain(k.fremderThread.threadId);
+		expect(antwort.geaendert).toContain(eigener);
+	},
 	'GET /threads/:id': async (k) => {
 		const vorher = await fremdeThreadZeilen(k);
 		const hole = (slug: string, cookie?: string) =>

@@ -4,6 +4,7 @@ import { antwortenRouten } from './antworten.js';
 import { lesenRouten } from './lesen.js';
 import { listeRouten } from './liste.js';
 import { schreibenRouten } from './schreiben.js';
+import { syncRouten } from './sync.js';
 import { verlaufRouten } from './verlauf.js';
 import { verwaltenRouten } from './verwalten.js';
 import { verwaltungRouten } from './verwaltung.js';
@@ -20,4 +21,5 @@ export function threadRouten(router: Router, deps: VolleAppDeps): void {
 	verwaltungRouten(router, deps);
 	schreibenRouten(router, deps);
 	verwaltenRouten(router, deps);
+	syncRouten(router, deps);
 }
