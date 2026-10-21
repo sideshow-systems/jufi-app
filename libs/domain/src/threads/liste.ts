@@ -2,7 +2,7 @@ import { threadDatenAus, type ModulDaten } from './ansicht.js';
 import { istArchiviert } from './archiv.js';
 import { threadSegment } from './pfad.js';
 import { siehtThread } from './sichtbarkeit.js';
-import { istNeu, type NeuAenderung } from './start.js';
+import { istNeu, nachAktivitaet, type NeuAenderung } from './start.js';
 import type { ThreadKopf, ThreadPerson, Umfeld } from './typen.js';
 import { naechsterTerminText } from './verwaltung.js';
 
@@ -55,14 +55,6 @@ export function passtZuSuche(kopf: ThreadKopf, module: readonly ModulDaten[], su
 		if (m.typ === 'TERMIN' && m.termin.ort !== null) texte.push(m.termin.ort);
 	}
 	return texte.some((t) => vergleichbar(t).includes(gesucht));
-}
-
-// Kein localeCompare: Die Reihenfolge darf nicht von der Sprache des Prozesses abhängen.
-function nachAktivitaet(a: ListenThread, b: ListenThread): number {
-	return (
-		b.letzteAktivitaetAm.getTime() - a.letzteAktivitaetAm.getTime() ||
-		(a.kopf.id < b.kopf.id ? -1 : a.kopf.id > b.kopf.id ? 1 : 0)
-	);
 }
 
 // Spec 6.5. Was die Person sieht, nach letzter Aktivität, neueste zuerst; die Abschnitte

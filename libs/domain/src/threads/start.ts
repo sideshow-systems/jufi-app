@@ -1,5 +1,10 @@
-import { istArchiviert } from './archiv.js';
+import { naechsteTermine, type TerminDaten, type TerminEintrag } from '../module/termin/termin.js';
 import { antwortZeilen } from './antworten.js';
+import { threadDatenAus } from './ansicht.js';
+import { istArchiviert } from './archiv.js';
+import type { ListenThread } from './liste.js';
+import { threadSegment } from './pfad.js';
+import { siehtThread } from './sichtbarkeit.js';
 import type { AenderungArt, ThreadDaten, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
 
 export interface OffenerPunkt {
@@ -114,13 +119,15 @@ function fremdeNeueAenderungen(e: NeuEingabe): NeuAenderung[] {
 // sieht, und einen Entwurf sehen nur Jugendleiter, für die fremde Aktivität daran
 // berechtigt neu ist.
 export function istNeu(e: NeuEingabe): boolean {
-	if (e.gelesenBis === null) {
-		const seit = e.zugangSeit.getTime();
-		const veroeffentlicht =
-			e.veroeffentlichtAm !== null && e.veroeffentlichtAm.getTime() >= seit && e.erstelltVonId !== e.personId;
-		if (veroeffentlicht) return true;
-	}
-	return fremdeNeueAenderungen(e).length > 0;
+	return istNeuerThread(e) || fremdeNeueAenderungen(e).length > 0;
+}
+
+// Der Teil von istNeu, der keine Änderung braucht: die Veröffentlichung selbst. Eigene
+// Funktion, weil die Startseite "Neuer Thread" an genau dieser Bedingung festmacht und
+// sonst Kennzeichen und Angabe auseinanderliefen.
+function istNeuerThread(e: NeuEingabe): boolean {
+	if (e.gelesenBis !== null || e.veroeffentlichtAm === null) return false;
+	return e.veroeffentlichtAm.getTime() >= e.zugangSeit.getTime() && e.erstelltVonId !== e.personId;
 }
 
 export interface NachrichtenEingabe {
@@ -170,4 +177,132 @@ export function neuKurzangabe(
 	}
 	if (e.antworten) return 'Neue Antworten';
 	return 'Aushang geändert';
+}
+
+export interface StartThread extends ListenThread {
+	verlaufGelesenBis: number | null;
+	nachrichten: NachrichtenEingabe['nachrichten'];
+}
+
+export interface OffenerPunktAnsicht {
+	threadId: string;
+	segment: string;
+	titel: string;
+	modulId: string;
+	fuerId: string;
+	vorname: string | null;
+	/** ISO-Zeitpunkt, null ohne Frist. */
+	frist: string | null;
+}
+
+export interface NeuEintrag {
+	threadId: string;
+	segment: string;
+	titel: string;
+	angabe: string;
+}
+
+export interface TerminZeile {
+	threadId: string;
+	segment: string;
+	titel: string;
+	termin: TerminDaten;
+}
+
+export interface StartAnsicht {
+	brauchtAntwort: OffenerPunktAnsicht[];
+	alsNaechstes: TerminZeile[];
+	neu: NeuEintrag[];
+}
+
+export const ALS_NAECHSTES = 3;
+export const NEU_HOECHSTENS = 5;
+
+// Letzte Aktivität absteigend, dann ID. Kein localeCompare: Die Reihenfolge darf nicht von
+// der Sprache des Prozesses abhängen. Hier und nicht in liste.ts, weil liste.ts schon
+// start.ts einliest; umgekehrt entstünde ein Kreis.
+export function nachAktivitaet(
+	a: Pick<ListenThread, 'kopf' | 'letzteAktivitaetAm'>,
+	b: Pick<ListenThread, 'kopf' | 'letzteAktivitaetAm'>,
+): number {
+	return (
+		b.letzteAktivitaetAm.getTime() - a.letzteAktivitaetAm.getTime() ||
+		(a.kopf.id < b.kopf.id ? -1 : a.kopf.id > b.kopf.id ? 1 : 0)
+	);
+}
+
+// Spec 3.9 und 3.13, Plan-Entscheidungen 5 und 6: Alle drei Blöcke kennen nur
+// veröffentlichte, sichtbare und nicht archivierte Threads. Ein Entwurf zeigt Geplantes,
+// die Startseite aber, was stattfindet; im Archiv kann nur noch nachgetragen werden, also
+// weder gefragt noch angekündigt noch als neu gemeldet wird. Die Sichtbarkeit prüft diese
+// Funktion selbst (siehtThread) und überlässt sie nicht der Abfrage des Servers.
+// Verworfen: für "Als Nächstes" Entwürfe der Jugendleiter mitzuzeigen — sie hätten dann
+// einen anderen Kalender als die Familien, die ihre Termine ansagen.
+export function startAnsicht(e: {
+	ich: ThreadPerson;
+	threads: readonly StartThread[];
+	umfeld: Umfeld;
+	zugangSeit: Date;
+	jetzt: Date;
+}): StartAnsicht {
+	const aktiv = e.threads
+		.filter((t) => t.kopf.veroeffentlichtAm !== null && siehtThread(e.ich, t.kopf, e.umfeld))
+		.map((t) => ({ t, daten: threadDatenAus(t.kopf, t.module) }))
+		.filter(({ t, daten }) => !istArchiviert(t.kopf, daten.termine, e.jetzt));
+
+	const brauchtAntwortPunkte = brauchtAntwort(
+		e.ich,
+		aktiv.map(({ daten }) => daten),
+		e.umfeld,
+		e.jetzt,
+	).map((p): OffenerPunktAnsicht => ({
+		threadId: p.threadId,
+		segment: threadSegment(p.threadId, p.titel),
+		titel: p.titel,
+		modulId: p.modulId,
+		fuerId: p.fuerId,
+		vorname: p.vorname,
+		frist: p.frist?.toISOString() ?? null,
+	}));
+
+	const termine: TerminEintrag[] = aktiv.flatMap(({ t, daten }) =>
+		daten.termine.map((termin) => ({ threadId: t.kopf.id, titel: t.kopf.titel, termin })),
+	);
+	const alsNaechstes = naechsteTermine(termine, e.jetzt, ALS_NAECHSTES).map((n): TerminZeile => ({
+		threadId: n.threadId,
+		segment: threadSegment(n.threadId, n.titel),
+		titel: n.titel,
+		termin: n.termin,
+	}));
+
+	const neu: NeuEintrag[] = [];
+	for (const { t } of aktiv.sort((a, b) => nachAktivitaet(a.t, b.t))) {
+		const eingabe: NeuEingabe = {
+			personId: e.ich.id,
+			zugangSeit: e.zugangSeit,
+			gelesenBis: t.gelesenBis,
+			erstelltVonId: t.kopf.erstelltVonId,
+			veroeffentlichtAm: t.kopf.veroeffentlichtAm,
+			aenderungen: t.aenderungen,
+		};
+		if (!istNeu(eingabe)) continue;
+		neu.push({
+			threadId: t.kopf.id,
+			segment: threadSegment(t.kopf.id, t.kopf.titel),
+			titel: t.kopf.titel,
+			angabe: neuKurzangabe(t.kopf.modus, {
+				neuerThread: istNeuerThread(eingabe),
+				nachrichten: ungeleseneNachrichten({
+					personId: e.ich.id,
+					zugangSeit: e.zugangSeit,
+					verlaufGelesenBis: t.verlaufGelesenBis,
+					nachrichten: t.nachrichten,
+				}),
+				antworten: fremdeNeueAenderungen(eingabe).some((a) => a.art === 'ANTWORT'),
+			}),
+		});
+		if (neu.length === NEU_HOECHSTENS) break;
+	}
+
+	return { brauchtAntwort: brauchtAntwortPunkte, alsNaechstes, neu };
 }
