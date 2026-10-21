@@ -3,6 +3,7 @@ import type { VerlaufAnsicht } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
@@ -30,9 +31,16 @@ describe('Verlauf lesen, schreiben und loeschen', () => {
 	// Eigene App mit einem Fenster von zwei Nachrichten: so prueft der Test das Rate-Limit,
 	// ohne 31 Nachrichten zu schreiben, und die anderen Tests stossen nie an die Grenze.
 	let eng: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
-		const deps = { prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, jetzt: () => JETZT };
+		const deps = {
+			prisma,
+			version: { version: '1.2.3', commit: 'abc' },
+			umgebung: TEST_UMGEBUNG,
+			jetzt: () => JETZT,
+			bus: ereignisse.bus,
+		};
 		server = await starteTestServer(createApp(deps));
 		eng = await starteTestServer(
 			createApp({ ...deps, nachrichtenFenster: new Fensterzaehler(2, 60_000, () => JETZT.getTime()) }),
@@ -100,6 +108,7 @@ describe('Verlauf lesen, schreiben und loeschen', () => {
 			loesche,
 			stand,
 			zeilen,
+			ereignisse: () => ereignisse.fuer(verein.id),
 		};
 	}
 
@@ -421,6 +430,119 @@ describe('Verlauf lesen, schreiben und loeschen', () => {
 	 * vor dem Aufruf in der Datenbank aendert. Verworfen: ein Testhaken in deps, der mitten in
 	 * die Route greift -- Produktionscode nur fuer den Test.
 	 */
+	describe('Ereignisse auf dem Bus', () => {
+		it('POST: genau ein Ereignis mit dem Stand der Antwort, den Aenderungen der Datenbank und dem Eintrag samt threadId', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+
+			const { eintrag, stand } = await s.nachricht(t.threadId, s.sandra.cookie, 'Hallo zusammen');
+
+			const geschrieben = await prisma.aenderung.findMany({ where: { vereinId: s.verein.id, stand } });
+			expect(s.ereignisse()).toEqual([
+				{
+					typ: 'aenderung',
+					vereinId: s.verein.id,
+					stand,
+					aenderungen: geschrieben.map((a) => ({ threadId: a.threadId, art: a.art, objektId: a.objektId })),
+					eintraege: [
+						expect.objectContaining({
+							id: eintrag.id,
+							threadId: t.threadId,
+							art: 'NACHRICHT',
+							autorId: s.sandra.personId,
+							text: 'Hallo zusammen',
+							stand,
+							geloeschtAm: null,
+						}),
+					],
+				},
+			]);
+			expect(s.ereignisse()[0]).toMatchObject({ aenderungen: [{ threadId: t.threadId, art: 'VERLAUF' }] });
+		});
+
+		it('POST: die Wiederholung (200) meldet nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const body = { text: 'Ich bringe Kuchen mit', clientId: 'bus-doppelt-1' };
+			expect((await s.schreibe(t.threadId, body, s.sandra.cookie)).status).toBe(201);
+
+			expect((await s.schreibe(t.threadId, body, s.sandra.cookie)).status).toBe(200);
+
+			expect(s.ereignisse()).toHaveLength(1);
+		});
+
+		it('POST: 409 und 404 melden nichts', async () => {
+			const s = await szenario();
+			const archiviert = await s.thread({ archivModus: 'ARCHIVIERT' });
+			const entwurf = await s.thread({ veroeffentlicht: false });
+			const body = { text: 'Hallo', clientId: 'bus-sperre-1' };
+
+			expect((await s.schreibe(archiviert.threadId, body, s.sandra.cookie)).status).toBe(409);
+			expect((await s.schreibe(entwurf.threadId, body, s.thomas.cookie)).status).toBe(409);
+			expect((await s.schreibe('gibt-es-nicht', body, s.sandra.cookie)).status).toBe(404);
+			expect((await s.schreibe(archiviert.threadId, { ...body, text: '' }, s.sandra.cookie)).status).toBe(400);
+
+			expect(s.ereignisse()).toEqual([]);
+		});
+
+		it('DELETE: ein Ereignis mit dem geloeschten Eintrag, das zweite Loeschen meldet nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const { eintrag } = await s.nachricht(t.threadId, s.sandra.cookie);
+
+			expect((await s.loesche(eintrag.id, s.sandra.cookie)).status).toBe(204);
+			expect((await s.loesche(eintrag.id, s.sandra.cookie)).status).toBe(204);
+
+			const [, loeschen, ...rest] = s.ereignisse();
+			expect(rest).toEqual([]);
+			const stand = await s.stand();
+			expect(loeschen).toEqual({
+				typ: 'aenderung',
+				vereinId: s.verein.id,
+				stand,
+				aenderungen: [{ threadId: t.threadId, art: 'VERLAUF', objektId: eintrag.id }],
+				eintraege: [
+					expect.objectContaining({
+						id: eintrag.id,
+						threadId: t.threadId,
+						text: null,
+						geloeschtAm: JETZT,
+						geloeschtVonId: s.sandra.personId,
+					}),
+				],
+			});
+		});
+
+		it('DELETE: 404 meldet nichts', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const { eintrag } = await s.nachricht(t.threadId, s.sandra.cookie);
+
+			expect((await s.loesche(eintrag.id, s.hans.cookie)).status).toBe(404);
+
+			expect(s.ereignisse()).toHaveLength(1);
+		});
+
+		it('das Ereignis kommt nach dem Commit: Der Abonnent liest die Aenderungszeilen schon', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const gezaehlt: Promise<number>[] = [];
+			const abbestellen = ereignisse.bus.abonniere((e) => {
+				if (e.typ === 'aenderung' && e.vereinId === s.verein.id) {
+					gezaehlt.push(prisma.aenderung.count({ where: { vereinId: s.verein.id, stand: e.stand } }));
+				}
+			});
+
+			try {
+				await s.nachricht(t.threadId, s.sandra.cookie);
+			} finally {
+				abbestellen();
+			}
+
+			expect(await Promise.all(gezaehlt)).toEqual([1]);
+		});
+	});
+
 	describe('schreibeNachricht unter der Sperre', () => {
 		function schreibeDirekt(
 			s: Awaited<ReturnType<typeof szenario>>,

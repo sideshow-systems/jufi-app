@@ -1,5 +1,6 @@
 import { AttemptTracker, verifyAuthentication, verifyRegistration } from '@jufi/auth';
 import type { PrismaClient } from '@jufi/db';
+import { Bus } from './echtzeit/bus.js';
 import { Nachlauf } from './nachlauf.js';
 import { Fensterzaehler } from './threads/fenster.js';
 import type { Umgebung } from './umgebung.js';
@@ -33,6 +34,12 @@ export interface AppDeps {
 	nachrichtenFenster?: Fensterzaehler;
 	/** Antworten auf Umfragen je Person und Minute. */
 	antwortenFenster?: Fensterzaehler;
+	/**
+	 * Was die Routen nach einem Commit melden (Etappe 5); der Hub abonniert ihn. Von aussen,
+	 * damit ein Test die Ereignisse einer App sammeln kann und server.ts Hub und Routen an
+	 * denselben Bus haengt.
+	 */
+	bus?: Bus;
 }
 
 /** AppDeps ohne Luecken, wie die Routen sie brauchen. */
@@ -56,5 +63,6 @@ export function mitStandardwerten(deps: AppDeps): VolleAppDeps {
 		// mitstellt und nicht eine Minute wartet.
 		nachrichtenFenster: deps.nachrichtenFenster ?? new Fensterzaehler(30, 60_000, () => jetzt().getTime()),
 		antwortenFenster: deps.antwortenFenster ?? new Fensterzaehler(60, 60_000, () => jetzt().getTime()),
+		bus: deps.bus ?? new Bus(),
 	};
 }

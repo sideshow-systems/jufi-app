@@ -151,7 +151,7 @@ export async function schreibeAntwort(
 
 /** PUT /umfragen/:modulId/antworten/:fuerId. */
 export function antwortenRouten(router: Router, deps: VolleAppDeps): void {
-	const { jetzt, antwortenFenster } = deps;
+	const { jetzt, antwortenFenster, bus } = deps;
 
 	router.put(
 		'/umfragen/:modulId/antworten/:fuerId',
@@ -222,7 +222,7 @@ export function antwortenRouten(router: Router, deps: VolleAppDeps): void {
 
 			let fehler: unknown;
 			try {
-				const { stand } = await db.$transaction((tx) =>
+				const { stand, aenderungen } = await db.$transaction((tx) =>
 					mitAenderung(tx, verein.id, person.id, zeit, (stand) =>
 						schreibeAntwort(
 							tx,
@@ -239,6 +239,9 @@ export function antwortenRouten(router: Router, deps: VolleAppDeps): void {
 						),
 					),
 				);
+				// Nach dem Commit und vor der Ansicht: Die Antwort ist gespeichert, auch wenn das
+				// Laden der Ansicht scheitert, und andere Geraete sollen davon erfahren.
+				bus.melde({ typ: 'aenderung', vereinId: verein.id, stand, aenderungen, eintraege: [] });
 				return void res.status(200).json(await ansicht(stand));
 			} catch (error) {
 				fehler = error;

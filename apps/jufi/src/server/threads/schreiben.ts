@@ -323,7 +323,7 @@ async function ersetzeThread(
 
 /** POST /threads und PUT /threads/:id. */
 export function schreibenRouten(router: Router, deps: VolleAppDeps): void {
-	const { jetzt } = deps;
+	const { jetzt, bus } = deps;
 
 	router.post(
 		'/threads',
@@ -342,7 +342,7 @@ export function schreibenRouten(router: Router, deps: VolleAppDeps): void {
 			const zeit = jetzt();
 			let angelegt: { ich: ThreadPerson; threadId: string };
 			try {
-				({ ergebnis: angelegt } = await db.$transaction((tx) =>
+				const { stand, ergebnis, aenderungen } = await db.$transaction((tx) =>
 					mitAenderung(tx, verein.id, person.id, zeit, async (stand) => {
 						const ich = await ichUnterSperre(tx, person.id);
 						if (!ich || !darfErstellen(ich)) throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
@@ -385,7 +385,11 @@ export function schreibenRouten(router: Router, deps: VolleAppDeps): void {
 							],
 						};
 					}),
-				));
+				);
+				angelegt = ergebnis;
+				// Auch fuer einen Entwurf: Jugendleiter mit Recht sehen ihn, und ob das Signal jemanden
+				// erreicht, entscheidet der Hub gegen Kopf und Umfeld, nicht die Route.
+				bus.melde({ typ: 'aenderung', vereinId: verein.id, stand, aenderungen, eintraege: [] });
 			} catch (error) {
 				return void antworteThreadFehler(res, error);
 			}
@@ -425,7 +429,7 @@ export function schreibenRouten(router: Router, deps: VolleAppDeps): void {
 			const zeit = jetzt();
 			let ich: ThreadPerson;
 			try {
-				({ ergebnis: ich } = await db.$transaction((tx) =>
+				const { stand, ergebnis, aenderungen } = await db.$transaction((tx) =>
 					mitAenderung(tx, verein.id, person.id, zeit, async (stand) => {
 						// Alles, was "angenommen oder nicht" entscheidet, unter der Sperre (Entscheidung 3):
 						// Eine Antwort, ein anderes Speichern oder ein entzogenes Recht zwischen dem Laden
@@ -447,7 +451,9 @@ export function schreibenRouten(router: Router, deps: VolleAppDeps): void {
 						const aenderungen = await ersetzeThread(tx, alt, e, plan, ichJetzt, stand, zeit);
 						return { ergebnis: ichJetzt, aenderungen };
 					}),
-				));
+				);
+				ich = ergebnis;
+				bus.melde({ typ: 'aenderung', vereinId: verein.id, stand, aenderungen, eintraege: [] });
 			} catch (error) {
 				return void antworteThreadFehler(res, error);
 			}

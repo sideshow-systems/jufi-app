@@ -70,7 +70,7 @@ const aenderung = (threadId: string, art: AenderungEingabe['art'], objektId = th
  * koennte; die Route antwortet dann 204.
  */
 function verwalte(deps: VolleAppDeps, req: Request, res: Response, arbeit: Arbeit, ohneAntwort = false): Promise<void> {
-	const { jetzt } = deps;
+	const { jetzt, bus } = deps;
 	return (async () => {
 		const { verein, db } = vereinsKontext(res);
 		const { person } = mitgliedKontext(res);
@@ -85,7 +85,7 @@ function verwalte(deps: VolleAppDeps, req: Request, res: Response, arbeit: Arbei
 		const zeit = jetzt();
 		let ich: ThreadPerson;
 		try {
-			({ ergebnis: ich } = await db.$transaction((tx) =>
+			const { stand, ergebnis, aenderungen } = await db.$transaction((tx) =>
 				mitAenderung(tx, verein.id, person.id, zeit, async (stand) => {
 					const [ichJetzt, alt] = await Promise.all([ichUnterSperre(tx, person.id), ladeThread(tx, threadId)]);
 					if (!ichJetzt || !alt || !darfBearbeiten(ichJetzt, alt.kopf)) throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
@@ -97,7 +97,11 @@ function verwalte(deps: VolleAppDeps, req: Request, res: Response, arbeit: Arbei
 						throw error;
 					}
 				}),
-			));
+			);
+			ich = ergebnis;
+			// Nur nach einer echten Aenderung: Die Wiederholung wirft in `arbeit` und kommt unten an,
+			// ohne dass etwas committet wurde.
+			bus.melde({ typ: 'aenderung', vereinId: verein.id, stand, aenderungen, eintraege: [] });
 		} catch (error) {
 			if (!(error instanceof Wiederholung)) return void antworteThreadFehler(res, error);
 			ich = error.vorhanden as ThreadPerson;
