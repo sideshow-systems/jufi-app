@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { pruefeNeuenSlug, SLUG_HINWEIS } from '@jufi/domain';
+import { MB, pruefeNeuenSlug, SLUG_HINWEIS, speicherText } from '@jufi/domain';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { datumDeutsch, zeitpunktBerlin } from '../gestaltung/format';
 import { AbschnittComponent, KarteComponent, PilleComponent } from '../gestaltung/ui';
@@ -17,7 +17,12 @@ const AKTION_TEXT: Record<AdminAktion, string> = {
 	SLUG_KORRIGIERT: 'Slug korrigiert',
 	NOTFALL_LINK: 'Notfall-Link erzeugt',
 	ERSTE_EINLADUNG_ERNEUERT: 'Einladung der ersten Leitung erneuert',
+	SPEICHERGRENZE: 'Speichergrenze geändert',
 };
+
+/** Wie die Pruefung des Servers (CHECK verein_speichergrenze); die Oberflaeche sperrt den Knopf, der Server entscheidet. */
+const GRENZE_MB_MIN = 100;
+const GRENZE_MB_MAX = 1_048_576;
 
 interface Frage {
 	text: string;
@@ -98,6 +103,10 @@ interface Frage {
 								<dd>{{ v.kennzahlen.offeneEinladungen }}</dd>
 							</div>
 							<div>
+								<dt>Speicher</dt>
+								<dd>{{ speicher(v) }}</dd>
+							</div>
+							<div>
 								<dt>Letzte Anmeldung</dt>
 								<dd>{{ v.kennzahlen.letzteAnmeldung ? datum(v.kennzahlen.letzteAnmeldung) : '—' }}</dd>
 							</div>
@@ -158,6 +167,27 @@ interface Frage {
 								{{ v.status === 'AKTIV' ? 'Sperren' : 'Entsperren' }}
 							</button>
 						</div>
+
+						<form class="aktion" (submit)="speichereGrenze($event)" novalidate>
+							<label class="feld">
+								Speichergrenze (MB)
+								<input
+									name="grenzeMb"
+									type="number"
+									inputmode="numeric"
+									step="1"
+									[attr.min]="grenzeMin"
+									[attr.max]="grenzeMax"
+									[value]="grenzeEingabe()"
+									aria-describedby="grenze-hinweis"
+									(input)="grenzeEingabe.set(wert($event))"
+								/>
+								<span class="hinweis" id="grenze-hinweis">
+									Belegt sind {{ speicher(v) }}. Eine Grenze unter dem Verbrauch sperrt nur neue Uploads.
+								</span>
+							</label>
+							<button type="submit" class="knopf" [disabled]="laeuft() || grenze() === null">Speichern</button>
+						</form>
 
 						@if (v.slugAenderbar) {
 							<form class="aktion" (submit)="korrigiereSlug($event)" novalidate>
@@ -292,7 +322,7 @@ interface Frage {
 		}
 		.zahlen {
 			display: grid;
-			grid-template-columns: repeat(5, 1fr);
+			grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
 			gap: var(--a4);
 			margin: 0;
 		}
@@ -409,6 +439,21 @@ export class AdminVereinSeiteComponent {
 		() => this.slugEingabe() !== this.verein()?.slug && pruefeNeuenSlug(this.slugEingabe()).ok,
 	);
 
+	protected readonly grenzeMin = GRENZE_MB_MIN;
+	protected readonly grenzeMax = GRENZE_MB_MAX;
+	protected readonly grenzeEingabe = signal('');
+	/**
+	 * Die Zahl im Feld, wenn sie eine zulaessige und neue Grenze ist, sonst null.
+	 * Number("") ist 0 und faellt unter das Minimum, Kommazahlen fallen an isInteger.
+	 */
+	protected readonly grenze = computed(() => {
+		const zahl = Number(this.grenzeEingabe());
+		const gueltig = Number.isInteger(zahl) && zahl >= GRENZE_MB_MIN && zahl <= GRENZE_MB_MAX;
+		return gueltig && zahl !== this.verein()?.kennzahlen.speicherGrenzeMb ? zahl : null;
+	});
+	protected readonly speicher = (v: VereinDetails): string =>
+		`${speicherText(v.kennzahlen.speicherBytes)} von ${speicherText(v.kennzahlen.speicherGrenzeMb * MB)}`;
+
 	protected readonly wert = wertVon;
 	protected readonly gesetzt = (ereignis: Event): boolean => (ereignis.target as HTMLInputElement).checked;
 	protected readonly datum = datumDeutsch;
@@ -446,6 +491,7 @@ export class AdminVereinSeiteComponent {
 		const v = await firstValueFrom(this.api.verein(this.id()));
 		this.verein.set(v);
 		this.slugEingabe.set(v.slug);
+		this.grenzeEingabe.set(String(v.kennzahlen.speicherGrenzeMb));
 		this.serverSlugFehler.set(null);
 	}
 
@@ -525,6 +571,13 @@ export class AdminVereinSeiteComponent {
 	protected slugGeaendert(wert: string): void {
 		this.slugEingabe.set(wert);
 		this.serverSlugFehler.set(null);
+	}
+
+	protected async speichereGrenze(ereignis: Event): Promise<void> {
+		ereignis.preventDefault();
+		const grenze = this.grenze();
+		if (this.laeuft() || grenze === null) return;
+		await this.ausfuehren(this.api.setzeSpeichergrenze(this.id(), grenze));
 	}
 
 	protected async korrigiereSlug(ereignis: Event): Promise<void> {

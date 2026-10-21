@@ -34,7 +34,13 @@ export interface Einladung {
 export type VereinStatus = 'AKTIV' | 'GESPERRT';
 
 export type AdminAktion =
-	'VEREIN_ANGELEGT' | 'GESPERRT' | 'ENTSPERRT' | 'SLUG_KORRIGIERT' | 'NOTFALL_LINK' | 'ERSTE_EINLADUNG_ERNEUERT';
+	| 'VEREIN_ANGELEGT'
+	| 'GESPERRT'
+	| 'ENTSPERRT'
+	| 'SLUG_KORRIGIERT'
+	| 'NOTFALL_LINK'
+	| 'ERSTE_EINLADUNG_ERNEUERT'
+	| 'SPEICHERGRENZE';
 
 export interface Kennzahlen {
 	jungfischer: number;
@@ -43,6 +49,8 @@ export interface Kennzahlen {
 	offeneEinladungen: number;
 	/** JJJJ-MM-TT, nur das Datum. */
 	letzteAnmeldung: string | null;
+	speicherBytes: number;
+	speicherGrenzeMb: number;
 }
 
 export interface VereinZeile {
@@ -184,6 +192,12 @@ export class AdminApi {
 
 	korrigiereSlug(id: string, slug: string): Observable<{ slug: string; einladung: Einladung }> {
 		return this.post(`/vereine/${encodeURIComponent(id)}/slug`, { slug });
+	}
+
+	setzeSpeichergrenze(id: string, grenzeMb: number): Observable<void> {
+		return this.http
+			.put<void>(`/admin/api/v1/vereine/${encodeURIComponent(id)}/speichergrenze`, { grenzeMb })
+			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
 	erneuereErsteEinladung(id: string, perMail = false): Observable<EinladungAntwort> {

@@ -1,6 +1,7 @@
 import { generateLinkToken, hashToken } from '@jufi/auth';
 import { createPrismaClientFromEnv, Recht } from '@jufi/db';
 import { EINLADUNG_GUELTIG_MS } from '@jufi/domain';
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { leitungsEinladungsText } from '../einladung.js';
@@ -318,7 +319,15 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 			slug: 'kennzahlen-test',
 			anzeigename: 'Kennzahlen',
 			status: 'AKTIV',
-			kennzahlen: { jungfischer: 2, erwachsene: 2, zugaenge: 1, offeneEinladungen: 1, letzteAnmeldung: '2026-10-01' },
+			kennzahlen: {
+				jungfischer: 2,
+				erwachsene: 2,
+				zugaenge: 1,
+				offeneEinladungen: 1,
+				letzteAnmeldung: '2026-10-01',
+				speicherBytes: 0,
+				speicherGrenzeMb: 5120,
+			},
 		});
 		const namen = vereine.map((v) => v.anzeigename);
 		expect(namen).toEqual([...namen].sort((a, b) => a.localeCompare(b, 'de')));
@@ -481,6 +490,142 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 			admin: benutzername,
 		});
 		expect(details.protokoll[19]?.zeitpunkt).toBe(new Date(uhr.getTime() - 20 * 60_000).toISOString());
+	});
+
+	/** Legt Dateizeilen an (nur Zahlen zaehlen), ueber Dokumente einer erfundenen Person des Vereins. */
+	async function fuelleSpeicher(vereinId: string, groessen: number[]): Promise<void> {
+		const person = await prisma.person.create({
+			data: { vereinId, art: 'ERWACHSENER', vorname: 'Fritz', nachname: 'Erfunden' },
+		});
+		const kategorie = await prisma.dokumentKategorie.findFirstOrThrow({ where: { vereinId } });
+		const dokumente = groessen.map(() => ({
+			id: randomUUID(),
+			vereinId,
+			kategorieId: kategorie.id,
+			titel: 'Fuellung',
+			angelegtAm: uhr,
+		}));
+		await prisma.dokument.createMany({ data: dokumente });
+		await prisma.datei.createMany({
+			data: dokumente.map((d, i) => ({
+				vereinId,
+				art: 'DATEI' as const,
+				dokumentId: d.id,
+				name: 'fuellung.pdf',
+				typ: 'application/pdf',
+				groesse: groessen[i] ?? 1,
+				sha256: 'x',
+				vonId: person.id,
+				hochgeladenAm: uhr,
+			})),
+		});
+	}
+
+	it('Vereinsliste und Details nennen Verbrauch und Speichergrenze, nur als Zahlen', async () => {
+		const mitDateien = await legeVereinAn(prisma, { slug: 'speicher-liste' });
+		const leer = await legeVereinAn(prisma, { slug: 'speicher-leer' });
+		await fuelleSpeicher(mitDateien.id, [1000, 2345]);
+		await prisma.verein.update({ where: { id: leer.id }, data: { speicherGrenzeMb: 200 } });
+
+		const { vereine } = (await (await hole('/vereine')).json()) as {
+			vereine: { id: string; kennzahlen: Record<string, unknown> }[];
+		};
+		const zeile = (id: string) => vereine.find((v) => v.id === id)?.kennzahlen;
+		expect(zeile(mitDateien.id)).toMatchObject({ speicherBytes: 3345, speicherGrenzeMb: 5120 });
+		expect(zeile(leer.id)).toMatchObject({ speicherBytes: 0, speicherGrenzeMb: 200 });
+
+		const details = (await (await hole(`/vereine/${mitDateien.id}`)).json()) as {
+			kennzahlen: Record<string, unknown>;
+		};
+		expect(details.kennzahlen).toMatchObject({ speicherBytes: 3345, speicherGrenzeMb: 5120 });
+		// Rahmen 8.3: keine Dateinamen im Antworttext.
+		expect(JSON.stringify(details)).not.toContain('fuellung.pdf');
+	});
+
+	it('der Verbrauch in der Liste ueberlaeuft ueber 2 GiB nicht', async () => {
+		const verein = await legeVereinAn(prisma, { slug: 'speicher-gross' });
+		await fuelleSpeicher(
+			verein.id,
+			Array.from({ length: 100 }, () => 26214400),
+		);
+		const { vereine } = (await (await hole('/vereine')).json()) as {
+			vereine: { id: string; kennzahlen: { speicherBytes: number } }[];
+		};
+		expect(vereine.find((v) => v.id === verein.id)?.kennzahlen.speicherBytes).toBe(2621440000);
+	});
+
+	let fehlerfall = 0;
+
+	function setzeGrenze(id: string, body: unknown, mitCookie = true) {
+		return sende(server.url, `/admin/api/v1/vereine/${id}/speichergrenze`, {
+			methode: 'PUT',
+			body,
+			cookie: mitCookie ? cookie : undefined,
+		});
+	}
+
+	it('Speichergrenze setzen schreibt Wert und Protokoll', async () => {
+		const verein = await legeVereinAn(prisma, { slug: 'grenze-setzen' });
+		const r = await setzeGrenze(verein.id, { grenzeMb: 2048 });
+		expect(r.status).toBe(204);
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: verein.id } })).speicherGrenzeMb).toBe(2048);
+		const protokoll = await prisma.adminProtokoll.findMany({ where: { vereinId: verein.id } });
+		expect(protokoll).toHaveLength(1);
+		expect(protokoll[0]).toMatchObject({
+			adminId,
+			aktion: 'SPEICHERGRENZE',
+			vereinSlug: 'grenze-setzen',
+			betroffenePersonId: null,
+			zeitpunkt: uhr,
+		});
+		const details = (await (await hole(`/vereine/${verein.id}`)).json()) as {
+			kennzahlen: { speicherGrenzeMb: number };
+			protokoll: { aktion: string }[];
+		};
+		expect(details.kennzahlen.speicherGrenzeMb).toBe(2048);
+		expect(details.protokoll[0]?.aktion).toBe('SPEICHERGRENZE');
+	});
+
+	it.each([
+		['99', { grenzeMb: 99 }],
+		['0', { grenzeMb: 0 }],
+		['eine Zeichenkette', { grenzeMb: 'abc' }],
+		['eine Zahl als Text', { grenzeMb: '2048' }],
+		['mit Nachkomma', { grenzeMb: 100.5 }],
+		['ueber der Obergrenze', { grenzeMb: 1048577 }],
+		['ohne Feld', {}],
+		['null', { grenzeMb: null }],
+	])('Speichergrenze: %s ist 400 und aendert nichts', async (_name, body) => {
+		// Eigener Slug je Fall: Die Datenbank ist geteilt, der Slug eindeutig.
+		const slug = `grenze-fehler-${++fehlerfall}`;
+		const verein = await legeVereinAn(prisma, { slug });
+		const r = await setzeGrenze(verein.id, body);
+		expect(r.status).toBe(400);
+		expect(((await r.json()) as { fehler: string }).fehler).toContain('100');
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: verein.id } })).speicherGrenzeMb).toBe(5120);
+		expect(await prisma.adminProtokoll.count({ where: { vereinId: verein.id } })).toBe(0);
+	});
+
+	it('die Grenzen 100 und 1048576 gelten', async () => {
+		const verein = await legeVereinAn(prisma, { slug: 'grenze-raender' });
+		expect((await setzeGrenze(verein.id, { grenzeMb: 100 })).status).toBe(204);
+		expect((await setzeGrenze(verein.id, { grenzeMb: 1048576 })).status).toBe(204);
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: verein.id } })).speicherGrenzeMb).toBe(1048576);
+	});
+
+	it('Speichergrenze eines unbekannten Vereins ist 404, auch bei falschem Wert', async () => {
+		for (const body of [{ grenzeMb: 2048 }, { grenzeMb: 5 }]) {
+			const r = await setzeGrenze('gibt-es-nicht', body);
+			expect(r.status).toBe(404);
+			expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		}
+	});
+
+	it('Speichergrenze ohne Sitzung ist 401', async () => {
+		const verein = await legeVereinAn(prisma, { slug: 'grenze-ohne-sitzung' });
+		const r = await setzeGrenze(verein.id, { grenzeMb: 2048 }, false);
+		expect(r.status).toBe(401);
+		expect((await prisma.verein.findUniqueOrThrow({ where: { id: verein.id } })).speicherGrenzeMb).toBe(5120);
 	});
 
 	it('unbekannte ID ist 404', async () => {

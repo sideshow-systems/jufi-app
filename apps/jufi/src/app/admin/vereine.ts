@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
+import { MB, speicherText } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { datumDeutsch } from '../gestaltung/format';
 import { KarteComponent, PilleComponent } from '../gestaltung/ui';
@@ -37,6 +38,7 @@ import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 									<th scope="col" class="zahl">Erwachsene</th>
 									<th scope="col" class="zahl">Zugänge</th>
 									<th scope="col" class="zahl">Offene Einladungen</th>
+									<th scope="col" class="zahl">Speicher</th>
 									<th scope="col">Letzte Anmeldung</th>
 								</tr>
 							</thead>
@@ -60,6 +62,7 @@ import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 										<td class="zahl">{{ v.kennzahlen.erwachsene }}</td>
 										<td class="zahl">{{ v.kennzahlen.zugaenge }}</td>
 										<td class="zahl">{{ v.kennzahlen.offeneEinladungen }}</td>
+										<td class="zahl">{{ speicher(v) }}</td>
 										<td>{{ anmeldung(v) }}</td>
 									</tr>
 								}
@@ -132,6 +135,10 @@ export class AdminVereineComponent implements OnInit {
 
 	protected anmeldung(v: VereinZeile): string {
 		return v.kennzahlen.letzteAnmeldung ? datumDeutsch(v.kennzahlen.letzteAnmeldung) : '—';
+	}
+
+	protected speicher(v: VereinZeile): string {
+		return `${speicherText(v.kennzahlen.speicherBytes)} von ${speicherText(v.kennzahlen.speicherGrenzeMb * MB)}`;
 	}
 
 	protected async lade(): Promise<void> {

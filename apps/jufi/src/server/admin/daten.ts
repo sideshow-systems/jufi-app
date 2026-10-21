@@ -29,6 +29,9 @@ export interface Kennzahlen {
 	offeneEinladungen: number;
 	/** JJJJ-MM-TT in Europe/Berlin, nur das Datum (Spec 7.3). */
 	letzteAnmeldung: string | null;
+	/** Summe der Dateigroessen; als number gefuehrt, sicher bis 2^53 (die Summe uebersteigt 2^31). */
+	speicherBytes: number;
+	speicherGrenzeMb: number;
 }
 
 export interface VereinZeile {
@@ -203,14 +206,14 @@ async function sperreWennVorhanden(tx: Prisma.TransactionClient, vereinId: strin
 
 export function adminDaten(prisma: PrismaClient) {
 	/**
-	 * Kennzahlen fuer mehrere Vereine mit vier Abfragen insgesamt statt vier je
+	 * Kennzahlen fuer mehrere Vereine mit sechs Abfragen insgesamt statt sechs je
 	 * Verein: Die Liste waechst mit der Zahl der Vereine. Verworfen: _count in
 	 * verein.findMany -- es zaehlt jede Relation nur einmal (Jungfischer und
 	 * Erwachsene sind beide personen) und liefert kein max(letzteAnmeldungAm) der Zugaenge.
 	 */
 	async function kennzahlen(vereinIds: string[], jetzt: Date): Promise<Map<string, Kennzahlen>> {
 		const inVereinen = { vereinId: { in: vereinIds } };
-		const [personen, zugaenge, einladungen, anmeldungen] = await Promise.all([
+		const [personen, zugaenge, einladungen, anmeldungen, speicher, grenzen] = await Promise.all([
 			// Grabsteine (Spec 5.8) sind keine Mitglieder mehr.
 			prisma.person.groupBy({
 				by: ['vereinId', 'art'],
@@ -226,12 +229,24 @@ export function adminDaten(prisma: PrismaClient) {
 			// Vom Zugang statt aus den Sitzungen: Die laufen ab und werden beim Abmelden
 			// geloescht, die letzte Anmeldung soll dadurch nicht verschwinden.
 			prisma.zugang.groupBy({ by: ['vereinId'], where: inVereinen, _max: { letzteAnmeldungAm: true } }),
+			// Nur die Summe, nie ein Dateiname (Rahmen 8.3). _sum eines Int liefert Prisma als
+			// number und ueberlaeuft bei 2^31 nicht (Test mit 100 mal 25 MB).
+			prisma.datei.groupBy({ by: ['vereinId'], where: inVereinen, _sum: { groesse: true } }),
+			prisma.verein.findMany({ where: { id: { in: vereinIds } }, select: { id: true, speicherGrenzeMb: true } }),
 		]);
 
 		const ergebnis = new Map<string, Kennzahlen>(
 			vereinIds.map((id) => [
 				id,
-				{ jungfischer: 0, erwachsene: 0, zugaenge: 0, offeneEinladungen: 0, letzteAnmeldung: null },
+				{
+					jungfischer: 0,
+					erwachsene: 0,
+					zugaenge: 0,
+					offeneEinladungen: 0,
+					letzteAnmeldung: null,
+					speicherBytes: 0,
+					speicherGrenzeMb: 0,
+				},
 			]),
 		);
 		const zeile = (vereinId: string) => ergebnis.get(vereinId) as Kennzahlen;
@@ -245,6 +260,8 @@ export function adminDaten(prisma: PrismaClient) {
 			const juengste = a._max.letzteAnmeldungAm;
 			zeile(a.vereinId).letzteAnmeldung = juengste ? berlinerDatum(juengste) : null;
 		}
+		for (const d of speicher) zeile(d.vereinId).speicherBytes = d._sum.groesse ?? 0;
+		for (const v of grenzen) zeile(v.id).speicherGrenzeMb = v.speicherGrenzeMb;
 		return ergebnis;
 	}
 
@@ -465,6 +482,30 @@ export function adminDaten(prisma: PrismaClient) {
 					},
 				});
 				return 'geaendert';
+			});
+		},
+
+		/**
+		 * false, wenn es den Verein nicht gibt. Sperrt die Vereinszeile wie die anderen
+		 * Handlungen; ein Protokolleintrag je Aufruf, auch wenn der Wert
+		 * schon so war: Der Admin hat die Grenze bestaetigt, und das Protokoll hat
+		 * kein Wertfeld, an dem man einen Leerlauf erkennen koennte.
+		 *
+		 * Die neue Grenze darf unter dem Verbrauch liegen: Sie sperrt nur neue
+		 * Uploads (Spec 2.6), vorhandene Dateien bleiben.
+		 */
+		async setzeSpeichergrenze(id: string, grenzeMb: number, adminId: string, jetzt: Date): Promise<boolean> {
+			return prisma.$transaction(async (tx) => {
+				if (!(await sperreWennVorhanden(tx, id))) return false;
+				const verein = await tx.verein.update({
+					where: { id },
+					data: { speicherGrenzeMb: grenzeMb },
+					select: { slug: true },
+				});
+				await tx.adminProtokoll.create({
+					data: { adminId, zeitpunkt: jetzt, aktion: 'SPEICHERGRENZE', vereinId: id, vereinSlug: verein.slug },
+				});
+				return true;
 			});
 		},
 

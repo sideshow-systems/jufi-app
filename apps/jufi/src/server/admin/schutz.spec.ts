@@ -24,6 +24,7 @@ const GESCHUETZT = [
 	'POST /vereine/:id/slug',
 	'POST /vereine/:id/einladung-erneuern',
 	'POST /vereine/:id/notfall-link',
+	'PUT /vereine/:id/speichergrenze',
 ];
 
 describe('Schutz der Admin-Routen', () => {

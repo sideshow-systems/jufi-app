@@ -23,6 +23,16 @@ const SLUG_FEST = { fehler: 'Der Slug ist fest, seit die erste Einladung angenom
 const SCHON_ANGENOMMEN = { fehler: 'Die erste Einladung ist schon angenommen' };
 const VEREIN_GESPERRT = { fehler: 'Der Verein ist gesperrt – erst entsperren' };
 const KEINE_ADRESSE = { fehler: 'Für diese Person ist keine E-Mail hinterlegt' };
+/**
+ * Dieselben Grenzen wie der CHECK verein_speichergrenze: Der Code antwortet mit
+ * einem Text, die Datenbank faengt nur, was an ihm vorbeikaeme (sonst 500).
+ */
+const GRENZE_MB_MIN = 100;
+const GRENZE_MB_MAX = 1_048_576;
+const GRENZE_UNGUELTIG = {
+	fehler: `Die Speichergrenze liegt zwischen ${GRENZE_MB_MIN} und ${GRENZE_MB_MAX} MB`,
+	feld: 'grenzeMb',
+};
 const BITTE_AUSFUELLEN = 'Bitte ausfüllen';
 /**
  * Ohne Grenze liefe ein 90-kB-Name (nur express.json begrenzt auf 100 kB) in die
@@ -233,6 +243,29 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 			else if (ergebnis === 'fest') res.status(409).json(SLUG_FEST);
 			else if (ergebnis === 'vergeben') res.status(409).json(SLUG_VERGEBEN);
 			else res.json({ slug, einladung: einladung(umgebung.basisUrl, { ...ergebnis, slug }) });
+		}),
+	);
+
+	/**
+	 * Antwortet 204 ohne Inhalt: Die Oberflaeche laedt die Seite ohnehin neu. Nur
+	 * eine echte Ganzzahl gilt, kein Text wie "2048": Wie bei perMail soll eine
+	 * Wirkung nur ausloesen, wer sie wirklich meint. Reihenfolge wie beim Slug:
+	 * erst 404, dann 400.
+	 */
+	router.put(
+		'/vereine/:id/speichergrenze',
+		brauchtAdmin,
+		asynchron(async (req, res) => {
+			const id = req.params['id'] ?? '';
+			const grenze = ((req.body ?? {}) as Record<string, unknown>)['grenzeMb'];
+			if (typeof grenze !== 'number' || !Number.isInteger(grenze) || grenze < GRENZE_MB_MIN || grenze > GRENZE_MB_MAX) {
+				if (!(await daten.gibtVerein(id))) nichtGefunden(res);
+				else res.status(400).json(GRENZE_UNGUELTIG);
+				return;
+			}
+			const { admin } = adminKontext(res);
+			if (await daten.setzeSpeichergrenze(id, grenze, admin.id, jetzt())) res.status(204).end();
+			else nichtGefunden(res);
 		}),
 	);
 
