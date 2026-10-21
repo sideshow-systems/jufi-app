@@ -5,6 +5,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import type { EchtzeitSignal, SyncAntwort } from '@jufi/domain';
 import { betrifft, Echtzeit, type EchtzeitEreignis, WEB_SOCKET } from './echtzeit';
+import { MitgliedSitzung } from './mitglied-waechter';
 
 const SYNC = '/demo/api/v1/sync';
 
@@ -427,6 +428,64 @@ describe('Echtzeit', () => {
 		zeige('visible');
 		expect(FalscherSocket.alle.length).toBe(1);
 		expect(echtzeit.getrennt()).toBe(false);
+	});
+
+	// Der Wettlauf aus dem Ende-zu-Ende-Lauf: Nach POST /abmelden schliesst der Hub den Socket, der Abgleich
+	// danach bekam 401 und schickte zur Anmeldung mit weiter auf die alte Seite, schneller als das Abmelden.
+	for (const [ueberall, pfad] of [
+		[false, '/demo/api/v1/abmelden'],
+		[true, '/demo/api/v1/abmelden/alle'],
+	] as const) {
+		it(`haelt vor dem Abmelden an, ohne Abgleich und ohne weiter (ueberall: ${ueberall})`, async () => {
+			bereite();
+			const navigiere = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+			const s = verbinde();
+
+			const fertig = TestBed.inject(MitgliedSitzung).abmelden('demo', ueberall);
+			// Zu, bevor die Anfrage beantwortet ist; was der alte Socket danach meldet, zaehlt nicht mehr.
+			expect(s.geschlossenMit).toBe(1000);
+			s.brichAb(4401);
+			http.expectNone(`${SYNC}?seit=5`);
+			http.expectOne(pfad).flush(null, { status: 204, statusText: 'No Content' });
+			await fertig;
+
+			expect(navigiere).toHaveBeenCalledExactlyOnceWith('/demo/anmelden');
+			vi.advanceTimersByTime(60_000);
+			expect(FalscherSocket.alle.length).toBe(1);
+			expect(echtzeit.getrennt()).toBe(false);
+			http.expectNone(() => true);
+		});
+	}
+
+	it('verbindet sich wieder, wenn das Abmelden scheitert', async () => {
+		bereite();
+		const navigiere = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+		const s = verbinde();
+
+		const fertig = TestBed.inject(MitgliedSitzung).abmelden('demo');
+		expect(s.geschlossenMit).toBe(1000);
+		http.expectOne('/demo/api/v1/abmelden').flush({ fehler: 'kaputt' }, { status: 500, statusText: 'Error' });
+		await expect(fertig).rejects.toMatchObject({ status: 500 });
+
+		// Die Person bleibt angemeldet auf der Seite; ohne neuen Socket stuende sie still.
+		expect(FalscherSocket.alle.length).toBe(2);
+		zuletzt().oeffne();
+		http.expectOne(SYNC).flush(antwort({ stand: 6, vollstaendig: true }));
+		expect(echtzeit.verbunden()).toBe(true);
+		expect(navigiere).not.toHaveBeenCalled();
+	});
+
+	it('bleibt verbunden, wenn sich jemand in einem anderen Verein abmeldet', async () => {
+		bereite();
+		vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+		const s = verbinde();
+
+		const fertig = TestBed.inject(MitgliedSitzung).abmelden('anderer');
+		http.expectOne('/anderer/api/v1/abmelden').flush(null, { status: 204, statusText: 'No Content' });
+		await fertig;
+
+		expect(s.geschlossenMit).toBeNull();
+		expect(echtzeit.verbunden()).toBe(true);
 	});
 
 	it('gleicht beim Zurueckkommen in den Vordergrund ab und folgt dem Dokument', () => {

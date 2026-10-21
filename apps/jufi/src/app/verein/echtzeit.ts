@@ -13,6 +13,7 @@ import { Router } from '@angular/router';
 import type { EchtzeitSignal, SyncAntwort } from '@jufi/domain';
 import { type Observable, Subject, Subscription } from 'rxjs';
 import { alsApiFehler } from '../gemeinsam/api-fehler';
+import { type Abmeldung, MitgliedSitzung } from './mitglied-waechter';
 import { beiAbgelaufenerSitzung } from './sitzung-abgelaufen';
 import { ThreadApi } from './threads/thread-api';
 
@@ -121,14 +122,22 @@ export class Echtzeit {
 	private abgleichOffen = false;
 	private abgleichNr = 0;
 
+	/** Der Verein, dessen Abmelden gerade laeuft und fuer den der Dienst deshalb angehalten hat. */
+	private angehaltenFuer: string | null = null;
+
 	private readonly sichtbarkeit = (): void => this.sichtbarkeitGeaendert();
 
 	constructor() {
-		inject(DestroyRef).onDestroy(() => this.stoppe());
+		const zerstoert = inject(DestroyRef);
+		zerstoert.onDestroy(() => this.stoppe());
+		// Der Dienst an der Wurzel meldet, Echtzeit je Huelle hoert zu (siehe MitgliedSitzung.abmeldung).
+		const abo = inject(MitgliedSitzung).abmeldung.subscribe((a) => this.beiAbmeldung(a));
+		zerstoert.onDestroy(() => abo.unsubscribe());
 	}
 
 	starte(slug: string): void {
 		if (!this.browser || slug === this.slug) return;
+		this.angehaltenFuer = null;
 		this.stoppe();
 		this.slug = slug;
 		this.dokument.addEventListener('visibilitychange', this.sichtbarkeit);
@@ -320,6 +329,25 @@ export class Echtzeit {
 		const s = this.socket;
 		this.socket = null;
 		s?.close(NORMAL_GESCHLOSSEN);
+	}
+
+	/**
+	 * Vor dem Abmelden anhalten: Der Hub schliesst den Socket, sobald die Sitzung weg ist, und der
+	 * Abgleich danach bekaeme 401 und schickte mit weiter zur Anmeldung, im Wettlauf mit der Navigation
+	 * des Abmeldens. Angehalten gibt es weder Socket noch Abgleich. Scheitert das Abmelden, faengt der
+	 * Dienst neu an, ohne Stand (wie nach jedem starte), also mit einem Abgleich, der alles neu laedt:
+	 * Was waehrend der Anfrage geschah, kam ueber keinen Socket. Verworfen: im Abgleich ein 401
+	 * waehrend des Abmeldens nur nicht weiterleiten -- dann liefen Abgleich und Neuverbinden mit einer
+	 * Sitzung, die gleich endet, und jeder weitere Weg zur Anmeldung muesste dieselbe Ausnahme kennen.
+	 */
+	private beiAbmeldung(a: Abmeldung): void {
+		if (a.phase === 'beginnt') {
+			if (this.slug !== a.slug) return;
+			this.stoppe();
+			this.angehaltenFuer = a.slug;
+		} else if (this.angehaltenFuer === a.slug) {
+			this.starte(a.slug);
+		}
 	}
 
 	private loescheZeitgeber(): void {
