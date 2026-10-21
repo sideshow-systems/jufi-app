@@ -185,6 +185,8 @@ describe('GET /sync', () => {
 			'?seit=1e3',
 			'?seit=1&seit=2',
 			'?seit=99999999999999999999',
+			'?seit=2147483648',
+			'?seit=9007199254740991',
 		]) {
 			const r = await s.sync(s.sandra.cookie, abfrage);
 			expect(r.status, abfrage).toBe(400);
