@@ -1,6 +1,15 @@
 import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { EINWILLIGUNG_TEXT_VERSION, teilnahmeOptionen, threadSegment } from '@jufi/domain';
+import {
+	baueUmfeld,
+	EINWILLIGUNG_TEXT_VERSION,
+	istArchiviert,
+	siehtThread,
+	teilnahmeOptionen,
+	threadSegment,
+	type TerminDaten,
+	type ThreadKopf,
+} from '@jufi/domain';
 import { DemoGeschuetztFehler, demoEinspielen } from './demo.js';
 
 const BEZUGSTAG = new Date('2026-10-12T12:00:00Z');
@@ -42,10 +51,10 @@ describe('demoEinspielen', () => {
 		};
 	}
 
-	it('legt 10 Personen, 7 Familienzuordnungen, 2 Untergruppen und 2 Einwilligungen an', async () => {
+	it('legt 11 Personen, 7 Familienzuordnungen, 2 Untergruppen und 2 Einwilligungen an', async () => {
 		const ergebnis = await demoEinspielen(prisma, BEZUGSTAG);
 
-		expect(ergebnis.personen).toBe(10);
+		expect(ergebnis.personen).toBe(11);
 		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug: 'demo' } });
 		expect(ergebnis.vereinId).toBe(verein.id);
 		expect(verein).toMatchObject({
@@ -53,7 +62,7 @@ describe('demoEinspielen', () => {
 			anzeigename: 'Jungfischer Demo',
 			farbe: '#0f766e',
 		});
-		expect(await prisma.person.count({ where: { vereinId: verein.id } })).toBe(10);
+		expect(await prisma.person.count({ where: { vereinId: verein.id } })).toBe(11);
 		expect(await prisma.bezugsperson.count({ where: { vereinId: verein.id } })).toBe(7);
 		const gruppen = await prisma.untergruppe.findMany({
 			where: { vereinId: verein.id },
@@ -62,7 +71,7 @@ describe('demoEinspielen', () => {
 		const mitglieder = Object.fromEntries(
 			gruppen.map((g) => [g.name, g.mitglieder.map((m) => m.person.vorname).sort()]),
 		);
-		expect(mitglieder).toEqual({ Ältere: ['Jonas', 'Lena'], Jüngere: ['Max'] });
+		expect(mitglieder).toEqual({ Ältere: ['Jonas', 'Lena'], Jüngere: ['Max', 'Tim'] });
 		expect(await prisma.einwilligung.count({ where: { vereinId: verein.id } })).toBe(2);
 		// Das Werkzeug legt selbst keine Zugaenge an; die entstehen erst durch Einladung.
 		expect(await prisma.zugang.count({ where: { vereinId: verein.id } })).toBe(0);
@@ -119,11 +128,13 @@ describe('demoEinspielen', () => {
 		expect(await prisma.person.count({ where: { art: 'JUNGFISCHER', email: { not: null } } })).toBe(0);
 	});
 
-	it('der Demo-Verein hat drei Threads, darunter den Austausch', async () => {
+	it('der Demo-Verein hat fuenf Threads, darunter den Austausch', async () => {
 		const { vereinId, threads } = await demoEinspielen(prisma, BEZUGSTAG);
 
 		const zeilen = await prisma.thread.findMany({ where: { vereinId }, orderBy: { titel: 'asc' } });
-		expect(zeilen.map((t) => t.titel)).toEqual(['Jugendsprecher-Austausch', 'Wichtige Infos', '🎳 Bowling']);
+		expect(zeilen.map((t) => t.titel).sort()).toEqual(
+			['Jugendsprecher-Austausch', 'Wichtige Infos', 'Zeltlager 2027', '🎣 Fischerfest', '🎳 Bowling'].sort(),
+		);
 		const austausch = zeilen.filter((t) => t.art === 'JUGENDSPRECHER_AUSTAUSCH');
 		expect(austausch).toHaveLength(1);
 		expect(austausch[0]).toMatchObject({ veroeffentlichtAm: BEZUGSTAG, erstelltVonId: null });
@@ -145,11 +156,16 @@ describe('demoEinspielen', () => {
 			angepinnt: false,
 			erstelltVonId: thomas.id,
 		});
+		const zeltlager = zeilen.find((t) => t.titel === 'Zeltlager 2027')!;
+		const fischerfest = zeilen.find((t) => t.titel === '🎣 Fischerfest')!;
 
-		// Die Rueckgabe traegt die Adressen der Threads: Segment aus ID und Titel, wie die App es bildet.
+		// Die Rueckgabe traegt die Adressen der Threads in der Reihenfolge der Demo: Segment aus ID und Titel,
+		// wie die App es bildet.
 		expect(threads).toEqual([
 			{ titel: 'Wichtige Infos', segment: threadSegment(infos.id, 'Wichtige Infos') },
 			{ titel: '🎳 Bowling', segment: threadSegment(bowling.id, '🎳 Bowling') },
+			{ titel: 'Zeltlager 2027', segment: threadSegment(zeltlager.id, 'Zeltlager 2027') },
+			{ titel: '🎣 Fischerfest', segment: threadSegment(fischerfest.id, '🎣 Fischerfest') },
 			{ titel: 'Jugendsprecher-Austausch', segment: threadSegment(austausch[0].id, 'Jugendsprecher-Austausch') },
 		]);
 	});
@@ -207,13 +223,13 @@ describe('demoEinspielen', () => {
 		expect(umfrage.optionen.map((o) => o.schluessel)).toEqual(
 			teilnahmeOptionen(umfrage.vielleicht).map((o) => o.schluessel),
 		);
-		expect(await prisma.umfrageAntwort.count({ where: { vereinId } })).toBe(0);
+		expect(await prisma.umfrageAntwort.count({ where: { umfrageId: umfrage.id } })).toBe(0);
 	});
 
 	it('die Frist der Bowling-Umfrage ist Donnerstag 18:00 Berliner Zeit vor dem Termin und nach dem Bezugstag', async () => {
 		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
 
-		const umfrage = await prisma.umfrageModul.findFirstOrThrow({ where: { vereinId } });
+		const umfrage = await prisma.umfrageModul.findFirstOrThrow({ where: { vereinId, teilnahme: true } });
 		const termin = await prisma.terminModul.findFirstOrThrow({ where: { modul: { threadId: umfrage.threadId } } });
 		expect(umfrage.frist).not.toBeNull();
 		expect(umfrage.frist!.getTime()).toBeGreaterThan(BEZUGSTAG.getTime());
@@ -227,9 +243,13 @@ describe('demoEinspielen', () => {
 		// uebernaechste Samstag der 7.11. und die Frist Donnerstag 5.11., 18:00 Berlin = 17:00 UTC.
 		const { vereinId } = await demoEinspielen(prisma, new Date('2026-10-26T12:00:00Z'));
 
-		const umfrage = await prisma.umfrageModul.findFirstOrThrow({ where: { vereinId } });
+		const umfrage = await prisma.umfrageModul.findFirstOrThrow({ where: { vereinId, teilnahme: true } });
 		expect(umfrage.frist).toEqual(new Date('2026-11-05T17:00:00Z'));
-		const termine = await prisma.terminModul.findMany({ where: { vereinId }, orderBy: { startDatum: 'asc' } });
+		// Nur die Threads, die dem Bezugstag folgen; Zeltlager und Fischerfest haben ihre eigenen Termine.
+		const termine = await prisma.terminModul.findMany({
+			where: { vereinId, modul: { thread: { titel: { in: ['Wichtige Infos', '🎳 Bowling'] } } } },
+			orderBy: { startDatum: 'asc' },
+		});
 		expect(termine.map((t) => t.startDatum.toISOString().slice(0, 10))).toEqual(['2026-10-30', '2026-11-07']);
 	});
 
@@ -252,21 +272,34 @@ describe('demoEinspielen', () => {
 		expect(austausch.letzteAktivitaetAm).toEqual(BEZUGSTAG);
 	});
 
-	it('der Vereinsstand ist der groesste Stand der Aenderungen, jeder Thread und jede Nachricht hat einen eigenen', async () => {
+	it('der Vereinsstand ist der groesste Stand, und jeder Stand gehoert zu genau einem Thread', async () => {
 		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
 
 		const verein = await prisma.verein.findUniqueOrThrow({ where: { id: vereinId } });
 		const aenderungen = await prisma.aenderung.findMany({ where: { vereinId }, orderBy: { stand: 'asc' } });
 		expect(verein.aenderungsstand).toBe(Math.max(...aenderungen.map((a) => a.stand)));
-		// Lueckenlos und ohne Wiederholung, wie mitAenderung sie vergibt.
-		expect(aenderungen.map((a) => a.stand)).toEqual([1, 2, 3, 4, 5]);
-		expect(aenderungen.map((a) => a.art)).toEqual(['THREAD', 'THREAD', 'THREAD', 'VERLAUF', 'VERLAUF']);
+		// Lueckenlos, wie mitAenderung sie vergibt: jede Zahl von 1 bis zum Vereinsstand kommt vor.
+		const staende = [...new Set(aenderungen.map((a) => a.stand))];
+		expect(staende).toEqual(Array.from({ length: verein.aenderungsstand }, (_, i) => i + 1));
+		// Ein Stand ist eine Transaktion, und die betrifft einen Thread (wie bei den Schreibrouten).
+		for (const stand of staende) {
+			const threadIds = new Set(aenderungen.filter((a) => a.stand === stand).map((a) => a.threadId));
+			expect(threadIds.size).toBe(1);
+			expect(threadIds.has(null)).toBe(false);
+		}
 
 		const threads = await prisma.thread.findMany({ where: { vereinId } });
 		const eintraege = await prisma.verlaufEintrag.findMany({ where: { vereinId } });
+		const antworten = await prisma.umfrageAntwort.findMany({ where: { vereinId } });
+		const module = await prisma.threadModul.findMany({ where: { vereinId } });
+		const objekte = {
+			THREAD: threads,
+			MODUL: module,
+			ANTWORT: antworten,
+			VERLAUF: eintraege,
+		} as Record<string, { id: string }[] | undefined>;
 		for (const a of aenderungen) {
-			const objekte = a.art === 'THREAD' ? threads.map((t) => t.id) : eintraege.map((e) => e.id);
-			expect(objekte).toContain(a.objektId);
+			expect(objekte[a.art]?.map((o) => o.id)).toContain(a.objektId);
 			if (a.art === 'VERLAUF') {
 				expect(eintraege.find((e) => e.id === a.objektId)!.stand).toBe(a.stand);
 			}
@@ -280,6 +313,232 @@ describe('demoEinspielen', () => {
 		expect(aenderungen.every((a) => a.angelegtAm.getTime() === BEZUGSTAG.getTime())).toBe(true);
 	});
 
+	it('jeder Thread hat eine THREAD-Aenderung und je Modul eine MODUL-Aenderung, der Austausch ohne Urheber', async () => {
+		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+		const threads = await prisma.thread.findMany({
+			where: { vereinId },
+			include: { module: { select: { id: true } } },
+		});
+		const aenderungen = await prisma.aenderung.findMany({ where: { vereinId } });
+		for (const t of threads) {
+			const eigene = aenderungen.filter((a) => a.threadId === t.id);
+			const threadAenderungen = eigene.filter((a) => a.art === 'THREAD');
+			expect(threadAenderungen.map((a) => a.objektId)).toEqual([t.id]);
+			expect(
+				eigene
+					.filter((a) => a.art === 'MODUL')
+					.map((a) => a.objektId)
+					.sort(),
+			).toEqual(t.module.map((m) => m.id).sort());
+			// Thread und Module teilen sich den Stand des Anlegens, wie in der Route.
+			for (const a of eigene.filter((a) => a.art === 'MODUL')) expect(a.stand).toBe(threadAenderungen[0].stand);
+			if (t.art === 'JUGENDSPRECHER_AUSTAUSCH') {
+				expect(t.module).toHaveLength(0);
+				expect(threadAenderungen[0].urheberId).toBeNull();
+			} else {
+				expect(threadAenderungen[0].urheberId).toBe(t.erstelltVonId);
+			}
+		}
+		expect(threads.reduce((summe, t) => summe + t.module.length, 0)).toBe(10);
+		// Antworten und Nachrichten haben eigene Staende, die Antwort mit der Antwortzeile als Objekt.
+		const antworten = await prisma.umfrageAntwort.findMany({ where: { vereinId } });
+		const antwortAenderungen = aenderungen.filter((a) => a.art === 'ANTWORT');
+		expect(antwortAenderungen.map((a) => a.objektId).sort()).toEqual(antworten.map((a) => a.id).sort());
+		for (const a of antwortAenderungen) {
+			expect(a.urheberId).toBe(antworten.find((x) => x.id === a.objektId)!.vonId);
+		}
+		expect(aenderungen.filter((a) => a.art === 'VERLAUF')).toHaveLength(4);
+	});
+
+	it('Tim ist 11, ohne Familie und ohne Einwilligung, und gehoert zu den Juengeren', async () => {
+		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+		const tim = await prisma.person.findFirstOrThrow({
+			where: { vereinId, vorname: 'Tim' },
+			include: { untergruppen: { include: { untergruppe: true } } },
+		});
+		expect(tim).toMatchObject({ art: 'JUNGFISCHER', nachname: 'Schmid', jugendsprecher: false });
+		expect(alterAn(tim.geburtsdatum as Date, BEZUGSTAG)).toBe(11);
+		expect(tim.untergruppen.map((m) => m.untergruppe.name)).toEqual(['Jüngere']);
+		expect(await prisma.bezugsperson.count({ where: { jungfischerId: tim.id } })).toBe(0);
+		expect(await prisma.einwilligung.count({ where: { jungfischerId: tim.id } })).toBe(0);
+	});
+
+	describe('Zeltlager und Fischerfest', () => {
+		it('das Zeltlager traegt das Jahr nach dem Bezugstag in Titel und Termin', async () => {
+			const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+			const zeltlager = await prisma.thread.findFirstOrThrow({
+				where: { vereinId, titel: { startsWith: 'Zeltlager' } },
+				include: { module: { orderBy: { position: 'asc' }, include: { info: true, termin: true } } },
+			});
+			expect(zeltlager.titel).toBe('Zeltlager 2027');
+			expect(zeltlager).toMatchObject({ modus: 'CHAT', rollenfilter: 'JUNGFISCHER_FAMILIE', alleUntergruppen: false });
+			const termin = zeltlager.module.find((m) => m.typ === 'TERMIN')!.termin!;
+			expect(termin).toMatchObject({
+				startDatum: new Date('2027-08-02T00:00:00Z'),
+				endDatum: new Date('2027-08-08T00:00:00Z'),
+				ort: 'Zeltplatz am See',
+			});
+			expect(zeltlager.module.find((m) => m.typ === 'INFO')!.info!.text).not.toBe('');
+		});
+
+		it('das Jahr des Zeltlagers ist das Berliner Jahr: Silvester 23:30 UTC ist schon Neujahr', async () => {
+			const { vereinId } = await demoEinspielen(prisma, new Date('2026-12-31T23:30:00Z'));
+
+			const zeltlager = await prisma.thread.findFirstOrThrow({
+				where: { vereinId, titel: { startsWith: 'Zeltlager' } },
+			});
+			expect(zeltlager.titel).toBe('Zeltlager 2028');
+		});
+
+		it('die Pizza-Umfrage hat drei Optionen mit Schluesseln wie der Editor sie vergibt, und zwei Antworten', async () => {
+			const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+			const umfrage = await prisma.umfrageModul.findFirstOrThrow({
+				where: { vereinId, frage: 'Welche Pizza am Ankunftsabend?' },
+				include: {
+					optionen: { orderBy: { position: 'asc' } },
+					antworten: { include: { optionen: { include: { option: true } }, fuer: true, von: true } },
+				},
+			});
+			expect(umfrage).toMatchObject({
+				einheit: 'PERSON',
+				teilnahme: false,
+				mehrfach: false,
+				ergebnisse: 'ALLE',
+				frist: null,
+			});
+			expect(umfrage.optionen.map((o) => o.text)).toEqual(['Margherita', 'Salami', 'Funghi']);
+			// "o" und acht Zeichen aus a-z0-9, nie ein fester Schluessel der Teilnahme.
+			for (const o of umfrage.optionen) expect(o.schluessel).toMatch(/^o[a-z0-9]{8}$/);
+			expect(new Set(umfrage.optionen.map((o) => o.schluessel)).size).toBe(3);
+
+			const antworten = umfrage.antworten
+				.map((a) => [a.fuer.vorname, a.von.vorname, a.optionen.map((o) => o.option.text)])
+				.sort();
+			expect(antworten).toEqual([
+				['Lena', 'Lena', ['Salami']],
+				['Thomas', 'Thomas', ['Margherita']],
+			]);
+		});
+
+		it('das Zeltlager hat zwei Nachrichten, von Lena und von Thomas', async () => {
+			const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+			const zeltlager = await prisma.thread.findFirstOrThrow({
+				where: { vereinId, titel: { startsWith: 'Zeltlager' } },
+			});
+			const verlauf = await prisma.verlaufEintrag.findMany({
+				where: { threadId: zeltlager.id },
+				include: { autor: true },
+				orderBy: { stand: 'asc' },
+			});
+			expect(verlauf.map((e) => [e.art, e.autor!.vorname])).toEqual([
+				['NACHRICHT', 'Lena'],
+				['NACHRICHT', 'Thomas'],
+			]);
+			expect(verlauf.every((e) => e.text !== null && e.geloeschtAm === null)).toBe(true);
+		});
+
+		it('das Fischerfest ist ein Kommentar-Thread mit Termin vor 14 Tagen und automatischem Archiv', async () => {
+			const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+			const fest = await prisma.thread.findFirstOrThrow({
+				where: { vereinId, titel: '🎣 Fischerfest' },
+				include: { module: { orderBy: { position: 'asc' }, include: { info: true, termin: true } } },
+			});
+			expect(fest).toMatchObject({
+				modus: 'KOMMENTARE',
+				rollenfilter: 'JUNGFISCHER_FAMILIE',
+				archivModus: 'AUTOMATISCH',
+				angepinnt: false,
+			});
+			// 12.10.2026 minus 14 Tage.
+			expect(fest.module.find((m) => m.typ === 'TERMIN')!.termin).toMatchObject({
+				startDatum: new Date('2026-09-28T00:00:00Z'),
+				endDatum: null,
+				beginn: '10:00',
+				ende: '16:00',
+				ort: 'Vereinsweiher',
+			});
+			expect(fest.module.find((m) => m.typ === 'INFO')!.info!.text).not.toBe('');
+		});
+
+		/** Kopf, Termine und Umfeld aus der Datenbank wie ladeThread und ladeThreadUmfeld der App (die liegen in apps/jufi). */
+		async function laden(vereinId: string) {
+			const [personen, zuordnungen, mitgliedschaften] = await Promise.all([
+				prisma.person.findMany({ where: { vereinId, entferntAm: null } }),
+				prisma.bezugsperson.findMany({ where: { vereinId } }),
+				prisma.untergruppeMitglied.findMany({ where: { vereinId } }),
+			]);
+			const umfeld = baueUmfeld(personen, zuordnungen, mitgliedschaften);
+			const zeilen = await prisma.thread.findMany({
+				where: { vereinId },
+				include: { untergruppen: true, module: { include: { termin: true } } },
+			});
+			const tag = (d: Date) => d.toISOString().slice(0, 10);
+			const thread = (titel: string) => {
+				const z = zeilen.find((t) => t.titel === titel)!;
+				const kopf: ThreadKopf = {
+					id: z.id,
+					art: z.art,
+					titel: z.titel,
+					modus: z.modus,
+					rollenfilter: z.rollenfilter,
+					alleUntergruppen: z.alleUntergruppen,
+					untergruppenIds: z.untergruppen.map((u) => u.untergruppeId),
+					angepinnt: z.angepinnt,
+					archivModus: z.archivModus,
+					veroeffentlichtAm: z.veroeffentlichtAm,
+					erstelltVonId: z.erstelltVonId,
+				};
+				const termine: TerminDaten[] = z.module.flatMap((m) =>
+					m.termin
+						? [
+								{
+									modulId: m.id,
+									startDatum: tag(m.termin.startDatum),
+									endDatum: m.termin.endDatum ? tag(m.termin.endDatum) : null,
+									beginn: m.termin.beginn,
+									ende: m.termin.ende,
+									ort: m.termin.ort,
+									treffpunkt: m.termin.treffpunkt,
+								},
+							]
+						: [],
+				);
+				return { kopf, termine };
+			};
+			const person = (vorname: string) => [...umfeld.personen.values()].find((p) => p.vorname === vorname)!;
+			return { umfeld, thread, person };
+		}
+
+		it('das Zeltlager sieht nur, wer zu den Aelteren gehoert: Lena ja, Max nein', async () => {
+			const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+			const { umfeld, thread, person } = await laden(vereinId);
+			const { kopf } = thread('Zeltlager 2027');
+			expect(siehtThread(person('Lena'), kopf, umfeld)).toBe(true);
+			expect(siehtThread(person('Max'), kopf, umfeld)).toBe(false);
+			// Tim ist bei den Juengeren und sieht es ebenso wenig; seine Familie gibt es nicht.
+			expect(siehtThread(person('Tim'), kopf, umfeld)).toBe(false);
+			// Die Mutter von Lena und Max sieht es ueber Lena.
+			expect(siehtThread(person('Sandra'), kopf, umfeld)).toBe(true);
+		});
+
+		it('das Fischerfest ist archiviert, Bowling nicht', async () => {
+			const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+			const { thread } = await laden(vereinId);
+			const fest = thread('🎣 Fischerfest');
+			const bowling = thread('🎳 Bowling');
+			expect(istArchiviert(fest.kopf, fest.termine, BEZUGSTAG)).toBe(true);
+			expect(istArchiviert(bowling.kopf, bowling.termine, BEZUGSTAG)).toBe(false);
+		});
+	});
+
 	it('zweimal einspielen ergibt denselben Stand', async () => {
 		await demoEinspielen(prisma, BEZUGSTAG);
 		const erster = await zaehlung();
@@ -287,11 +546,12 @@ describe('demoEinspielen', () => {
 
 		expect(await zaehlung()).toEqual(erster);
 		expect(erster.vereine).toBe(1);
-		expect(erster.personen).toBe(10);
-		expect(erster.threads).toBe(3);
-		expect(erster.aenderungsstand).toBe(5);
-		expect(erster.aenderungen).toBe(5);
-		expect(erster.module).toBe(5);
+		expect(erster.personen).toBe(11);
+		expect(erster.threads).toBe(5);
+		expect(erster.aenderungsstand).toBe(11);
+		// 5 Threads, 10 Module, 2 Antworten und 4 Nachrichten.
+		expect(erster.aenderungen).toBe(21);
+		expect(erster.module).toBe(10);
 	});
 
 	it('andere Vereine bleiben unberuehrt', async () => {
@@ -317,7 +577,7 @@ describe('demoEinspielen', () => {
 
 		const jungfischer = await prisma.person.findMany({ where: { art: 'JUNGFISCHER' } });
 		const alter = Object.fromEntries(jungfischer.map((p) => [p.vorname, alterAn(p.geburtsdatum as Date, BEZUGSTAG)]));
-		expect(alter).toEqual({ Lena: 14, Max: 12, Jonas: 17 });
+		expect(alter).toEqual({ Lena: 14, Max: 12, Jonas: 17, Tim: 11 });
 		expect(jungfischer.filter((p) => p.jugendsprecher).map((p) => p.vorname)).toEqual(['Jonas']);
 		const jonas = jungfischer.find((p) => p.vorname === 'Jonas')!;
 		expect(alterAn(jonas.geburtsdatum as Date, new Date('2026-10-13T12:00:00Z'))).toBe(18);
@@ -364,7 +624,7 @@ describe('demoEinspielen', () => {
 
 			const ergebnis = await demoEinspielen(prisma, BEZUGSTAG);
 
-			expect(ergebnis.personen).toBe(10);
+			expect(ergebnis.personen).toBe(11);
 			expect(await prisma.zugang.count()).toBe(0);
 			expect(await prisma.session.count()).toBe(0);
 			expect(await prisma.verein.count({ where: { id: verein.id } })).toBe(0);

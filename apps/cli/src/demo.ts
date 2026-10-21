@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { austauschAnlegen, Recht, type Beziehung, type PrismaClient } from '@jufi/db';
 import {
 	berlinerTag,
@@ -86,6 +87,37 @@ const INFO_TEXT_BOWLING = [
 	'- Treffpunkt ist eine halbe Stunde vor dem Start am Vereinsheim.',
 	'- Wir fahren gemeinsam, Abholung ab 17:00 Uhr am Bowlingcenter.',
 ].join('\n');
+
+const INFO_TEXT_ZELTLAGER = [
+	'Im Sommer fahren wir ins **Zeltlager** an den See! Alle Älteren sind eingeladen.',
+	'',
+	'- Zelte und Kochgeschirr stellt der Verein, Schlafsack und Isomatte bringt ihr selbst mit.',
+	'- Am Ankunftsabend gibt es Pizza, stimmt unten ab, welche.',
+	'- Hier im Chat könnt ihr Fragen stellen und euch absprechen.',
+].join('\n');
+
+const INFO_TEXT_FISCHERFEST = [
+	'Das **Fischerfest** am Vereinsweiher war ein voller Erfolg!',
+	'',
+	'- Danke an alle, die Kuchen gebacken und beim Aufbau geholfen haben.',
+	'- Fotos gibt es bei der Jugendleitung.',
+].join('\n');
+
+const ZEICHEN = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/**
+ * Schluessel einer freien Option, wie der Server sie beim Speichern aus dem Editor vergibt
+ * (neuerSchluessel in apps/jufi, Plan-Entscheidung 11): "o" und acht Zeichen aus a-z0-9. Das "o"
+ * haelt sie von den festen Schluesseln der Teilnahme fern. Verworfen: die Funktion aus apps/jufi
+ * zu importieren -- die CLI haengt nicht an der App, und ein Paket nur dafuer waere mehr als
+ * diese vier Zeilen. Verworfen: Schluessel aus dem Text ("margherita"): so vergibt sie der
+ * Editor nie, und die Demo soll dieselben Daten zeigen wie ein echter Verein.
+ */
+function neuerOptionsschluessel(): string {
+	let schluessel = 'o';
+	for (let i = 0; i < 8; i++) schluessel += ZEICHEN[randomInt(ZEICHEN.length)];
+	return schluessel;
+}
 
 /**
  * Spielt den erfundenen Verein "Jungfischer Demo" ein (Spec 7.1). Ein vorhandener
@@ -183,6 +215,8 @@ export async function demoEinspielen(
 		const lena = await jungfischer('Lena', 'Huber', geburtsdatumFuer(14, jetzt));
 		// Ohne Einwilligung: zeigt, was Verwaltung und Eltern ohne sie sehen.
 		const max = await jungfischer('Max', 'Huber', geburtsdatumFuer(12, jetzt));
+		// Ohne Familie und ohne Einwilligung: Thomas hat in der Demo ein Kind, fuer das er Antworten nachtragen kann.
+		const tim = await jungfischer('Tim', 'Schmid', geburtsdatumFuer(11, jetzt));
 		const jonas = await jungfischer('Jonas', 'Weber', geburtsdatumMorgenVolljaehrig(jetzt), true);
 
 		const bezug = (
@@ -235,7 +269,7 @@ export async function demoEinspielen(
 
 		// Ohne vereinId in den Mitgliedern: Prisma setzt es aus der Untergruppe, die
 		// Eingabe mit eigenem vereinId lehnt es als unbekanntes Argument ab.
-		await tx.untergruppe.create({
+		const aeltere = await tx.untergruppe.create({
 			data: {
 				vereinId,
 				name: 'Ältere',
@@ -243,33 +277,48 @@ export async function demoEinspielen(
 			},
 		});
 		await tx.untergruppe.create({
-			data: { vereinId, name: 'Jüngere', mitglieder: { create: [{ personId: max.id }] } },
+			data: {
+				vereinId,
+				name: 'Jüngere',
+				mitglieder: { create: [{ personId: max.id }, { personId: tim.id }] },
+			},
 		});
 
 		// Staende von Hand statt ueber mitAenderung: Das Werkzeug vergibt sie fuer einen Verein, den nur
 		// diese Transaktion kennt, also gibt es keinen gleichzeitigen Schreiber, den die Sperre der
-		// Vereinszeile ausschliessen muesste. Ein Update des Zaehlers am Ende genuegt. Jeder Thread und
-		// jede Nachricht bekommt trotzdem einen eigenen Stand mit einer Aenderung, wie es die Routen tun.
+		// Vereinszeile ausschliessen muesste. Ein Update des Zaehlers am Ende genuegt. Jeder Thread, jede
+		// Antwort und jede Nachricht bekommt trotzdem einen eigenen Stand, wie es die Routen tun; ein Thread
+		// schreibt neben THREAD je Modul eine MODUL-Aenderung in denselben Stand (POST /threads).
 		let stand = 0;
 		const aenderungen: {
 			stand: number;
 			threadId: string;
-			art: 'THREAD' | 'VERLAUF';
+			art: 'THREAD' | 'MODUL' | 'ANTWORT' | 'VERLAUF';
 			objektId: string;
-			urheberId: string;
+			urheberId: string | null;
 		}[] = [];
 
 		const thread = async (
-			daten: { titel: string; modus: 'AUSHANG' | 'KOMMENTARE'; angepinnt: boolean },
+			daten: {
+				titel: string;
+				modus: 'AUSHANG' | 'KOMMENTARE' | 'CHAT';
+				angepinnt: boolean;
+				/** Sichtbar nur fuer diese Untergruppe; ohne Angabe fuer alle. */
+				nurUntergruppeId?: string;
+			},
 			module: (threadId: string) => Promise<void>,
 		) => {
 			stand += 1;
+			const { nurUntergruppeId, ...kopf } = daten;
 			const zeile = await tx.thread.create({
 				data: {
 					vereinId,
-					...daten,
+					...kopf,
 					rollenfilter: 'JUNGFISCHER_FAMILIE',
-					alleUntergruppen: true,
+					alleUntergruppen: nurUntergruppeId === undefined,
+					// Der Standardwert, hier ausdruecklich: Das Fischerfest soll die Zeitregel zeigen (Spec 3.7),
+					// nicht einen Knopfdruck, und kein Thread der Demo ist von Hand archiviert.
+					archivModus: 'AUTOMATISCH',
 					veroeffentlichtAm: jetzt,
 					erstelltVonId: thomas.id,
 					letzteAktivitaetAm: jetzt,
@@ -277,8 +326,17 @@ export async function demoEinspielen(
 					angelegtAm: jetzt,
 				},
 			});
+			if (nurUntergruppeId !== undefined) {
+				await tx.threadUntergruppe.create({ data: { vereinId, threadId: zeile.id, untergruppeId: nurUntergruppeId } });
+			}
 			await module(zeile.id);
 			aenderungen.push({ stand, threadId: zeile.id, art: 'THREAD', objektId: zeile.id, urheberId: thomas.id });
+			// Die Modul-IDs aus der Datenbank statt aus den Helfern: Jedes Modul, das die Callbacks anlegen, ist
+			// damit erfasst, auch wenn ein kuenftiger Helfer vergisst, die ID zu melden.
+			const angelegte = await tx.threadModul.findMany({ where: { threadId: zeile.id }, orderBy: { position: 'asc' } });
+			for (const m of angelegte) {
+				aenderungen.push({ stand, threadId: zeile.id, art: 'MODUL', objektId: m.id, urheberId: thomas.id });
+			}
 			return zeile;
 		};
 		const infoModul = async (threadId: string, position: number, text: string) => {
@@ -289,7 +347,7 @@ export async function demoEinspielen(
 			threadId: string,
 			position: number,
 			titel: string,
-			termin: { tag: string; beginn: string; ende: string; ort: string; treffpunkt?: string },
+			termin: { tag: string; endTag?: string; beginn?: string; ende?: string; ort: string; treffpunkt?: string },
 		) => {
 			const modul = await tx.threadModul.create({ data: { vereinId, threadId, typ: 'TERMIN', position, titel } });
 			await tx.terminModul.create({
@@ -297,8 +355,9 @@ export async function demoEinspielen(
 					vereinId,
 					id: modul.id,
 					startDatum: datumSpalte(termin.tag),
-					beginn: termin.beginn,
-					ende: termin.ende,
+					endDatum: termin.endTag ? datumSpalte(termin.endTag) : null,
+					beginn: termin.beginn ?? null,
+					ende: termin.ende ?? null,
 					ort: termin.ort,
 					treffpunkt: termin.treffpunkt ?? null,
 				},
@@ -347,28 +406,108 @@ export async function demoEinspielen(
 			});
 		});
 
-		// Den Austausch hat der Verein schon (austauschAnlegen); er bekommt hier nur seine Stande und
-		// zwei Nachrichten, damit der Verlauf nicht leer ist.
+		// Das Zeltlager des Folgejahres, nur fuer die Aelteren, als Chat mit Umfrage. Der Titel traegt das Jahr
+		// seines Termins (Berliner Jahr von jetzt plus 1): So steht dort nie ein Jahr, das schon vorbei ist.
+		// Verworfen: das Jahr von jetzt -- ab August waere der Termin vergangen, und die Demo zeigte ein
+		// abgelaufenes Lager.
+		const lagerJahr = Number(berlinerTag(jetzt).slice(0, 4)) + 1;
+		const pizzaOptionen = new Map<string, string>();
+		let pizzaUmfrageId = '';
+		const zeltlager = await thread(
+			{ titel: `Zeltlager ${lagerJahr}`, modus: 'CHAT', angepinnt: false, nurUntergruppeId: aeltere.id },
+			async (threadId) => {
+				await infoModul(threadId, 0, INFO_TEXT_ZELTLAGER);
+				await terminModul(threadId, 1, 'Zeltlager', {
+					tag: `${lagerJahr}-08-02`,
+					endTag: `${lagerJahr}-08-08`,
+					ort: 'Zeltplatz am See',
+				});
+				const modul = await tx.threadModul.create({ data: { vereinId, threadId, typ: 'UMFRAGE', position: 2 } });
+				pizzaUmfrageId = modul.id;
+				await tx.umfrageModul.create({
+					data: {
+						vereinId,
+						id: modul.id,
+						threadId,
+						frage: 'Welche Pizza am Ankunftsabend?',
+						einheit: 'PERSON',
+						teilnahme: false,
+						mehrfach: false,
+						// Ohne Frist: Die Demo soll das Antworten jederzeit zeigen koennen.
+						frist: null,
+						ergebnisse: 'ALLE',
+					},
+				});
+				for (const [position, text] of ['Margherita', 'Salami', 'Funghi'].entries()) {
+					const option = await tx.umfrageOption.create({
+						data: { vereinId, umfrageId: modul.id, position, text, schluessel: neuerOptionsschluessel() },
+					});
+					pizzaOptionen.set(text, option.id);
+				}
+			},
+		);
+
+		// Vor 14 Tagen vorbei und damit nach der Karenz von 7 Tagen archiviert (Spec 3.7, archivModus
+		// AUTOMATISCH): Der Thread zeigt die Zeitregel und braucht keinen Knopfdruck.
+		const fischerfest = await thread(
+			{ titel: '🎣 Fischerfest', modus: 'KOMMENTARE', angepinnt: false },
+			async (threadId) => {
+				await infoModul(threadId, 0, INFO_TEXT_FISCHERFEST);
+				await terminModul(threadId, 1, 'Fischerfest', {
+					tag: tagPlus(berlinerTag(jetzt), -14),
+					beginn: '10:00',
+					ende: '16:00',
+					ort: 'Vereinsweiher',
+				});
+			},
+		);
+
+		// Den Austausch hat der Verein schon (austauschAnlegen); er bekommt hier nur seine Staende und
+		// zwei Nachrichten, damit der Verlauf nicht leer ist. Seine THREAD-Aenderung hat keinen Urheber,
+		// denn den Thread hat das System angelegt (erstelltVonId ist null).
 		const austausch = await tx.thread.findFirstOrThrow({
 			where: { vereinId, art: 'JUGENDSPRECHER_AUSTAUSCH' },
 			select: { id: true, titel: true },
 		});
 		stand += 1;
-		aenderungen.push({ stand, threadId: austausch.id, art: 'THREAD', objektId: austausch.id, urheberId: thomas.id });
-		for (const [autor, text] of [
-			[jonas, 'Können wir beim Bowling hinterher noch Pizza essen?'],
-			[thomas, 'Gute Idee, ich frage im Bowlingcenter nach.'],
-		] as const) {
+		aenderungen.push({ stand, threadId: austausch.id, art: 'THREAD', objektId: austausch.id, urheberId: null });
+
+		// Antworten und Nachrichten, je mit eigenem Stand; die Zeile der Antwort ist das Objekt der
+		// Aenderung wie in schreibeAntwort, die der Nachricht wie in schreibeNachricht.
+		const antwort = async (threadId: string, umfrageId: string, person: { id: string }, optionId: string) => {
+			stand += 1;
+			const zeile = await tx.umfrageAntwort.create({
+				data: {
+					vereinId,
+					umfrageId,
+					fuerId: person.id,
+					vonId: person.id,
+					abgegebenAm: jetzt,
+					clientId: `demo-antwort-${stand}`,
+				},
+			});
+			await tx.umfrageAntwortOption.create({ data: { vereinId, umfrageId, antwortId: zeile.id, optionId } });
+			aenderungen.push({ stand, threadId, art: 'ANTWORT', objektId: zeile.id, urheberId: person.id });
+		};
+		const nachricht = async (threadId: string, autor: { id: string }, text: string) => {
 			stand += 1;
 			const eintrag = await tx.verlaufEintrag.create({
-				data: { vereinId, threadId: austausch.id, art: 'NACHRICHT', autorId: autor.id, text, stand, angelegtAm: jetzt },
+				data: { vereinId, threadId, art: 'NACHRICHT', autorId: autor.id, text, stand, angelegtAm: jetzt },
 			});
-			aenderungen.push({ stand, threadId: austausch.id, art: 'VERLAUF', objektId: eintrag.id, urheberId: autor.id });
-		}
-		await tx.thread.update({
-			where: { id: austausch.id },
-			data: { letzteAktivitaetAm: jetzt, letzteAktivitaetStand: stand },
-		});
+			aenderungen.push({ stand, threadId, art: 'VERLAUF', objektId: eintrag.id, urheberId: autor.id });
+		};
+		const aktivitaet = (threadId: string) =>
+			tx.thread.update({ where: { id: threadId }, data: { letzteAktivitaetAm: jetzt, letzteAktivitaetStand: stand } });
+
+		await antwort(zeltlager.id, pizzaUmfrageId, lena, pizzaOptionen.get('Salami')!);
+		await antwort(zeltlager.id, pizzaUmfrageId, thomas, pizzaOptionen.get('Margherita')!);
+		await nachricht(zeltlager.id, lena, 'Ich freue mich schon! Darf ich meine Gitarre mitbringen?');
+		await nachricht(zeltlager.id, thomas, 'Klar, die Gitarre darf mit. Am Lagerfeuer ist Platz dafür.');
+		await aktivitaet(zeltlager.id);
+
+		await nachricht(austausch.id, jonas, 'Können wir beim Bowling hinterher noch Pizza essen?');
+		await nachricht(austausch.id, thomas, 'Gute Idee, ich frage im Bowlingcenter nach.');
+		await aktivitaet(austausch.id);
 
 		await tx.aenderung.createMany({
 			data: aenderungen.map((a) => ({ vereinId, ...a, angelegtAm: jetzt })),
@@ -378,7 +517,10 @@ export async function demoEinspielen(
 		return {
 			vereinId,
 			personen: await tx.person.count({ where: { vereinId } }),
-			threads: [infos, bowling, austausch].map((t) => ({ titel: t.titel, segment: threadSegment(t.id, t.titel) })),
+			threads: [infos, bowling, zeltlager, fischerfest, austausch].map((t) => ({
+				titel: t.titel,
+				segment: threadSegment(t.id, t.titel),
+			})),
 		};
 	});
 }
