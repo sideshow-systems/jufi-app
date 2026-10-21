@@ -35,6 +35,15 @@ describe('teile', () => {
 		expect(writeText).not.toHaveBeenCalled();
 	});
 
+	it('erkennt Abbrechen am Namen, auch bei einem schlichten Error', async () => {
+		const abbruch = new Error('abgebrochen');
+		abbruch.name = 'AbortError';
+		const { fenster: f, writeText } = fenster({ grob: true, share: () => Promise.reject(abbruch) });
+
+		expect(await teile('Hallo', f)).toBe('ABGEBROCHEN');
+		expect(writeText).not.toHaveBeenCalled();
+	});
+
 	it('kopiert, wenn das Teilen sonst scheitert', async () => {
 		const { fenster: f, writeText } = fenster({
 			grob: true,

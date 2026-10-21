@@ -12,13 +12,15 @@ export type TeilenErgebnis = 'GETEILT' | 'KOPIERT' | 'ABGEBROCHEN' | 'FEHLER';
  * Nutzergeste.
  */
 export async function teile(text: string, fenster: Window): Promise<TeilenErgebnis> {
+	// Das ?. ist fuer jsdom, das matchMedia nicht kennt (die Seitentests laufen darin); dort gilt der feine Zeiger.
 	const grob = fenster.matchMedia?.('(pointer: coarse)').matches ?? false;
 	if (grob && typeof fenster.navigator.share === 'function') {
 		try {
 			await fenster.navigator.share({ text });
 			return 'GETEILT';
 		} catch (ursache) {
-			if (ursache instanceof DOMException && ursache.name === 'AbortError') return 'ABGEBROCHEN';
+			// Am Namen erkennen, nicht mit instanceof DOMException: Das Blatt kann aus einem anderen Realm oder von einem Polyfill einen schlichten Error mit diesem Namen werfen.
+			if ((ursache as { name?: unknown } | null)?.name === 'AbortError') return 'ABGEBROCHEN';
 		}
 	}
 	try {

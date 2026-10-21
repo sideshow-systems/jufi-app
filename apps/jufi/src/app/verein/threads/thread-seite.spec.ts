@@ -318,6 +318,8 @@ describe('Thread-Seite', () => {
 
 		afterEach(() => {
 			delete (navigator as { clipboard?: unknown }).clipboard;
+			delete (navigator as { share?: unknown }).share;
+			delete (window as { matchMedia?: unknown }).matchMedia;
 		});
 
 		function mitZwischenablage(writeText: (text: string) => Promise<void>) {
@@ -350,6 +352,34 @@ describe('Thread-Seite', () => {
 			expect(TestBed.inject(MeldungService).text()).toBe('Kopiert');
 		});
 
+		it('ignoriert einen zweiten Tipp, solange das Teilen-Blatt offen ist', async () => {
+			let schliesse: () => void = () => undefined;
+			const share = vi.fn(() => new Promise<void>((r) => (schliesse = r)));
+			Object.defineProperty(navigator, 'share', { value: share, configurable: true });
+			const schreibe = mitZwischenablage(() => Promise.resolve());
+			Object.defineProperty(window, 'matchMedia', {
+				value: () => ({ matches: true }),
+				configurable: true,
+			});
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
+
+			teilenKnopf(seite)?.click();
+			teilenKnopf(seite)?.click();
+			await vi.waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+			schliesse();
+			await harness.fixture.whenStable();
+
+			expect(share).toHaveBeenCalledTimes(1);
+			expect(schreibe).not.toHaveBeenCalled();
+			expect(TestBed.inject(MeldungService).text()).toBeNull();
+
+			// Danach geht das Teilen wieder.
+			teilenKnopf(seite)?.click();
+			await vi.waitFor(() => expect(share).toHaveBeenCalledTimes(2));
+			schliesse();
+			await harness.fixture.whenStable();
+		});
+
 		it('zeigt bei verweigerter Zwischenablage den Text zum Markieren', async () => {
 			const schreibe = mitZwischenablage(() => Promise.reject(new Error('verweigert')));
 			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
@@ -363,6 +393,17 @@ describe('Thread-Seite', () => {
 			const feld = seite.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text zum Teilen"]');
 			expect(feld?.readOnly).toBe(true);
 			expect(feld?.value).toBe(schreibe.mock.calls[0][0]);
+		});
+	});
+
+	describe('Bearbeiten-Link', () => {
+		it('behaelt den zugaenglichen Namen Bearbeiten, auch wenn unter 480 px nur der Stift zu sehen ist', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ darfBearbeiten: true }) });
+
+			const link = seite.querySelector<HTMLAnchorElement>('header a.bearbeiten');
+			expect(link?.textContent?.trim()).toBe('Bearbeiten');
+			expect(link?.querySelector('jf-icon')).not.toBeNull();
+			expect(link?.getAttribute('href')).toBe('/demo/verwaltung/threads/ck1');
 		});
 	});
 

@@ -102,7 +102,10 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 							</button>
 						}
 						@if (t.darfBearbeiten) {
-							<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'threads', t.id]">Bearbeiten</a>
+							<a class="knopf bearbeiten" [routerLink]="['/', slug(), 'verwaltung', 'threads', t.id]">
+								<jf-icon name="stift" />
+								<span>Bearbeiten</span>
+							</a>
 						}
 					</header>
 
@@ -265,6 +268,20 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 		jf-karte p + button {
 			margin-top: var(--a3);
 		}
+		/* Unter 480 px bleibt vom Link nur der Stift: Mit Text und Teilen-Knopf schrumpfte der Titel eines langen Namens auf etwa 114 px und liefe ueber sieben Zeilen. Der Text bleibt fuer Screenreader da (gleiche Technik wie die globale Klasse unsichtbar, die sich nicht per Media Query zuschalten laesst). Verworfen: die Knoepfe in eine zweite Zeile umbrechen; der Kopf waere dann doppelt so hoch, und der Zurueck-Pfeil stuende ueber den Aktionen statt neben dem Titel. */
+		@media (max-width: 479px) {
+			.bearbeiten {
+				padding: 0;
+			}
+			.bearbeiten span {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				overflow: hidden;
+				clip: rect(0 0 0 0);
+				white-space: nowrap;
+			}
+		}
 		textarea {
 			width: 100%;
 			box-sizing: border-box;
@@ -312,6 +329,13 @@ export class ThreadSeite {
 	protected readonly wiederherstellFehler = signal<string | null>(null);
 	/** Der Text zum Markieren, wenn weder Teilen noch Kopieren ging. */
 	protected readonly teilenFallback = signal<string | null>(null);
+	/**
+	 * Wahr, solange das Teilen-Blatt offen ist. Ein zweiter Tipp riefe share noch einmal, das mit
+	 * InvalidStateError scheitert; teile fiele auf Kopieren zurueck und meldete zu Unrecht Kopiert.
+	 * Verworfen: den Knopf sperren; ein gesperrter Knopf wirkt am Handy wie ein Defekt, und der
+	 * Tipp ist ohnehin wirkungslos.
+	 */
+	private teilt = false;
 	/**
 	 * Bis hierhin hat die Seite den Thread (Entscheidung 8): der Stand der zuletzt geladenen Ansicht,
 	 * gehoben um den Stand einer Live-Nachricht, solange keine Ladung offen ist (standOffen). Ist eine
@@ -465,9 +489,15 @@ export class ThreadSeite {
 	 */
 	protected async teileStand(t: ThreadAnsicht): Promise<void> {
 		const fenster = this.dokument.defaultView;
-		if (!fenster) return;
+		if (!fenster || this.teilt) return;
 		const text = teilenText({ ansicht: t, basisUrl: fenster.location.origin, slug: this.slug(), jetzt: new Date() });
-		const ergebnis = await teile(text, fenster);
+		this.teilt = true;
+		let ergebnis;
+		try {
+			ergebnis = await teile(text, fenster);
+		} finally {
+			this.teilt = false;
+		}
 		// Nur ein gescheitertes Kopieren zeigt das Feld; ein neuer Versuch, der gelingt, raeumt es weg.
 		this.teilenFallback.set(ergebnis === 'FEHLER' ? text : null);
 		if (ergebnis === 'KOPIERT') this.meldung.zeige('Kopiert');
