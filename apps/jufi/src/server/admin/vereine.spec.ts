@@ -6,6 +6,7 @@ import { createApp } from '../app.js';
 import { leitungsEinladungsText } from '../einladung.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
+import { adminDaten } from './daten.js';
 import { meldeAdminAn } from './test-admin.js';
 
 const ALLE_RECHTE = Object.values(Recht);
@@ -117,6 +118,44 @@ describe('Admin: Vereine anlegen und ansehen', () => {
 		});
 	});
 
+	const KATEGORIEN = [
+		{ name: 'Ordnungen', position: 0 },
+		{ name: 'Merkblätter', position: 1 },
+		{ name: 'Formulare', position: 2 },
+	];
+
+	it('legeVereinAn gibt dem neuen Verein die drei Standard-Kategorien in Reihenfolge', async () => {
+		const angelegt = await adminDaten(prisma).legeVereinAn(
+			{
+				name: 'Fischereiverein Kategorien e.V.',
+				anzeigename: 'Jungfischer Kategorien',
+				slug: 'kategorien-anlegen',
+				farbe: '#0f766e',
+				leitung: { vorname: 'Thomas', nachname: 'Beispiel', email: 'kategorien.beispiel@example.org' },
+			},
+			adminId,
+			uhr,
+		);
+		if (angelegt === 'vergeben') throw new Error('Slug schon vergeben');
+
+		const kategorien = await prisma.dokumentKategorie.findMany({
+			where: { vereinId: angelegt.id },
+			orderBy: { position: 'asc' },
+			select: { name: true, position: true },
+		});
+		expect(kategorien).toEqual(KATEGORIEN);
+	});
+
+	it('der Testhelfer legeVereinAn gibt dem Verein dieselben Kategorien wie das echte Anlegen', async () => {
+		const verein = await legeVereinAn(prisma, { slug: 'kategorien-testhelfer' });
+
+		const kategorien = await prisma.dokumentKategorie.findMany({
+			where: { vereinId: verein.id },
+			orderBy: { position: 'asc' },
+			select: { name: true, position: true },
+		});
+		expect(kategorien).toEqual(KATEGORIEN);
+	});
 	it('E-Mail wird normalisiert gespeichert', async () => {
 		const r = await lege(
 			neuerVerein('email-normal-test', {
