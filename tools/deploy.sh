@@ -144,6 +144,9 @@ SMOKE_ENV=(
 	-e "DATABASE_URL=postgresql://jufi:rauchtest@jufi-db:5432/jufi?schema=public"
 	-e "SESSION_SECRET=$(openssl rand -base64 32)"
 	-e "TOTP_ENC_KEY=$(openssl rand -base64 32)"
+	# Ohne Volume: /daten gehoert im Image node (Dockerfile), der Rauchtest prueft damit
+	# zugleich, dass die App dort schreiben kann.
+	-e 'DATEIEN_PFAD=/daten'
 	-e "BASIS_URL=$APP_URL"
 	-e "WEBAUTHN_RP_ID=${APP_URL#https://}"
 	-e "WEBAUTHN_ORIGIN=$APP_URL"
@@ -216,6 +219,9 @@ done
 APP_LOG="$(docker logs "$SMOKE_APP" 2>&1)"
 grep -q 'Mail-Arbeiter gestartet' <<<"$APP_LOG" || fail 'Der Mail-Arbeiter ist nicht gestartet.'
 [[ "$(docker exec "$SMOKE_APP" id -u)" != '0' ]] || fail 'Der Container laeuft als root.'
+# Ein leeres Volume erbt Besitzer und Rechte von /daten im Image; gehoerte das Verzeichnis
+# dort root, scheiterte jeder Upload erst auf dem Server mit EACCES und kein Test sah es.
+docker exec "$SMOKE_APP" test -w /daten || fail '/daten ist fuer den App-Benutzer nicht beschreibbar (Dockerfile: chown node).'
 note "Docker-Healthcheck: healthy; Mail-Arbeiter gestartet; laeuft nicht als root; $(docker stats --no-stream --format '{{.MemUsage}}' "$SMOKE_APP" | cut -d/ -f1)im Leerlauf"
 
 # Schrift und Initialen-Icon. Lokal liefert macOS eine Schrift, im Image fehlte

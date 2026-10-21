@@ -114,9 +114,17 @@ COPY --from=build /src/apps/cli/dist/main.js ./apps/cli/dist/main.js
 COPY --from=build /src/prisma ./prisma
 COPY --from=build /src/prisma.config.ts ./prisma.config.ts
 
-# Nicht als root. Das node-Konto bringt das Basisbild mit; die App schreibt
-# nirgends hin ausser in die Datenbank, braucht also kein beschreibbares
-# Verzeichnis.
+# /daten ist das einzige Verzeichnis, in das die App schreibt (hochgeladene Dateien,
+# DATEIEN_PFAD). Das Verzeichnis entsteht hier und gehoert node, **vor** USER node:
+# Ein leeres benanntes Volume uebernimmt beim ersten Einhaengen Besitzer und
+# Rechte des Verzeichnisses im Image. Ohne diese Zeile gehoerte das Volume root,
+# und jeder Upload scheiterte mit EACCES. Verworfen: ein Start als root mit
+# anschliessendem Wechsel -- das braeuchte ein Entrypoint-Skript und gaebe dem
+# Prozess zwischendurch Rechte, die er nie braucht.
+RUN mkdir -p /daten && chown node:node /daten
+
+# Nicht als root. Das node-Konto bringt das Basisbild mit; ausser in /daten und
+# die Datenbank schreibt die App nirgends hin.
 USER node
 
 EXPOSE 4000

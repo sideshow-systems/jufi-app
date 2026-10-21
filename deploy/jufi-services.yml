@@ -124,6 +124,11 @@ services:
       DATABASE_URL: postgresql://${JUFI_POSTGRES_USER}:${JUFI_POSTGRES_PASSWORD}@jufi-db:5432/${JUFI_POSTGRES_DB}?schema=public
       SESSION_SECRET: ${JUFI_SESSION_SECRET}
       TOTP_ENC_KEY: ${JUFI_TOTP_ENC_KEY}
+      # Hier liegen hochgeladene Dateien (Dokumente, ab Etappe 2 Fotos), siehe das
+      # Volume unten. Pflicht: ohne den Wert startet die App nicht, statt Dateien
+      # still in die beschreibbare Schicht des Containers zu schreiben, die mit
+      # dem naechsten Ausrollen weg waere.
+      DATEIEN_PFAD: /daten
       # Ursprung fuer die Origin-Pruefung schreibender Anfragen (server/ursprung.ts)
       # und fuer Links in Mails und aus der CLI. Reiner Ursprung, ohne Schraegstrich
       # am Ende -- sonst bricht die Startpruefung ab (libs/auth env-check).
@@ -168,6 +173,8 @@ services:
     # Halb so viel wie HWYD (512m), weil hier kein Analyse-Endpunkt grosse
     # Antworten im Speicher baut.
     mem_limit: 256m
+    volumes:
+      - jufi-dateien:/daten
     # Wie im Image (Dockerfile), hier noch einmal, damit der Block fuer sich lesbar
     # ist: Node **und** Datenbank, und in der Startphase jede Sekunde, weil
     # Traefik den Dienst erst bei healthy aufnimmt.
@@ -216,3 +223,17 @@ volumes:
   # Die Mitgliederdaten. Gesichert wird taeglich um 03:40 per restic ausser Haus
   # (tools/backup.sh, eingerichtet mit tools/install-backup.sh, README Sicherung).
   jufi-pgdata:
+  # Die hochgeladenen Dateien. Die Datenbank kennt nur ihre Zeilen (Name, Typ,
+  # Pruefsumme); ohne dieses Volume waeren die Bytes nach einer Wiederherstellung
+  # weg. Gesichert wird es im selben Lauf wie der Dump (tools/backup.sh, Tag
+  # jufi-dateien).
+  #
+  # **Fester Name** statt des von Compose aus dem Projektnamen gebildeten
+  # (<projekt>_jufi-dateien): backup.sh findet das Volume mit
+  # `docker volume inspect jufi-dateien` und soll den Projektnamen der
+  # gemeinsamen Compose-Datei nicht kennen muessen. Verworfen: ein Bind-Mount auf
+  # einen Pfad neben der Compose-Datei -- das Volume bekommt beim ersten
+  # Einhaengen den Besitzer node aus dem Image (Dockerfile), ein Bind-Mount
+  # gehoerte root und die App koennte nicht schreiben.
+  jufi-dateien:
+    name: jufi-dateien

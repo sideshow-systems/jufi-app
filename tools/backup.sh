@@ -200,6 +200,43 @@ note "$SNAP_SIZE Byte im Snapshot, gleich dem Dump"
 step 'Aufraeumen: 7 taeglich / 4 woechentlich / 6 monatlich'
 restic forget --tag jufi-db --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --group-by host,tags --prune
 
+# --- Dateien (Volume jufi-dateien) ---------------------------------------------
+# Die Datenbank kennt nur die Zeilen der Dateien; die Bytes liegen im Volume. Ein
+# Dump ohne Volume stellte Dokumente wieder her, die beim Oeffnen 404 melden.
+# Deshalb im selben Lauf, und zwar **nach** dem Dump: Dateien verschwinden erst
+# 24 Stunden nach dem Loeschen der Zeile (Loeschliste), also hat jede Zeile des
+# Dumps ihre Bytes im spaeteren Snapshot. Verworfen: erst die Dateien, dann der
+# Dump -- eine dazwischen hochgeladene Datei stuende im Dump ohne Bytes im
+# Snapshot. Scheitert der Teil hier, liegt der Dump schon ausser Haus.
+#
+# Das Volume heisst fest jufi-dateien (deploy/jufi-services.yml). Fehlt es, laeuft
+# der Server noch ohne diese Etappe: eine Warnung, kein Abbruch, sonst bliebe die
+# Datenbanksicherung bis zum ersten Deploy der Etappe aus.
+MP=''
+if ! MP="$(docker volume inspect jufi-dateien --format '{{ .Mountpoint }}' 2>/dev/null)" || [[ -z "$MP" ]]; then
+	warn 'Volume jufi-dateien fehlt -- Dateien nicht gesichert (Server vor dem ersten Deploy der Dateien-Etappe?).'
+else
+	# Das Verzeichnis tmp enthaelt halbe Uploads, die nach einer Stunde ohnehin
+	# aufgeraeumt werden; sie gehoeren in keinen Snapshot.
+	step 'restic backup (Dateien)'
+	restic backup --tag jufi-dateien --exclude "$MP/tmp" "$MP"
+
+	# Wie beim Dump: restic legt auch bei unlesbarer Quelle einen Snapshot an.
+	# Geprueft wird also, dass ein Snapshot von heute existiert (Zeit in der Zone
+	# des Servers, wie das STAMP oben).
+	step 'Snapshot pruefen (Dateien)'
+	SNAP_TAG="$(restic snapshots --tag jufi-dateien --latest 1 --json 2>/dev/null | grep -o '"time":"[0-9-]*' | head -1 | cut -d'"' -f4 || true)"
+	[[ "$SNAP_TAG" == "$(date +%Y-%m-%d)" ]] \
+		|| fail "Kein Snapshot der Dateien von heute (letzter: ${SNAP_TAG:-keiner}). Nichts aufgeraeumt."
+	note "Snapshot der Dateien vom $SNAP_TAG"
+
+	# Gleiche Werte wie beim Dump. Ohne `--group-by` gruppiert restic nach
+	# host,paths; der Pfad ist hier bei jedem Lauf derselbe, also genuegt die
+	# Vorgabe, und die Regeln greifen je Volume-Pfad.
+	step 'Aufraeumen (Dateien): 7 taeglich / 4 woechentlich / 6 monatlich'
+	restic forget --tag jufi-dateien --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+fi
+
 # Verworfen: eine zweite, kuerzere lokale Aufbewahrung, sobald die Ablage ausser
 # Haus steht. Sie schnitte am ersten erfolgreichen Lauf die lokalen Dumps zusammen
 # -- genau dann, wenn noch niemand einen Restore aus der neuen Ablage geprobt hat.

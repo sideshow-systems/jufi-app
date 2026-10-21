@@ -12,6 +12,13 @@
 #   tools/restore-test.sh --dump x --source remote        gegen die Server-DB vergleichen
 #   tools/restore-test.sh --dump x --no-compare           nur zaehlen
 #   tools/restore-test.sh                                 letzter restic-Snapshot
+#   tools/restore-test.sh --dateien                       zusaetzlich die Dateien pruefen
+#
+# `--dateien` stellt aus dem letzten restic-Snapshot mit Tag jufi-dateien bis zu
+# 20 zufaellige Dateien wieder her, die der zurueckgelesene Dump kennt, und
+# vergleicht ihre SHA-256-Summe mit der Zeile der Tabelle Datei. Ohne das waere
+# die Probe gruen fuer eine Wiederherstellung, deren Dokumente beim Oeffnen
+# fehlen. Braucht JUFI_RESTIC_* auch dann, wenn der Dump mit --dump kommt.
 #
 # `--source local` (Vorgabe) vergleicht gegen die Entwicklungsdatenbank
 # (`jufi-postgres-dev`) oder, auf dem Server, gegen den Compose-Dienst;
@@ -40,11 +47,13 @@ PROBE_NAME="jufi-restore-probe-$$"
 
 DUMP=""
 COMPARE=1
+DATEIEN=0
 SOURCE=local
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--dump) DUMP="${2:?--dump braucht eine Datei}"; shift 2 ;;
 		--no-compare) COMPARE=0; shift ;;
+		--dateien) DATEIEN=1; shift ;;
 		--source) SOURCE="${2:-}"; shift 2 ;;
 		*) echo "Unbekanntes Argument: $1" >&2; exit 2 ;;
 	esac
@@ -66,6 +75,13 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 # --- Dump beschaffen ----------------------------------------------------------
+# Vor dem Wegwerf-Postgres: eine fehlende Ablage soll nach Sekunden auffallen und
+# nicht erst, nachdem Container und Restore gelaufen sind.
+if [[ "$DATEIEN" -eq 1 ]]; then
+	restic_env
+	[[ -n "$RESTIC_REPOSITORY" ]] || fail '--dateien braucht JUFI_RESTIC_REPOSITORY (auf dem Server: set -a; . ./.env; set +a).'
+	[[ -n "$RESTIC_PASSWORD" ]] || fail '--dateien braucht JUFI_RESTIC_PASSWORD.'
+fi
 if [[ -z "$DUMP" ]]; then
 	# Dieselbe Umschreibung wie in backup.sh, aus derselben geteilten `.env`.
 	restic_env
@@ -132,7 +148,51 @@ awk -F'\t' '{printf "  %-24s %8s\n", $1, $2}' "$WORKDIR/restored.tsv"
 # meldete und die Quelle ebenfalls leer ist -- sonst verglichen zwei leere Listen.
 [[ -s "$WORKDIR/restored.tsv" ]] || fail 'Die Wiederherstellung enthaelt keine Tabellen.'
 
+# --- Dateien ------------------------------------------------------------------
+# Stichprobe statt aller Dateien: Der Verein darf bis zu 5 GB belegen, und der
+# Arbeitsordner liegt auf dem Server unter /tmp. Verworfen: den ganzen Snapshot
+# wiederherstellen -- das kostete Platz und Zeit, die die Probe nicht braucht,
+# um ein defektes Archiv zu finden. Zufaellig (random() in der Datenbank), damit
+# nicht jede Probe dieselben 20 Dateien sieht.
+DATEIEN_FEHLER=0
+if [[ "$DATEIEN" -eq 1 ]]; then
+	step 'Dateien: Pruefsummen aus dem letzten Snapshot (jufi-dateien)'
+	# Der Pfad, unter dem das Volume gesichert wurde (backup.sh nimmt den
+	# Mountpoint); restic legt ihn im Ziel nach, deshalb muss er bekannt sein.
+	SNAP_PFAD="$(restic snapshots --tag jufi-dateien --latest 1 --json | grep -o '"paths":\["[^"]*"' | head -1 | cut -d'"' -f4 || true)"
+	[[ -n "$SNAP_PFAD" ]] || fail 'Kein Snapshot mit Tag jufi-dateien in der Ablage (hat backup.sh mit restic schon gesichert?).'
+	ZEILEN="$(docker exec -i "$PROBE_NAME" psql -U "$PGUSER_" -d "$PGDB_" -tAF ' ' \
+		-c 'SELECT "vereinId", id, sha256 FROM "Datei" ORDER BY random() LIMIT 20')"
+	if [[ -z "$ZEILEN" ]]; then
+		warn 'Der Dump kennt keine Dateien -- nichts zu pruefen.'
+	else
+		INCLUDES=()
+		while read -r verein id _; do
+			INCLUDES+=(--include "$SNAP_PFAD/$verein/$id")
+		done <<<"$ZEILEN"
+		mkdir -p "$WORKDIR/dateien"
+		restic restore latest --tag jufi-dateien --target "$WORKDIR/dateien" "${INCLUDES[@]}" >/dev/null
+		summe() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+		while read -r verein id erwartet; do
+			datei="$WORKDIR/dateien$SNAP_PFAD/$verein/$id"
+			if [[ ! -f "$datei" ]]; then
+				printf '  ✗ %s/%s fehlt im Snapshot\n' "$verein" "$id"
+				DATEIEN_FEHLER=1
+			elif [[ "$(summe "$datei")" != "$erwartet" ]]; then
+				printf '  ✗ %s/%s Pruefsumme weicht ab\n' "$verein" "$id"
+				DATEIEN_FEHLER=1
+			else
+				printf '  ✓ %s/%s\n' "$verein" "$id"
+			fi
+		done <<<"$ZEILEN"
+	fi
+fi
+
 if [[ "$COMPARE" -eq 0 ]]; then
+	if [[ "$DATEIEN_FEHLER" -ne 0 ]]; then
+		echo '✗ Restore-Probe fehlgeschlagen: Dateien stimmen nicht.' >&2
+		exit 1
+	fi
 	echo '✓ Restore gelesen, Vergleich uebersprungen (--no-compare)'
 	exit 0
 fi
@@ -176,7 +236,7 @@ fi
 
 [[ -s "$WORKDIR/source.tsv" ]] || fail 'Quelle lieferte keine Tabellen -- nichts zu vergleichen.'
 
-FAILED=0
+FAILED="$DATEIEN_FEHLER"
 while IFS=$'\t' read -r table expected; do
 	actual="$(awk -F'\t' -v t="$table" '$1==t {print $2}' "$WORKDIR/restored.tsv")"
 	if [[ -z "$actual" ]]; then
@@ -203,3 +263,4 @@ if [[ "$FAILED" -ne 0 ]]; then
 	exit 1
 fi
 echo '✓ Restore-Probe bestanden: jede Tabelle hat dieselbe Zeilenzahl wie die Quelle.'
+[[ "$DATEIEN" -eq 0 ]] || echo '✓ Dateien: Pruefsummen der Stichprobe stimmen.'

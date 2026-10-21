@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Live-Pruefung der echten App: Health, Routing, Kopf, Manifest und Icons,
-# WebSocket-Upgrade, Link-Vorschau, optional Mail-DNS (SPF, DMARC, DKIM). Nur lesend, aendert
-# nichts.
+# WebSocket-Upgrade, Link-Vorschau, Dateien-Routen ohne Sitzung, optional Mail-DNS
+# (SPF, DMARC, DKIM). Nur lesend, aendert nichts.
 #
 # Aufruf:
 #   tools/pruefe-betrieb.sh [--url <basis>] [--slug <slug>] [--ohne-entwurf]
@@ -306,6 +306,24 @@ if [[ -n "$MAIL_DOMAIN" ]]; then
 		note 'DKIM: ohne --dkim-selector nicht pruefbar. Beweis ist tools/mail-testen.mjs'
 		note 'plus "Originalnachricht anzeigen" im Postfach (dkim=pass).'
 	fi
+fi
+
+# --- 10. Dateien --------------------------------------------------------------
+# Ohne Cookie muessen beide Dateien-Routen mit 401 antworten: Die Dateien eines
+# Vereins sind nie oeffentlich, auch nicht fuer eine unbekannte ID (dann waere es
+# ein 404 -- das gibt es erst mit Sitzung). Ein 200 oder 404 hiesse, dass die
+# Pruefung der Sitzung nicht vor der Route steht, oder dass Traefik die Adresse
+# nicht an die App reicht. Verworfen: mit Sitzung eine echte Datei holen -- das
+# Skript braeuchte Zugangsdaten eines Mitglieds (wie beim WebSocket oben).
+if [[ -n "$SLUG" ]]; then
+	for pfad in "dateien/x" "dokumente"; do
+		DATEI_STATUS="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$URL/$SLUG/api/v1/$pfad" 2>"$CURLERR" || true)"
+		if [[ "$DATEI_STATUS" == 401 ]]; then
+			ok "Dateien $SLUG: GET /api/v1/$pfad ohne Sitzung mit 401 abgelehnt"
+		else
+			nok "Dateien $SLUG: GET /api/v1/$pfad ohne Sitzung gibt ${DATEI_STATUS:-keinen Status} statt 401 $(in_klammern)"
+		fi
+	done
 fi
 
 echo

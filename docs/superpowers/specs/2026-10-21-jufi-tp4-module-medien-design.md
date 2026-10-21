@@ -41,16 +41,18 @@ Neue Module folgen dem Muster von TP3 2.2: Kopfzeile `ThreadModul` mit erweitert
 
 Jede Etappe ist für sich lauffähig, bekommt einen eigenen Plan und wird vom Eigentümer lokal abgenommen.
 
-| #   | Etappe                          | Inhalt                                                                                                                                                                          | Abschnitte  |
-| --- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| 1   | Dateien-Grundlage und Dokumente | Speicher-Schnittstelle, Volume, Upload als Strom, Fotoverarbeitung, Ausliefern, Kontingent, Löschliste und Aufräumer, Sicherung des Volumes, globale Dokumente, Leiste „Medien“ | 2, 3, 9, 12 |
-| 2   | Dateien, Fotos, Einwilligung    | Module Dateien und Fotos, Foto-Einwilligung, Medienbereich „Fotos & Dateien“                                                                                                    | 3.2, 4      |
-| 3   | Helfer- und Mitbringliste       | Modul, Eintragen mit Notiz, Antworten-Übersicht                                                                                                                                 | 5, 8        |
-| 4   | Fahrgemeinschaft                | Autos, Mitfahrten, „Braucht noch Mitfahrt“, Umsetzen durch die Leitung                                                                                                          | 6, 8        |
-| 5   | Kosten                          | Betrag und Ausnahmen, offen → gemeldet → bezahlt, Verwendungszweck, „Braucht deine Antwort“                                                                                     | 7, 8        |
-| 6   | Teilen und Abschluss            | Teilen-Zeilen, Datenauszug, Entfernen, Datenschutzerklärung, Demo-Zeltlager, Ende-zu-Ende-Test, Doku                                                                            | 11, 12, 13  |
+| #   | Etappe                          | Inhalt                                                                                                                                                        | Abschnitte                 |
+| --- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| 1   | Dateien-Grundlage und Dokumente | Speicher-Schnittstelle, Volume, Upload als Strom, Ausliefern, Kontingent, Löschliste und Aufräumer, Sicherung des Volumes, globale Dokumente, Leiste „Medien“ | 2 (ohne 2.4), 3.1, 9, 12.4 |
+| 2   | Dateien, Fotos, Einwilligung    | Fotoverarbeitung, Module Dateien und Fotos, Foto-Einwilligung, Medienbereich „Fotos & Dateien“                                                                | 2.4, 3.2, 4                |
+| 3   | Helfer- und Mitbringliste       | Modul, Eintragen mit Notiz, Antworten-Übersicht                                                                                                               | 5, 8                       |
+| 4   | Fahrgemeinschaft                | Autos, Mitfahrten, „Braucht noch Mitfahrt“, Umsetzen durch die Leitung                                                                                        | 6, 8                       |
+| 5   | Kosten                          | Betrag und Ausnahmen, offen → gemeldet → bezahlt, Verwendungszweck, „Braucht deine Antwort“                                                                   | 7, 8                       |
+| 6   | Teilen und Abschluss            | Teilen-Zeilen, Datenauszug, Entfernen, Datenschutzerklärung, Demo-Zeltlager, Ende-zu-Ende-Test, Doku                                                          | 11, 12, 13                 |
 
-Die Dateien-Grundlage kommt zuerst, weil dort das meiste Risiko liegt (Speicher im 256-MiB-Container, Volume und Sicherung brauchen einen Deploy). Jede neue Schreibroute pflegt ab ihrer Etappe den Änderungszähler und meldet an `deps.bus`.
+Die Dateien-Grundlage kommt zuerst, weil dort das meiste Risiko liegt (Speicher im 256-MiB-Container, Volume und Sicherung brauchen einen Deploy).
+
+**Fotoverarbeitung wandert in Etappe 2** (Plan zu Etappe 1, Entscheidung 1). Ohne Foto-Modul gäbe es in Etappe 1 keinen Weg, sie im laufenden Image zu prüfen, und die Speicherabnahme unter `mem_limit` (2.4) braucht genau diesen Weg. Etappe 1 baut die Typerkennung für Fotos schon mit (sie ist eine reine Regel), nimmt aber nur Dateien an; 2.4 und `img-src blob:` (2.5) gelten damit erst ab Etappe 2. Jede neue Schreibroute pflegt ab ihrer Etappe den Änderungszähler und meldet an `deps.bus`.
 
 ### 1.5 Nicht in Teilprojekt 4
 
@@ -76,11 +78,13 @@ Die Dateien-Grundlage kommt zuerst, weil dort das meiste Risiko liegt (Speicher 
 - `sha256`: beim Schreiben berechnet; die Restore-Probe vergleicht damit (12.4).
 - `vonId`: wer hochgeladen hat; Fremdschlüssel `NoAction` wie bei Antworten (TP3 2.3), angezeigt nach TP3 3.10.
 
-`DateiLoeschung (schluessel, geloeschtAm)`: die Löschliste (2.7). Plattformweit, ohne `vereinId`; sie trägt nur Speicherschlüssel.
+`DateiLoeschung (schluessel, vereinId, geloeschtAm)`: die Löschliste (2.7). **`vereinId` ohne Fremdschlüssel auf `Verein`** (Plan, Entscheidung 6): Nur so darf ein Vereins-Pfad über `vereinDb` hineinschreiben; der Aufräumer liest plattformweit über den schlichten Client. Verworfen: die ursprünglich vorgesehene Tabelle ohne `vereinId` — sie ließe sich aus einer Vereins-Route nicht schreiben, ohne `vereinDb` zu umgehen.
 
-`Verein.speicherGrenze` (Bytes, Vorgabe 5 GiB).
+**`Datei` verweist mit `NoAction` auf Modul und Dokument** (Entscheidung 5). Ein Kaskadenlöschen umginge die Löschliste (2.7), und die Bytes fielen erst später durch den Waisen-Schritt weg. So muss jeder Löschpfad `loescheDateien` rufen. Verworfen: `onDelete: Cascade` — bequemer, aber nach einer Wiederherstellung fehlten Bytes, deren Zeile der Dump noch kennt.
 
-Die neuen Tabellen stehen in `VEREINS_MODELLE` (`libs/db`), außer `DateiLoeschung`, die nur der Aufräumer über den schlichten Client liest.
+**`Verein.speicherGrenzeMb`** (`Int`, Megabyte, Vorgabe 5120; Entscheidung 3). Verworfen: Bytes als `BigInt` — das Schema meidet `BigInt` bewusst (er bricht `JSON.stringify`). Der Verbrauch ist eine Summe, die 2^31 übersteigt; er wird als `number` geführt (sicher bis 2^53). Der Plattform-Admin stellt 100 bis 1 048 576 MB ein.
+
+Die neuen Tabellen stehen in `VEREINS_MODELLE` (`libs/db`), auch `DateiLoeschung` (wegen `vereinId`).
 
 ### 2.2 Speicher
 
@@ -90,7 +94,7 @@ Verworfen: Bytes in Postgres wie beim Vereinslogo — bei 5 GB je Verein würde 
 
 ### 2.3 Hochladen
 
-Eine Datei je Anfrage, der Körper ist die Datei selbst (kein Multipart). Verworfen: Multipart mit mehreren Dateien — ein Fehler bei der zwölften Datei verwürfe die Anfrage, und Fortschritt und Wiederholung je Datei wären umständlicher. Der Logo-Upload (TP2) ist das Muster.
+Eine Datei je Anfrage, der Körper ist die Datei selbst (kein Multipart) mit `Content-Type: application/octet-stream` (Entscheidung 8): Der globale `express.json` lässt ihn so in Ruhe, und der Typ zählt ohnehin nur am Inhalt. Verworfen: Multipart mit mehreren Dateien — ein Fehler bei der zwölften Datei verwürfe die Anfrage, und Fortschritt und Wiederholung je Datei wären umständlicher. Der Logo-Upload (TP2) ist das Muster.
 
 Ablauf:
 
@@ -103,9 +107,13 @@ Ablauf:
 4. Fotos verarbeitet 2.4; Dateien bleiben, wie sie sind. Die fertigen Bytes werden **vor** dem Commit an ihren Zielort verschoben, damit keine Zeile je auf fehlende Bytes zeigt.
 5. In `mitAenderung` unter der Vereinssperre: Kontingent mit der echten Größe prüfen, Zeile anlegen, Änderung schreiben; nach dem Commit Meldung an `deps.bus`. Scheitert die Prüfung oder der Commit, sind die Bytes verwaist und fallen nach 2.7 weg.
 
-Der Dateiname kommt im Kopf `X-Dateiname` (Prozent-kodiertes UTF-8). Bereinigt werden Pfadtrenner, Steuerzeichen und Länge; die Endung bleibt.
+Der Dateiname kommt im Kopf `X-Dateiname` (Prozent-kodiertes UTF-8; Entscheidung 9). Bereinigt werden Pfadtrenner, Steuerzeichen und Länge; die Endung bleibt. Der Titel eines neuen Dokuments ist der bereinigte Name ohne Endung.
+
+**Hochladen aus dem Browser** geht über `XMLHttpRequest` und nicht über `fetch`, **nur** wegen des Fortschrittsbalkens: `fetch` meldet den Fortschritt des Sendens nicht. Der Rest der Oberfläche bleibt bei `HttpClient`. Die Seite lädt die Dateien einzeln nacheinander hoch, über alle Kategorien hinweg.
 
 ### 2.4 Fotoverarbeitung
+
+**Gilt ab Etappe 2** (1.4): Etappe 1 nimmt keine Fotos an.
 
 Mit `sharp`, aus der Temp-Datei, nicht aus einem Puffer:
 
@@ -127,18 +135,20 @@ Köpfe:
 - Fotos und PDF `inline`, alle anderen `attachment`; Dateiname über `filename*=UTF-8''…`. Mit `?herunterladen=1` immer `attachment` („Speichern“ am Rechner).
 - `Cache-Control: private, max-age=31536000, immutable`: Eine ID ändert nie ihren Inhalt (Ersetzen erzeugt eine neue Datei, 3.1).
 
-Die CSP der App bekommt `img-src 'self' blob:`, damit ausgewählte Fotos vor dem Hochladen als Vorschau erscheinen.
+Die CSP der App bekommt `img-src 'self' blob:`, damit ausgewählte Fotos vor dem Hochladen als Vorschau erscheinen. **Das kommt mit Etappe 2** (1.4): Ohne Foto-Modul gibt es keine Vorschau, die es brauchte.
 
 ### 2.6 Kontingent
 
-Verbrauch = Summe von `Datei.groesse` des Vereins (Abfrage, kein Zähler; verworfen: ein mitgeführter Zähler — er liefe bei jedem Fehler im Löschpfad auseinander). Bei vollem Kontingent lehnt der Server mit 413 `KONTINGENT` ab; die Meldung nennt Verbrauch und Grenze und wen man fragt.
+Verbrauch = Summe von `Datei.groesse` des Vereins (Abfrage, kein Zähler; verworfen: ein mitgeführter Zähler — er liefe bei jedem Fehler im Löschpfad auseinander). Er ist eine `number` und kein `BigInt` (2.1): 100 Dateien zu je 25 MB sind genau `100 * 26214400`, ohne Überlauf.
 
-- Verwaltung › Einstellungen zeigt „1,2 von 5 GB belegt“, ab 90 % mit Hinweis.
+**Beim Ersetzen eines Dokuments zählt das Kontingent netto**: Die alte Datei geht mit der neuen Zeile aus der Summe, sie wird nicht doppelt gezählt, obwohl ihre Bytes bis zum Aufräumen (2.7) noch auf der Platte liegen. Verworfen: beide zählen — ein Verein knapp unter der Grenze könnte dann sein Dokument nicht mehr durch eine gleich große Fassung ersetzen. Bei vollem Kontingent lehnt der Server mit 413 `KONTINGENT` ab; die Meldung nennt Verbrauch und Grenze und wen man fragt.
+
+- Verwaltung › Einstellungen zeigt „1,2 von 5 GB belegt“, ab 90 % mit Hinweis. Größen schreibt `speicherText` in `@jufi/domain`: Basis 1024, ab 1 GB und ab 1 MB mit einer Nachkommastelle, **darunter in ganzen KB** (mindestens „1 KB“, damit eine nicht leere Datei nie wie eine leere aussieht); nur `0` heißt „0 MB“, nicht „0 KB“. Ein typisches Dokument ist ein paar Dutzend KB groß und stünde sonst als „0,0 MB“ in der Liste.
 - Der Plattform-Admin sieht den Verbrauch je Verein (Rahmen 8.3) und ändert die Grenze. Später hängt sie am Tarif (Teilprojekt 7).
 
 ### 2.7 Löschen und Aufräumen
 
-Das Löschen einer `Datei` (einzeln, mit ihrem Modul, Dokument oder Thread) entfernt in der Transaktion die Zeile und trägt ihre Schlüssel in `DateiLoeschung` ein. Die Datei ist damit sofort unerreichbar (2.5).
+Das Löschen einer `Datei` (einzeln, mit ihrem Modul, Dokument oder Thread) entfernt in der Transaktion die Zeile und trägt ihre Schlüssel in `DateiLoeschung` ein. **Jeder Löschpfad ruft dafür `loescheDateien`**; die Datenbank löscht nie per Kaskade (2.1). Die Datei ist damit sofort unerreichbar (2.5).
 
 Der vorhandene Aufräumer (`threads/aufraeumen.ts`, beim Start und alle 24 h) bekommt zwei Schritte:
 
@@ -155,9 +165,11 @@ Der Abstand von 24 Stunden sorgt dafür, dass zwischen Datenbank-Dump und Sicher
 
 `DokumentKategorie (id, vereinId, name, position)`, Name 1–40 Zeichen, je Verein eindeutig. Neue Vereine (und per Migration die bestehenden) bekommen „Ordnungen“, „Merkblätter“, „Formulare“.
 
-`Dokument (id, vereinId, kategorieId, titel, position)` mit genau einer `Datei` (`art = DATEI`), Titel 1–120 Zeichen, vorbelegt mit dem Dateinamen ohne Endung.
+`Dokument (id, vereinId, kategorieId, titel, angelegtAm)` mit genau einer `Datei` (`art = DATEI`), Titel 1–120 Zeichen, vorbelegt mit dem Dateinamen ohne Endung. Titel und Kategorienamen mit Steuerzeichen lehnt der Server mit 400 ab.
 
-Rechte: Pflegen nur mit „Globale Dokumente verwalten“ (`DOKUMENTE`, Rahmen 4.2): Kategorien anlegen, umbenennen, sortieren, löschen (nur leere); Dokumente hochladen, umbenennen, verschieben, sortieren, **ersetzen** (neue `Datei`, die alte geht in die Löschliste) und löschen. Sehen: alle Mitglieder. Leere Kategorien sehen nur Pfleger.
+**Dokumente stehen alphabetisch nach Titel** (`localeCompare` mit `'de'`; Plan, Entscheidung 4), nicht in Handreihenfolge: Das Dokument hat deshalb keine `position`. Verworfen: Handreihenfolge — sie bräuchte eine Sortier-Oberfläche je Kategorie, und alphabetisch findet man schneller. Kategorien behalten ihre Handreihenfolge.
+
+Rechte: Pflegen nur mit „Globale Dokumente verwalten“ (`DOKUMENTE`, Rahmen 4.2): Kategorien anlegen, umbenennen, sortieren, löschen (nur leere); Dokumente hochladen, umbenennen, verschieben, **ersetzen** (neue `Datei`, die alte geht in die Löschliste) und löschen. Sehen: alle Mitglieder. **Leere Kategorien erscheinen auf der Seite Medien für niemanden**, auch nicht für Pfleger; diese sehen sie unter Verwaltung › Dokumente, wo sie sie befüllen. Verworfen: leere Kategorien für Pfleger auch unter Medien — eine Überschrift ohne Inhalt sagt dort nichts, und die Pflege hat ihren eigenen Ort. Ohne Dokument zeigt Medien „Noch keine Dokumente.“
 
 Die Kategorien pflegt der Verein (Rahmen 15). Verworfen: feste Kategorien — jeder Verein ordnet anders („Für Eltern“, „Gewässer“). Verworfen: freies Kategorie-Feld je Dokument — Tippfehler ergäben zwei Kategorien.
 
@@ -343,7 +355,7 @@ Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, K
 
 ### 9.3 Fehler
 
-Wie TP3 4.4, zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` (Warteschlange voll); 409 `VOLL` (Helfer-Position, Auto). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
+Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Feld `code`**: `{ fehler: '<Text>', code: 'GROESSE' | 'KONTINGENT' | 'TYP' | 'HEIC' }` (Plan, Entscheidung 2). Die API antwortet sonst nur mit `{ fehler }`; verworfen: Codes statt Text — der Client zeigt den Text überall direkt an, und Tests und Skripte prüfen den Code. Zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` (Warteschlange voll); 409 `VOLL` (Helfer-Position, Auto). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
 
 ---
 
@@ -388,8 +400,8 @@ Ergänzt um: Fotos (verkleinert, ohne EXIF und GPS, im Volume gespeichert, Bytes
 ### 12.4 Betrieb
 
 - Volume `jufi-dateien` in `deploy/jufi-services.yml`, im Image ein Verzeichnis mit Besitzer `node`; `DATEIEN_PFAD` in der Umgebung.
-- `tools/backup.sh` sichert nach dem Dump das Volume mit restic; `restore-test.sh` und die Restore-Probe stellen beides wieder her und prüfen Stichproben gegen `sha256`.
-- `tools/pruefe-betrieb.sh` bekommt einen Abschnitt „Dateien“: Hochladen ohne Sitzung ergibt 401, `GET /dateien/<unbekannt>` ergibt 404.
+- `tools/backup.sh` sichert nach dem Dump das Volume mit restic (Tag `jufi-dateien`, ohne `tmp/`); `restore-test.sh --dateien` stellt eine Stichprobe von bis zu 20 Dateien wieder her und prüft sie gegen `sha256`. Das Volume heißt fest `jufi-dateien` (`name:` in der Compose-Datei), damit `backup.sh` es ohne den Projektnamen findet.
+- `tools/pruefe-betrieb.sh` bekommt einen Abschnitt „Dateien“ (`--slug`), **ohne Sitzung** (Entscheidung 7): `GET /<slug>/api/v1/dateien/x` und `GET /<slug>/api/v1/dokumente` ergeben je 401. Ein 404 für eine unbekannte ID gibt es erst mit Sitzung; das Skript hat bewusst keine Anmeldung.
 - CLAUDE.md: Stolpersteine zu Volume, Löschliste und Speicher-Abnahme.
 
 ---

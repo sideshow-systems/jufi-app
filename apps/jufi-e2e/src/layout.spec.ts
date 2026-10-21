@@ -6,7 +6,7 @@ import {
 	abstandUnterKopf,
 	hinweisUeberdecktNamenNicht,
 	keinWaagrechtesScrollen,
-	leisteHatVierEintraege,
+	leisteHatFuenfEintraege,
 	leisteVerdecktNichts,
 	lesbar,
 	monatsrasterPasst,
@@ -69,6 +69,11 @@ const SEITEN: Seite[] = [
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/threads` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/termine` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/termine` },
+	// Medien und die Pflege der Dokumente; der Ablauf hat sein Dokument dann wieder geloescht, gemessen
+	// wird also der leere Zustand, in dem die Seite am schmalsten und am leichtesten zu verfehlen ist.
+	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/medien` },
+	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/medien` },
+	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/dokumente` },
 	// Der Monat mit dem Bowling-Termin: ein markierter Tag und ein Eintrag in der Liste darunter.
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/termine?monat=:terminMonat` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/termine?monat=:terminMonat` },
@@ -147,7 +152,7 @@ for (const groesse of GROESSEN) {
 
 						if (handy) expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
 						if (seite.art === 'mitglied') await leisteVerdecktNichts(page);
-						if (seite.art === 'mitglied' && handy) await leisteHatVierEintraege(page);
+						if (seite.art === 'mitglied' && handy) await leisteHatFuenfEintraege(page);
 						if (seite.verlauf) await verlaufUeberLeiste(page);
 
 						if (seite.art === 'verwaltung') {
@@ -213,7 +218,7 @@ test.describe('Start und Termine am Handy', () => {
 				expect(oben.bloecke, 'Bloecke beginnen unter der Begruessung').toBeGreaterThanOrEqual(0);
 				expect(oben.bloecke, 'Bloecke vor der Begruessung').toBeLessThan(oben.gruss);
 				await keinWaagrechtesScrollen(page);
-				await leisteHatVierEintraege(page);
+				await leisteHatFuenfEintraege(page);
 			});
 
 			test('Monatsraster ohne Ueberlauf, Reihen gleich hoch', async ({ page }) => {
@@ -294,8 +299,8 @@ test.describe('Verwaltungs-Huelle an der Bruchstelle', () => {
 			await page.getByRole('button', { name: 'Menü öffnen' }).click();
 			const navigation = page.getByRole('navigation', { name: 'Verwaltung' });
 			await expect(navigation).toBeVisible();
-			// Fuenf Punkte der Verwaltung (seit TP3 mit Threads) und der Weg zurueck in die App.
-			await expect(navigation.getByRole('link')).toHaveCount(6);
+			// Sechs Punkte der Verwaltung (seit TP4 mit Dokumente) und der Weg zurueck in die App.
+			await expect(navigation.getByRole('link')).toHaveCount(7);
 			await expect(page.getByRole('button', { name: 'Menü schließen' })).toBeVisible();
 			expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
 			await keinWaagrechtesScrollen(page);

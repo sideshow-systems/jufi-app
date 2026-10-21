@@ -38,7 +38,9 @@ export async function keinWaagrechtesScrollen(page: Page): Promise<void> {
 /**
  * Text oder Beschriftung jedes sichtbaren Bedienelements, das niedriger als mindestens ist.
  * Kontrollkaestchen und Optionsfelder fehlen mit Absicht: Bei ihnen ist die ganze Zeile mit
- * Beschriftung die Tippflaeche (Klasse haken in styles.css), nicht das Kaestchen selbst.
+ * Beschriftung die Tippflaeche (Klasse haken in styles.css), nicht das Kaestchen selbst. Ebenso das
+ * Dateifeld im Knopf (label.knopf mit input.unsichtbar, Verwaltung > Dokumente): Das Feld ist ein Pixel
+ * gross und versteckt, getippt wird der Knopf darum, und der ist als .knopf selbst Teil der Messung.
  */
 export async function tippflaechen(page: Page, mindestens = 44): Promise<string[]> {
 	return page.evaluate((grenze) => {
@@ -50,6 +52,7 @@ export async function tippflaechen(page: Page, mindestens = 44): Promise<string[
 			const r = el.getBoundingClientRect();
 			if (r.width === 0 || r.height === 0) continue;
 			if (r.height >= grenze) continue;
+			if (el.matches('input[type=file]') && el.closest('label.knopf')) continue;
 			const feld = el as HTMLInputElement;
 			const knapp = (s: string | null | undefined) => (s ?? '').trim().replace(/\s+/g, ' ');
 			const beschriftung = knapp(el.getAttribute('aria-label')) || knapp(feld.labels?.[0]?.textContent);
@@ -77,16 +80,33 @@ export async function leisteVerdecktNichts(page: Page): Promise<void> {
 }
 
 /**
- * Die vier Eintraege der unteren Leiste: jeder mindestens 44 px hoch, in einer Reihe nebeneinander und
+ * Die fuenf Eintraege der unteren Leiste: jeder mindestens 44 px hoch, in einer Reihe nebeneinander und
  * ganz innerhalb des Fensters. tippflaechen misst die Hoehe schon fuer jeden Link; hier kommt dazu, dass
  * die Eintraege einander nicht ueberlappen und nicht aus der Leiste ragen, was eine Hoehe nicht zeigt.
- * Gemessen wird die Zahl vier mit: Ein fuenfter Eintrag sprengte bei 375 px die Spaltenbreite.
+ * Gemessen wird die Zahl fuenf mit: Ein sechster Eintrag sprengte bei 375 px die Spaltenbreite. Dazu kein
+ * Eintrag breiter als ein Fuenftel des Fensters und kein Beschriftungstext abgeschnitten (scrollWidth
+ * gegen clientWidth), denn "Termine" und "Threads" sind die laengsten Woerter und werden bei 75 px eng.
  */
-export async function leisteHatVierEintraege(page: Page): Promise<void> {
+export async function leisteHatFuenfEintraege(page: Page): Promise<void> {
 	const m = await page.evaluate(() => {
 		const eintraege = Array.from(document.querySelectorAll('jf-mitglieder-huelle > .leiste > a')).map((a) => {
 			const r = a.getBoundingClientRect();
-			return { text: a.textContent?.trim() ?? '', links: r.left, rechts: r.right, oben: r.top, hoehe: r.height };
+			// Die Beschriftung ist ein Flex-Kind des Links: Ihr eigenes scrollWidth waechst mit dem Text und sagt
+			// nichts, ueberragt sie aber den Link, ist sie auf dem Handy abgeschnitten oder liegt auf dem
+			// Nachbarn. Deshalb ihr Kasten gegen den des Links, dazu scrollWidth gegen clientWidth des Links.
+			const text = a.querySelector(':scope > span:not(.punkt)')?.getBoundingClientRect();
+			const abgeschnitten =
+				a.scrollWidth > a.clientWidth ||
+				(text !== undefined && (text.left < r.left - 0.5 || text.right > r.right + 0.5));
+			return {
+				text: a.textContent?.trim() ?? '',
+				links: r.left,
+				rechts: r.right,
+				oben: r.top,
+				hoehe: r.height,
+				breite: r.width,
+				abgeschnitten,
+			};
 		});
 		return { eintraege, fenster: window.innerWidth };
 	});
@@ -94,9 +114,13 @@ export async function leisteHatVierEintraege(page: Page): Promise<void> {
 	expect(
 		eintraege.map((e) => e.text.replace(/\s*neu$/, '')),
 		'Eintraege der Leiste',
-	).toEqual(['Start', 'Threads', 'Termine', 'Mehr']);
+	).toEqual(['Start', 'Threads', 'Termine', 'Medien', 'Mehr']);
 	for (const [i, e] of eintraege.entries()) {
 		expect(e.hoehe, `${e.text} ist ${e.hoehe} px hoch`).toBeGreaterThanOrEqual(44);
+		expect(e.breite, `${e.text} ist ${e.breite} px breit im Fenster von ${fenster} px`).toBeLessThanOrEqual(
+			fenster / 5 + 0.5,
+		);
+		expect(e.abgeschnitten, `${e.text} ist abgeschnitten`).toBe(false);
 		expect(e.links, `${e.text} beginnt bei ${e.links}`).toBeGreaterThanOrEqual(0);
 		expect(e.rechts, `${e.text} endet bei ${e.rechts} im Fenster von ${fenster} px`).toBeLessThanOrEqual(fenster);
 		if (i > 0) {

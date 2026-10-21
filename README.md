@@ -246,6 +246,30 @@ ssh -L 8025:127.0.0.1:8025 <server>
 Dann im Browser <http://127.0.0.1:8025>. Läuft lokal schon Mailpit auf 8025, einen anderen lokalen Port nehmen
 (`-L 18025:127.0.0.1:8025`).
 
+## Dateien
+
+Hochgeladene Dateien (seit TP4 Etappe 1 die Dokumente unter Medien, später Fotos) liegen nicht in der Datenbank,
+sondern als Dateien in einem Verzeichnis: `<DATEIEN_PFAD>/<vereinId>/<dateiId>`, der Name ist nie Teil des Pfads. Die
+Datenbank hält nur die Zeile (Name, am Inhalt erkannter Typ, Größe, SHA-256).
+
+- **Lokal:** `DATEIEN_PFAD` in der `.env` (Vorgabe `./.daten/dateien`, steht in `.env.example` und in `.gitignore`).
+  **Pflicht**: Ohne den Wert startet die App nicht. Eine `.env` aus der Zeit vor dieser Etappe braucht die Zeile nachgetragen.
+- **Auf dem Server:** das benannte Volume `jufi-dateien` unter `/daten` (`deploy/jufi-services.yml`). `/daten` gehört im
+  Image dem Benutzer `node`, und `tools/deploy.sh` prüft im Rauchtest, dass er dort schreiben kann.
+- **Löschen und Aufräumen:** Wer ein Dokument löscht, entfernt die Zeile sofort, die Bytes bleiben auf der Löschliste
+  und gehen **nach 24 Stunden** (der Aufräumer läuft mit dem Thread-Aufräumer): So überlebt eine Datei einen Restore der
+  Datenbank, der die Zeile zurückbringt. Dazu entfernt der Aufräumer Bytes ohne Zeile (Reste abgebrochener Uploads,
+  ebenfalls erst nach 24 Stunden) und halbe Temp-Dateien nach einer Stunde. Eine Zeile **ohne** Bytes löscht er nie,
+  er meldet sie im Protokoll („Restore prüfen“).
+- **Speichergrenze:** je Verein 5 GB, der Plattform-Admin ändert sie (100 MB bis 1 TB); ab 90 % gibt es einen Hinweis
+  in der Verwaltung. Eine Datei darf höchstens 25 MB groß sein.
+- **Sicherung:** `tools/backup.sh` sichert das Volume nach dem Dump mit restic in dasselbe Repository, Tag
+  `jufi-dateien` (ohne `tmp/`), und räumt mit denselben Regeln auf wie beim Dump (siehe „Sicherung“).
+- **Prüfen:** `tools/restore-test.sh --dateien` stellt eine Stichprobe von bis zu 20 Dateien aus dem letzten Snapshot
+  wieder her und vergleicht ihre SHA-256-Summe mit der Tabelle `Datei` (siehe „Wiederherstellungsprobe“).
+  `tools/pruefe-betrieb.sh --slug <slug>` prüft nebenbei, dass `GET /<slug>/api/v1/dateien/x` und `…/dokumente` ohne
+  Sitzung 401 geben.
+
 ## Sicherung
 
 Die Postgres-Datenbank (`jufi-db`) ist das einzige Exemplar der Vereinsdaten. Deshalb läuft auf dem Server **täglich um
@@ -260,6 +284,12 @@ Die Postgres-Datenbank (`jufi-db`) ist das einzige Exemplar der Vereinsdaten. De
 4. Verschlüsselt mit restic nach außen schieben (Hetzner-Konto wie bei HWYD, SFTP, eigenes Repository `backups/jufi`, Tag `jufi-db`),
    prüfen, dass der Snapshot den Dump in voller Größe enthält, und erst dann aufräumen: 7 tägliche, 4 wöchentliche und
    6 monatliche Stände.
+
+5. Das Volume `jufi-dateien` (hochgeladene Dateien, Abschnitt „Dateien“) mit restic sichern, `--tag jufi-dateien`,
+   `tmp/` ausgenommen, prüfen, dass ein Snapshot von heute da ist, und aufräumen wie beim Dump. Das geschieht **nach**
+   dem Dump: Bytes verschwinden erst 24 Stunden nach dem Löschen der Zeile, also hat jede Zeile des Dumps ihre Bytes im
+   Snapshot. Fehlt das Volume noch (Server vor dem ersten Deploy der Dateien-Etappe), warnt der Lauf und sichert nur
+   den Dump. Ohne restic (`--no-restic`, etwa im Deploy vor der Migration) entfällt der Schritt.
 
 Das Protokoll ist die einzige Spur des nächtlichen Laufs: `tail -20 /var/log/jufi-backup.log`. Gelegentlich
 hineinsehen. Ohne `JUFI_RESTIC_REPOSITORY` in der `.env` endet der Lauf nach dem geprüften Dump und sagt, dass keine Kopie
@@ -313,6 +343,15 @@ Jede abweichende, fehlende oder zusätzliche Tabelle steht mit `✗` und Namen d
 der Vergleich gegen die **laufende** Datenbank geht, kann eine Tabelle seit dem Lauf um 03:40 gewachsen sein (Einladungen,
 Sitzungen); eine solche Abweichung ist erklärbar, eine fehlende Tabelle oder eine leere Wiederherstellung nie. Dann hilft
 es, die Probe gleich nach einem frischen `jufi-tools/backup.sh --local` zu machen.
+
+Mit `--dateien` prüft das Skript zusätzlich die Dateien: Es stellt bis zu 20 zufällige Dateien, die der zurückgelesene
+Dump kennt (`SELECT "vereinId", id, sha256 FROM "Datei" ORDER BY random() LIMIT 20`), aus dem letzten Snapshot mit Tag
+`jufi-dateien` wieder her und vergleicht `sha256sum` mit der Zeile. Je Datei steht `✓` oder `✗`; ein `✗` (fehlt im
+Snapshot, Summe weicht ab) beendet das Skript mit Exit 1, auch zusammen mit `--no-compare`. Das braucht
+`JUFI_RESTIC_REPOSITORY` und `JUFI_RESTIC_PASSWORD` auch dann, wenn der Dump mit `--dump` kommt. Verglichen wird eine
+Stichprobe, nicht der ganze Snapshot: Der Verein darf bis zu 5 GB belegen. Eine Datei, die erst nach dem Snapshot
+hochgeladen wurde, kann bei einem älteren `--dump` fehlen; die Probe gleich nach einem frischen
+`jufi-tools/backup.sh --local` zu machen vermeidet das.
 
 Weitere Aufrufe: `--dump <datei>` für einen bestimmten Dump (auch ein lokaler aus `backups/`), `--source remote` zum
 Vergleich gegen die Server-Datenbank vom Entwicklungsrechner aus, `--no-compare` nur zum Lesen.
@@ -383,7 +422,7 @@ Plattformseite `/` (die App, nicht der Entwurf), den Entwurf unter `/entwurf/` s
 Entwurf ist, bei `test.jufi-app.de` den Umzug (`app-test` → 301 mit Pfad und Anfrage), die Content-Security-Policy, mit
 `--slug` Manifest und Icons (192 und 512 px, mit Zeichnung) sowie den WebSocket (Abschnitt 7: ein Upgrade ohne Cookie auf
 `/<slug>/ws` muss mit 401 abgelehnt werden: dann hat er Traefik und die App erreicht) und die Link-Vorschau (Abschnitt 8: `/<slug>/t/vorschaupruefung`, eine ID, die es nicht gibt, muss mit 200, `Cache-Control: no-store` und dem `og:image` der App antworten; geprüft wird die Kette aus Traefik, App und Angular-Seite, nicht ein Thread), mit `--mail` SPF, DMARC (Abschnitt 9) und mit `--dkim-selector` DKIM
-(Abfrage über 1.1.1.1). Es braucht `curl`, `node` und `dig`. Der Selektor kommt von Hetzner.
+(Abfrage über 1.1.1.1). Mit `--slug` prüft Abschnitt 10 zudem, dass `/<slug>/api/v1/dateien/x` und `/<slug>/api/v1/dokumente` ohne Cookie mit 401 antworten. Es braucht `curl`, `node` und `dig`. Der Selektor kommt von Hetzner.
 
 `pruefe-texte.sh` zeigt mit Zeilennummern, was Impressum, Datenschutzerklärung und der Einwilligungstext (Fassung 1) noch
 an Platzhaltern haben, und endet mit Exit 1, solange etwas offen ist, mit Exit 0, wenn alles leer ist. Es ist **kein**
