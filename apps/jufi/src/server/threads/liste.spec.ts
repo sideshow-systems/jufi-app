@@ -1,4 +1,4 @@
-import { createPrismaClientFromEnv } from '@jufi/db';
+import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
 import type { StartAnsicht, TerminZeile, ThreadAnsicht, ThreadListe } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -375,6 +375,36 @@ describe('GET /threads', () => {
 				module: [{ typ: 'UMFRAGE', teilnahme: true, einheit: 'PERSON' }, termin('2026-10-26')],
 			});
 			expect(await start(s, s.sandra.cookie)).toEqual({ brauchtAntwort: [], alsNaechstes: [], neu: [] });
+		});
+
+		it('Braucht deine Antwort stimmt weiter, obwohl die Liste ohne Antworten laedt und nur aktive Threads nachlaedt', async () => {
+			const s = await szenario();
+			const umfrage = [{ typ: 'UMFRAGE' as const, teilnahme: true, einheit: 'PERSON' as const }];
+			// Archiviert mit offener Umfrage: kommt nicht vor.
+			await s.bowling('Vorbei', { archivModus: 'ARCHIVIERT', module: umfrage });
+			// Aktiv und fuer beide beantwortet: kommt nicht vor.
+			const fertig = await s.bowling('Fertig', { module: umfrage });
+			// Aktiv, nur fuer Sandra beantwortet: Lena fehlt noch.
+			const offen = await s.bowling('Offen', { module: umfrage });
+			const antworte = (t: typeof fertig, fuerId: string) =>
+				vereinDb(prisma, s.verein.id).umfrageAntwort.create({
+					data: {
+						umfrageId: t.modulIds[0],
+						fuerId,
+						vonId: s.sandra.personId,
+						abgegebenAm: JETZT,
+						clientId: randomUUID(),
+						optionen: { create: [{ optionId: t.optionIds['dabei'] }] },
+					},
+				});
+			await antworte(fertig, s.sandra.personId);
+			await antworte(fertig, s.lena.personId);
+			await antworte(offen, s.sandra.personId);
+
+			const sandra = await start(s, s.sandra.cookie);
+
+			expect(sandra.brauchtAntwort).toHaveLength(1);
+			expect(sandra.brauchtAntwort[0]).toMatchObject({ threadId: offen.threadId, vorname: 'Lena' });
 		});
 
 		it('ist ohne Anmeldung 401 und schreibt nichts', async () => {
