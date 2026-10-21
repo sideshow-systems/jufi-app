@@ -1,10 +1,16 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
+import type { EchtzeitSignal } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
+import { Bus } from './echtzeit/bus.js';
+import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
 import { Nachlauf } from './nachlauf.js';
@@ -1187,4 +1193,75 @@ describe('Mandanten-Test', () => {
 	});
 
 	it.each(Object.entries(FAELLE))('%s gibt nichts aus fremden Vereinen preis', async (_name, fall) => fall(kontext));
+});
+
+/**
+ * Die Sockets sind keine Vereins-Route und stehen darum nicht in FAELLE: Der Hub haelt die
+ * Sockets je Verein, und ein Ereignis aus Verein A darf keinen Socket aus Verein B erreichen.
+ */
+describe('Mandanten-Test Echtzeit', () => {
+	const prisma = createPrismaClientFromEnv();
+	const bus = new Bus();
+	const jetzt = new Date();
+	let server: Server;
+	let hub: Hub;
+	let url = '';
+	const sockets: WebSocket[] = [];
+
+	beforeAll(async () => {
+		const app = createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, bus });
+		server = createServer(app);
+		hub = new Hub({ prisma, umgebung: TEST_UMGEBUNG, jetzt: () => new Date(), bus });
+		hub.haengeAn(server);
+		await new Promise<void>((fertig) => server.listen(0, '127.0.0.1', fertig));
+		url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	});
+
+	afterAll(async () => {
+		for (const ws of sockets) ws.terminate();
+		await hub.schliesseAlle();
+		server.closeAllConnections();
+		await new Promise<void>((fertig, fehler) => server.close((err) => (err ? fehler(err) : fertig())));
+		await prisma.$disconnect();
+	});
+
+	/** Ein offener Socket, der alles mitschreibt, was der Hub ihm schickt. */
+	async function oeffne(slug: string, cookie: string): Promise<EchtzeitSignal[]> {
+		const ws = new WebSocket(`${url.replace('http', 'ws')}/${slug}/ws`, {
+			headers: { Cookie: cookie, Origin: TEST_UMGEBUNG.basisUrl },
+		});
+		sockets.push(ws);
+		const signale: EchtzeitSignal[] = [];
+		ws.on('message', (daten) => signale.push(JSON.parse(String(daten)) as EchtzeitSignal));
+		await new Promise<void>((fertig, fehler) => {
+			ws.once('open', () => fertig());
+			ws.once('error', fehler);
+		});
+		return signale;
+	}
+
+	it('ein Socket aus Verein B bekommt bei einer Nachricht in Verein A nichts', async () => {
+		const kuerzel = randomUUID().slice(0, 8);
+		const a = await legeVereinAn(prisma, { slug: `mandant-ws-a-${kuerzel}` });
+		const b = await legeVereinAn(prisma, { slug: `mandant-ws-b-${kuerzel}` });
+		// In beiden Vereinen ein Jugendleiter: Er saehe jeden Thread seines Vereins, eine
+		// Stille in B liegt also an der Vereinsgrenze und nicht an der Zielgruppe.
+		const leiterA = await legeMitgliedAn(prisma, a, { art: 'ERWACHSENER', rechte: ['THREADS_ERSTELLEN'], jetzt });
+		const leiterB = await legeMitgliedAn(prisma, b, { art: 'ERWACHSENER', rechte: ['THREADS_ERSTELLEN'], jetzt });
+		const { threadId } = await legeThreadAn(prisma, a, jetzt, { erstelltVonId: leiterA.personId });
+		const inA = await oeffne(a.slug, leiterA.cookie);
+		const inB = await oeffne(b.slug, leiterB.cookie);
+
+		const r = await sende(url, `/${a.slug}/api/v1/threads/${threadId}/verlauf`, {
+			methode: 'POST',
+			body: { text: 'Nur fuer Verein A', clientId: randomUUID() },
+			cookie: leiterA.cookie,
+		});
+		expect(r.status).toBe(201);
+		// Erst die Zustellung in A, dann die Stille in B: Bis A sein Signal hat, hat der Hub
+		// ueber alle Sockets entschieden.
+		await expect.poll(() => inA.map((s) => s.threadId)).toEqual([threadId]);
+		await new Promise((fertig) => setTimeout(fertig, 300));
+		expect(inB).toEqual([]);
+	});
 });

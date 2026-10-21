@@ -1,5 +1,6 @@
 import { MITGLIEDER_COOKIE, MITGLIEDER_SITZUNG_SEKUNDEN } from '@jufi/auth';
-import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
+import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
+import type { EchtzeitSignal, ThreadBearbeitung, VerlaufAnsicht } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -10,6 +11,7 @@ import { createApp } from '../app.js';
 import { legeSitzungAn } from '../mitglieder/sitzung.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, TEST_UMGEBUNG } from '../test-setup.js';
+import { legeThreadAn, ordneZu } from '../threads/test-threads.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { Bus } from './bus.js';
 import { Hub } from './hub.js';
@@ -17,6 +19,12 @@ import { Hub } from './hub.js';
 const T0 = new Date('2026-10-22T10:00:00.000Z');
 // Kurz, damit der Ping-Test nicht 30 Sekunden wartet; die Tests stellen die Uhr, nicht die Zeit.
 const PING_MS = 50;
+/**
+ * So lange gilt "nichts empfangen". Kein Beweis, aber jeder solche Test zeigt vorher im selben
+ * Ablauf, dass ein Signal desselben Ereignisses bei einem anderen Socket ankam: Bis dahin hat
+ * der Hub fuer alle Sockets entschieden, die 300 ms decken nur noch den Weg durchs Netz.
+ */
+const STILLE_MS = 300;
 
 /** Wie ein Upgrade-Versuch ausging: offen, mit HTTP-Status abgelehnt, oder ohne Antwort zerstoert. */
 type Ausgang = { art: 'offen'; client: Client } | { art: 'abgelehnt'; status: number } | { art: 'zerstoert' };
@@ -28,6 +36,8 @@ type Ausgang = { art: 'offen'; client: Client } | { art: 'abgelehnt'; status: nu
 interface Client {
 	ws: WebSocket;
 	geschlossen: Promise<number>;
+	/** Alles, was der Hub geschickt hat, in Empfangsreihenfolge. */
+	signale: EchtzeitSignal[];
 }
 
 // Wer auf das Schliessen beim Client wartet, ist dem Server einen Schritt voraus: Dessen
@@ -41,8 +51,8 @@ describe('Hub', () => {
 	let port = 0;
 	const clients: WebSocket[] = [];
 
-	beforeEach(async () => {
-		uhr = T0;
+	/** App und Hub an einem Bus; hubPrisma ersetzt nur den Client des Hubs (Test der Nachpruefung). */
+	async function starte(hubPrisma: PrismaClient = prisma): Promise<void> {
 		bus = new Bus();
 		const app = createApp({
 			prisma,
@@ -52,18 +62,25 @@ describe('Hub', () => {
 			bus,
 		});
 		server = createServer(app);
-		hub = new Hub({ prisma, umgebung: TEST_UMGEBUNG, jetzt: () => uhr, bus, pingMs: PING_MS });
+		hub = new Hub({ prisma: hubPrisma, umgebung: TEST_UMGEBUNG, jetzt: () => uhr, bus, pingMs: PING_MS });
 		hub.haengeAn(server);
 		await new Promise<void>((fertig) => server.listen(0, '127.0.0.1', fertig));
 		port = (server.address() as AddressInfo).port;
-	});
+	}
 
-	afterEach(async () => {
+	async function stoppe(): Promise<void> {
 		for (const ws of clients.splice(0)) ws.terminate();
 		await hub.schliesseAlle();
 		server.closeAllConnections();
 		await new Promise<void>((fertig, fehler) => server.close((err) => (err ? fehler(err) : fertig())));
+	}
+
+	beforeEach(async () => {
+		uhr = T0;
+		await starte();
 	});
+
+	afterEach(stoppe);
 
 	afterAll(async () => {
 		await prisma.$disconnect();
@@ -86,8 +103,10 @@ describe('Hub', () => {
 		// duerfen den Testlauf nicht als unbehandeltes Ereignis beenden.
 		ws.on('error', () => undefined);
 		const geschlossen = new Promise<number>((fertig) => ws.once('close', (code) => fertig(code)));
+		const signale: EchtzeitSignal[] = [];
+		ws.on('message', (daten) => signale.push(JSON.parse(String(daten)) as EchtzeitSignal));
 		return new Promise((fertig) => {
-			ws.once('open', () => fertig({ art: 'offen', client: { ws, geschlossen } }));
+			ws.once('open', () => fertig({ art: 'offen', client: { ws, geschlossen, signale } }));
 			ws.once('unexpected-response', (_req, res) => {
 				fertig({ art: 'abgelehnt', status: res.statusCode ?? 0 });
 				res.resume();
@@ -121,6 +140,42 @@ describe('Hub', () => {
 		const api = (pfad: string) => `/${verein.slug}/api/v1${pfad}`;
 		return { verein, thomas, api };
 	}
+
+	/**
+	 * Thomas ist Jugendleiter und legt die Threads an, Sandra ist die Mutter von Lena und sieht
+	 * damit jeden Thread fuer "Jungfischer und Familie", aber keinen "Nur Jugendleiter".
+	 */
+	async function familie() {
+		const verein = await legeVereinAn(prisma, { slug: `hub-signal-${randomUUID().slice(0, 8)}` });
+		const mitglied = (e: Parameters<typeof legeMitgliedAn>[2]) => legeMitgliedAn(prisma, verein, { jetzt: T0, ...e });
+		const thomas = await mitglied({
+			art: 'ERWACHSENER',
+			vorname: 'Thomas',
+			nachname: 'Leiter',
+			rechte: ['MITGLIEDER', 'THREADS_ERSTELLEN'],
+		});
+		const sandra = await mitglied({ art: 'ERWACHSENER', vorname: 'Sandra', nachname: 'Mutter' });
+		const lena = await mitglied({ art: 'JUNGFISCHER', vorname: 'Lena', nachname: 'Mutter' });
+		await ordneZu(prisma, verein, sandra.personId, lena.personId);
+		const api = (pfad: string) => `/${verein.slug}/api/v1${pfad}`;
+		const thread = (daten: Parameters<typeof legeThreadAn>[3] = {}) =>
+			legeThreadAn(prisma, verein, T0, { titel: 'Bowling', erstelltVonId: thomas.personId, ...daten });
+		const schreibe = async (threadId: string, cookie: string, text: string) => {
+			const r = await sende(url(), api(`/threads/${threadId}/verlauf`), {
+				methode: 'POST',
+				body: { text, clientId: randomUUID() },
+				cookie,
+			});
+			expect(r.status).toBe(201);
+			return (await r.json()) as { eintrag: VerlaufAnsicht; stand: number };
+		};
+		const stand = async () =>
+			(await prisma.verein.findUniqueOrThrow({ where: { id: verein.id }, select: { aenderungsstand: true } }))
+				.aenderungsstand;
+		return { verein, thomas, sandra, lena, api, thread, schreibe, stand };
+	}
+
+	const stille = () => new Promise((fertig) => setTimeout(fertig, STILLE_MS));
 
 	describe('Upgrade', () => {
 		it('oeffnet mit gueltigem Cookie und eigenem Origin unter /<slug>/ws', async () => {
@@ -250,6 +305,37 @@ describe('Hub', () => {
 			expect(hub.anzahl(b.verein.id)).toBe(1);
 		});
 
+		it('ein Abmelden waehrend des Upgrades schliesst den frisch geoeffneten Socket mit 4401', async () => {
+			const s = await szenario();
+			// Der Hub liest die Sitzung, dann meldet sich die Person ab, bevor er den Socket aufnimmt:
+			// Die Pruefung zu pruefen sieht den Socket noch nicht, der Socket muss selbst nachpruefen.
+			// Am Lesen der Sitzung statt am Laden des Vereins: Fehlte die Sitzung schon dort, endete
+			// das Upgrade mit 401 und der Socket kaeme gar nicht erst auf.
+			let einmal = true;
+			const abmeldend = prisma.$extends({
+				query: {
+					session: {
+						async findUnique({ args, query }) {
+							const ergebnis = await query(args);
+							if (einmal) {
+								einmal = false;
+								await prisma.session.deleteMany({ where: { zugangId: s.thomas.zugangId } });
+								bus.melde({ typ: 'pruefen', vereinId: s.verein.id });
+							}
+							return ergebnis;
+						},
+					},
+				},
+			}) as unknown as PrismaClient;
+			await stoppe();
+			await starte(abmeldend);
+
+			const c = await oeffne(s.verein.slug, s.thomas.cookie);
+			expect(einmal).toBe(false);
+			expect(await c.geschlossen).toBe(4401);
+			await expect.poll(() => hub.anzahl(s.verein.id)).toBe(0);
+		});
+
 		it('eine abgelaufene Sitzung faellt beim naechsten Ping mit 4401 heraus', async () => {
 			const s = await szenario();
 			const c = await oeffne(s.verein.slug, s.thomas.cookie);
@@ -280,6 +366,115 @@ describe('Hub', () => {
 			// 1006: Der Hub hat die Verbindung ohne Schliess-Handschlag gekappt.
 			expect(await ausgang.client.geschlossen).toBe(1006);
 			await expect.poll(() => hub.anzahl(s.verein.id)).toBe(0);
+		});
+	});
+
+	describe('Signale', () => {
+		it('eine Nachricht im Bowling-Verlauf kommt bei Thomas und Sandra an, je mit ihrer Ansicht', async () => {
+			const f = await familie();
+			const bowling = await f.thread();
+			const thomas = await oeffne(f.verein.slug, f.thomas.cookie);
+			const sandra = await oeffne(f.verein.slug, f.sandra.cookie);
+
+			const { eintrag, stand } = await f.schreibe(bowling.threadId, f.thomas.cookie, 'Wer faehrt mit?');
+			const signal = { stand, threadId: bowling.threadId, art: 'VERLAUF', objektId: eintrag.id };
+			await expect.poll(() => thomas.signale).toEqual([{ ...signal, eintrag }]);
+			await expect
+				.poll(() => sandra.signale)
+				.toEqual([{ ...signal, eintrag: { ...eintrag, eigen: false, darfLoeschen: false } }]);
+			// Spec 3.10: der Jugendleiter mit Zusatz, fuer alle gleich.
+			expect(eintrag).toMatchObject({ eigen: true, absender: 'Thomas L. (Jugendleiter)', text: 'Wer faehrt mit?' });
+		});
+
+		it('eine Nachricht in einem Thread nur fuer Jugendleiter erreicht Sandra nicht', async () => {
+			const f = await familie();
+			const intern = await f.thread({ titel: 'Leiterrunde', rollenfilter: 'NUR_JUGENDLEITER' });
+			const thomas = await oeffne(f.verein.slug, f.thomas.cookie);
+			const sandra = await oeffne(f.verein.slug, f.sandra.cookie);
+
+			const { eintrag } = await f.schreibe(intern.threadId, f.thomas.cookie, 'Nur unter uns');
+			await expect.poll(() => thomas.signale.map((s) => s.objektId)).toEqual([eintrag.id]);
+			await stille();
+			expect(sandra.signale).toEqual([]);
+		});
+
+		it('wird Bowling nur fuer Jugendleiter, bekommt Sandra SICHTBARKEIT mit der Thread-ID', async () => {
+			const f = await familie();
+			const bowling = await f.thread();
+			const thomas = await oeffne(f.verein.slug, f.thomas.cookie);
+			const sandra = await oeffne(f.verein.slug, f.sandra.cookie);
+
+			const b = await sende(url(), f.api(`/threads/${bowling.threadId}/bearbeitung`), { cookie: f.thomas.cookie });
+			const { version, entwurf } = (await b.json()) as ThreadBearbeitung;
+			const r = await sende(url(), f.api(`/threads/${bowling.threadId}`), {
+				methode: 'PUT',
+				body: { version, entwurf: { ...entwurf, rollenfilter: 'NUR_JUGENDLEITER' } },
+				cookie: f.thomas.cookie,
+			});
+			expect(r.status).toBe(200);
+			const stand = await f.stand();
+
+			// Thomas sieht den Thread weiter und bekommt beides; Sandra nur, dass er weg ist.
+			await expect
+				.poll(() => thomas.signale.map((s) => [s.stand, s.threadId, s.art]).sort())
+				.toEqual([
+					[stand, bowling.threadId, 'SICHTBARKEIT'],
+					[stand, bowling.threadId, 'THREAD'],
+				]);
+			await expect
+				.poll(() => sandra.signale)
+				.toEqual([expect.objectContaining({ stand, threadId: bowling.threadId, art: 'SICHTBARKEIT' })]);
+		});
+
+		it('kommt Lena in eine Untergruppe, bekommen beide threadId null, und danach gilt das neue Umfeld', async () => {
+			const f = await familie();
+			const aal = await vereinDb(prisma, f.verein.id).untergruppe.create({ data: { name: 'Aal' } });
+			const aalThread = await f.thread({ titel: 'Aal-Training', untergruppenIds: [aal.id] });
+			const thomas = await oeffne(f.verein.slug, f.thomas.cookie);
+			const sandra = await oeffne(f.verein.slug, f.sandra.cookie);
+
+			// Vorher: Lena ist in keiner Untergruppe, Sandra sieht den Thread nicht. Das laedt
+			// zugleich das Umfeld des Vereins in den Hub, das die Aenderung danach verwerfen muss.
+			const vorher = await f.schreibe(aalThread.threadId, f.thomas.cookie, 'Training am Samstag');
+			await expect.poll(() => thomas.signale.map((s) => s.objektId)).toEqual([vorher.eintrag.id]);
+			await stille();
+			expect(sandra.signale).toEqual([]);
+
+			const r = await sende(url(), f.api(`/personen/${f.lena.personId}/untergruppen`), {
+				methode: 'PUT',
+				body: { untergruppenIds: [aal.id] },
+				cookie: f.thomas.cookie,
+			});
+			expect(r.status).toBe(200);
+			const stand = await f.stand();
+			const umfeld = { stand, threadId: null, art: 'SICHTBARKEIT', objektId: f.lena.personId };
+			await expect.poll(() => thomas.signale.slice(1)).toEqual([umfeld]);
+			await expect.poll(() => sandra.signale).toEqual([umfeld]);
+
+			const danach = await f.schreibe(aalThread.threadId, f.thomas.cookie, 'Lena ist jetzt dabei');
+			await expect
+				.poll(() => sandra.signale.slice(1))
+				.toEqual([
+					{
+						stand: danach.stand,
+						threadId: aalThread.threadId,
+						art: 'VERLAUF',
+						objektId: danach.eintrag.id,
+						eintrag: { ...danach.eintrag, eigen: false, darfLoeschen: false },
+					},
+				]);
+		});
+
+		it('Signale eines Vereins kommen in der Reihenfolge der Staende an', async () => {
+			const f = await familie();
+			const bowling = await f.thread();
+			const sandra = await oeffne(f.verein.slug, f.sandra.cookie);
+
+			const staende: number[] = [];
+			for (const text of ['eins', 'zwei', 'drei', 'vier']) {
+				staende.push((await f.schreibe(bowling.threadId, f.thomas.cookie, text)).stand);
+			}
+			await expect.poll(() => sandra.signale.map((s) => s.stand)).toEqual(staende);
 		});
 	});
 

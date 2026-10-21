@@ -1,8 +1,10 @@
 import { vereinDb, type PrismaClient } from '@jufi/db';
+import { signaleFuer, type Umfeld } from '@jufi/domain';
 import { STATUS_CODES, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loeseSitzungAuf, sitzungGilt } from '../mitglieder/sitzung.js';
+import { ladeKoepfe, ladeThreadUmfeld } from '../threads/laden.js';
 import type { Umgebung } from '../umgebung.js';
 import { ladeVereinAusSlug } from '../verein.js';
 import type { Bus, BusEreignis } from './bus.js';
@@ -48,8 +50,10 @@ export interface HubDeps {
 	pingMs?: number;
 }
 
+type Aenderungsereignis = Extract<BusEreignis, { typ: 'aenderung' }>;
+
 /**
- * Haelt die WebSockets der Mitglieder je Verein (Spec 5.1).
+ * Haelt die WebSockets der Mitglieder je Verein (Spec 5.1) und verteilt die Signale.
  *
  * Er haengt am Bus und nicht an den Routen (Plan-Entscheidung 1): Die Routen melden nach dem
  * Commit, der Hub abonniert. Verworfen: Routen rufen den Hub direkt -- jeder Routen-Test
@@ -70,6 +74,15 @@ export interface HubDeps {
  * Person. Verworfen: 401/404 auch fuer den Origin (Spec 5.1 woertlich) -- die REST-Pruefung
  * antwortet 403, und der Unterschied verraet nichts.
  *
+ * Signale ohne Abo je Thread (Plan-Entscheidung 2): Je Ereignis laedt der Hub die Koepfe der
+ * betroffenen Threads in einer Abfrage, nimmt das Umfeld des Vereins aus einem Cache und laesst
+ * signaleFuer je Socket entscheiden, was die Person erfaehrt; eine eigene Sichtpruefung hat der
+ * Hub nicht. Den Cache verwirft jede Umfeld-Aenderung (Aenderung ohne Thread), und eine solche
+ * kommt bei jeder Aenderung an Personen, Familien, Untergruppen und Rechten (Plan-Entscheidung 3).
+ * Verworfen: den Kopf von vorher durch das Ereignis reichen, damit SICHTBARKEIT und GELOESCHT
+ * nur an die gehen, die den Thread bisher sahen -- jede Route muesste ihn laden, und gewonnen
+ * waere nur eine zufaellige ID, die nichts verraet (5.2 nennt sie mit unsichtbar ohnehin).
+ *
  * noServer statt new WebSocketServer({ server }): ws beantwortete sonst jedes Upgrade auf
  * jedem Pfad selbst, und die Pruefungen davor sind asynchron (Datenbank); verifyClient
  * koennte das, raten die ws-Autoren aber selbst ab.
@@ -78,6 +91,20 @@ export class Hub {
 	// Der Client schickt nichts; 1 KiB reicht fuer jeden Steuerrahmen und haelt Unfug klein.
 	private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 1024 });
 	private readonly vereine = new Map<string, Set<Verbindung>>();
+	/**
+	 * Das Umfeld je Verein, als Promise: Ereignisse, die waehrend des Ladens kommen, warten auf
+	 * dieselbe Abfrage statt eine eigene zu starten. Verworfen: das Umfeld je Ereignis frisch
+	 * laden -- jede Nachricht im Chat laede dann alle Personen und Zuordnungen des Vereins, obwohl
+	 * sie sich nur mit einer Umfeld-Aenderung aendern, und die verwirft den Eintrag.
+	 */
+	private readonly umfelder = new Map<string, Promise<Umfeld>>();
+	/**
+	 * Das Ende der Verteilung je Verein. Jedes Ereignis haengt sich hinten an, damit die Signale
+	 * eines Vereins in der Reihenfolge der Staende ankommen: Ein spaeteres Ereignis mit Umfeld aus
+	 * dem Cache ueberholte sonst eines, das noch laedt. Je Verein statt einer fuer alle, damit ein
+	 * langsamer Verein die anderen nicht aufhaelt.
+	 */
+	private readonly ketten = new Map<string, Promise<void>>();
 	private readonly ursprung: string;
 	private readonly abbestellen: () => void;
 	private takt: NodeJS.Timeout | undefined;
@@ -117,6 +144,9 @@ export class Hub {
 		this.abbestellen();
 		clearInterval(this.takt);
 		this.takt = undefined;
+		// Laufende Verteilungen fragen noch die Datenbank; wer danach die Verbindung schliesst,
+		// soll nicht in eine offene Abfrage fallen. Sie scheitern nie (verteile faengt ab).
+		const laufend = [...this.ketten.values()];
 		const alle = [...this.vereine.values()].flatMap((set) => [...set]);
 		await Promise.all(
 			alle.map(
@@ -131,6 +161,8 @@ export class Hub {
 					}),
 			),
 		);
+		await Promise.all(laufend);
+		this.umfelder.clear();
 	}
 
 	/** Offene Sockets, insgesamt oder eines Vereins. */
@@ -208,7 +240,12 @@ export class Hub {
 		v.ws.once('close', () => {
 			const aktuell = this.vereine.get(v.vereinId);
 			aktuell?.delete(v);
-			if (aktuell?.size === 0) this.vereine.delete(v.vereinId);
+			if (aktuell?.size === 0) {
+				this.vereine.delete(v.vereinId);
+				// Ohne Socket laedt der Verein nichts mehr; ein liegengebliebenes Umfeld waere nur
+				// Speicher und muesste sonst auch fuer Vereine verworfen werden, die keiner sieht.
+				this.umfelder.delete(v.vereinId);
+			}
 		});
 	}
 
@@ -224,7 +261,14 @@ export class Hub {
 	 * Sitzung beim Upgrade selbst geprueft (und prueft nach, siehe pruefungen).
 	 */
 	private beiEreignis(e: BusEreignis): void {
-		if (e.typ === 'aenderung' && !e.aenderungen.some((a) => a.threadId === null)) return;
+		if (e.typ === 'aenderung') {
+			const umfeldGeaendert = e.aenderungen.some((a) => a.threadId === null);
+			// Jetzt verwerfen, nicht erst in der Kette: Was danach geladen wird, ist nach dem Commit
+			// dieser Aenderung gelesen, fuer dieses Ereignis und alle spaeteren.
+			if (umfeldGeaendert) this.umfelder.delete(e.vereinId);
+			this.reiheEin(e);
+			if (!umfeldGeaendert) return;
+		}
 		this.pruefungen++;
 		const set = this.vereine.get(e.vereinId);
 		if (set?.size) this.pruefeSicher(e.vereinId, [...set]);
@@ -251,6 +295,60 @@ export class Hub {
 			}
 		}
 		for (const [vereinId, liste] of abgelaufen) this.pruefeSicher(vereinId, liste);
+	}
+
+	/** Haengt die Verteilung hinten an die Kette des Vereins; der Bus wartet nicht darauf. */
+	private reiheEin(e: Aenderungsereignis): void {
+		const vorher = this.ketten.get(e.vereinId) ?? Promise.resolve();
+		const fertig = vorher.then(() => this.verteile(e)).catch((error: unknown) => logge('Verteilen', error));
+		this.ketten.set(e.vereinId, fertig);
+		void fertig.then(() => {
+			if (this.ketten.get(e.vereinId) === fertig) this.ketten.delete(e.vereinId);
+		});
+	}
+
+	/**
+	 * Die Sockets werden erst nach dem Laden gelesen: Wer waehrenddessen dazukam, bekommt das
+	 * Signal auch, wer ging, nicht. Nur an offene Sockets: Einer, den pruefe mit 4401 schliesst,
+	 * bleibt bis zum Ende des Handschlags im Verein, soll aber nichts mehr erfahren.
+	 */
+	private async verteile(e: Aenderungsereignis): Promise<void> {
+		// Ohne Socket nichts laden: Die meisten Vereine haben die meiste Zeit niemanden verbunden.
+		if (!this.vereine.get(e.vereinId)?.size) return;
+		const db = vereinDb(this.d.prisma, e.vereinId);
+		const threadIds = [...new Set(e.aenderungen.flatMap((a) => (a.threadId === null ? [] : [a.threadId])))];
+		const [umfeld, koepfe] = await Promise.all([this.umfeld(e.vereinId), ladeKoepfe(db, threadIds)]);
+		// Mehrere Tabs einer Person bekommen dieselben Signale; einmal gebaut genuegt.
+		const nachrichten = new Map<string, string[]>();
+		for (const v of this.vereine.get(e.vereinId) ?? []) {
+			if (v.ws.readyState !== WebSocket.OPEN) continue;
+			let fuerPerson = nachrichten.get(v.personId);
+			if (!fuerPerson) {
+				const signale = signaleFuer({
+					ich: umfeld.personen.get(v.personId),
+					umfeld,
+					koepfe,
+					stand: e.stand,
+					aenderungen: e.aenderungen,
+					eintraege: e.eintraege,
+				});
+				fuerPerson = signale.map((signal) => JSON.stringify(signal));
+				nachrichten.set(v.personId, fuerPerson);
+			}
+			for (const nachricht of fuerPerson) v.ws.send(nachricht);
+		}
+	}
+
+	/** Das Umfeld aus dem Cache. Ein gescheitertes Laden bleibt nicht liegen, das naechste versucht es neu. */
+	private umfeld(vereinId: string): Promise<Umfeld> {
+		const vorhanden = this.umfelder.get(vereinId);
+		if (vorhanden) return vorhanden;
+		const geladen = ladeThreadUmfeld(vereinDb(this.d.prisma, vereinId));
+		this.umfelder.set(vereinId, geladen);
+		geladen.catch(() => {
+			if (this.umfelder.get(vereinId) === geladen) this.umfelder.delete(vereinId);
+		});
+		return geladen;
 	}
 
 	private pruefeSicher(vereinId: string, verbindungen: readonly Verbindung[]): void {
