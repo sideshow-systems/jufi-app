@@ -111,6 +111,15 @@ export class Echtzeit {
 	private neuVersuch: ReturnType<typeof setTimeout> | null = null;
 	private hinweis: ReturnType<typeof setTimeout> | null = null;
 	private abgleiche = new Subscription();
+	/**
+	 * Wahr ab dem Beginn eines Abgleichs bis zum Erfolg des zuletzt begonnenen. Solange heben Signale
+	 * den Stand nicht an: Der Abgleich soll die Luecke davor belegen, und scheitert er, faengt der
+	 * naechste beim alten Stand an statt bei dem eines Signals, das ueber die Luecke hinweg kam
+	 * (Review Task 9). Verworfen: nur den Socket nach einem Fehler schliessen, denn ein Signal zwischen
+	 * Beginn und Fehler haette den Stand schon gehoben.
+	 */
+	private abgleichOffen = false;
+	private abgleichNr = 0;
 
 	private readonly sichtbarkeit = (): void => this.sichtbarkeitGeaendert();
 
@@ -133,6 +142,7 @@ export class Echtzeit {
 		this.slug = null;
 		this.aufgegeben = false;
 		this.stand = null;
+		this.abgleichOffen = false;
 		this.wartezeit = ERSTE_WARTEZEIT_MS;
 		this.abgleiche.unsubscribe();
 		this.abgleiche = new Subscription();
@@ -165,7 +175,7 @@ export class Echtzeit {
 			if (this.socket !== s) return;
 			const signal = liesSignal(nachricht.data);
 			if (!signal) return;
-			this.stand = Math.max(this.stand ?? signal.stand, signal.stand);
+			if (!this.abgleichOffen) this.stand = Math.max(this.stand ?? signal.stand, signal.stand);
 			this.quelle.next({ typ: 'signal', signal });
 		};
 		s.onclose = (ereignis) => {
@@ -174,22 +184,29 @@ export class Echtzeit {
 			this.verbundenWert.set(false);
 			this.planeHinweis();
 			if (ereignis.code === SERVER_FAEHRT_HERUNTER) this.planeNeuVersuch();
-			else this.gleicheAb(() => this.planeNeuVersuch());
+			else this.gleicheAb();
 		};
 	}
 
 	/**
-	 * Fragt GET /sync ab dem bekannten Stand. danach laeuft nur, wenn weiter verbunden werden soll:
-	 * nach Erfolg und nach Fehlern ohne Aussage (Netz, 5xx), nicht nach 401 und 404.
+	 * Fragt GET /sync ab dem bekannten Stand. 401 und 404 beenden die Verbindung. Ein Fehler ohne
+	 * Aussage (Netz, 5xx) bei offenem Socket schliesst ihn: Der Abgleich nach dem naechsten Oeffnen
+	 * holt nach, und der Backoff des Neuverbindens taktet auch die Wiederholung (verworfen: ein eigener
+	 * Zeitgeber fuer den Abgleich neben dem des Neuverbindens). Ohne Socket (nach einem Abbruch) folgt
+	 * auf jeden solchen Ausgang der geplante Neuversuch.
 	 */
-	private gleicheAb(danach?: () => void): void {
+	private gleicheAb(): void {
 		const slug = this.slug;
 		if (slug === null) return;
+		const socket = this.socket;
+		const nr = ++this.abgleichNr;
+		this.abgleichOffen = true;
 		this.abgleiche.add(
 			this.api.sync(slug, this.stand).subscribe({
 				next: (antwort) => {
+					if (nr === this.abgleichNr) this.abgleichOffen = false;
 					this.wendeAn(antwort);
-					danach?.();
+					this.weiterNachAbgleich();
 				},
 				error: (roh: unknown) => {
 					const fehler = alsApiFehler(roh);
@@ -198,10 +215,16 @@ export class Echtzeit {
 						if (fehler.status === 401) void beiAbgelaufenerSitzung(this.router, slug, fehler);
 						return;
 					}
-					danach?.();
+					if (socket !== null && this.socket === socket) this.trenne();
+					this.weiterNachAbgleich();
 				},
 			}),
 		);
+	}
+
+	/** Ohne Socket und ohne geplanten Versuch neu verbinden; ein offener oder geplanter bleibt, wie er ist. */
+	private weiterNachAbgleich(): void {
+		if (this.socket === null && this.neuVersuch === null) this.planeNeuVersuch();
 	}
 
 	/**
@@ -221,12 +244,18 @@ export class Echtzeit {
 		}
 	}
 
+	/** Ohne Neuverbinden; der Hinweis kommt wie nach jedem Abbruch, denn die Inhalte stehen still. */
 	private gibAuf(): void {
 		this.aufgegeben = true;
 		if (this.neuVersuch !== null) clearTimeout(this.neuVersuch);
 		this.neuVersuch = null;
+		this.trenne();
+	}
+
+	private trenne(): void {
 		this.schliesseSocket();
 		this.verbundenWert.set(false);
+		this.planeHinweis();
 	}
 
 	/** 1 s, verdoppelt bis 30 s, je ±20 %; ganze Millisekunden, damit Zeitgeber nicht runden muessen. */
@@ -295,9 +324,13 @@ function liesSignal(daten: unknown): EchtzeitSignal | null {
 /**
  * Bereitstellung in der Huelle: je Huelle ein eigener Dienst, ausser weiter oben steht schon einer.
  * Das ist die stille Attrappe der Tests (adminTestAnbieter); in der App stellt ihn niemand sonst
- * bereit. Verworfen: Echtzeit schlicht in providers, dann kaeme keine Attrappe an der Huelle vorbei,
- * und jede Spec unter ihr oeffnete einen Socket; und TestBed.overrideProvider, das die Anbieter
- * einer erst ueber den Router erreichten Komponente nicht sicher trifft.
+ * bereit, und das muss so bleiben: Stuende Echtzeit an der Wurzel oder an einer Route, teilten sich
+ * alle Huellen einen Dienst, und das Schliessen ueber die DestroyRef der Huelle entfiele.
+ * Verworfen: Echtzeit schlicht in providers, dann kaeme keine Attrappe an der Huelle vorbei, und jede
+ * Spec unter ihr oeffnete einen Socket; TestBed.overrideProvider, das die Anbieter einer erst ueber
+ * den Router erreichten Komponente nicht sicher trifft; TestBed.overrideComponent an der Huelle, das
+ * in jeder Spec neben configureTestingModule stehen muesste (adminTestAnbieter liefert nur Anbieter)
+ * und die Huelle je Test neu uebersetzte.
  */
 export const echtzeitDerHuelle: Provider = {
 	provide: Echtzeit,

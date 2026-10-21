@@ -49,7 +49,10 @@ const leereStart: HttpInterceptorFn = (anfrage, weiter) =>
  * TestBed.inject(EchtzeitAttrappe) liefert dieselbe Instanz, die die Huelle bekommt.
  */
 @Injectable()
-export class EchtzeitAttrappe {
+export class EchtzeitAttrappe implements Pick<
+	Echtzeit,
+	'verbunden' | 'getrennt' | 'vordergrund' | 'ereignisse' | 'starte' | 'stoppe'
+> {
 	readonly verbunden = signal(false);
 	readonly getrennt = signal(false);
 	readonly vordergrund = signal(true);

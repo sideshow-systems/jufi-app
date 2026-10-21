@@ -4,12 +4,13 @@ import { DestroyRef, effect, type Injector, type Signal, signal, untracked } fro
 const ENTPRELLEN_MS = 250;
 
 /**
- * Laedt eine Ressource auf Anlass neu, ohne einen Anlass zu verlieren (Entscheidung 10). reload() ist
- * waehrend einer laufenden Anfrage wirkungslos; kaeme ein Signal genau dann, zeigte die Seite die
- * Antwort von davor, bis zum naechsten Anlass (Rueckstand M2). Deshalb merkt sich der Nachlader den
- * Anlass und laedt nach dem Ende der Anfrage genau einmal neu. Verworfen: reload() direkt aufrufen
- * (eben jener Verlust) und die laufende Anfrage abbrechen und neu stellen (bei vielen Signalen kaeme
- * die Ressource nie zu einer Antwort).
+ * Laedt eine Ressource auf Anlass neu, ohne einen Anlass zu verlieren (Entscheidung 10). reload() haengt
+ * am Zustand der Ressource: Waehrend der ersten Ladung oder nach neuen Parametern (loading) ist es
+ * wirkungslos, und ein Signal genau dann ginge verloren, die Seite zeigte die Antwort von davor bis zum
+ * naechsten Anlass (Rueckstand M2). Waehrend eines Neuladens (reloading) bricht es die laufende Anfrage
+ * ab und stellt eine neue. Der Nachlader merkt sich den Anlass in beiden Faellen und laedt nach dem Ende
+ * der Anfrage genau einmal neu. Verworfen: reload() direkt aufrufen (der Verlust in loading und das
+ * Abbrechen in reloading: bei vielen Signalen kaeme die Ressource nie zu einer Antwort).
  *
  * Der Zeitgeber laeuft nur, wenn es einen Anlass gibt; im Server-Rendering kommt keiner, denn dort
  * verbindet sich Echtzeit nicht.

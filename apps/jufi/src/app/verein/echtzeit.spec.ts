@@ -166,6 +166,91 @@ describe('Echtzeit', () => {
 		http.expectOne(`${SYNC}?seit=12`).flush(antwort({ stand: 12 }));
 	});
 
+	// Review Important 1: Ein gescheiterter Abgleich bei offenem Socket darf die Luecke nicht verschlucken.
+	it('fragt nach einem gescheiterten ersten Abgleich nicht ab dem Stand eines spaeteren Signals', () => {
+		bereite();
+		vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		echtzeit.starte('demo');
+		zuletzt().oeffne();
+		http.expectOne(SYNC).flush({ fehler: 'kaputt' }, { status: 500, statusText: 'Server Error' });
+		zuletzt().sende(signal({ stand: 9 }));
+
+		zeige('visible');
+		vi.advanceTimersByTime(1000);
+		if (FalscherSocket.alle.length > 1) zuletzt().oeffne();
+		http.expectNone(`${SYNC}?seit=9`);
+		http.expectOne(SYNC).flush(antwort({ stand: 9, vollstaendig: true }));
+		expect(ereignisse.at(-1)).toEqual({ typ: 'alles' });
+	});
+
+	it('hebt den Stand nicht ueber ein Signal, das waehrend eines spaeter gescheiterten Abgleichs kam', () => {
+		bereite();
+		vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const s = verbinde(5);
+
+		zeige('visible');
+		const offen = http.expectOne(`${SYNC}?seit=5`);
+		s.sende(signal({ stand: 9 }));
+		offen.error(new ProgressEvent('error'));
+
+		// Der Socket ist zu, der Hinweis kommt wie nach jedem Abbruch, und der naechste Versuch gleicht ab 5 ab.
+		expect(s.geschlossenMit).toBe(1000);
+		expect(echtzeit.verbunden()).toBe(false);
+		vi.advanceTimersByTime(1000);
+		expect(FalscherSocket.alle.length).toBe(2);
+		zuletzt().oeffne();
+		http.expectOne(`${SYNC}?seit=5`).flush(antwort({ stand: 9, geaendert: ['t1'] }));
+		expect(ereignisse.at(-1)).toEqual({ typ: 'sync', geaendert: ['t1'], unsichtbar: [] });
+		vi.advanceTimersByTime(2000);
+		expect(echtzeit.getrennt()).toBe(false);
+	});
+
+	it('zeigt den Hinweis, wenn der Abgleich im Vordergrund mit 404 endet', () => {
+		bereite();
+		verbinde(5);
+
+		zeige('visible');
+		http.expectOne(`${SYNC}?seit=5`).flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+		expect(echtzeit.verbunden()).toBe(false);
+		vi.advanceTimersByTime(2000);
+		expect(echtzeit.getrennt()).toBe(true);
+		vi.advanceTimersByTime(60_000);
+		expect(FalscherSocket.alle.length).toBe(1);
+	});
+
+	it('wechselt bei einem anderen Slug den Socket und faengt ohne Stand an', () => {
+		bereite();
+		const alt = verbinde(5);
+
+		echtzeit.starte('andere');
+		expect(alt.geschlossenMit).toBe(1000);
+		expect(zuletzt().url).toBe(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/andere/ws`);
+		zuletzt().oeffne();
+		http.expectOne('/andere/api/v1/sync').flush(antwort({ stand: 2, vollstaendig: true }));
+	});
+
+	it('uebergeht alles, was ein ersetzter Socket noch meldet', () => {
+		bereite();
+		const alt = verbinde(5);
+		echtzeit.starte('andere');
+		const neu = zuletzt();
+		const vorher = ereignisse.length;
+
+		alt.oeffne();
+		alt.sende(signal({ stand: 40 }));
+		alt.brichAb(1006);
+		expect(ereignisse.length).toBe(vorher);
+		expect(echtzeit.verbunden()).toBe(false);
+		http.expectNone(() => true);
+
+		neu.oeffne();
+		http.expectOne('/andere/api/v1/sync').flush(antwort({ vollstaendig: true }));
+		alt.brichAb(1012);
+		expect(echtzeit.verbunden()).toBe(true);
+		vi.advanceTimersByTime(60_000);
+		expect(FalscherSocket.alle.length).toBe(2);
+	});
+
 	it('schickt nach einem Abbruch und 401 zur Anmeldung und verbindet sich nicht mehr', () => {
 		bereite();
 		const router = TestBed.inject(Router);

@@ -65,9 +65,12 @@ const EINTRAEGE: Eintrag[] = [
 						<span class="name">{{ v.anzeigename }}</span>
 					}
 				}
-				@if (echtzeit.getrennt()) {
-					<span class="hinweis" role="status">Nicht verbunden – Inhalte evtl. veraltet</span>
-				}
+				<!-- Die Live-Region steht immer da, nur ihr Text wechselt: Eine Region, die mit ihrem Inhalt entsteht, kuendigen viele Screenreader nicht an. -->
+				<span class="hinweis" role="status">
+					@if (echtzeit.getrennt()) {
+						Nicht verbunden – Inhalte evtl. veraltet
+					}
+				</span>
 			</header>
 			<main>
 				<router-outlet />
