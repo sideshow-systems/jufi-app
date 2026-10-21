@@ -20,7 +20,15 @@ export interface Umgebung {
 	mailAntwort: string;
 	/** Steht vor jedem Betreff; leer in Produktion. */
 	mailBetreffPraefix: string;
+	/**
+	 * Nur unter ng serve: Port, auf dem der Hub lauscht (proxy.conf.json leitet /<slug>/ws dorthin,
+	 * Plan-Entscheidung 12). Im Betrieb haengt der Hub am Server aus app.listen und braucht keinen.
+	 */
+	wsDevPort: number;
 }
+
+/** Steht so auch in apps/jufi/proxy.conf.json; wer ihn aendert, aendert beide. */
+export const WS_DEV_PORT_VORGABE = 4201;
 
 const MAIL_PFLICHT = ['SMTP_HOST', 'SMTP_PORT', 'MAIL_ABSENDER', 'MAIL_ANTWORT'] as const;
 
@@ -36,9 +44,12 @@ export function umgebungAusEnv(env: Record<string, string | undefined>): Umgebun
 	// Meldung nur die Namen, nie Werte.
 	const beanstandet: string[] = MAIL_PFLICHT.filter((name) => !env[name]);
 	const port = Number(env['SMTP_PORT']);
-	if (env['SMTP_PORT'] && !(Number.isInteger(port) && port > 0 && port < 65536)) {
+	if (env['SMTP_PORT'] && !istPort(port)) {
 		beanstandet.push('SMTP_PORT (keine Portnummer)');
 	}
+	// Leer wie nicht gesetzt, wie bei den WebAuthn-Werten: Die .env-Vorlage fuehrt Variablen als "".
+	const wsDevPort = env['JUFI_WS_DEV_PORT'] ? Number(env['JUFI_WS_DEV_PORT']) : WS_DEV_PORT_VORGABE;
+	if (!istPort(wsDevPort)) beanstandet.push('JUFI_WS_DEV_PORT (keine Portnummer)');
 	if (beanstandet.length > 0) {
 		throw new Error(`Umgebung unvollstaendig oder ungueltig: ${beanstandet.join(', ')}`);
 	}
@@ -60,5 +71,10 @@ export function umgebungAusEnv(env: Record<string, string | undefined>): Umgebun
 		mailAbsender: env['MAIL_ABSENDER'] ?? '',
 		mailAntwort: env['MAIL_ANTWORT'] ?? '',
 		mailBetreffPraefix: env['MAIL_BETREFF_PRAEFIX'] ?? '',
+		wsDevPort,
 	};
+}
+
+function istPort(n: number): boolean {
+	return Number.isInteger(n) && n > 0 && n < 65536;
 }

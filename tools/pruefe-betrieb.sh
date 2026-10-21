@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Live-Pruefung der echten App: Health, Routing, Kopf, Manifest und Icons,
-# optional Mail-DNS (SPF, DMARC, DKIM). Nur lesend, aendert nichts.
+# WebSocket-Upgrade, optional Mail-DNS (SPF, DMARC, DKIM). Nur lesend, aendert
+# nichts.
 #
 # Aufruf:
 #   tools/pruefe-betrieb.sh [--url <basis>] [--slug <slug>] [--ohne-entwurf]
@@ -184,7 +185,33 @@ if [[ -n "$SLUG" ]]; then
 	done
 fi
 
-# --- 7. Mail-DNS --------------------------------------------------------------
+# --- 7. WebSocket -------------------------------------------------------------
+# Ein Upgrade ohne Cookie auf /<slug>/ws muss mit 401 abgelehnt werden: Nur der
+# Hub antwortet so, also hat der Upgrade Traefik und die App erreicht und den
+# Verein gefunden. Ein Erfolg (101) ist ohne Sitzung nicht zu haben und waere
+# selbst ein Befund. Verworfen: mit einer echten Sitzung bis zum offenen Socket
+# pruefen -- das Skript braeuchte dafuer Zugangsdaten eines Mitglieds.
+# Der Origin ist die gepruefte Adresse, wie im Browser; weicht --url von der
+# BASIS_URL der App ab, lehnt der Hub mit 403 ab. Der Schluessel ist fest und
+# beliebig (RFC 6455 verlangt nur 16 Byte base64), es kommt ja kein Socket
+# zustande. --http1.1, weil der Upgrade-Kopf in HTTP/2 nicht vorkommt.
+if [[ -n "$SLUG" ]]; then
+	WS_STATUS="$(curl --http1.1 -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+		-H 'Connection: Upgrade' \
+		-H 'Upgrade: websocket' \
+		-H 'Sec-WebSocket-Version: 13' \
+		-H 'Sec-WebSocket-Key: SnVGaS1QcnVlZnVuZy0xMg==' \
+		-H "Origin: $URL" \
+		"$URL/$SLUG/ws" 2>"$CURLERR" || true)"
+	case "$WS_STATUS" in
+		401) ok "WebSocket $SLUG: Upgrade ohne Sitzung mit 401 abgelehnt (erreicht den Hub)" ;;
+		403) nok "WebSocket $SLUG: 403 statt 401, der Origin $URL ist nicht die BASIS_URL der App" ;;
+		404) nok "WebSocket $SLUG: 404 statt 401, Verein unbekannt oder gesperrt" ;;
+		*) nok "WebSocket $SLUG: Status ${WS_STATUS:-keiner} statt 401 $(in_klammern)" ;;
+	esac
+fi
+
+# --- 8. Mail-DNS --------------------------------------------------------------
 # Mit ausdruecklichem Server 1.1.1.1, damit das Ergebnis nicht davon abhaengt,
 # was der lokale Resolver noch zwischengespeichert hat.
 # Setzt TXT_AUS (Zeilen ohne Anfuehrungszeichen) und TXT_FEHLER (Ursache, leer

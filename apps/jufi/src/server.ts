@@ -6,16 +6,23 @@ import {
 } from '@angular/ssr/node';
 import { createPrismaClientFromEnv } from '@jufi/db';
 import express from 'express';
+import { createServer, type Server } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 import { createApp } from './server/app.js';
+import { Bus } from './server/echtzeit/bus.js';
+import { Hub } from './server/echtzeit/hub.js';
 import { fehlerbehandlung } from './server/fehler.js';
 import { starteMailArbeiter } from './server/mail/arbeiter.js';
 import { nodemailerVersand } from './server/mail/versand.js';
 import { Nachlauf } from './server/nachlauf.js';
+import { starteAufraeumen } from './server/threads/aufraeumen.js';
 import { umgebungAusEnv, type Umgebung } from './server/umgebung.js';
 import { VERSION } from './version.generated.js';
+
+/** Symbol.for, damit das neu geladene Modul denselben Schluessel findet wie das alte. */
+const DEV_HUB = Symbol.for('jufi.devHub');
 
 const serverDistFolder = dirname(fileURLToPath(import.meta.url));
 const browserDistFolder = resolve(serverDistFolder, '../browser');
@@ -36,10 +43,19 @@ const browserDistFolder = resolve(serverDistFolder, '../browser');
  * eine Pruefung bestehen, sind genau das, wovor die Pruefung schuetzen soll.
  * Verworfen: auf NG_ALLOWED_HOSTS pruefen, das Angular im Worker setzt -- ein
  * Nebeneffekt, kein Vertrag; isMainThread ist eine Eigenschaft von Node.
+ *
+ * Der Hub gehoert aus demselben Grund in betriebsApp: Er lauscht unter ng serve auf einem Port und
+ * pingt im Takt, beides hat im Bau nichts zu suchen.
  */
-const app = isMainThread ? betriebsApp() : express();
+const { app, betrieb } = isMainThread ? betriebsApp() : { app: express(), betrieb: undefined };
 
-function betriebsApp(): express.Express {
+interface Betrieb {
+	hub: Hub;
+	/** Nur unter ng serve gebraucht (starteDevHub). */
+	wsDevPort: number;
+}
+
+function betriebsApp(): { app: express.Express; betrieb: Betrieb } {
 	// Zuerst: createPrismaClientFromEnv laedt die .env, aus der umgebungAusEnv liest.
 	const prisma = createPrismaClientFromEnv();
 
@@ -59,7 +75,10 @@ function betriebsApp(): express.Express {
 
 	// Hier statt in createApp, damit das Beenden unten auf genau diesen warten kann.
 	const nachlauf = new Nachlauf();
-	const app = createApp({ prisma, version: VERSION, umgebung, nachlauf });
+	// Ein Bus fuer Routen und Hub: Was die Routen melden, muss beim Hub ankommen (Plan-Entscheidung 1).
+	const bus = new Bus();
+	const app = createApp({ prisma, version: VERSION, umgebung, nachlauf, bus });
+	const hub = new Hub({ prisma, umgebung, jetzt: () => new Date(), bus });
 
 	/**
 	 * Der Arbeiter startet erst, wenn die Datenbank antwortet: Sein erster Durchlauf
@@ -76,15 +95,25 @@ function betriebsApp(): express.Express {
 				versand: nodemailerVersand(umgebung),
 				jetzt: () => new Date(),
 			});
+			// Neben dem Mail-Arbeiter und aus demselben Grund erst nach SELECT 1 (Plan-Entscheidung 13).
+			const aufraeumen = starteAufraeumen({ prisma, jetzt: () => new Date() });
 			// Ein laufender Versand soll nicht mitten im SMTP-Gespraech abbrechen und
 			// ein Nachlauf ("Passwort vergessen?") nicht mitten in seiner Transaktion;
 			// ohne diese Handler beendete SIGTERM den Prozess sofort. Danach
-			// ausdruecklich beenden, weil ein Handler das Standardverhalten ersetzt.
+			// ausdruecklich beenden, weil ein Handler das Standardverhalten ersetzt. Der Hub
+			// schliesst die Sockets mit 1012, damit die Clients sich nach dem Neustart wieder
+			// verbinden, statt auf einen gekappten Socket zu warten; das Aufraeumen soll seine
+			// Abfrage zu Ende bringen.
 			let beendet = false;
 			const beende = () => {
 				if (beendet) return;
 				beendet = true;
-				Promise.allSettled([arbeiter.stoppe(), nachlauf.warteAufAlle()]).finally(() => process.exit(0));
+				Promise.allSettled([
+					arbeiter.stoppe(),
+					aufraeumen.stoppe(),
+					hub.schliesseAlle(),
+					nachlauf.warteAufAlle(),
+				]).finally(() => process.exit(0));
 			};
 			process.once('SIGTERM', beende);
 			process.once('SIGINT', beende);
@@ -92,12 +121,12 @@ function betriebsApp(): express.Express {
 		.catch((error: unknown) => {
 			// Nur die Klasse: die Meldung einer Verbindungsstoerung kann die DATABASE_URL samt Passwort enthalten.
 			console.error(
-				`Datenbank nicht erreichbar (${error instanceof Error ? error.name : 'Fehler'}), Mail-Arbeiter nicht gestartet`,
+				`Datenbank nicht erreichbar (${error instanceof Error ? error.name : 'Fehler'}), Mail-Arbeiter und Aufraeumen nicht gestartet`,
 			);
 			process.exit(1);
 		});
 
-	return app;
+	return { app, betrieb: { hub, wsDevPort: umgebung.wsDevPort } };
 }
 
 /**
@@ -144,9 +173,63 @@ app.use(fehlerbehandlung);
 
 if (isMainModule(import.meta.url) || process.env['pm_id']) {
 	const port = process.env['PORT'] ?? 4000;
-	app.listen(port, () => {
-		console.log(`JuFi laeuft auf http://localhost:${port}`);
+	// Im Betrieb nimmt der Hub die Upgrades desselben Servers an; Traefik reicht sie durch.
+	betrieb?.hub.haengeAn(
+		app.listen(port, () => {
+			console.log(`JuFi laeuft auf http://localhost:${port}`);
+		}),
+	);
+} else if (betrieb) {
+	starteDevHub(betrieb);
+}
+
+/**
+ * Unter ng serve gibt es kein app.listen: Vite ruft die App als Middleware, und an dessen Server
+ * kommt der Hub nicht heran. Er lauscht darum auf einem eigenen Port, und proxy.conf.json leitet
+ * /<slug>/ws dorthin (Plan-Entscheidung 12). Verworfen: der Hub am Server von Vite -- die
+ * Dev-Server-API reicht ihn nicht heraus, und HMR haengt dort schon am Upgrade.
+ *
+ * Laedt Vite diese Datei nach einer Aenderung neu, laeuft betriebsApp erneut und baut einen neuen
+ * Bus samt Hub; der alte haengt dann an einem Bus, an den keine Route mehr meldet, und haelt den
+ * Port. Der Griff auf globalThis ueberlebt das Neuladen: Der neue Hub schliesst erst den alten
+ * samt seinem Server und lauscht dann. Ein eigener Server je Hub statt einem gemeinsamen, weil
+ * haengeAn nicht wiederholbar ist -- der Upgrade-Handler eines geschlossenen Hubs bliebe am Server
+ * und zerstoerte jedes Upgrade. Die Kette ueber vorher.schliesse wartet auch auf ein noch
+ * laufendes listen des Vorgaengers, damit zwei schnelle Neuladungen nicht um den Port streiten.
+ */
+function starteDevHub({ hub, wsDevPort }: Betrieb): void {
+	const griff = globalThis as { [DEV_HUB]?: { schliesse(): Promise<void> } };
+	const vorher = griff[DEV_HUB];
+	const gestartet = (async (): Promise<Server> => {
+		await vorher?.schliesse();
+		// Anfragen ohne Upgrade gehoeren nicht hierher; der Proxy schickt nur /<slug>/ws.
+		const server = createServer((_req, res) => res.writeHead(404).end());
+		hub.haengeAn(server);
+		await new Promise<void>((fertig, fehler) => {
+			server.once('error', fehler);
+			server.listen(wsDevPort, 'localhost', () => {
+				server.off('error', fehler);
+				fertig();
+			});
+		});
+		console.log(`JuFi-Hub (Entwicklung) lauscht auf ws://localhost:${wsDevPort}`);
+		return server;
+	})();
+	gestartet.catch((error: unknown) => {
+		// Meist EADDRINUSE: Ein anderer Prozess haelt den Port. Die App laeuft weiter, nur ohne Live.
+		console.error(
+			`JuFi-Hub (Entwicklung) nicht gestartet auf Port ${wsDevPort}:`,
+			error instanceof Error ? ((error as NodeJS.ErrnoException).code ?? error.name) : typeof error,
+		);
 	});
+	griff[DEV_HUB] = {
+		async schliesse() {
+			const server = await gestartet.catch(() => undefined);
+			await hub.schliesseAlle();
+			if (!server) return;
+			await new Promise<void>((fertig) => server.close(() => fertig()));
+		},
+	};
 }
 
 export const reqHandler = createNodeRequestHandler(app);
