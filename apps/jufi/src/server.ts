@@ -28,6 +28,37 @@ const serverDistFolder = dirname(fileURLToPath(import.meta.url));
 const browserDistFolder = resolve(serverDistFolder, '../browser');
 
 /**
+ * Hinter dem Proxy muss Angular die X-Forwarded-*-Header ausdruecklich
+ * akzeptieren. Ohne das verwirft sanitizeRequestHeaders jeden davon und warnt
+ * bei jeder Anfrage. Angular leitet daraus sonst http://<host> ab statt der
+ * tatsaechlichen Adresse.
+ *
+ * Ausgewertet werden von Angular nur -proto, -host und -port (createRequestUrl
+ * in @angular/ssr). Die anderen zwei stehen hier, weil Proxys sie mitschicken
+ * und sie sonst jede Anfrage eine Warnzeile kosten.
+ *
+ * Das ist eine sicherheitsrelevante Einstellung: wer diese Header setzen kann,
+ * bestimmt die vom Server gesehene Adresse. Zulaessig ist es, weil die App
+ * keinen veroeffentlichten Port hat und nur ueber den Proxy erreichbar ist, der
+ * die Header fuer nicht vertrauenswuerdige Clients selbst ueberschreibt.
+ *
+ * Steht vor betriebsApp und nicht dahinter, weil die Link-Vorschau (seitenHtml) die Seite
+ * von Angular holt und createApp ihn deshalb schon beim Aufbau kennen muss. Er braucht weder
+ * Umgebung noch Datenbank und hat keinen Nebeneffekt, darf also auch im Worker der
+ * Routenextraktion stehen; aufgerufen wird er dort nie. Verworfen: eine zweite Engine in
+ * betriebsApp -- zwei Stellen mit derselben Proxy-Einstellung, von denen eine vergessen wird.
+ */
+const angularApp = new AngularNodeAppEngine({
+	trustProxyHeaders: [
+		'x-forwarded-proto',
+		'x-forwarded-host',
+		'x-forwarded-port',
+		'x-forwarded-for',
+		'x-forwarded-server',
+	],
+});
+
+/**
  * Beim Bau fuehrt Angular diese Datei aus, um die Routen auszulesen -- in einem
  * Worker-Thread (Routenextraktion in @angular/build). Dort gibt es im Docker-Bau
  * weder Geheimnisse noch eine Datenbank: die Umgebungspruefung beendete den
@@ -77,7 +108,18 @@ function betriebsApp(): { app: express.Express; betrieb: Betrieb } {
 	const nachlauf = new Nachlauf();
 	// Ein Bus fuer Routen und Hub: Was die Routen melden, muss beim Hub ankommen (Plan-Entscheidung 1).
 	const bus = new Bus();
-	const app = createApp({ prisma, version: VERSION, umgebung, nachlauf, bus });
+	const app = createApp({
+		prisma,
+		version: VERSION,
+		umgebung,
+		nachlauf,
+		bus,
+		// Erst bei einer Anfrage gerufen, nie beim Bau. null: Angular beansprucht den Pfad nicht.
+		seitenHtml: async (req) => {
+			const antwort = await angularApp.handle(req);
+			return antwort ? antwort.text() : null;
+		},
+	});
 	const hub = new Hub({ prisma, umgebung, jetzt: () => new Date(), bus });
 
 	/**
@@ -128,31 +170,6 @@ function betriebsApp(): { app: express.Express; betrieb: Betrieb } {
 
 	return { app, betrieb: { hub, wsDevPort: umgebung.wsDevPort } };
 }
-
-/**
- * Hinter dem Proxy muss Angular die X-Forwarded-*-Header ausdruecklich
- * akzeptieren. Ohne das verwirft sanitizeRequestHeaders jeden davon und warnt
- * bei jeder Anfrage. Angular leitet daraus sonst http://<host> ab statt der
- * tatsaechlichen Adresse.
- *
- * Ausgewertet werden von Angular nur -proto, -host und -port (createRequestUrl
- * in @angular/ssr). Die anderen zwei stehen hier, weil Proxys sie mitschicken
- * und sie sonst jede Anfrage eine Warnzeile kosten.
- *
- * Das ist eine sicherheitsrelevante Einstellung: wer diese Header setzen kann,
- * bestimmt die vom Server gesehene Adresse. Zulaessig ist es, weil die App
- * keinen veroeffentlichten Port hat und nur ueber den Proxy erreichbar ist, der
- * die Header fuer nicht vertrauenswuerdige Clients selbst ueberschreibt.
- */
-const angularApp = new AngularNodeAppEngine({
-	trustProxyHeaders: [
-		'x-forwarded-proto',
-		'x-forwarded-host',
-		'x-forwarded-port',
-		'x-forwarded-for',
-		'x-forwarded-server',
-	],
-});
 
 app.use(
 	express.static(browserDistFolder, {

@@ -1,5 +1,6 @@
 import { AttemptTracker, verifyAuthentication, verifyRegistration } from '@jufi/auth';
 import type { PrismaClient } from '@jufi/db';
+import type { Request } from 'express';
 import { Bus } from './echtzeit/bus.js';
 import { Nachlauf } from './nachlauf.js';
 import { Fensterzaehler } from './threads/fenster.js';
@@ -40,6 +41,12 @@ export interface AppDeps {
 	 * denselben Bus haengt.
 	 */
 	bus?: Bus;
+	/**
+	 * Die Seite, die Angular fuer diese Anfrage ausliefern wuerde, als Text (null: Angular
+	 * beansprucht den Pfad nicht). Die Link-Vorschau setzt ihre Tags darin ein. Von aussen, weil
+	 * nur server.ts den Angular-Handler kennt; Tests geben ein festes Geruest vor.
+	 */
+	seitenHtml?: (req: Request) => Promise<string | null>;
 }
 
 /** AppDeps ohne Luecken, wie die Routen sie brauchen. */
@@ -64,5 +71,6 @@ export function mitStandardwerten(deps: AppDeps): VolleAppDeps {
 		nachrichtenFenster: deps.nachrichtenFenster ?? new Fensterzaehler(30, 60_000, () => jetzt().getTime()),
 		antwortenFenster: deps.antwortenFenster ?? new Fensterzaehler(60, 60_000, () => jetzt().getTime()),
 		bus: deps.bus ?? new Bus(),
+		seitenHtml: deps.seitenHtml ?? (async () => null),
 	};
 }
