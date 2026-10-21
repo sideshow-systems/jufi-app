@@ -130,7 +130,7 @@ Die Zeile entsteht beim ersten Setzen. Kommt der erste Aufruf mit `bereich = ueb
 
 - `Verein.aenderungsstand` (`Int`, Vorgabe 0) zählt die schreibenden Transaktionen im Verein: **ein Stand je Transaktion**, nicht je Zeile. Verworfen: `BigInt` — 2,1 Milliarden Änderungen je Verein werden nie erreicht, und `BigInt` bräche `JSON.stringify` an jeder API-Grenze.
 - `Aenderung (id, vereinId, stand, threadId?, art, objektId, urheberId?, angelegtAm)` mit eigener `id` und einem Index auf `(vereinId, stand)`; mehrere Zeilen einer Transaktion teilen sich den Stand. Verworfen: ein eindeutiges `(vereinId, stand)` — ein Verlaufseintrag braucht seinen Stand beim Anlegen, seine ID entsteht erst dabei, also bekommt die Arbeit der Transaktion den Stand vorab (4.2). Lückenlos bleibt der Zähler: Jede committete schreibende Transaktion hat genau einen Stand. `threadId` und `objektId` sind bewusst keine Fremdschlüssel, damit das Löschen eines Threads als Änderung erhalten bleibt. `art` z. B. `THREAD`, `MODUL`, `ANTWORT`, `VERLAUF`, `SICHTBARKEIT`, `LISTE`, `GELOESCHT` (nicht für das Löschen einer Nachricht, 2.4). **`LISTE`** (Etappe 3) ist Anpinnen und Archivieren: Es steht wie `SICHTBARKEIT` und `GELOESCHT` in `OHNE_AKTIVITAET`, ist also keine Aktivität des Threads (4.2). Verworfen: `THREAD` — jedes Anpinnen schöbe den Thread in der Liste nach oben und hieße bei allen „Aushang geändert“. Das „Neu“-Kennzeichen (Etappe 4) lässt `LISTE` außen vor: `istNeu` bekommt die Änderungen mit ihrer `art` und filtert selbst (3.9). Verworfen: die Abfrage des Servers filtern lassen — die Regel gehört zu `istNeu` und muss ohne Datenbank prüfbar sein. Keine Inhalte, nur Kennungen.
-- **Änderungen ohne Thread (Etappe 5).** Die Routen aus TP2, die das Umfeld einer Person verändern (Personen, Zugang, Zuordnungen, Untergruppen, Rechte, Merkmale, Einwilligung), schreiben über `mitAenderung` eine `Aenderung` mit `threadId: null`, der Art `SICHTBARKEIT` und der Person beziehungsweise Untergruppe als `objektId` (`vermerkeUmfeld`, direkt nach `sperreVereinszeile`; wo ein Pfad ohne Wirkung enden kann, erst vor dem ersten Schreiben, damit keine Änderung ohne Wirkung entsteht). Welche Threads eine neue Untergruppe oder ein Recht berührt, rechnet niemand aus: Ein Sync, der eine solche Zeile sieht, antwortet `vollstaendig` (5.2), live geht ein Signal ohne Thread an alle Sockets des Vereins (5.1). Verworfen: je betroffenem Thread eine `SICHTBARKEIT` — jede TP2-Route müsste selbst ausrechnen, welche Threads sie berührt. Verworfen: nur ein Live-Signal ohne `Aenderung` — wer in dem Moment getrennt war, erführe es nie. `PATCH /einstellungen` schreibt keine solche Änderung: Es ändert nur Name und Farbe des Vereins, nichts, was `siehtThread` liest.
+- **Änderungen ohne Thread (Etappe 5).** Die Routen aus TP2, die das Umfeld einer Person verändern (Personen, Zugang, Zuordnungen, Untergruppen, Rechte, Merkmale, Einwilligung), schreiben über `mitAenderung` eine `Aenderung` mit `threadId: null`, der Art `SICHTBARKEIT` und der Person beziehungsweise Untergruppe als `objektId` (`vermerkeUmfeld`, direkt nach `sperreVereinszeile`; wo ein Pfad ohne Wirkung enden kann, erst vor dem ersten Schreiben, damit keine Änderung ohne Wirkung entsteht). **`POST /personen` ist die Ausnahme:** Es hat keine `sperreVereinszeile`, denn über „angenommen oder nicht“ entscheidet dort allein der Unique-Index auf `(vereinId, email)`; die Doppelt-Prüfung davor (409 `DOPPELT`) ist nur ein Hinweis, und eine Sperre ließe die zweite Anfrage nur warten, nicht anders enden. `vermerkeUmfeld` steht dort als **erste schreibende Anweisung** der Transaktion und sperrt die Vereinszeile trotzdem bis zum Commit (`mitAenderung` erhöht den Stand), zwei gleichzeitige Anlagen stellen sich also dort an. Dafür vergibt die Route die ID der Person vorab (`randomUUID`), damit der Vermerk sie schon vor dem Anlegen nennen kann. Verworfen: den Vermerk nach dem Anlegen schreiben — dann kennt er die ID von selbst, steht aber hinter dem Schreiben der Person, und was vor der Zeile des Vereins geschrieben wird, kann mit einer Transaktion verklemmen, die sie schon hält. Welche Threads eine neue Untergruppe oder ein Recht berührt, rechnet niemand aus: Ein Sync, der eine solche Zeile sieht, antwortet `vollstaendig` (5.2), live geht ein Signal ohne Thread an alle Sockets des Vereins (5.1). Verworfen: je betroffenem Thread eine `SICHTBARKEIT` — jede TP2-Route müsste selbst ausrechnen, welche Threads sie berührt. Verworfen: nur ein Live-Signal ohne `Aenderung` — wer in dem Moment getrennt war, erführe es nie. `PATCH /einstellungen` schreibt keine solche Änderung: Es ändert nur Name und Farbe des Vereins, nichts, was `siehtThread` liest.
 - Einträge älter als 90 Tage werden beim Start und danach alle 24 Stunden im App-Prozess gelöscht (ein `setInterval(…).unref()`, kein Cron), plattformweit über den schlichten `PrismaClient`, weil die Löschung über alle Vereine läuft. `unref`, damit der Zeitgeber den Prozess nicht am Beenden hindert. Ein Sync, der älter einsteigt, bekommt „vollständig neu laden“ (5.2).
 
 ---
@@ -476,7 +476,7 @@ Der Client ruft Sync nach dem Öffnen jedes Sockets, nach jedem Abbruch und beim
 
 - URL `/<slug>/t/<id>-<titel-slug>`; maßgeblich ist die ID, ein umbenannter Thread bleibt erreichbar (Rahmen 5.4); die Seite schreibt ein veraltetes Segment ohne neuen Eintrag in der Browser-Historie (`replaceUrl`) auf den aktuellen Titel um. Verworfen: den Titel nie umschreiben — er stünde sonst in jeder Adresse, die jemand aus der Leiste kopiert, falsch da. Deep Links `?reiter=verlauf` und `/<slug>/t/<id>/m/<modulId>` scrollen zur Stelle und heben sie hervor.
 - **Die ID kennt zwei Formen:** `cuid` (vom Code) und `gen_random_uuid()` (der Austausch aus der Migration, mit Bindestrichen). `idAusSegment` erkennt zuerst die UUID-Form, sonst gilt alles bis zum ersten Bindestrich. Verworfen: immer bis zum ersten Bindestrich — die UUID des Austauschs würde nach ihrem ersten Block abgeschnitten, und der Austausch wäre über seine Adresse nie zu öffnen. Verworfen: den Slug mitprüfen und bei einem umbenannten Thread umleiten — jeder alte Link geht über die ID ohnehin auf. Ein Segment ohne lesbare ID ergibt ohne Anfrage dieselbe Seite wie ein 404.
-- Kopf: Titel, „Teilen“, für Berechtigte „Bearbeiten“ (öffnet den Editor in der Verwaltung). Der Zurück-Pfeil führt seit Etappe 4 zur Thread-Liste (`/<slug>/threads`, 6.5); bis dahin führte er zur Startseite, weil es die Liste noch nicht gab. Verworfen: Browser-Zurück — ein geteilter Link hat keine Seite davor.
+- Kopf: Titel, „Teilen“ (7.1), für Berechtigte „Bearbeiten“ (öffnet den Editor in der Verwaltung). Unter 480 px zeigt „Bearbeiten“ nur den Stift (der Text bleibt für Screenreader): Der Teilen-Knopf nimmt dem Titel Platz, und Bearbeiter sähen bei einem langen Titel sonst eine Wortsäule. Verworfen: „Bearbeiten“ mit Text lassen — der Teilen-Knopf nimmt dem Titel 52 px, und bei 375 px blieben ihm mit langem Titel 114 px (sieben Zeilen). Der Zurück-Pfeil führt seit Etappe 4 zur Thread-Liste (`/<slug>/threads`, 6.5); bis dahin führte er zur Startseite, weil es die Liste noch nicht gab. Verworfen: Browser-Zurück — ein geteilter Link hat keine Seite davor.
 - Geöffnet wird immer die **Übersicht**, auch bei Threads im Modus „Offener Chat“ (kein Start-Reiter je Modus); Entscheidung des Eigentümers vom 21.10.2026. Verworfen: den Reiter nach Modus wählen — `?reiter=verlauf` genügt für Links, die in den Chat führen sollen.
 - Reiter **Übersicht** und **Verlauf** (mit Zähler). Der Reiter Verlauf fehlt nur bei „Nur Aushang“ ohne Nachrichten; bei „Nur Aushang“ mit Nachrichten bleibt er lesbar, ohne Eingabefeld. Der Zähler `verlauf.eintraege` der Ansicht zählt nur Nachrichten (gelöschte eingeschlossen), keine Systemeinträge. Verworfen: den Verlauf bei „Nur Aushang“ ausblenden (Rahmen 6.1 wörtlich) — nach der Veranstaltung verschwände das Gespräch. Verworfen: alle Einträge zählen — jedes Veröffentlichen schreibt ab Etappe 3 einen Systemeintrag (3.6), der Reiter erschiene dann bei jedem veröffentlichten Aushang, mit dem einen Satz „veröffentlicht“.
 - Archivierte Threads tragen oben den Hinweis „Archiviert“; für Berechtigte mit „Wiederherstellen“.
@@ -512,7 +512,7 @@ Beide Seiten liegen in der Mitglieder-Hülle (6.1) und tragen ihren Zustand in d
   - Fehler am Feld; eine leere Zielgruppe (Auswahl ohne Untergruppe) lässt sich nicht speichern. Ein Feldfehler des Servers bleibt an seinem Modul, auch wenn es danach verschoben wird. Nennt der Server ein Feld, das der Editor für Typ und Modus dieses Moduls nicht zeigt (`zeigtModulFeld`), steht der Satz unter den Knöpfen statt an einer unsichtbaren Stelle.
   - Der Editor bietet nur Einheiten an, die beim gewählten Rollenfilter jemanden fragen (3.2). Beim Hinzufügen einer Umfrage und beim Wechsel des Rollenfilters stellt der Editor die Einheit einer **ungesperrten** Umfrage sofort auf die erste passende um (`einheitenFuer`), damit kein Fehler an einem Feld entsteht, das niemand angefasst hat. Verworfen: die Einheit stehen lassen und den Fehler erst beim Speichern zeigen.
   - Welche Felder gesperrt sind, wenn Antworten vorliegen, steht in 3.14; Teilnahme-Umfragen ohne „Vielleicht“ und ohne Mehrfachauswahl in 3.12.
-- **Antworten-Übersicht** je Umfrage: je Option die Namen, „Noch offen“ mit Namen, je Zeile „Eintragen“ (Nachtragen). „Stand teilen“ folgt mit Etappe 6 (Teilen-Text, 7.1); verworfen: einen vorläufigen Text bauen, den Etappe 6 ersetzt.
+- **Antworten-Übersicht** je Umfrage: je Option die Namen, „Noch offen“ mit Namen, je Zeile „Eintragen“ (Nachtragen). „Stand teilen“ steht seit Etappe 6 im Kopf der Thread-Seite (7.1), nicht in dieser Übersicht; verworfen (Etappe 3): einen vorläufigen Text bauen, den Etappe 6 ersetzt.
   - **Nachtragen bei Mehrfachauswahl:** „Eintragen“ klappt die Optionen als Umschalter auf, vorbelegt mit der bisherigen Auswahl. Jeder Tipp speichert die **ganze neue Menge**; die letzte gewählte Option lässt sich nicht abwählen (eine Antwort ohne Option gilt als keine, 3.2). Verworfen: eine Option ersetzt die Auswahl — gespeicherte Antworten gingen dann still verloren. Verworfen: „Eintragen“ nur für offene Zeilen — eine Mehrfach-Antwort ließe sich dann nicht mehr ändern. Ohne Mehrfachauswahl ersetzt eine Option die bisherige.
 - Im Austausch-Thread sind Zielgruppe, Module, Löschen und Archivieren gesperrt (8).
 
@@ -533,7 +533,7 @@ Tokens und Bauteile aus TP2. Gemessen bei 375 × 812 und 1280 × 800, hell und d
 
 ### 7.1 Teilen
 
-`teilenText(betrachter, thread, …, jetzt)` erzeugt WhatsApp-tauglichen Text (Rahmen 6.7), **mit dem, was der Teilende selbst sehen darf** (3.4):
+`teilenText({ ansicht, basisUrl, slug, jetzt })` (`libs/domain/src/threads/teilen.ts`) erzeugt WhatsApp-tauglichen Text (Rahmen 6.7), **mit dem, was der Teilende selbst sehen darf** (3.4):
 
 ```
 🎳 *Bowling* – Stand Fr 18:30
@@ -547,17 +547,38 @@ Tokens und Bauteile aus TP2. Gemessen bei 375 × 812 und 1280 × 800, hell und d
 
 - Nur Summe: „✅ Dabei: 9“ usw.; „nichts“: die Umfrage entfällt im Text.
 - Weitere Umfragen als „📊 Frage“ und „• Option (n)“ mit Namen nach 3.4.
-- Bis zehn Namen, dann „…“; WhatsApp-Formatzeichen in fremdem Text werden durch gleich aussehende Zeichen ersetzt; das Emoji des Titels steht außerhalb der Sternchen (Entwurf).
-- Stand-Zeit in Berlin; Link über `BASIS_URL`.
-- Am Handy über die Web Share API, am Rechner „Kopieren“ mit Bestätigung. Teilen kann jeder Leser; Teilprojekt 4 ergänzt Zeilen für Fahrer und Kosten.
+- Bis zehn Namen, dann „, …“; WhatsApp-Formatzeichen in fremdem Text werden durch gleich aussehende Zeichen ersetzt; das Emoji des Titels steht außerhalb der Sternchen (Entwurf).
+- Stand-Zeit in Berlin (`<Wt> <HH:MM>`).
+- Teilen kann jeder Leser; Teilprojekt 4 ergänzt Zeilen für Fahrer und Kosten.
+
+**Der Text entsteht im Client aus der `ThreadAnsicht`.** Die Ansicht ist schon je Betrachter gerechnet (die `auswertung` nach 3.4), also steht im Text nur, was der Teilende ohnehin auf dem Bildschirm sieht: Sieht eine Familie eine Umfrage nur als Summe, steht dort „✅ Dabei: 3“ ohne Namen, und bei „nur Jugendleiter“ fehlt die Umfrage ganz. Verworfen: eine Route `GET /threads/:id/teilen` — Safari verlangt `navigator.share` innerhalb der Nutzergeste, und eine Anfrage davor verbraucht sie, das Teilen ginge dann am iPhone nicht.
+
+**Der Link nimmt `location.origin`, nicht `BASIS_URL`.** Die App ist nur unter `BASIS_URL` erreichbar (`security.allowedHosts` lässt keinen anderen Host zu, der Proxy leitet um), beides ist also dasselbe. Verworfen: `BASIS_URL` an den Client ausliefern — ein Feld nur für diesen Zweck. (Das Bild der Link-Vorschau, 7.2, nimmt dagegen `BASIS_URL`, denn der Server hat keinen `location`.)
+
+**Teilen oder Kopieren entscheidet der Zeiger** (`teile` in `apps/jufi/src/app/verein/threads/teilen.ts`):
+
+- Bei `(pointer: coarse)` und vorhandenem `navigator.share` öffnet die App das Teilen-Blatt, sonst kopiert sie in die Zwischenablage und zeigt „Kopiert“.
+- Schließt die Person das Blatt (`AbortError`), passiert nichts, auch kein Kopieren: Sie hat sich entschieden. Scheitert das Teilen anders, wird kopiert. Ein zweiter Tipp, während das Blatt offen ist, wird ignoriert.
+- Scheitert das Kopieren (unsicherer Kontext, verweigert), erscheint der Text in einem schreibgeschützten Feld zum Markieren, wie bei `einladung-anzeige.ts`.
+- Verworfen: immer `navigator.share`, wenn vorhanden — Chrome unter Windows öffnet dann den Systemdialog, obwohl die Person am Rechner „Kopieren“ erwartet. Der grobe Zeiger trennt Handy und Rechner, ohne den Gerätetyp zu raten.
+
+**Kein Teilen bei Entwürfen:** Der Knopf fehlt dort. Den Link öffnet außer den Bearbeitern niemand (3.1), also hätte das Teilen keinen Empfänger. Verworfen: der Knopf auch im Entwurf — er teilte einen Link ohne Empfänger.
+
+Die „Kopiert“-Meldung (`<jf-meldung />`) sitzt seit Etappe 6 einmal in der Wurzel der App (`app.ts`); vorher stand sie nur im Rahmen der Verwaltung, und weder „Kopiert“ auf der Thread-Seite noch „Gespeichert“ in den Einstellungen war zu sehen. Verworfen: je Hülle eine eigene — die nächste Hülle hätte sie wieder vergessen.
 
 ### 7.2 Link-Vorschau
 
-- Eine Express-Route vor dem Angular-Handler beantwortet `GET /<slug>/t/:id…` mit der `index.html`, in die sie Open-Graph-Tags einsetzt (Rahmen 7.6).
-- **Titel** nur, wenn der Thread veröffentlicht ist und seine Zielgruppe Familien einschließt (`JUNGFISCHER_FAMILIE`, `NUR_FAMILIE`). Für alle anderen Threads, Entwürfe und unbekannte IDs: dieselbe neutrale Vorschau mit dem Vereinsnamen. Bild ist immer das Vereins-Icon in 512 px. Unbekannter oder gesperrter Verein: 404 wie bisher.
+Eine Express-Route vor dem Angular-Handler (`vorschauRouten`, `GET /<slug>/t/:segment`) beantwortet die Adresse mit der Seite, die Angular sonst ausliefert, und setzt Open-Graph-Tags in deren Kopf (Rahmen 7.6). Ein Messenger holt die Seite ohne Cookie und liest nur den Kopf.
+
+- **Die Seite kommt aus `deps.seitenHtml(req)`.** In `server.ts` ist das `angularApp.handle(req)` und dann `antwort.text()`, in Tests ein festes Gerüst. So kommen die Tags unter `ng serve` und im Image in dieselbe `index.html` samt aktuellen Skript-Hashes. Liefert Angular nichts, reicht die Route weiter. Verworfen: `index.csr.html` aus `dist` lesen — unter `ng serve` gibt es die Datei nicht. Verworfen: eine eigene HTML-Vorlage in Express — sie liefe dem Angular-Bau hinterher. `angularApp` steht in `server.ts` außerhalb von `betriebsApp()`, `seitenHtml` wird erst bei einer Anfrage gerufen, denn die Datei läuft auch beim Bau.
+- **Unbekannter oder gesperrter Verein: die Route reicht weiter** (`next()`). Angular antwortet dann wie bisher, ohne Tags. „404 wie bisher“ heißt also: Nichts ändert sich, auch keine Datenbankauskunft. Verworfen: `vereinAusSlug` vorschalten — es antwortet mit JSON-404, und ein Mensch mit einem Tippfehler im Link sähe statt der Seite JSON.
+- **Tags**, alle Werte HTML-maskiert (`& < > " '`): `og:type` = `website`, `og:site_name` = Anzeigename des Vereins, `og:title` = Thread-Titel oder Anzeigename, `og:image` = `<BASIS_URL>/<slug>/icon-512.png` (immer das Vereins-Icon in 512 px) mit `og:image:width` und `og:image:height` = `512`. Sonst nichts, auch keine Beschreibung („keine weiteren Daten“). Der Titel ist fremder Text; die Maskierung setzt ihn nie als Markup in den Kopf, und er wird ohne Regex-Ersetzung eingesetzt, damit `$&` darin nichts auswertet.
+- **Titel** nur, wenn der Thread veröffentlicht ist und seine Zielgruppe Familien einschließt (`JUNGFISCHER_FAMILIE`, `NUR_FAMILIE`; `vorschauTitel` in `@jufi/domain`). Für alle anderen Threads, Entwürfe, den Austausch, Threads eines anderen Vereins unter diesem Slug und unbekannte IDs: dieselbe neutrale Vorschau mit dem Vereinsnamen, **byte-gleich**. Ein Segment ohne lesbare ID gilt als unbekannte ID. Verworfen: je Fall eine eigene Antwort — jeder Unterschied verriete, dass es den Thread gibt.
 - Die IDs sind zufällig (`cuid`), damit niemand Titel durch Ausprobieren findet. Verworfen: fortlaufende Nummern je Verein (Entwurf) — erratbar.
-- `Cache-Control: no-store`; keine weiteren Daten.
+- `Cache-Control: no-store`; keine weiteren Daten. Eine Vorschau, die den Titel eines inzwischen zurückgezogenen Threads zeigt, wäre genau das Leck, das es nicht geben soll.
 - Verworfen: immer den Titel zeigen (Rahmen 6.7 wörtlich) — Titel von Jugendleiter-Threads wären für jeden mit dem Link lesbar. Verworfen: nie einen Titel — in WhatsApp sähe jeder Link gleich aus.
+
+**Bekannte, angenommene Folge: Untergruppen zählen nicht.** Ist ein Familien-Thread auf Untergruppen beschränkt, zeigt die Vorschau den Titel trotzdem jedem, der den (nicht erratbaren) Link hat, auch Familien außerhalb der Untergruppe, die den Thread selbst nicht öffnen könnten (3.1). Die Regel fragt nur nach Veröffentlichung und Rollenfilter. Die Alternative, die Sichtbarkeit für Untergruppen zu prüfen, geht nicht: Ein Vorschau-Abruf trägt keinen Cookie und damit keine Person, gegen die sich `siehtThread` rechnen ließe. Wer einen solchen Link weitergibt, gibt auch den Titel weiter; der Titel eines Untergruppen-Threads sollte darum nichts enthalten, was nur diese Untergruppe wissen darf. Die Datenschutzerklärung sagt es so (9.3).
 
 ---
 
@@ -575,13 +596,17 @@ Tokens und Bauteile aus TP2. Gemessen bei 375 × 812 und 1280 × 800, hell und d
 
 ### 9.1 Datenauszug
 
-Der Datenauszug im Profil („Meine Daten herunterladen“) ergänzt:
+Der Datenauszug im Profil („Meine Daten herunterladen“) ergänzt drei Felder (`datenauszug.ts`):
 
-- eigene Antworten und Antworten für die eigenen Kinder (Thread-Titel, Frage, gewählte Optionen, für wen, von wem, wann);
-- eigene Nachrichten (Thread-Titel, Zeit, Text; gelöschte ohne Text);
-- Gelesen-Stand je Thread (Titel, Zeit).
+- `antworten`: Thread-Titel, Frage, gewählte Optionen, für wen, von wem, wann. Darin stehen die Antworten, deren `fuer` die Person selbst oder eines ihrer **zugeordneten** Kinder ist, auch wenn ein anderer sie eingetragen hat (etwa die Leitung nach einem Telefonat).
+- `nachrichten`: die eigenen Nachrichten (Thread-Titel, Zeit, Text); bei gelöschten ist `text` `null`.
+- `gelesen`: der Gelesen-Stand je Thread (Titel, Zeit).
 
 Threads selbst und Nachrichten anderer gehören nicht dazu.
+
+- **„Zugeordnet“ heißt jedes nicht entfernte Kind**, nicht nur bei Erziehungsberechtigung: Wer zugeordnet ist, darf für das Kind antworten (`darfFuerKindHandeln`, 3.3). Verworfen: nur, was die Person selbst abgegeben hat — dann fehlte die Antwort für das eigene Kind, wenn die Leitung sie nachgetragen hat, obwohl die Person dafür hätte antworten dürfen.
+- **Nicht darin:** Antworten, die die Person für fremde Kinder nachgetragen hat. Das wären deren Daten. Antworten für ein entferntes Kind stehen auch nicht darin, denn die Zuordnung ist mit dem Entfernen gelöscht (9.2).
+- Personen heißen wie im übrigen Auszug: `'ich'` oder der volle Name, bei entfernten Personen „(entfernte Person)“. Ids und `clientId`s stehen nicht darin.
 
 ### 9.2 Entfernen einer Person
 
@@ -589,13 +614,22 @@ Ergänzend zu TP2 5.8: Gelesen-Stände werden gelöscht. Antworten und Nachricht
 
 ### 9.3 Datenschutzerklärung
 
-Nachzutragen: Threads, Antworten und Verlauf; wer welche Namen sieht (3.4, 3.10); Gelesen-Stand; WebSocket (keine zusätzlichen Daten, Sitzungscookie); Teilen nach WhatsApp nur durch eigenes Antippen; der Google-Kalender-Weg und der Karten-Link (übertragen erst nach Antippen Titel, Zeit, Ort an Google bzw. den Kartenanbieter); die Link-Vorschau mit Titel bei Familien-Threads; Löschfristen aus 2.6 und 9.2.
+Seit Etappe 6 in `apps/jufi/src/rechtstexte/datenschutz.md` nachgetragen:
+
+- **Welche Daten:** Block „Threads“ (Inhalte der Threads und Module, Antworten, Nachrichten, Gelesen-Stand, Änderungsprotokoll).
+- **Wer was sieht:** Namen in Threads (3.10), Ergebnisse je Einstellung (3.4), „eingetragen von“ nur für Jugendleiter.
+- **Teilen, Kalender und Karten** (eigener Abschnitt): Teilen nach WhatsApp nur durch eigenes Antippen; der Google-Kalender-Weg und der Karten-Link übertragen erst nach dem Antippen Titel, Zeit, Ort an Google bzw. den Kartenanbieter; die Link-Vorschau mit Titel nur bei veröffentlichten Familien-Threads, sonst mit dem Vereinsnamen, samt der angenommenen Folge für Untergruppen (7.2).
+- **Cookies:** WebSocket (Sitzungscookie, keine zusätzlichen Daten).
+- **Speicherdauer:** `Aenderung` 90 Tage (2.6), Gelesen-Stände beim Entfernen gelöscht, Antworten und Nachrichten bleiben als „ehemaliges Mitglied“ (9.2), mit dem Vorbehalt der rechtlichen Prüfung im Platzhalter-Vermerk, den `tools/pruefe-texte.sh` findet.
+- **Ihre Rechte:** der Datenauszug nennt Antworten, Nachrichten und Gelesen-Stände (9.1).
+
+Die Texte bleiben ein Entwurf zur rechtlichen Prüfung; offen sind sie bis zur Einladung der Jugendleiter (Spec 1.2).
 
 ### 9.4 Betrieb
 
 - Neue Abhängigkeit: `ws`.
 - Das Aufräumen von `Aenderung` (2.6) läuft im App-Prozess; der SIGTERM-Ablauf wartet darauf und auf das Schließen der Sockets, damit eine laufende Löschung nicht mit dem Prozess abbricht.
-- `tools/pruefe-betrieb.sh` prüft zusätzlich den WebSocket-Upgrade und die Link-Vorschau einer unbekannten ID.
+- `tools/pruefe-betrieb.sh` prüft zusätzlich den WebSocket-Upgrade (Abschnitt 7) und die Link-Vorschau einer unbekannten ID (Abschnitt 8, nur mit `--slug`: 200, `no-store`, `og:image` mit der `BASIS_URL`); die Mail-DNS-Prüfung ist dadurch Abschnitt 9.
 
 ---
 
@@ -612,13 +646,25 @@ Jede Funktion aus Abschnitt 3 testgetrieben mit Grenzfällen: Fristsekunde, Arch
 
 ### 10.3 Ende-zu-Ende
 
-Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kontexten (Thomas und Sandra), darunter die Antwort für zwei Kinder (Rahmen 13), die Live-Aktualisierung, der Austausch mit 404 für Sandra und der Teilen-Text. Dazu Layout-Messungen der neuen Seiten.
+Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kontexten (Thomas und Sandra), darunter die Antwort für zwei Kinder (Rahmen 13), die Live-Aktualisierung, der Austausch mit 404 für Sandra und der Teilen-Text (Kopieren über die Zwischenablage, nicht das Teilen-Blatt). Etappe 6 ergänzt das Fristende (Sandra kann nicht mehr antworten, Thomas trägt nach), die Link-Vorschau mit Titel für Familien und neutral für alles andere sowie die Layout-Messung des Thread-Kopfs mit langem Titel. Dazu Layout-Messungen der neuen Seiten.
 
 ### 10.4 Demo
 
-`pnpm run demo` bringt zusätzlich: „Wichtige Infos“ (angepinnt, Nur Aushang, Info-Text, Termin „Nächste Gruppenstunde“), „Bowling“ im Ausgangszustand aus 1.1, „Zeltlager 2027“ (Chat, Untergruppe, Pizza-Umfrage pro Person), einen archivierten Thread und den Austausch mit einigen Nachrichten.
+`pnpm run demo` bringt zusätzlich fünf Threads in dieser Reihenfolge:
 
-**Teilweise vorgezogen (Etappe 2):** Die Demo spielt schon jetzt „Wichtige Infos“, „Bowling“ (ohne Antworten, Frist der Donnerstag davor 18:00) und zwei Nachrichten im Austausch ein und gibt die Thread-Adressen aus. Ohne das hätte der Eigentümer vor Etappe 4 nichts abzunehmen, denn eine Thread-Liste gibt es noch nicht. „Zeltlager 2027“ und der archivierte Thread folgen in Etappe 6. Verworfen: die ganze Demo bis Etappe 6 aufzuschieben.
+1. „Wichtige Infos“ (angepinnt, Nur Aushang, Info-Text, Termin „Nächste Gruppenstunde“),
+2. „Bowling“ im Ausgangszustand aus 1.1,
+3. `Zeltlager <Jahr>` (Chat, Untergruppe „Ältere“, Pizza-Umfrage pro Person),
+4. „🎣 Fischerfest“ (archiviert),
+5. den Austausch mit einigen Nachrichten.
+
+Dazu kommt **Tim Schmid** (11, Jungfischer ohne Familie und ohne Einwilligung, Untergruppe „Jüngere“), damit Thomas in 1.1 Schritt 8 jemanden zum Nachtragen hat.
+
+- **Das Zeltlager trägt das Jahr seines Termins:** 2. bis 8. August des Folgejahres (Berliner Jahr von `jetzt` plus 1), Titel `Zeltlager <Jahr>`, eingespielt 2026 also „Zeltlager 2027“. Verworfen: das Jahr von `jetzt` — ab August wäre der Termin vergangen, und die Demo zeigte ein abgelaufenes Lager.
+- **Das Fischerfest ist archiviert durch die Zeitregel, nicht durch einen Knopf:** `archivModus: AUTOMATISCH`, Termin vor 14 Tagen, also nach der Karenz von sieben Tagen (3.7). Verworfen: es von Hand zu archivieren (`ARCHIVIERT`) — die Demo soll die Regel zeigen, nicht einen Knopfdruck.
+- **Jeder angelegte Thread schreibt je Modul eine `MODUL`-Änderung** im Stand des Threads, wie `POST /threads` (4.2). Verworfen: nur die `THREAD`-Änderung (so bis Etappe 5) — die Demo erzeugte dann einen Stand, den kein echter Schreibpfad erzeugt. Die `THREAD`-Änderung des Austauschs hat `urheberId: null`, denn den Thread hat das System angelegt (`erstelltVonId` ist `null`, 8).
+
+**Teilweise vorgezogen (Etappe 2), erledigt in Etappe 6:** Etappe 2 spielte schon „Wichtige Infos“, „Bowling“ (ohne Antworten, Frist der Donnerstag davor 18:00) und zwei Nachrichten im Austausch ein und gab die Thread-Adressen aus, damit der Eigentümer vor Etappe 4 etwas abzunehmen hatte; eine Thread-Liste gab es noch nicht. „Zeltlager <Jahr>“, „Fischerfest“ und Tim sind mit Etappe 6 dazugekommen. Verworfen: die ganze Demo bis Etappe 6 aufzuschieben.
 
 ---
 

@@ -6,8 +6,8 @@ Helferlisten, Fahrgemeinschaften, Kosten und Dokumente an einem Ort statt verstr
 Das Repo enthält zwei Teile. **Teilprojekt 1** ist der klickbare Entwurf (`apps/entwurf`): Er läuft nur im Browser,
 ohne Server und ohne Anmeldung, mit erfundenen Beispieldaten. Testpersonen spielen ihn per Link durch, lösen Aufgaben
 im Testmodus und schicken eine Rückmeldung per WhatsApp. **Teilprojekt 2** ist die echte App (`apps/jufi`, Kommandozeile
-in `apps/cli`) bis Etappe 6: Vereine anlegen, einladen, anmelden, Mitglieder pflegen, die Oberflächen dazu und der Betrieb (Sicherung, Rückfall, Mailversand). Threads und
-weitere Module folgen in späteren Teilprojekten.
+in `apps/cli`) bis Etappe 6: Vereine anlegen, einladen, anmelden, Mitglieder pflegen, die Oberflächen dazu und der Betrieb (Sicherung, Rückfall, Mailversand). **Teilprojekt 3** bringt
+die Threads mit Aushang und Verlauf, Umfragen und Terminen, Kalender, Live-Aktualisierung und Teilen mit Link-Vorschau. Weitere Module folgen in späteren Teilprojekten.
 
 - Rahmen: [`docs/superpowers/specs/2026-10-11-jufi-rahmen-design.md`](docs/superpowers/specs/2026-10-11-jufi-rahmen-design.md)
 - Entwurf: [`docs/superpowers/specs/2026-10-11-jufi-tp1-entwurf-design.md`](docs/superpowers/specs/2026-10-11-jufi-tp1-entwurf-design.md)
@@ -50,7 +50,16 @@ belegt, meldet der Start „JuFi-Hub (Entwicklung) nicht gestartet“ und die Ap
 `JUFI_WS_DEV_PORT` in der `.env` **und** das Ziel in `proxy.conf.json` ändern, die Datei ist statisch. Im Betrieb hängt
 der Hub am Server der App selbst, dort gibt es keinen zweiten Port.
 
-Der Demo-Verein enthält zwei Untergruppen, drei Jungfischer (einer ohne Einwilligung, einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
+Der Demo-Verein enthält zwei Untergruppen, vier Jungfischer (zwei ohne Einwilligung, davon Tim ohne Familie, und einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Dazu kommen fünf Threads: „Wichtige Infos“, „Bowling“, „Zeltlager <Jahr>“ (das Folgejahr, nur für die Älteren), „🎣 Fischerfest“ (von selbst archiviert) und der Jugendsprecher-Austausch; `pnpm run demo` gibt ihre Adressen aus. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
+
+**Link-Vorschau lokal prüfen:** Wer einen Thread-Link in einen Messenger einfügt, lässt die Seite ohne Cookie abrufen und liest nur den Kopf. Die Tags setzt der Server in die Seite, die Angular sonst ausliefert (`apps/jufi/src/server/verein/vorschau.ts`); ob sie ankommen, zeigt `curl`: Ein Messenger führt kein JavaScript aus, der Browser zeigt also mehr, als er sieht.
+
+```bash
+pnpm run demo            # gibt die Adressen der Threads aus; den Teil hinter /t/ kopieren
+curl -s http://localhost:4200/demo/t/<segment> | grep og:
+```
+
+Erwartet sind sechs `og:`-Zeilen: `og:type`, `og:site_name` (Anzeigename des Vereins), `og:title`, `og:image` (`<BASIS_URL>/demo/icon-512.png`), `og:image:width` und `og:image:height` (512). Bei „Bowling“ und „Wichtige Infos“ steht im `og:title` der Thread-Titel, beim Austausch, bei einer unbekannten ID und bei Unsinn hinter `/t/` der Anzeigename des Vereins („Jungfischer Demo“), und diese drei Antworten sind byte-gleich. Der Kopf der Antwort (`curl -s -D - -o /dev/null <adresse>`) trägt `Cache-Control: no-store`. Bei einem unbekannten Verein (`/gibtsnicht/t/abc`) gibt es keine `og:`-Zeilen. Das gehört zur Prüfung, wenn `angularApp` in `server.ts` wandert oder sich der Render-Modus ändert (Spec TP3 7.2). Gegen die Live-Adresse prüft dasselbe der Abschnitt 8 von `tools/pruefe-betrieb.sh` (siehe „Betrieb prüfen“).
 
 Die Tests (`pnpm test`) laufen gegen echte Postgres-Datenbanken `jufi_test_<projekt>` und brauchen deshalb das
 laufende `pnpm run db:up`. Sie legen ihre Datenbanken selbst an und setzen sie zurück, die Entwicklungsdatenbank
@@ -372,8 +381,8 @@ bash tools/pruefe-texte.sh
 einmal, statt beim ersten `✗` abzubrechen; Exit 1, sobald eines steht: `/healthz` mit Version und Commit, die
 Plattformseite `/` (die App, nicht der Entwurf), den Entwurf unter `/entwurf/` samt Gegenprobe, dass `/` nicht der
 Entwurf ist, bei `test.jufi-app.de` den Umzug (`app-test` → 301 mit Pfad und Anfrage), die Content-Security-Policy, mit
-`--slug` Manifest und Icons (192 und 512 px, mit Zeichnung) sowie den WebSocket (ein Upgrade ohne Cookie auf
-`/<slug>/ws` muss mit 401 abgelehnt werden: dann hat er Traefik und die App erreicht), mit `--mail` SPF, DMARC und mit `--dkim-selector` DKIM
+`--slug` Manifest und Icons (192 und 512 px, mit Zeichnung) sowie den WebSocket (Abschnitt 7: ein Upgrade ohne Cookie auf
+`/<slug>/ws` muss mit 401 abgelehnt werden: dann hat er Traefik und die App erreicht) und die Link-Vorschau (Abschnitt 8: `/<slug>/t/vorschaupruefung`, eine ID, die es nicht gibt, muss mit 200, `Cache-Control: no-store` und dem `og:image` der App antworten; geprüft wird die Kette aus Traefik, App und Angular-Seite, nicht ein Thread), mit `--mail` SPF, DMARC (Abschnitt 9) und mit `--dkim-selector` DKIM
 (Abfrage über 1.1.1.1). Es braucht `curl`, `node` und `dig`. Der Selektor kommt von Hetzner.
 
 `pruefe-texte.sh` zeigt mit Zeilennummern, was Impressum, Datenschutzerklärung und der Einwilligungstext (Fassung 1) noch
