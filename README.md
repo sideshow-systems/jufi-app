@@ -204,10 +204,16 @@ Fehlt `jufi-tools` auf dem Server, bricht Tor 5 ab und verweist auf `tools/insta
 
 ```bash
 cd /home/paperless/paperless-ngx
-docker compose exec jufi node apps/cli/dist/main.js admin anlegen <name>
+docker compose run --rm --no-deps -T -l traefik.enable=false jufi node apps/cli/dist/main.js admin anlegen <name>
 ```
 
 Der ausgegebene Link führt nach `https://test.jufi-app.de/admin/einrichten#…` und gilt 1 Stunde.
+
+**Warum `run` und nicht `exec`:** `jufi` hat ein Speicherlimit von 256 MiB. Die CLI als zweiter Node-Prozess im laufenden
+Container sprengt es, der Kernel beendet dann Prozesse (Exit 137, oft ohne Ausgabe) und startet dabei die App neu. `run`
+startet einen eigenen Wegwerf-Container mit demselben Image und derselben Umgebung; `--no-deps` lässt Datenbank und
+Migration in Ruhe, `-l traefik.enable=false` hält Traefik davon ab, Anfragen an den Wegwerf-Container zu schicken. Dasselbe
+gilt für jede CLI-Aufgabe, etwa den Demo-Verein: `… jufi node apps/cli/dist/main.js demo einspielen`.
 
 **Mails lesen** — Mailpit ist absichtlich nicht öffentlich (die Mails enthalten Einladungs- und Zurücksetzen-Links),
 sondern nur an `127.0.0.1` des Servers gebunden:
