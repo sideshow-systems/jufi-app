@@ -3,6 +3,7 @@ import { createPrismaClientFromEnv, sperreVereinszeile, type Recht } from '@jufi
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
@@ -10,10 +11,11 @@ import { legeMitgliedAn } from './test-mitglieder.js';
 describe('Entfernen und Zugang entziehen', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
-			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, bus: ereignisse.bus }),
 		);
 	});
 
@@ -465,6 +467,70 @@ describe('Entfernen und Zugang entziehen', () => {
 			const v = await neuerVerein();
 			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
 			expect((await setze(v, kind.personId, 'ja')).status).toBe(400);
+		});
+	});
+	describe('Umfeld-Aenderungen auf dem Bus', () => {
+		it('DELETE /personen/:id: eine Aenderung ohne Thread mit der entfernten Person', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+
+			expect((await v.entferne(kind.personId)).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.personId])).toBe(1);
+		});
+
+		it('POST /personen/:id/zugang: eine Aenderung mit dem Kind beim Entziehen', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+
+			const r = await sende(server.url, v.api(`/personen/${kind.personId}/zugang`), {
+				methode: 'POST',
+				body: { erlaubt: false },
+				cookie: v.verwalter.cookie,
+			});
+
+			expect(r.status).toBe(200);
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.personId])).toBe(1);
+		});
+
+		it('POST /personen/:id/zugang: eine Aenderung mit dem Kind beim Erlauben', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+			await v.verknuepfe(mutter.personId, kind.personId);
+			await v.willigtEin(kind.personId, mutter.personId);
+			await prisma.person.update({ where: { id: kind.personId }, data: { zugangErlaubt: false } });
+
+			const r = await sende(server.url, v.api(`/personen/${kind.personId}/zugang`), {
+				methode: 'POST',
+				body: { erlaubt: true },
+				cookie: v.verwalter.cookie,
+			});
+
+			expect(r.status).toBe(200);
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.personId])).toBe(1);
+		});
+
+		it('POST /personen/:id/zugang: 400, 404 und 409 melden nichts', async () => {
+			const v = await neuerVerein();
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER' });
+			const setze = (id: string, erlaubt: unknown) =>
+				sende(server.url, v.api(`/personen/${id}/zugang`), {
+					methode: 'POST',
+					body: { erlaubt },
+					cookie: v.verwalter.cookie,
+				});
+			// Ohne Einwilligung: erst entziehen, dann 409 beim Erlauben. Das Entziehen zaehlt hier nicht mit.
+			expect((await setze(kind.personId, 'ja')).status).toBe(400);
+			expect((await setze('gibt-es-nicht', false)).status).toBe(404);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+
+			await setze(kind.personId, false);
+			const nachEntzug = await prisma.aenderung.count({ where: { vereinId: v.verein.id } });
+			const ereignisseNachEntzug = ereignisse.fuer(v.verein.id).length;
+			expect((await setze(kind.personId, true)).status).toBe(409);
+			expect(await prisma.aenderung.count({ where: { vereinId: v.verein.id } })).toBe(nachEntzug);
+			expect(ereignisse.fuer(v.verein.id)).toHaveLength(ereignisseNachEntzug);
 		});
 	});
 });

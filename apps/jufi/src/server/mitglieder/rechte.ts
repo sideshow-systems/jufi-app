@@ -1,8 +1,9 @@
-import { sperreVereinszeile, type Recht } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld, type Recht } from '@jufi/db';
 import { ALLE_RECHTE, darfRechteAendern, hatRecht, wuerdeLetzteLeitungVerlieren, type RechtName } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
+import { meldeUmfeld } from '../echtzeit/umfeld.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 import { alsSicht, statt404 } from './verwaltung.js';
@@ -22,7 +23,9 @@ class Abbruch extends Error {
 	}
 }
 
-export function rechteRouten(router: Router, _deps: VolleAppDeps): void {
+export function rechteRouten(router: Router, deps: VolleAppDeps): void {
+	const { jetzt, bus } = deps;
+
 	router.put(
 		'/personen/:id/rechte',
 		brauchtMitglied,
@@ -41,11 +44,12 @@ export function rechteRouten(router: Router, _deps: VolleAppDeps): void {
 			const { verein, db } = vereinsKontext(res);
 			const zielId = req.params['id'] ?? '';
 			try {
-				await db.$transaction(async (tx) => {
+				const vermerk = await db.$transaction(async (tx) => {
 					// Sperre statt Serializable (Plan-Entscheidung 1; Serializable verwarf schon Etappe 1: es
 					// liesse gleichzeitige Anfragen mit Serialisierungsfehlern scheitern und der Aufrufer
 					// muesste wiederholen). Die Sperre reiht sie hintereinander.
 					await sperreVereinszeile(tx, verein.id);
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt(), [zielId]);
 					// Die Personen werden erst jetzt gelesen: ein Stand aus ladeUmfeld vor der Sperre waere
 					// veraltet, sobald eine andere Anfrage zwischen Lesen und Sperre Rechte entzogen hat --
 					// beide sahen dann den jeweils anderen noch als Leitung.
@@ -63,7 +67,9 @@ export function rechteRouten(router: Router, _deps: VolleAppDeps): void {
 						throw new Abbruch(409, LETZTE_LEITUNG);
 					}
 					await tx.person.update({ where: { id: zielId }, data: { rechte: rechte as Recht[] } });
+					return vermerk;
 				});
+				meldeUmfeld(bus, verein.id, vermerk);
 				res.json({ rechte });
 			} catch (error) {
 				if (error instanceof Abbruch) return void res.status(error.status).json(error.antwort);

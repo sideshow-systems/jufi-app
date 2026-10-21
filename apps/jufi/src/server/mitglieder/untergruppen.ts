@@ -1,8 +1,10 @@
-import { sperreVereinszeile } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld } from '@jufi/db';
 import { hatRecht, istJugendleiter } from '@jufi/domain';
+import { randomUUID } from 'node:crypto';
 import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron, text } from '../admin/asynchron.js';
+import { meldeUmfeld } from '../echtzeit/umfeld.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 import { statt404 } from './verwaltung.js';
@@ -69,7 +71,9 @@ function antworteAbbruch(res: Response, error: unknown): void {
 	throw error;
 }
 
-export function untergruppenRouten(router: Router, _deps: VolleAppDeps): void {
+export function untergruppenRouten(router: Router, deps: VolleAppDeps): void {
+	const { jetzt, bus } = deps;
+
 	router.get(
 		'/untergruppen',
 		brauchtMitglied,
@@ -102,11 +106,17 @@ export function untergruppenRouten(router: Router, _deps: VolleAppDeps): void {
 			const { verein, db } = vereinsKontext(res);
 			try {
 				const name = liesName(((req.body ?? {}) as Record<string, unknown>)['name']);
-				const id = await db.$transaction(async (tx) => {
+				// Die ID steht vorab fest, damit die Aenderung direkt nach der Sperre steht und trotzdem die
+				// neue Untergruppe nennt; eine abgelehnte Anfrage rollt sie mit der Transaktion zurueck.
+				const id = randomUUID();
+				const vermerk = await db.$transaction(async (tx) => {
 					await sperreVereinszeile(tx, verein.id);
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt(), [id]);
 					if (await nameVergeben(tx, name)) throw new Abbruch(409, NAME_VERGEBEN);
-					return (await tx.untergruppe.create({ data: { name } })).id;
+					await tx.untergruppe.create({ data: { id, name } });
+					return vermerk;
 				});
+				meldeUmfeld(bus, verein.id, vermerk);
 				res.status(201).json({ id });
 			} catch (error) {
 				antworteAbbruch(res, error);
@@ -124,13 +134,16 @@ export function untergruppenRouten(router: Router, _deps: VolleAppDeps): void {
 			const id = req.params['id'] ?? '';
 			try {
 				const name = liesName(((req.body ?? {}) as Record<string, unknown>)['name']);
-				await db.$transaction(async (tx) => {
+				const vermerk = await db.$transaction(async (tx) => {
 					await sperreVereinszeile(tx, verein.id);
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt(), [id]);
 					if (!(await tx.untergruppe.findFirst({ where: { id } }))) throw new Abbruch(404, NICHT_GEFUNDEN);
 					// Die eigene Zeile ausgenommen, sonst waere "hechte" statt "Hechte" ein Duplikat seiner selbst.
 					if (await nameVergeben(tx, name, id)) throw new Abbruch(409, NAME_VERGEBEN);
 					await tx.untergruppe.update({ where: { id }, data: { name } });
+					return vermerk;
 				});
+				meldeUmfeld(bus, verein.id, vermerk);
 				res.status(204).end();
 			} catch (error) {
 				antworteAbbruch(res, error);
@@ -151,12 +164,22 @@ export function untergruppenRouten(router: Router, _deps: VolleAppDeps): void {
 			// liesse das PUT als 500 scheitern. Die Mitgliedschaften gehen per ON DELETE CASCADE mit,
 			// die Personen bleiben (Spec 5.5). deleteMany statt delete: "gibt es nicht oder gehoert
 			// einem anderen Verein" ist beides count 0 und damit 404, ohne Prisma-Fehler.
-			const geloescht = await db.$transaction(async (tx) => {
-				await sperreVereinszeile(tx, verein.id);
-				return tx.untergruppe.deleteMany({ where: { id } });
-			});
-			if (geloescht.count === 0) return statt404(res);
-			res.status(204).end();
+			//
+			// Das 404 wird in der Transaktion geworfen, nicht danach: Die Aenderung steht vor dem Loeschen,
+			// und ein Loeschen ohne Treffer darf sie nicht hinterlassen.
+			try {
+				const vermerk = await db.$transaction(async (tx) => {
+					await sperreVereinszeile(tx, verein.id);
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt(), [id]);
+					const geloescht = await tx.untergruppe.deleteMany({ where: { id } });
+					if (geloescht.count === 0) throw new Abbruch(404, NICHT_GEFUNDEN);
+					return vermerk;
+				});
+				meldeUmfeld(bus, verein.id, vermerk);
+				res.status(204).end();
+			} catch (error) {
+				antworteAbbruch(res, error);
+			}
 		}),
 	);
 
@@ -174,10 +197,11 @@ export function untergruppenRouten(router: Router, _deps: VolleAppDeps): void {
 			}
 			const ids = [...new Set(roh as string[])];
 			try {
-				await db.$transaction(async (tx) => {
+				const vermerk = await db.$transaction(async (tx) => {
 					// Angenommen oder nicht haengt an Person und Gruppen; die Sperre haelt ein gleichzeitiges
 					// Loeschen einer Gruppe (DELETE ebenfalls unter der Sperre) oder Entfernen des Kindes an.
 					await sperreVereinszeile(tx, verein.id);
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt(), [personId]);
 					const kind = await tx.person.findFirst({ where: { id: personId, art: 'JUNGFISCHER', entferntAm: null } });
 					if (!kind) throw new Abbruch(404, NICHT_GEFUNDEN);
 					// Eine unbekannte oder fremde Gruppe ist fuer vereinDb dasselbe: nicht da. Die ganze Anfrage
@@ -191,7 +215,9 @@ export function untergruppenRouten(router: Router, _deps: VolleAppDeps): void {
 							data: ids.map((untergruppeId) => ({ untergruppeId, personId })),
 						});
 					}
+					return vermerk;
 				});
+				meldeUmfeld(bus, verein.id, vermerk);
 				res.json({ untergruppenIds: ids.sort() });
 			} catch (error) {
 				antworteAbbruch(res, error);

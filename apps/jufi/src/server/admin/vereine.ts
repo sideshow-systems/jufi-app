@@ -84,7 +84,7 @@ function pruefeNeuenVerein(
  * so die Signatur fest und nicht die Disziplin beim naechsten Einfuegen einer
  * Route. Verworfen: VolleAppDeps durchreichen und prisma nur nicht benutzen.
  */
-export type VereinsRoutenDeps = Pick<VolleAppDeps, 'jetzt' | 'umgebung'> & { daten: AdminDaten };
+export type VereinsRoutenDeps = Pick<VolleAppDeps, 'jetzt' | 'umgebung' | 'bus'> & { daten: AdminDaten };
 
 /** Link und fertiger Text zum Kopieren, wie nach dem Anlegen eines Vereins. */
 function einladung(
@@ -115,7 +115,7 @@ function nichtGefunden(res: Response): void {
  * api.ts).
  */
 export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
-	const { jetzt, umgebung, daten } = deps;
+	const { jetzt, umgebung, daten, bus } = deps;
 
 	/** Der Mailbauer fuer daten.ts, oder undefined, wenn keine Mail gewuenscht ist. */
 	function mailBauer(body: unknown, art: 'einladung' | 'notfall'): EinladungsMailBauer | undefined {
@@ -195,6 +195,10 @@ export function vereinsRouten(router: Router, deps: VereinsRoutenDeps): void {
 					nichtGefunden(res);
 					return;
 				}
+				// Nur das Sperren beendet Sitzungen, und nur, wenn es etwas geaendert hat: Ein zweiter Klick
+				// laesst die Sockets in Ruhe. Entsperren schliesst nichts, offene Sockets gab es nicht.
+				if (status === 'GESPERRT' && ergebnis === 'geaendert')
+					bus.melde({ typ: 'pruefen', vereinId: req.params['id'] ?? '' });
 				res.json({ status });
 			}),
 		);

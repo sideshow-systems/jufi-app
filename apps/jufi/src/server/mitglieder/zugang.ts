@@ -1,8 +1,9 @@
-import { sperreVereinszeile, type EinladungArt, type Person, type VereinDb } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld, type EinladungArt, type Person, type VereinDb } from '@jufi/db';
 import { darfEinladen, einladungsAblauf, hatGueltigeEinwilligung, hatRecht, istVolljaehrig } from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
+import { meldeUmfeld } from '../echtzeit/umfeld.js';
 import { einladungsLink, erzeugeVereinsEinladung } from '../einladung.js';
 import { mitgliedMail } from '../mail/texte.js';
 import { legeMailAn } from '../mail/warteschlange.js';
@@ -254,7 +255,7 @@ export function einladenRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' 
  * wieder ueber eine neue Einladung. Verworfen: Erlauben ohne Einwilligungspruefung, weil die
  * Verwaltung dann Art. 8 aushebeln koennte.
  */
-export function zugangRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt'>): void {
+export function zugangRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt' | 'bus'>): void {
 	router.post(
 		'/personen/:id/zugang',
 		brauchtMitglied,
@@ -269,8 +270,9 @@ export function zugangRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt'>):
 			const zielId = req.params['id'] ?? '';
 			const jetzt = deps.jetzt();
 			try {
-				await db.$transaction(async (tx) => {
+				const vermerk = await db.$transaction(async (tx) => {
 					await sperreVereinszeile(tx, verein.id);
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt, [zielId]);
 					// Auch der Handelnde frisch: hat eine andere Anfrage ihm MITGLIEDER entzogen, gilt der
 					// Sitzungsstand nicht mehr (wie in rechte.ts).
 					const ich = await tx.person.findFirst({ where: { id: handelnder.id, art: 'ERWACHSENER', entferntAm: null } });
@@ -278,11 +280,13 @@ export function zugangRouten(router: Router, deps: Pick<VolleAppDeps, 'jetzt'>):
 					if (!ich || !hatRecht(ich, 'MITGLIEDER') || !ziel) throw new Abbruch(404, { fehler: 'nicht gefunden' });
 					if (!erlaubt) {
 						await entzieheZugang(tx, ziel.id);
-						return;
+						return vermerk;
 					}
 					if (!(await hatEinwilligung(tx, ziel, jetzt))) throw new Abbruch(409, EINWILLIGUNG_FEHLT);
 					await tx.person.update({ where: { id: ziel.id }, data: { zugangErlaubt: true } });
+					return vermerk;
 				});
+				meldeUmfeld(deps.bus, verein.id, vermerk);
 				res.json({ ok: true });
 			} catch (error) {
 				if (error instanceof Abbruch) return void res.status(error.status).json(error.antwort);

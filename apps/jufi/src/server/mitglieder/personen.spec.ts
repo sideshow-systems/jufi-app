@@ -2,6 +2,7 @@ import { createPrismaClientFromEnv, type Recht } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { MAIL_MAX_VERSUCHE } from '../mail/arbeiter.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
@@ -26,10 +27,11 @@ type Eintrag = {
 describe('Personen', () => {
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	const ereignisse = sammleEreignisse();
 
 	beforeAll(async () => {
 		server = await starteTestServer(
-			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG, bus: ereignisse.bus }),
 		);
 	});
 
@@ -611,6 +613,110 @@ describe('Personen', () => {
 			const verwalter = await v.mitglied(['MITGLIEDER']);
 			const erw = await v.erwachsener('Anna');
 			expect((await belassen(v, verwalter.cookie, erw.id)).status).toBe(404);
+		});
+	});
+	describe('Umfeld-Aenderungen auf dem Bus', () => {
+		const route = (
+			v: Awaited<ReturnType<typeof neuerVerein>>,
+			cookie: string,
+			methode: string,
+			pfad: string,
+			body?: unknown,
+		) => sende(server.url, `/${v.verein.slug}/api/v1${pfad}`, { methode, body, cookie });
+
+		it('POST /personen: eine Aenderung ohne Thread mit der neuen Person, ein Ereignis mit demselben Stand', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+
+			const r = await route(v, verwalter.cookie, 'POST', '/personen', {
+				art: 'JUNGFISCHER',
+				vorname: 'Mia',
+				nachname: 'Fisch',
+				geburtsdatum: '2014-03-04',
+			});
+
+			expect(r.status).toBe(201);
+			const { id } = (await r.json()) as { id: string };
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [id])).toBe(1);
+		});
+
+		it('POST /personen: 400, 409 (Dublette, E-Mail) und 404 schreiben nichts und melden nichts', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const ohneRecht = await v.mitglied([], 'Ohne');
+			const anna = await v.erwachsener('Anna');
+			await v.kind('Kai');
+			const neu = { art: 'ERWACHSENER', vorname: 'Neu', nachname: 'Erw' };
+
+			expect((await route(v, verwalter.cookie, 'POST', '/personen', { ...neu, vorname: '' })).status).toBe(400);
+			expect((await route(v, verwalter.cookie, 'POST', '/personen', { ...neu, email: anna.email })).status).toBe(409);
+			expect(
+				(
+					await route(v, verwalter.cookie, 'POST', '/personen', {
+						art: 'JUNGFISCHER',
+						vorname: 'Kai',
+						nachname: 'Kind',
+						geburtsdatum: '2015-05-05',
+					})
+				).status,
+			).toBe(409);
+			expect((await route(v, ohneRecht.cookie, 'POST', '/personen', neu)).status).toBe(404);
+
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+		});
+
+		it('PATCH /personen/:id: eine Aenderung mit der Person; 404, 400 und 409 nicht', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const kind = await v.kind('Kai');
+			expect((await route(v, verwalter.cookie, 'PATCH', '/personen/gibt-es-nicht', { vorname: 'X' })).status).toBe(404);
+			expect((await route(v, verwalter.cookie, 'PATCH', `/personen/${kind.id}`, { vorname: '' })).status).toBe(400);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+
+			expect((await route(v, verwalter.cookie, 'PATCH', `/personen/${kind.id}`, { vorname: 'Karl' })).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.id])).toBe(1);
+		});
+
+		it('PATCH /personen/:id ohne Aenderung im Body meldet nichts', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const kind = await v.kind('Kai');
+
+			expect((await route(v, verwalter.cookie, 'PATCH', `/personen/${kind.id}`, {})).status).toBe(200);
+
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+		});
+
+		it('volljaehrig-belassen: 200 meldet die Person, 409 und das zweite Belassen nichts', async () => {
+			const v = await neuerVerein();
+			const verwalter = await v.mitglied(['MITGLIEDER']);
+			const jung = await v.kind('Jung', new Date(Date.now() - 17 * 365 * 86_400_000).toISOString().slice(0, 10));
+			const alt = await v.kind('Alt', '2000-01-01');
+			const belasse = (id: string) => route(v, verwalter.cookie, 'POST', `/personen/${id}/volljaehrig-belassen`);
+
+			expect((await belasse(jung.id)).status).toBe(409);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+
+			expect((await belasse(alt.id)).status).toBe(200);
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [alt.id])).toBe(1);
+
+			// Wirkungslos: der erste Zeitpunkt bleibt, es gibt nichts zu melden.
+			expect((await belasse(alt.id)).status).toBe(200);
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [alt.id])).toBe(1);
+		});
+
+		it('DELETE /personen/:id: eine Aenderung mit der entfernten Person; 404 und 409 nicht', async () => {
+			const v = await neuerVerein();
+			const leitung = await v.mitglied(['MITGLIEDER', 'JUGENDLEITER_RECHTE']);
+			const kind = await v.kind('Kai');
+			expect((await route(v, leitung.cookie, 'DELETE', '/personen/gibt-es-nicht')).status).toBe(404);
+			expect((await route(v, leitung.cookie, 'DELETE', `/personen/${leitung.personId}`)).status).toBe(409);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+
+			expect((await route(v, leitung.cookie, 'DELETE', `/personen/${kind.id}`)).status).toBe(200);
+
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [kind.id])).toBe(1);
 		});
 	});
 });

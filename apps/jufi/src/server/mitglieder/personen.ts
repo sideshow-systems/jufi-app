@@ -1,4 +1,4 @@
-import { sperreVereinszeile, type Bezugsperson, type Person, type VereinDb } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld, type Bezugsperson, type Person, type VereinDb } from '@jufi/db';
 import {
 	einsichtIn,
 	hatGueltigeEinwilligung,
@@ -16,9 +16,11 @@ import {
 	type Warnhinweis,
 	type Zuordnung,
 } from '@jufi/domain';
+import { randomUUID } from 'node:crypto';
 import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron, text } from '../admin/asynchron.js';
+import { meldeUmfeld } from '../echtzeit/umfeld.js';
 import { MAIL_MAX_VERSUCHE } from '../mail/arbeiter.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
@@ -215,7 +217,7 @@ function liesEmail(wert: unknown): string | null {
 }
 
 export function personenRouten(router: Router, deps: VolleAppDeps): void {
-	const { jetzt } = deps;
+	const { jetzt, bus } = deps;
 
 	/** Alles, was die Regeln und Serialisierer fuer die Anfrage brauchen. */
 	async function laden(db: VereinDb, betrachter: Person, nur?: string) {
@@ -285,7 +287,8 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 		brauchtMitglied,
 		asynchron(async (req, res) => {
 			if (nurVerwaltung(res)) return;
-			const { db } = vereinsKontext(res);
+			const { verein, db } = vereinsKontext(res);
+			const { person: handelnder } = mitgliedKontext(res);
 			const body = (req.body ?? {}) as Record<string, unknown>;
 			try {
 				const art = body['art'];
@@ -336,18 +339,26 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 
 				// Ohne Vereinssperre: angenommen oder nicht entscheidet hier allein der Unique-Index, und
 				// die Sperre liesse die zweite Anfrage nur warten, nicht anders ausgehen.
-				const id = await db.$transaction(async (tx) => {
-					const person = await tx.person.create({
-						data: { art, vorname, nachname, geburtsdatum, email },
+				//
+				// Die ID steht vorab fest, damit die Aenderung die erste schreibende Anweisung ist: Was vor
+				// der Zeile des Vereins geschrieben wird, kann mit einer Transaktion verklemmen, die sie
+				// schon haelt (mitAenderung). Verworfen: die Aenderung nach dem Anlegen -- dann kennt sie
+				// die ID von selbst, steht aber hinter dem Schreiben der Person.
+				const id = randomUUID();
+				const vermerk = await db.$transaction(async (tx) => {
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt(), [id]);
+					await tx.person.create({
+						data: { id, art, vorname, nachname, geburtsdatum, email },
 						select: { id: true },
 					});
 					if (untergruppenIds.length > 0) {
 						await tx.untergruppeMitglied.createMany({
-							data: untergruppenIds.map((untergruppeId) => ({ untergruppeId, personId: person.id })),
+							data: untergruppenIds.map((untergruppeId) => ({ untergruppeId, personId: id })),
 						});
 					}
-					return person.id;
+					return vermerk;
 				});
+				meldeUmfeld(bus, verein.id, vermerk);
 				res.status(201).json({ id });
 			} catch (error) {
 				antworteAbbruch(res, error);
@@ -365,7 +376,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 			const id = req.params['id'] ?? '';
 			const body = (req.body ?? {}) as Record<string, unknown>;
 			try {
-				await db.$transaction(async (tx) => {
+				const vermerk = await db.$transaction(async (tx) => {
 					// Die Entscheidung "darf ich diese Person aendern" liest Rechte und Art; die Sperre
 					// haelt eine gleichzeitige Rechtevergabe an, bis hier fertig ist.
 					await sperreVereinszeile(tx, verein.id);
@@ -416,13 +427,18 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 					// Ein neues Datum macht die Quittung "Belassen" hinfaellig: sie galt dem alten Datum, und ohne
 					// Zuruecksetzen erschiene der Hinweis "Volljaehrig seit" nie wieder.
 					if (datumGeaendert) aenderung.volljaehrigGeprueftAm = null;
-					if (Object.keys(aenderung).length > 0) await tx.person.update({ where: { id: ziel.id }, data: aenderung });
+					// Ein Body ohne Aenderung schreibt nichts und meldet darum auch nichts.
+					if (Object.keys(aenderung).length === 0) return undefined;
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, jetzt(), [ziel.id]);
+					await tx.person.update({ where: { id: ziel.id }, data: aenderung });
 					// Ein falsches Geburtsjahr kann ein Kind volljaehrig gemacht haben; die Korrektur macht es
 					// wieder minderjaehrig, und dann zaehlt die Einwilligung. Fehlt sie, verliert es den Zugang.
 					if (datumGeaendert && aenderung.geburtsdatum) {
 						await entzieheZugangWennUngueltig(tx, { ...ziel, geburtsdatum: aenderung.geburtsdatum }, jetzt());
 					}
+					return vermerk;
 				});
+				if (vermerk) meldeUmfeld(bus, verein.id, vermerk);
 				res.json({ ok: true });
 			} catch (error) {
 				antworteAbbruch(res, error);
@@ -436,10 +452,11 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 		asynchron(async (req, res) => {
 			if (nurVerwaltung(res)) return;
 			const { verein, db } = vereinsKontext(res);
+			const { person: handelnder } = mitgliedKontext(res);
 			const id = req.params['id'] ?? '';
 			const zeit = jetzt();
 			try {
-				await db.$transaction(async (tx) => {
+				const vermerk = await db.$transaction(async (tx) => {
 					await sperreVereinszeile(tx, verein.id);
 					const ziel = await tx.person.findFirst({ where: { id, entferntAm: null, art: 'JUNGFISCHER' } });
 					if (!ziel) throw new Abbruch(404, NICHT_GEFUNDEN);
@@ -447,10 +464,13 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 						throw new Abbruch(409, { fehler: 'Das Kind ist noch nicht volljährig', code: 'NOCH_MINDERJAEHRIG' });
 					}
 					// Ein zweites "Belassen" behaelt den ersten Zeitpunkt: er belegt, wann die Verwaltung hingesehen hat.
-					if (!ziel.volljaehrigGeprueftAm) {
-						await tx.person.update({ where: { id: ziel.id }, data: { volljaehrigGeprueftAm: zeit } });
-					}
+					// Es aendert nichts und meldet darum auch nichts.
+					if (ziel.volljaehrigGeprueftAm) return undefined;
+					const vermerk = await vermerkeUmfeld(tx, verein.id, handelnder.id, zeit, [ziel.id]);
+					await tx.person.update({ where: { id: ziel.id }, data: { volljaehrigGeprueftAm: zeit } });
+					return vermerk;
 				});
+				if (vermerk) meldeUmfeld(bus, verein.id, vermerk);
 				res.json({ ok: true });
 			} catch (error) {
 				antworteAbbruch(res, error);
@@ -468,7 +488,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 			const zielId = req.params['id'] ?? '';
 			const zeit = jetzt();
 			try {
-				const folgeangebot = await db.$transaction(async (tx) => {
+				const { folgeangebot, vermerk } = await db.$transaction(async (tx) => {
 					// Angenommen oder nicht haengt an Rechten, Entfernt-Stand und der Leitung; dazu gehoert auch
 					// eine Einloesung der Einladung dieser Person, die entweder vorher fertig ist oder an der
 					// Sperre wartet und dann ein 404 sieht.
@@ -505,6 +525,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 						});
 					}
 
+					const vermerk = await vermerkeUmfeld(tx, verein.id, ich.id, zeit, [ziel.id]);
 					// Vor dem Entfernen merken, wer zum Kind gehoerte: danach sind die Zuordnungen weg.
 					const bisherige =
 						ziel.art === 'JUNGFISCHER'
@@ -515,7 +536,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 					// Erwachsene ohne Kind und ohne Rechte brauchen die Verwaltung nicht mehr (Spec 5.8). Nur
 					// ein Angebot: ob sie gehen, entscheidet die Verwaltung. Verworfen: sie gleich mitzuentfernen
 					// -- ein Grossvater, der spaeter ein anderes Enkelkind bekommt, waere dann weg.
-					if (bisherige.length === 0) return [];
+					if (bisherige.length === 0) return { folgeangebot: [], vermerk };
 					const [kandidaten, weiterhin] = await Promise.all([
 						tx.person.findMany({
 							where: { id: { in: bisherige }, entferntAm: null },
@@ -527,10 +548,12 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 						}),
 					]);
 					const mitKind = new Set(weiterhin.map((z) => z.erwachsenerId));
-					return kandidaten
+					const folgeangebot = kandidaten
 						.filter((e) => !istJugendleiter(e) && !mitKind.has(e.id))
 						.map((e) => ({ id: e.id, vorname: e.vorname, nachname: e.nachname }));
+					return { folgeangebot, vermerk };
 				});
+				meldeUmfeld(bus, verein.id, vermerk);
 				res.json({ folgeangebot });
 			} catch (error) {
 				antworteAbbruch(res, error);

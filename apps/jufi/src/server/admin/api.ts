@@ -40,7 +40,7 @@ export function adminApi(appDeps: AppDeps): Router {
 	anmeldeRouten(router, deps);
 	passkeyRouten(router, deps);
 	// Ohne prisma: die Vereinsrouten lesen Vereinsdaten nur ueber adminDaten.
-	vereinsRouten(router, { jetzt: deps.jetzt, umgebung: deps.umgebung, daten: adminDaten(prisma) });
+	vereinsRouten(router, { jetzt: deps.jetzt, umgebung: deps.umgebung, bus: deps.bus, daten: adminDaten(prisma) });
 
 	router.get('/ich', brauchtAdmin, async (_req, res, next) => {
 		try {

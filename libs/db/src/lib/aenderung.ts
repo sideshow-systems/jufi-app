@@ -87,3 +87,35 @@ export async function mitAenderung<T>(
 
 	return { stand, ergebnis, aenderungen };
 }
+
+/**
+ * Vermerkt eine Aenderung im Umfeld eines Vereins (Personen, Familie, Untergruppen, Rechte,
+ * Zugang, Einwilligung), die keinem Thread gehoert: ein Stand, je ID eine Aenderung der Art
+ * SICHTBARKEIT ohne Thread (Plan-Entscheidung 3). `objektIds` sind die geaenderten Personen
+ * bzw. Untergruppen.
+ *
+ * Wer sie sieht, laedt alles neu: Der Sync antwortet dann `vollstaendig`, und ein Signal ohne
+ * threadId geht live an alle Sockets des Vereins. Denn welche Threads eine neue Untergruppe
+ * oder ein Recht beruehrt, ist Sache der Sichtbarkeitsregeln und wuerde sich je Route anders
+ * berechnen.
+ * Verworfen: je betroffenem Thread eine SICHTBARKEIT -- jede TP2-Route muesste selbst
+ * ausrechnen, welche Threads die Aenderung beruehrt. Verworfen: keine Aenderung und nur ein
+ * Live-Signal -- ein Client, der in dem Moment getrennt war, erfuehre es nie.
+ *
+ * Aufrufer rufen es in der Transaktion der Route direkt nach sperreVereinszeile auf (die
+ * Vereinszeile ist dann ohnehin gesperrt) und melden den Bus erst nach dem Commit; die
+ * Rueckgabe traegt dafuer alles.
+ */
+export async function vermerkeUmfeld(
+	tx: VereinTx,
+	vereinId: string,
+	urheberId: string | null,
+	jetzt: Date,
+	objektIds: readonly string[],
+): Promise<{ stand: number; aenderungen: readonly AenderungEingabe[] }> {
+	const { stand, aenderungen } = await mitAenderung(tx, vereinId, urheberId, jetzt, async () => ({
+		ergebnis: undefined,
+		aenderungen: objektIds.map((objektId) => ({ threadId: null, art: 'SICHTBARKEIT' as const, objektId })),
+	}));
+	return { stand, aenderungen };
+}
