@@ -83,6 +83,11 @@ export interface Datenauszug {
 		widerrufenAm: string | null;
 		erteiltVon: string;
 	}[];
+	/** Nach Abgabe aufsteigend. fuer und von: "ich" oder der volle Name. */
+	antworten: { thread: string; frage: string; optionen: string[]; fuer: string; von: string; abgegebenAm: string }[];
+	/** Nur eigene Nachrichten, nach Zeit aufsteigend; text ist null, wenn die Nachricht geloescht wurde. */
+	nachrichten: { thread: string; zeit: string; text: string | null }[];
+	gelesen: { thread: string; zeit: string }[];
 }
 
 /**
@@ -103,6 +108,15 @@ export interface Datenauszug {
  * zusammengesetzt. Verworfen: die ganzen Zeilen nehmen und Hash, Schluessel und Token
  * herausloeschen. Dann landete ein spaeter ergaenztes Geheimnis-Feld still im Auszug,
  * bis jemand daran denkt, es zu streichen.
+ *
+ * Threads (TP3): die Antworten auf Umfragen, die eigenen Nachrichten und wann welcher Thread
+ * zuletzt gelesen wurde. Bei den Antworten zaehlt, fuer wen sie gelten, nicht wer sie
+ * eingetragen hat: Die Person selbst und jedes ihrer zugeordneten Kinder, auch wenn die
+ * Leitung nachgetragen hat. Verworfen: nur, was die Person selbst abgegeben hat; dann
+ * fehlte die Antwort fuer das eigene Kind, wenn die Leitung sie nachgetragen hat, obwohl die
+ * Person fuer das Kind handeln darf (darfFuerKindHandeln). Umgekehrt fehlen Antworten, die die Person fuer fremde Kinder nachgetragen hat: Das sind Daten dieser Kinder.
+ * Nachrichten stehen mit ihrem Text, solange sie nicht geloescht sind. Systemeintraege und
+ * fremde Nachrichten fehlen. Ids und clientIds stehen nicht darin, wie im uebrigen Auszug.
  *
  * Ein schlichter GET mit Content-Disposition (Plan-Entscheidung 9), damit die Oberflaeche
  * nur einen Link braucht. Der Auszug gehoert immer der Person der Sitzung; es gibt keine
@@ -220,6 +234,38 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 					.filter((e) => e.personId === personId)
 					.map((e) => ({ art: e.art, angelegtAm: e.angelegtAm.toISOString(), ablauf: e.ablauf.toISOString() }));
 
+			// Wie die Kinder fuer die Einladungen, nur ohne Erziehungsberechtigung: Wer zugeordnet ist, darf
+			// fuer das Kind antworten (darfFuerKindHandeln), also gehoert die Antwort auch in seinen Auszug.
+			// Bezuege enthalten keine entfernten Kinder; deren Antworten bleiben im Thread, nicht hier.
+			const zugeordneteKinderIds = bezuege.filter((b) => b.erwachsenerId === person.id).map((b) => b.jungfischerId);
+			const nameVon = (p: { vorname: string; nachname: string; entferntAm: Date | null }, id: string): string =>
+				id === person.id ? 'ich' : vollerName(p);
+			const [antworten, nachrichten, gelesen] = await Promise.all([
+				db.umfrageAntwort.findMany({
+					where: { fuerId: { in: [person.id, ...zugeordneteKinderIds] } },
+					select: {
+						fuerId: true,
+						vonId: true,
+						abgegebenAm: true,
+						fuer: { select: { vorname: true, nachname: true, entferntAm: true } },
+						von: { select: { vorname: true, nachname: true, entferntAm: true } },
+						umfrage: { select: { frage: true, modul: { select: { thread: { select: { titel: true } } } } } },
+						optionen: { select: { option: { select: { text: true, position: true } } } },
+					},
+					orderBy: [{ abgegebenAm: 'asc' }, { id: 'asc' }],
+				}),
+				db.verlaufEintrag.findMany({
+					where: { art: 'NACHRICHT', autorId: person.id },
+					select: { angelegtAm: true, text: true, geloeschtAm: true, thread: { select: { titel: true } } },
+					orderBy: [{ angelegtAm: 'asc' }, { stand: 'asc' }, { id: 'asc' }],
+				}),
+				db.gelesenStand.findMany({
+					where: { personId: person.id },
+					select: { gelesenAm: true, thread: { select: { titel: true } } },
+					orderBy: [{ gelesenAm: 'asc' }, { threadId: 'asc' }],
+				}),
+			]);
+
 			const auszug = {
 				erstelltAm: zeit.toISOString(),
 				verein: { name: verein.name, anzeigename: verein.anzeigename },
@@ -295,6 +341,25 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 					widerrufenAm: iso(e.widerrufenAm),
 					erteiltVon: e.erteiltVon === person.id ? 'ich' : vollerName(e.erteiltVonPerson),
 				})),
+				antworten: antworten.map((a) => ({
+					thread: a.umfrage.modul.thread.titel,
+					frage: a.umfrage.frage,
+					optionen: a.optionen
+						.map((o) => o.option)
+						.sort((x, y) => x.position - y.position)
+						.map((o) => o.text),
+					fuer: nameVon(a.fuer, a.fuerId),
+					von: nameVon(a.von, a.vonId),
+					abgegebenAm: a.abgegebenAm.toISOString(),
+				})),
+				nachrichten: nachrichten.map((n) => ({
+					thread: n.thread.titel,
+					zeit: n.angelegtAm.toISOString(),
+					// Der Text einer geloeschten Nachricht ist schon in der Datenbank leer (CHECK verlauf_nachricht);
+					// die Abfrage hier verlaesst sich nicht darauf.
+					text: n.geloeschtAm ? null : n.text,
+				})),
+				gelesen: gelesen.map((g) => ({ thread: g.thread.titel, zeit: g.gelesenAm.toISOString() })),
 			} satisfies Datenauszug;
 
 			// Berliner Tag statt UTC: Eine Datei, die um 00:30 Ortszeit entsteht, soll das Datum von

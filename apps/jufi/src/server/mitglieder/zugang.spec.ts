@@ -6,6 +6,7 @@ import { createApp } from '../app.js';
 import { erwarteNichts, erwarteUmfeldAenderung, sammleEreignisse } from '../echtzeit/test-bus.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
+import { legeThreadAn } from '../threads/test-threads.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
 
 describe('Entfernen und Zugang entziehen', () => {
@@ -115,6 +116,67 @@ describe('Entfernen und Zugang entziehen', () => {
 		expect((await v.person(mutter.personId)).entferntAm).toBeNull();
 		expect(await prisma.bezugsperson.count({ where: { jungfischerId: nachbar.personId } })).toBe(1);
 		expect(await prisma.untergruppe.count({ where: { id: gruppe.id } })).toBe(1);
+	});
+
+	it('Entfernen loescht die Gelesen-Staende der Person; ihre Antwort und Nachricht bleiben samt Text', async () => {
+		const v = await neuerVerein();
+		const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER', vorname: 'Kai', nachname: 'Kind' });
+		const andere = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		const jetzt = new Date('2026-10-18T10:00:00.000Z');
+		const t = await legeThreadAn(prisma, v.verein, jetzt, {
+			module: [{ typ: 'UMFRAGE', teilnahme: true }],
+		});
+		const stand = (personId: string) => ({
+			vereinId: v.verein.id,
+			personId,
+			threadId: t.threadId,
+			gelesenBis: 2,
+			verlaufGelesenBis: 1,
+			gelesenAm: jetzt,
+		});
+		await prisma.gelesenStand.createMany({ data: [stand(kind.personId), stand(andere.personId)] });
+		const antwort = await prisma.umfrageAntwort.create({
+			data: {
+				vereinId: v.verein.id,
+				umfrageId: t.modulIds[0] as string,
+				fuerId: kind.personId,
+				vonId: kind.personId,
+				abgegebenAm: jetzt,
+				clientId: randomUUID(),
+			},
+		});
+		await prisma.umfrageAntwortOption.create({
+			data: {
+				vereinId: v.verein.id,
+				umfrageId: t.modulIds[0] as string,
+				antwortId: antwort.id,
+				optionId: t.optionIds['dabei'] as string,
+			},
+		});
+		const nachricht = await prisma.verlaufEintrag.create({
+			data: {
+				vereinId: v.verein.id,
+				threadId: t.threadId,
+				art: 'NACHRICHT',
+				autorId: kind.personId,
+				text: 'Ich bin dabei',
+				stand: 1,
+				clientId: randomUUID(),
+			},
+		});
+
+		expect((await v.entferne(kind.personId)).status).toBe(200);
+
+		expect(await prisma.gelesenStand.count({ where: { personId: kind.personId } })).toBe(0);
+		// Der Stand einer anderen Person bleibt.
+		expect(await prisma.gelesenStand.count({ where: { personId: andere.personId } })).toBe(1);
+		// Antworten und Nachrichten gehoeren zum Thread und zu den anderen Teilnehmern (Spec 9.2).
+		expect(await prisma.umfrageAntwort.findUnique({ where: { id: antwort.id } })).toEqual(antwort);
+		expect(await prisma.verlaufEintrag.findUniqueOrThrow({ where: { id: nachricht.id } })).toMatchObject({
+			autorId: kind.personId,
+			text: 'Ich bin dabei',
+			geloeschtAm: null,
+		});
 	});
 
 	it('Folgeangebot nennt Opa Hans, der sonst niemanden hat, aber nicht die Mutter mit weiterem Kind und nicht einen Erwachsenen mit Rechten', async () => {
