@@ -453,6 +453,21 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect((await lege(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
 		expect(await anzahl()).toBe(vorher);
 	},
+	'GET /threads': async (k) => {
+		const pfad = '/api/v1/threads';
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}?archiv=1`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const liste = (await r.json()) as { threads: { id: string; titel: string }[] };
+		// Der Thread aus fremd erscheint in der Liste von eigen nicht, auch nicht ueber die Suche.
+		expect(liste.threads.map((t) => t.id)).not.toContain(k.fremderThread.threadId);
+		expect(liste.threads.map((t) => t.titel)).not.toContain('Fremder Thread');
+		// Positiv: Der eigene Austausch steht in der Liste, sie ist also nicht nur leer.
+		expect(liste.threads.map((t) => t.titel)).toContain('Jugendsprecher-Austausch');
+		const suche = await sende(k.url, `/${k.eigen.slug}${pfad}?archiv=1&suche=Fremder`, { cookie: k.eigenerLeiter });
+		expect(((await suche.json()) as { threads: unknown[] }).threads).toEqual([]);
+	},
 	'GET /threads/:id': async (k) => {
 		const vorher = await fremdeThreadZeilen(k);
 		const hole = (slug: string, cookie?: string) =>

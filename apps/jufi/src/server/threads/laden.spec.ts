@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { ladeThread, ladeThreadUmfeld, ladeVereinsstand, modulOrt } from './laden.js';
+import { ladeNeuKandidaten, ladeThread, ladeThreadUmfeld, ladeVereinsstand, modulOrt } from './laden.js';
 import { legeThreadAn, ordneZu, steckeInUntergruppe } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00Z');
@@ -223,5 +223,201 @@ describe('Threads laden', () => {
 		expect(await ladeVereinsstand(db, verein.id)).toBe(1);
 		const { aenderungsstand } = await prisma.verein.findUniqueOrThrow({ where: { id: verein.id } });
 		expect(aenderungsstand).toBe(1);
+	});
+
+	it('liefert die letzte Aktivitaet des Threads', async () => {
+		const { verein, db } = await neuerVerein();
+		const { threadId } = await legeThreadAn(prisma, verein, JETZT);
+		await db.thread.update({ where: { id: threadId }, data: { letzteAktivitaetAm: new Date('2026-10-25T08:00:00Z') } });
+
+		expect((await ladeThread(db, threadId))?.letzteAktivitaetAm).toEqual(new Date('2026-10-25T08:00:00Z'));
+	});
+
+	describe('ladeNeuKandidaten', () => {
+		const ZUGANG = new Date('2026-10-10T10:00:00Z');
+		const VOR_ZUGANG = new Date('2026-10-10T09:59:59Z');
+
+		async function aenderung(
+			vereinId: string,
+			threadId: string,
+			stand: number,
+			urheberId: string | null,
+			angelegtAm: Date,
+			art: 'THREAD' | 'LISTE' = 'THREAD',
+		) {
+			await prisma.aenderung.create({
+				data: { vereinId, stand, threadId, art, objektId: threadId, urheberId, angelegtAm },
+			});
+		}
+
+		it('liefert mit Gelesen-Zeile nur Aenderungen ueber dem Stand, eigene und urheberlose mit', async () => {
+			const { verein, db } = await neuerVerein();
+			const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+			const thomas = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Thomas' });
+			const { threadId } = await legeThreadAn(prisma, verein, JETZT, { erstelltVonId: thomas.personId });
+			await prisma.gelesenStand.create({
+				data: {
+					vereinId: verein.id,
+					personId: sandra.personId,
+					threadId,
+					gelesenBis: 10,
+					verlaufGelesenBis: 4,
+					gelesenAm: JETZT,
+				},
+			});
+			// Ueber dem Stand zaehlt auch, was vor dem Zugang geschah: mit Zeile entscheidet nur der Stand.
+			await aenderung(verein.id, threadId, 10, thomas.personId, JETZT);
+			await aenderung(verein.id, threadId, 11, thomas.personId, VOR_ZUGANG);
+			await aenderung(verein.id, threadId, 12, sandra.personId, JETZT);
+			await aenderung(verein.id, threadId, 13, null, JETZT);
+			await aenderung(verein.id, threadId, 14, thomas.personId, JETZT, 'LISTE');
+
+			const k = (await ladeNeuKandidaten(db, sandra.personId, ZUGANG, [threadId], false)).get(threadId);
+
+			expect(k?.gelesenBis).toBe(10);
+			expect(k?.verlaufGelesenBis).toBe(4);
+			expect(k?.aenderungen.map((a) => a.stand).sort((x, y) => x - y)).toEqual([11, 12, 13, 14]);
+			expect(k?.aenderungen.find((a) => a.stand === 13)).toEqual({
+				stand: 13,
+				art: 'THREAD',
+				urheberId: null,
+				angelegtAm: JETZT,
+			});
+			expect(k?.nachrichten).toEqual([]);
+		});
+
+		it('liefert ohne Gelesen-Zeile nur Aenderungen ab dem Zugang, den Zugang selbst eingeschlossen', async () => {
+			const { verein, db } = await neuerVerein();
+			const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+			const thomas = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Thomas' });
+			const { threadId } = await legeThreadAn(prisma, verein, JETZT, { erstelltVonId: thomas.personId });
+			await aenderung(verein.id, threadId, 20, thomas.personId, VOR_ZUGANG);
+			await aenderung(verein.id, threadId, 21, thomas.personId, ZUGANG);
+			await aenderung(verein.id, threadId, 22, sandra.personId, JETZT);
+			await aenderung(verein.id, threadId, 23, null, JETZT);
+
+			const k = (await ladeNeuKandidaten(db, sandra.personId, ZUGANG, [threadId], false)).get(threadId);
+
+			expect(k?.gelesenBis).toBeNull();
+			expect(k?.verlaufGelesenBis).toBeNull();
+			// Die Aenderung des Anlegens (angelegtAm = JETZT) kommt aus legeThreadAn dazu.
+			const staende = k?.aenderungen.map((a) => a.stand) ?? [];
+			expect(staende).toEqual(expect.arrayContaining([21, 22, 23]));
+			expect(staende).not.toContain(20);
+		});
+
+		it('trennt die Threads, auch mit unterschiedlichen Staenden, und kennt fremde Gelesen-Staende nicht', async () => {
+			const { verein, db } = await neuerVerein();
+			const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+			const hans = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Hans' });
+			const thomas = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Thomas' });
+			const a = await legeThreadAn(prisma, verein, JETZT, { erstelltVonId: thomas.personId });
+			const b = await legeThreadAn(prisma, verein, JETZT, { erstelltVonId: thomas.personId });
+			await prisma.gelesenStand.create({
+				data: {
+					vereinId: verein.id,
+					personId: sandra.personId,
+					threadId: a.threadId,
+					gelesenBis: 50,
+					verlaufGelesenBis: 50,
+					gelesenAm: JETZT,
+				},
+			});
+			await prisma.gelesenStand.create({
+				data: {
+					vereinId: verein.id,
+					personId: hans.personId,
+					threadId: b.threadId,
+					gelesenBis: 99,
+					verlaufGelesenBis: 99,
+					gelesenAm: JETZT,
+				},
+			});
+			await aenderung(verein.id, a.threadId, 40, thomas.personId, JETZT);
+			await aenderung(verein.id, a.threadId, 60, thomas.personId, JETZT);
+			await aenderung(verein.id, b.threadId, 60, thomas.personId, JETZT);
+
+			const m = await ladeNeuKandidaten(db, sandra.personId, ZUGANG, [a.threadId, b.threadId], false);
+
+			expect([...m.keys()].sort()).toEqual([a.threadId, b.threadId].sort());
+			expect(m.get(a.threadId)?.aenderungen.map((x) => x.stand)).toEqual([60]);
+			// Hans' Zeile an b gehoert nicht zu Sandra: b hat fuer sie keinen Stand.
+			expect(m.get(b.threadId)?.gelesenBis).toBeNull();
+			expect(m.get(b.threadId)?.aenderungen.map((x) => x.stand)).toContain(60);
+		});
+
+		it('laedt Nachrichten nur mit mitNachrichten, nach verlaufGelesenBis beziehungsweise ab dem Zugang, ohne Systemeintraege', async () => {
+			const { verein, db } = await neuerVerein();
+			const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+			const thomas = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Thomas' });
+			const mitZeile = await legeThreadAn(prisma, verein, JETZT, { erstelltVonId: thomas.personId });
+			const ohneZeile = await legeThreadAn(prisma, verein, JETZT, { erstelltVonId: thomas.personId });
+			await prisma.gelesenStand.create({
+				data: {
+					vereinId: verein.id,
+					personId: sandra.personId,
+					threadId: mitZeile.threadId,
+					gelesenBis: 0,
+					verlaufGelesenBis: 5,
+					gelesenAm: JETZT,
+				},
+			});
+			const nachricht = (
+				threadId: string,
+				stand: number,
+				angelegtAm: Date,
+				art: 'NACHRICHT' | 'SYSTEM' = 'NACHRICHT',
+			) =>
+				prisma.verlaufEintrag.create({
+					data: {
+						vereinId: verein.id,
+						threadId,
+						art,
+						autorId: thomas.personId,
+						text: art === 'NACHRICHT' ? 'Hallo' : null,
+						systemArt: art === 'SYSTEM' ? 'VEROEFFENTLICHT' : null,
+						stand,
+						angelegtAm,
+					},
+				});
+			await nachricht(mitZeile.threadId, 5, JETZT);
+			await nachricht(mitZeile.threadId, 6, VOR_ZUGANG);
+			await nachricht(mitZeile.threadId, 7, JETZT, 'SYSTEM');
+			await nachricht(ohneZeile.threadId, 3, VOR_ZUGANG);
+			await nachricht(ohneZeile.threadId, 4, ZUGANG);
+
+			const ohne = await ladeNeuKandidaten(db, sandra.personId, ZUGANG, [mitZeile.threadId, ohneZeile.threadId], false);
+			expect(ohne.get(mitZeile.threadId)?.nachrichten).toEqual([]);
+
+			const mit = await ladeNeuKandidaten(db, sandra.personId, ZUGANG, [mitZeile.threadId, ohneZeile.threadId], true);
+			expect(mit.get(mitZeile.threadId)?.nachrichten.map((n) => n.stand)).toEqual([6]);
+			expect(mit.get(ohneZeile.threadId)?.nachrichten.map((n) => n.stand)).toEqual([4]);
+			expect(mit.get(ohneZeile.threadId)?.nachrichten[0]).toEqual({
+				art: 'NACHRICHT',
+				stand: 4,
+				autorId: thomas.personId,
+				angelegtAm: ZUGANG,
+				geloeschtAm: null,
+			});
+		});
+
+		it('liefert fuer keine Threads eine leere Map ohne Abfrage', async () => {
+			const { verein, db } = await neuerVerein();
+			const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+			expect((await ladeNeuKandidaten(db, sandra.personId, ZUGANG, [], true)).size).toBe(0);
+		});
+
+		it('sieht nichts aus einem fremden Verein', async () => {
+			const eins = await neuerVerein();
+			const zwei = await neuerVerein();
+			const sandra = await legeMitgliedAn(prisma, eins.verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+			const thomas = await legeMitgliedAn(prisma, zwei.verein, { art: 'ERWACHSENER', vorname: 'Thomas' });
+			const { threadId } = await legeThreadAn(prisma, zwei.verein, JETZT, { erstelltVonId: thomas.personId });
+
+			const k = (await ladeNeuKandidaten(eins.db, sandra.personId, ZUGANG, [threadId], true)).get(threadId);
+
+			expect(k?.aenderungen).toEqual([]);
+			expect(k?.nachrichten).toEqual([]);
+		});
 	});
 });
