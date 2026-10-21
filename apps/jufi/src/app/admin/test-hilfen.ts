@@ -19,6 +19,8 @@ import { routerFeatures, routes } from '../app.routes';
  * Seite sie quittieren, und die offene Anfrage hielte whenStable an. Verworfen: sie in jedem Test
  * einzeln beantworten, das waeren neun Specs mit demselben Handgriff ohne Aussage. Wer den Punkt
  * pruefen will (mitglieder-huelle.spec.ts), schaltet das mit eigeneThreadListe ab.
+ * Blinder Fleck: expectNone und verify() sehen die vom Interceptor beantworteten Listenanfragen nicht;
+ * Specs, die auf die Listenanfrage pruefen, muessen eigeneThreadListe: true setzen.
  */
 const leereThreadListe: HttpInterceptorFn = (anfrage, weiter) =>
 	anfrage.method === 'GET' && /^\/[^/]+\/api\/v1\/threads$/.test(anfrage.url)

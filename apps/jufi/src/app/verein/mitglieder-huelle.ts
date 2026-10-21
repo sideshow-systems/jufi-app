@@ -127,12 +127,13 @@ const EINTRAEGE: Eintrag[] = [
 			border-top: 1px solid var(--linie);
 		}
 		.leiste a {
+			position: relative;
 			display: flex;
 			flex-direction: column;
 			align-items: center;
 			justify-content: center;
 			gap: 2px;
-			min-height: 56px;
+			min-height: calc(var(--leiste-hoehe) - 1px);
 			color: var(--text-gedaempft);
 			text-decoration: none;
 			font-size: 0.6875rem;
@@ -140,6 +141,18 @@ const EINTRAEGE: Eintrag[] = [
 		}
 		.leiste jf-icon {
 			font-size: 1.375rem;
+		}
+		/* Der Ring in der Farbe der Leiste hebt den Punkt vom Icon ab, auch wenn beide die Akzentfarbe haben. */
+		.punkt {
+			position: absolute;
+			top: 8px;
+			left: calc(50% + 6px);
+			width: 10px;
+			height: 10px;
+			border-radius: 50%;
+			background: var(--akzent);
+			border: 2px solid var(--karte);
+			box-sizing: content-box;
 		}
 		.leiste a.aktiv {
 			color: var(--akzent);
