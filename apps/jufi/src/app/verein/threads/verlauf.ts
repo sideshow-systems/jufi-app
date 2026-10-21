@@ -45,10 +45,20 @@ function vergleiche(a: VerlaufAnsicht, b: VerlaufAnsicht): number {
 	return a.stand - b.stand || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
-/** Fuehrt zwei Listen nach Id zusammen; bei gleicher Id gilt neu. */
+/**
+ * Fuehrt zwei Listen nach Id zusammen; bei gleicher Id gilt neu, ausser alt ist geloescht und neu
+ * nicht. Loeschen ist endgueltig, eine geloeschte Nachricht wird nie wieder lebendig: Kommt das
+ * Loeschen live, waehrend eine Seite unterwegs ist, die der Server davor gelesen hat, holte deren
+ * Antwort die Nachricht sonst mit Text zurueck, bis der Verlauf neu geoeffnet wird (Review Task 10).
+ * Verworfen: die neuere Fassung am Stand erkennen; beide tragen den Stand der Nachricht, nicht den
+ * des Loeschens.
+ */
 function mische(alt: readonly VerlaufAnsicht[], neu: readonly VerlaufAnsicht[]): VerlaufAnsicht[] {
 	const nachId = new Map(alt.map((e) => [e.id, e]));
-	for (const e of neu) nachId.set(e.id, e);
+	for (const e of neu) {
+		const vorher = nachId.get(e.id);
+		nachId.set(e.id, vorher?.geloescht && !e.geloescht ? vorher : e);
+	}
 	return [...nachId.values()].sort(vergleiche);
 }
 
@@ -336,6 +346,12 @@ export class Verlauf {
 	private readonly vollstaendig = signal(true);
 	/** Nur das zuletzt begonnene Auffrischen entscheidet ueber vollstaendig. */
 	private frischNr = 0;
+	/**
+	 * Zaehlt, wie oft ein Auffrischen die Liste wegen einer Luecke ersetzt hat. Fruehere laden prueft
+	 * ihn: Sein Cursor gehoerte zur alten Liste, und seine Zeilen landeten sonst ueber der neuen Seite,
+	 * mit genau der unsichtbaren Luecke, die das Ersetzen vermeiden soll.
+	 */
+	private ersetzt = 0;
 
 	constructor() {
 		inject(DestroyRef).onDestroy(() => this.lauf++);
@@ -399,8 +415,12 @@ export class Verlauf {
 			// Bei einer Luecke bleibt nur, was juenger ist als die neue Seite: was nach ihrer Antwort live kam.
 			const aeltester = neu[0];
 			const behalten = luecke && aeltester !== undefined ? alle.filter((e) => vergleiche(e, aeltester) > 0) : alle;
+			if (luecke) this.ersetzt++;
+			// Wie bei uebernimm: neue Zeilen nehmen die Person nur mit, wenn sie schon unten war.
+			const unten = this.istUnten();
 			this.eintraege.set(mische(behalten, neu));
 			this.weitere.set(luecke || alle.length === 0 ? seite.weitere : this.weitere() && seite.weitere);
+			if (unten && neu.some((e) => !bekannt.has(e.id))) this.zumEnde();
 			if (nr === this.frischNr) this.vollstaendig.set(true);
 		} catch (ursache) {
 			if (lauf !== this.lauf) return;
@@ -464,11 +484,12 @@ export class Verlauf {
 		const aeltester = this.eintraege()[0];
 		if (this.laedtFrueher() || aeltester === undefined) return;
 		const lauf = this.lauf;
+		const ersetzt = this.ersetzt;
 		this.laedtFrueher.set(true);
 		this.listenfehler.set(null);
 		try {
 			const seite = await firstValueFrom(this.api.verlauf(this.slug(), this.threadId(), aeltester.id));
-			if (lauf !== this.lauf) return;
+			if (lauf !== this.lauf || ersetzt !== this.ersetzt) return;
 			const bekannt = new Set(this.eintraege().map((e) => e.id));
 			this.eintraege.update((alle) => [...[...seite.eintraege].reverse().filter((e) => !bekannt.has(e.id)), ...alle]);
 			this.weitere.set(seite.weitere);
@@ -499,7 +520,9 @@ export class Verlauf {
 			);
 			if (lauf !== this.lauf) return;
 			this.versuch = null;
-			this.eintraege.update((alle) => (alle.some((e) => e.id === eintrag.id) ? alle : [...alle, eintrag]));
+			// Nach Stand eingeordnet: Kam vor der Antwort eine fremde Nachricht live, steht die eigene davor.
+			// War das eigene Echo schon da (oder schon geloescht), bleibt es bei einer Zeile.
+			this.eintraege.update((alle) => mische(alle, [eintrag]));
 			// Hat die Person waehrend des Sendens weitergetippt, gehoert der neue Text ihr.
 			if (this.text().trim() === text) this.text.set('');
 			this.zumEnde();
@@ -547,11 +570,6 @@ export class Verlauf {
 	}
 
 	/**
-	 * Das Ende der Seite, damit die neueste Nachricht zu sehen ist. Ueber die Seite statt ueber
-	 * scrollIntoView an einem Element: Die untere Leiste und das Eingabefeld sind fest, ein Element
-	 * "am Rand" laege dahinter; am Seitenende sorgen Abstandhalter und Polster der Huelle fuer Platz.
-	 */
-	/**
 	 * Liest die Person gerade weiter oben, bleibt die Seite stehen, wenn unten etwas dazukommt.
 	 * Verworfen: bei jeder Live-Nachricht ans Ende springen, das risse sie aus dem Lesen.
 	 */
@@ -560,6 +578,11 @@ export class Verlauf {
 		return !seite || seite.scrollTop + seite.clientHeight >= seite.scrollHeight - UNTEN_PX;
 	}
 
+	/**
+	 * Das Ende der Seite, damit die neueste Nachricht zu sehen ist. Ueber die Seite statt ueber
+	 * scrollIntoView an einem Element: Die untere Leiste und das Eingabefeld sind fest, ein Element
+	 * "am Rand" laege dahinter; am Seitenende sorgen Abstandhalter und Polster der Huelle fuer Platz.
+	 */
 	private zumEnde(): void {
 		afterNextRender(
 			() => {

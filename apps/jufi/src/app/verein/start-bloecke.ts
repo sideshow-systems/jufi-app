@@ -39,7 +39,9 @@ function wertVon<T>(ressource: { hasValue: () => boolean; value: () => T }): T |
  * Neu geladen wird auf jedes Ereignis der Echtzeit, entprellt und vorgemerkt (nachlader): Jede
  * Aenderung an einem sichtbaren Thread kann einen der drei Bloecke aendern, auch Nachrichten
  * (Neu) und Antworten (Braucht deine Antwort). Verworfen: nach Arten filtern wie die Termine,
- * hier faellt keine Art sicher heraus. Waehrend des Neuladens bleibt die alte Antwort stehen.
+ * hier faellt keine Art sicher heraus. Waehrend des Neuladens bleibt die alte Antwort stehen;
+ * scheitert es, ersetzt der Fehlerblock sie wie beim ersten Laden (anders als die stille
+ * Aktualisierung der Thread-Seite, offen fuer eine spaetere Etappe).
  */
 @Component({
 	selector: 'jf-start-bloecke',

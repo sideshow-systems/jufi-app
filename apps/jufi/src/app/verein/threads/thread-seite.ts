@@ -288,9 +288,9 @@ export class ThreadSeite {
 	protected readonly wiederherstellFehler = signal<string | null>(null);
 	/**
 	 * Bis hierhin hat die Seite den Thread (Entscheidung 8): der Stand der zuletzt geladenen Ansicht,
-	 * gehoben um den Stand einer Live-Nachricht, solange keine Ladung aussteht. Steht eine aus, kann
-	 * unter dem Stand der Nachricht eine andere Aenderung liegen, die noch nicht da ist; dann hebt
-	 * erst die Antwort den Stand. Der Verlauf meldet bis hierhin.
+	 * gehoben um den Stand einer Live-Nachricht, solange keine Ladung offen ist (standOffen). Ist eine
+	 * offen, kann unter dem Stand der Nachricht eine andere Aenderung liegen, die noch nicht da ist;
+	 * dann hebt erst die gelungene Antwort den Stand. Der Verlauf meldet bis hierhin.
 	 */
 	protected readonly bekannterStand = signal(0);
 
@@ -331,8 +331,32 @@ export class ThreadSeite {
 	 * denn der Zaehler schuetzt auch die Nachlaeufer nach dem await.
 	 */
 	private lauf = 0;
-	/** Eine Ladung oder stille Aktualisierung des juengsten lauf steht aus. */
-	private laeuft = false;
+	/**
+	 * Wahr ab dem Beginn einer Ladung oder stillen Aktualisierung, bis eine gelingt. Ein Fehler (ausser
+	 * 404, dann ist der Thread weg) laesst es wahr: Die Aenderung, die die Aktualisierung ausgeloest
+	 * hat, ist dann nicht geladen, und eine spaetere Live-Nachricht darf den Stand nicht ueber sie
+	 * heben, sonst gaelte sie als gelesen (Entscheidung 8). Erst die naechste gelungene Aktualisierung,
+	 * ausgeloest vom naechsten Ereignis, das keine Live-Nachricht im offenen Verlauf ist, holt es nach.
+	 * Verworfen: der Wortlaut des Plans ("anderer Fehler: alter Stand bleibt" und danach keine
+	 * ausstehende Aktualisierung mehr); dann hoebe die naechste Nachricht den Stand ueber die
+	 * gescheiterte Aenderung hinweg (Review Task 10).
+	 */
+	private standOffen = false;
+	/**
+	 * Der hoechste Stand der Live-Nachrichten, die waehrend standOffen in den Verlauf kamen. Nach der
+	 * gelungenen Antwort gilt max(ihr Stand, liveBis): Jede andere Aenderung vor einer dieser
+	 * Nachrichten kam als Signal davor (der Hub liefert in Stand-Reihenfolge) und hat eine Aktualisierung
+	 * gestartet, deren Antwort sie deckt; die Nachrichten selbst stehen schon im Verlauf. Verworfen:
+	 * nur den Stand der Antwort nehmen; war die Nachricht juenger als die Antwort, bliebe sie trotz
+	 * Anzeige ungelesen, bis sich am Thread wieder etwas aendert.
+	 */
+	private liveBis = 0;
+	/**
+	 * Zaehlt die Seiten (Adresse, Thread, Abbau). Wiederherstellen prueft diesen Zaehler statt lauf:
+	 * Ein Live-Ereignis waehrend des Aufrufs erhoeht lauf, und ein Fehler des Aufrufs ginge sonst
+	 * verloren, der Knopf taete scheinbar nichts (Review Task 10).
+	 */
+	private seitenNr = 0;
 	/** Die Ansicht, deren Stand schon als gelesen gemeldet ist; eine neu geladene meldet sich erneut. */
 	private gemeldet: ThreadAnsicht | null = null;
 	/**
@@ -350,13 +374,17 @@ export class ThreadSeite {
 	constructor() {
 		inject(DestroyRef).onDestroy(() => {
 			this.lauf++;
+			this.seitenNr++;
 			clearTimeout(this.hervorUhr);
 		});
 
 		effect(() => {
 			const slug = this.slug();
 			const id = this.id();
-			untracked(() => void this.lade(slug, id));
+			untracked(() => {
+				this.seitenNr++;
+				void this.lade(slug, id);
+			});
 		});
 
 		this.echtzeit.ereignisse.pipe(takeUntilDestroyed()).subscribe((e) => this.beiEreignis(e));
@@ -399,7 +427,8 @@ export class ThreadSeite {
 
 	private async lade(slug: string, id: string | null): Promise<void> {
 		const lauf = ++this.lauf;
-		this.laeuft = id !== null;
+		this.standOffen = id !== null;
+		this.liveBis = 0;
 		this.thread.set(null);
 		this.fehler.set(null);
 		this.hervor.set(null);
@@ -414,14 +443,12 @@ export class ThreadSeite {
 		try {
 			const ansicht = await firstValueFrom(this.api.thread(slug, id));
 			if (lauf !== this.lauf) return;
-			this.laeuft = false;
 			this.thread.set(ansicht);
-			this.bekannterStand.set(ansicht.stand);
+			this.setzeStand(ansicht.stand);
 			this.zustand.set('bereit');
 			this.korrigiereAdresse(slug, ansicht);
 		} catch (ursache) {
 			if (lauf !== this.lauf) return;
-			this.laeuft = false;
 			const fehler = alsApiFehler(ursache);
 			// Der Waechter prueft die Sitzung nur beim Betreten; sie kann bei offener Seite ablaufen.
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
@@ -454,7 +481,8 @@ export class ThreadSeite {
 			}
 			verlauf.uebernimm(e.signal.eintrag);
 			const stand = e.signal.stand;
-			if (!this.laeuft) this.bekannterStand.update((s) => Math.max(s, stand));
+			if (this.standOffen) this.liveBis = Math.max(this.liveBis, stand);
+			else this.bekannterStand.update((s) => Math.max(s, stand));
 			return;
 		}
 		void this.aktualisiereStill();
@@ -468,7 +496,6 @@ export class ThreadSeite {
 	 */
 	private verschwunden(): void {
 		this.lauf++;
-		this.laeuft = false;
 		this.thread.set(null);
 		this.fehler.set(null);
 		this.zustand.set('nicht-gefunden');
@@ -478,34 +505,46 @@ export class ThreadSeite {
 	 * Laedt den Thread neu, ohne die Seite auf "Wird geladen" zu setzen: Die Karten bleiben stehen
 	 * (Umfrage-Auswahl, Scrollstelle), nur der Inhalt wechselt. Derselbe lauf wie lade, damit eine
 	 * aeltere Antwort keine neuere ueberschreibt. Ein Fehler ausser 401 und 404 laesst den alten
-	 * Stand stehen, ohne Fehlerblock: Die Person hat nichts ausgeloest, und das naechste Ereignis
-	 * oder Oeffnen holt es nach. Ist die Seite nicht bereit (laedt noch, Fehler, nicht gefunden),
-	 * laedt sie richtig; eine laufende erste Anfrage koennte vor der Aenderung beantwortet sein.
+	 * Inhalt stehen, ohne Fehlerblock: Die Person hat nichts ausgeloest, und das naechste Ereignis
+	 * oder Oeffnen holt es nach; der Stand bleibt dabei offen (standOffen).
+	 *
+	 * Laedt die Seite noch oder zeigt einen Fehler, laedt sie richtig: Es gibt keinen Inhalt, der
+	 * stehen bleiben koennte, und eine laufende erste Anfrage koennte vor der Aenderung beantwortet
+	 * sein. Bei "Nicht gefunden" fragt sie still und schaltet nur bei Erfolg um (der Thread ist wieder
+	 * sichtbar); verworfen: auch dort lade, das liesse bei jedem Wiederverbinden und jeder
+	 * Umfeld-Aenderung "Wird geladen" aufblitzen, meist nur, um wieder 404 zu bekommen.
 	 */
 	private async aktualisiereStill(): Promise<void> {
 		const slug = this.slug();
 		const id = this.id();
 		if (id === null) return;
-		if (this.zustand() !== 'bereit') return this.lade(slug, id);
+		const zustand = this.zustand();
+		if (zustand === 'laedt' || zustand === 'fehler') return this.lade(slug, id);
 		const lauf = ++this.lauf;
-		this.laeuft = true;
+		this.standOffen = true;
 		try {
 			const ansicht = await firstValueFrom(this.api.thread(slug, id));
 			if (lauf !== this.lauf) return;
-			this.laeuft = false;
 			// Gleicher Stand, gleiche Meldung: Ein zweites PUT mit demselben Stand aenderte nichts.
 			const alt = this.thread();
 			if (alt !== null && alt === this.gemeldet && alt.stand === ansicht.stand) this.gemeldet = ansicht;
 			this.thread.set(ansicht);
-			this.bekannterStand.set(ansicht.stand);
+			this.setzeStand(ansicht.stand);
+			this.zustand.set('bereit');
 			this.korrigiereAdresse(slug, ansicht);
 		} catch (ursache) {
 			if (lauf !== this.lauf) return;
-			this.laeuft = false;
 			const fehler = alsApiFehler(ursache);
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
 			if (fehler.status === 404 && lauf === this.lauf) this.verschwunden();
 		}
+	}
+
+	/** Nach einer gelungenen Ladung: Der Stand gilt, samt der Live-Nachrichten waehrend der Anfrage. */
+	private setzeStand(stand: number): void {
+		this.bekannterStand.set(Math.max(stand, this.liveBis));
+		this.standOffen = false;
+		this.liveBis = 0;
 	}
 
 	/**
@@ -518,15 +557,15 @@ export class ThreadSeite {
 		// Der zweite Tipp eines Doppeltipps kommt an, bevor der Knopf als gesperrt gezeichnet ist.
 		if (this.stelltWieder()) return;
 		const slug = this.slug();
-		const lauf = this.lauf;
+		const seite = this.seitenNr;
 		this.stelltWieder.set(true);
 		this.wiederherstellFehler.set(null);
 		try {
 			await firstValueFrom(this.verwaltung.archiviere(slug, t.id, false));
-			if (lauf !== this.lauf) return;
+			if (seite !== this.seitenNr) return;
 			await this.lade(slug, t.id);
 		} catch (ursache) {
-			if (lauf !== this.lauf) return;
+			if (seite !== this.seitenNr) return;
 			const fehler = alsApiFehler(ursache);
 			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
 			this.wiederherstellFehler.set(fehlertextNichtGefunden(fehler));

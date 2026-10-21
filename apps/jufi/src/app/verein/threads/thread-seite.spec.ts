@@ -923,6 +923,79 @@ describe('Thread-Seite', () => {
 			expect(seite.querySelector('h1')?.textContent).toBe('Neu');
 		});
 
+		it('hebt den Stand nach einer gescheiterten Aktualisierung erst mit der naechsten gelungenen', async () => {
+			const { harness } = await oeffneVerlauf();
+
+			sende(signal('MODUL', 43));
+			await vi.waitFor(() =>
+				http.expectOne(THREAD_URL).flush({ fehler: 'Unerwarteter Fehler' }, { status: 500, statusText: 'Fehler' }),
+			);
+			await kurz(harness);
+			sende(signal('VERLAUF', 44, { eintrag: nachricht('v1', 'Hallo', { stand: 44 }) }));
+			await beendeSeite(harness);
+			// Bis 44 gemeldet, galte die nicht geladene Modul-Aenderung 43 als gelesen (Entscheidung 8).
+			http.expectNone(GELESEN_URL);
+
+			sende(signal('ANTWORT', 45));
+			await vi.waitFor(() => http.expectOne(THREAD_URL).flush(thread({ stand: 45 })));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 45 });
+			await beendeSeite(harness);
+			http.expectNone(GELESEN_URL);
+		});
+
+		it('meldet eine Nachricht, die waehrend der Aktualisierung kam, auch wenn deren Antwort aelter ist', async () => {
+			const { harness } = await oeffneVerlauf();
+
+			sende(signal('MODUL', 43));
+			const offen = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			sende(signal('VERLAUF', 44, { eintrag: nachricht('v1', 'Hallo', { stand: 44 }) }));
+			await kurz(harness);
+			http.expectNone(GELESEN_URL);
+
+			// Der Server hat vor der Nachricht gelesen; die Modul-Aenderung 43 ist jetzt da, die Nachricht steht im Verlauf.
+			offen.flush(thread({ stand: 43 }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'verlauf', bis: 44 });
+			await beendeSeite(harness);
+		});
+
+		it('fragt bei Nicht gefunden still nach und zeigt den Thread, wenn er wieder sichtbar ist', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: { fehler: 'nicht gefunden' },
+				status: 404,
+			});
+
+			sende(signal('SICHTBARKEIT', 43, { threadId: null }));
+			const offen = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			await kurz(harness);
+			expect(text(seite)).toContain('Nicht gefunden oder keine Berechtigung');
+			expect(text(seite)).not.toContain('Wird geladen');
+
+			offen.flush(thread({ stand: 43 }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'uebersicht', bis: 43 });
+			await beendeSeite(harness);
+			expect(seite.querySelector('h1')?.textContent).toBe('🎳 Bowling');
+		});
+
+		it('zeigt den Fehler beim Wiederherstellen auch, wenn waehrenddessen ein Ereignis kam', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ archiviert: true, darfArchivieren: true }),
+			});
+			[...seite.querySelectorAll<HTMLButtonElement>('button')]
+				.find((b) => b.textContent?.includes('Wiederherstellen'))
+				?.click();
+			const archiv = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1/archiv'));
+
+			sende(signal('ANTWORT', 42));
+			const still = await vi.waitFor(() => http.expectOne(THREAD_URL));
+			archiv.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+			still.flush(thread({ archiviert: true, darfArchivieren: true }));
+			await beendeSeite(harness);
+
+			expect(seite.querySelector('[role="alert"]')?.textContent).toContain('Nicht gefunden oder keine Berechtigung');
+		});
+
 		it('frischt bei alles den offenen Verlauf auf, ohne einen gezeigten Eintrag doppelt zu zeigen', async () => {
 			const { harness, seite } = await oeffneVerlauf([nachricht('v1', 'Erste', { stand: 40 })]);
 

@@ -775,6 +775,82 @@ describe('Verlauf', () => {
 			await fertig();
 		});
 
+		it('laesst eine live geloeschte Nachricht geloescht, auch wenn ein aelteres Auffrischen sie mit Text liefert', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste')]);
+
+			const fertigGefrischt = fixture.componentInstance.frischeAuf();
+			fixture.componentInstance.uebernimm(nachricht('e1', null as unknown as string, { geloescht: 'MODERATION' }));
+			http
+				.expectOne('/demo/api/v1/threads/ck1/verlauf')
+				.flush({ eintraege: [nachricht('e1', 'Erste')], weitere: false });
+			await fertigGefrischt;
+			await fertig();
+
+			expect(text()).not.toContain('Erste');
+			expect(text()).toContain('Von einem Jugendleiter entfernt');
+		});
+
+		it('laesst eine waehrend des ersten Ladens geloeschte Nachricht geloescht', async () => {
+			zeige();
+			const offen = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1/verlauf'));
+			fixture.componentInstance.uebernimm(nachricht('e1', null as unknown as string, { geloescht: 'MODERATION' }));
+			offen.flush({ eintraege: [nachricht('e1', 'Erste')], weitere: false });
+			await quittiereGelesen();
+			await fertig();
+
+			expect(text()).not.toContain('Erste');
+			expect(text()).toContain('Von einem Jugendleiter entfernt');
+		});
+
+		it('verwirft Fruehere laden, wenn ein Auffrischen die Liste waehrenddessen ersetzt hat', async () => {
+			zeige();
+			await ladeSeite([nachricht('e3', 'Dritte', { stand: 30 })], true);
+
+			knopf(el, 'Frühere laden').click();
+			const frueher = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1/verlauf?vor=e3'));
+			const fertigGefrischt = fixture.componentInstance.frischeAuf();
+			http
+				.expectOne('/demo/api/v1/threads/ck1/verlauf')
+				.flush({ eintraege: [nachricht('e4', 'Vierte', { stand: 40 })], weitere: true });
+			await fertigGefrischt;
+			frueher.flush({ eintraege: [nachricht('e2', 'Zweite', { stand: 20 })], weitere: false });
+			await fertig();
+
+			// Zweite gehoerte vor Dritte, nicht vor Vierte; dazwischen fehlt etwas.
+			expect(inhalte()).toEqual(['Vierte']);
+			expect(el.querySelector('.frueher')).not.toBeNull();
+		});
+
+		it('ordnet die eigene Nachricht nach Stand ein, wenn vor der Antwort eine juengere live kam', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste', { stand: 10 })]);
+			tippe('Zweite');
+			sendeKnopf().click();
+			const a = schreibeAnfrage();
+
+			fixture.componentInstance.uebernimm(nachricht('e3', 'Dritte', { stand: 30 }));
+			a.flush({ eintrag: nachricht('e2', 'Zweite', { eigen: true, stand: 20 }), stand: 20 });
+			await fertig();
+
+			expect(inhalte()).toEqual(['Erste', 'Zweite', 'Dritte']);
+		});
+
+		it('zeigt die eigene Nachricht einmal, auch wenn ihr Echo vor der Antwort kam', async () => {
+			zeige();
+			await ladeSeite([nachricht('e1', 'Erste', { stand: 10 })]);
+			tippe('Zweite');
+			sendeKnopf().click();
+			const a = schreibeAnfrage();
+			const eigene = nachricht('e2', 'Zweite', { eigen: true, stand: 20 });
+
+			fixture.componentInstance.uebernimm(eigene);
+			a.flush({ eintrag: eigene, stand: 20 });
+			await fertig();
+
+			expect(inhalte()).toEqual(['Erste', 'Zweite']);
+		});
+
 		it('schickt beim Auffrischen mit abgelaufener Sitzung zur Anmeldung', async () => {
 			const navigieren = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
 			zeige();
