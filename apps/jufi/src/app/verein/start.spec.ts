@@ -2,6 +2,7 @@ import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
+import type { StartAnsicht } from '@jufi/domain';
 import { adminTestAnbieter } from '../admin/test-hilfen';
 import type { Ansprechpartner, KindAnsicht, PersonListe, Warnhinweis } from './mitglieder-api';
 import { wartet, zugangsstand } from './start';
@@ -53,14 +54,18 @@ interface Aufbau {
 	kontakt?: string | null;
 	kinder?: KindAnsicht[] | Error;
 	personen?: PersonListe[] | Error;
+	/** Die Bloecke oben (GET /start); ohne Angabe leer, dann steht dort nichts. */
+	start?: StartAnsicht | Error;
 }
+
+const LEERE_START: StartAnsicht = { brauchtAntwort: [], alsNaechstes: [], neu: [] };
 
 describe('Start', () => {
 	let http: HttpTestingController;
 
 	beforeEach(() => {
 		TestBed.configureTestingModule({
-			providers: adminTestAnbieter(),
+			providers: adminTestAnbieter({ eigeneStart: true }),
 		});
 		http = TestBed.inject(HttpTestingController);
 		document.documentElement.removeAttribute('style');
@@ -91,6 +96,7 @@ describe('Start', () => {
 		const navigation = harness.navigateByUrl('/demo');
 		await vi.waitFor(() => http.expectOne('/demo/api/v1/ich').flush(ich));
 		await navigation;
+		await vi.waitFor(() => antworte('/demo/api/v1/start', a.start ?? LEERE_START));
 		await vi.waitFor(() => antworte('/demo/api/v1/ansprechpartner', toBody(a)));
 		if (ich.hatKinder) {
 			await vi.waitFor(() =>
@@ -156,6 +162,33 @@ describe('Start', () => {
 
 			expect(document.documentElement.style.getPropertyValue('--akzent-hell')).not.toBe('');
 			expect(document.title).toBe('Jungfischer Demo');
+		});
+	});
+
+	describe('Bloecke', () => {
+		const NEU = [{ threadId: 't3', segment: 't3-kegeln', titel: 'Kegeln', angabe: '2 neue Kommentare' }];
+
+		it('stehen vor der Begruessung', async () => {
+			const { seite } = await oeffneStart({ start: { ...LEERE_START, neu: NEU } });
+
+			const bloecke = seite.querySelector('jf-start-bloecke') as HTMLElement;
+			const gruss = seite.querySelector('h1') as HTMLElement;
+			expect(text(bloecke)).toContain('Neu seit deinem letzten Besuch');
+			expect(bloecke.compareDocumentPosition(gruss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		});
+
+		it('zeigen bei einem Netzfehler allein ihren Fehlerblock, Begruessung und Jungfischer-Karten stehen', async () => {
+			const { seite } = await oeffneStart({
+				ich: { hatKinder: true },
+				kinder: [kind()],
+				start: new Error('netz'),
+			});
+
+			const bloecke = seite.querySelector('jf-start-bloecke') as HTMLElement;
+			expect(text(bloecke)).toContain('Keine Verbindung – nochmal versuchen');
+			expect(seite.querySelector('h1')?.textContent?.trim()).toBe('Hallo Flo');
+			expect(text(abschnitt(seite, 'Deine Jungfischer') as HTMLElement)).toContain('Lena Muster');
+			expect(text(abschnitt(seite, 'Ansprechpartner') as HTMLElement)).not.toContain('Keine Verbindung');
 		});
 	});
 
@@ -436,6 +469,7 @@ describe('Start', () => {
 				expect(text(abschnitt(seite, titel) as HTMLElement)).toContain('Wird geladen …');
 			}
 
+			await vi.waitFor(() => antworte('/demo/api/v1/start', LEERE_START));
 			await vi.waitFor(() => antworte('/demo/api/v1/ansprechpartner', { ansprechpartner: [] }));
 			await vi.waitFor(() => antworte('/demo/api/v1/meine-jungfischer', { kinder: [] }));
 			await vi.waitFor(() => antworte('/demo/api/v1/personen', { personen: [] }));
@@ -467,6 +501,8 @@ describe('Start', () => {
 			const navigiert = vi
 				.spyOn(TestBed.inject(Router), 'navigateByUrl')
 				.mockReturnValue(new Promise<boolean>((r) => (beende = r)));
+			// Auch die Bloecke fragen; ihre offene Anfrage hielte whenStable unten an.
+			await vi.waitFor(() => antworte('/demo/api/v1/start', LEERE_START));
 			const abgelaufen = { status: 401, statusText: 'Unauthorized' };
 			await vi.waitFor(() =>
 				http.expectOne('/demo/api/v1/ansprechpartner').flush({ fehler: 'nicht angemeldet' }, abgelaufen),
@@ -502,6 +538,7 @@ describe('Start', () => {
 			await vi.waitFor(() => expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo'));
 			// Die Anmeldeseite laedt ihren Vereinskopf; hier zaehlt nur das Ziel der Umleitung.
 			for (const kopf of http.match('/demo/api/v1/verein')) kopf.flush(VEREIN);
+			http.match('/demo/api/v1/start');
 			await harness.fixture.whenStable();
 			harness.detectChanges();
 
@@ -571,6 +608,7 @@ describe('Start', () => {
 			const navigation = harness.navigateByUrl('/demo');
 			await vi.waitFor(() => http.expectOne('/demo/api/v1/ich').flush(ichMit()));
 			await navigation;
+			await vi.waitFor(() => antworte('/demo/api/v1/start', LEERE_START));
 			await vi.waitFor(() => antworte('/demo/api/v1/ansprechpartner', { ansprechpartner: [] }));
 			http
 				.expectOne('/demo/api/v1/verein')
@@ -599,6 +637,7 @@ describe('Start', () => {
 			const navigation = harness.navigateByUrl('/vereina');
 			await vi.waitFor(() => http.expectOne('/vereina/api/v1/ich').flush(ichMit()));
 			await navigation;
+			await vi.waitFor(() => antworte('/vereina/api/v1/start', LEERE_START));
 			await vi.waitFor(() => antworte('/vereina/api/v1/ansprechpartner', { ansprechpartner: [] }));
 			antworte('/vereina/api/v1/verein', { ...VEREIN, slug: 'vereina', anzeigename: 'Verein A' });
 			await harness.fixture.whenStable();
@@ -614,6 +653,7 @@ describe('Start', () => {
 			expect(document.title).toBe('JuFi App');
 			expect(document.documentElement.style.getPropertyValue('--akzent-hell')).toBe('');
 
+			await vi.waitFor(() => antworte('/vereinb/api/v1/start', LEERE_START));
 			await vi.waitFor(() => antworte('/vereinb/api/v1/ansprechpartner', { ansprechpartner: [] }));
 			http
 				.expectOne('/vereinb/api/v1/verein')

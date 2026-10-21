@@ -27,13 +27,28 @@ const leereThreadListe: HttpInterceptorFn = (anfrage, weiter) =>
 		? of(new HttpResponse({ status: 200, body: { threads: [], archiv: 0 } }))
 		: weiter(anfrage);
 
+/**
+ * Dasselbe fuer die Bloecke der Startseite (GET /start): Jede Spec, die die Startseite oeffnet,
+ * bekaeme sonst eine offene Anfrage, die sie nicht betrifft. Verworfen: sie in allen Specs einzeln
+ * beantworten (sieben Dateien, die vom Aufbau der Startseite nichts wissen wollen). Wer die Bloecke
+ * pruefen will (start.spec.ts), schaltet das mit eigeneStart ab; dort gilt derselbe blinde Fleck.
+ */
+const leereStart: HttpInterceptorFn = (anfrage, weiter) =>
+	anfrage.method === 'GET' && /^\/[^/]+\/api\/v1\/start$/.test(anfrage.url)
+		? of(new HttpResponse({ status: 200, body: { brauchtAntwort: [], alsNaechstes: [], neu: [] } }))
+		: weiter(anfrage);
+
 /** Gemeinsame Bereitstellung der Admin-Tests: echte Routen, gespielte HTTP-Antworten. */
 export function adminTestAnbieter(
-	optionen: { eigeneThreadListe?: boolean } = {},
+	optionen: { eigeneThreadListe?: boolean; eigeneStart?: boolean } = {},
 ): Array<Provider | EnvironmentProviders> {
+	const interceptoren = [
+		...(optionen.eigeneThreadListe ? [] : [leereThreadListe]),
+		...(optionen.eigeneStart ? [] : [leereStart]),
+	];
 	return [
 		provideRouter(routes, ...routerFeatures),
-		provideHttpClient(withFetch(), withInterceptors(optionen.eigeneThreadListe ? [] : [leereThreadListe])),
+		provideHttpClient(withFetch(), withInterceptors(interceptoren)),
 		provideHttpClientTesting(),
 	];
 }
