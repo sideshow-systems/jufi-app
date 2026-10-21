@@ -94,9 +94,9 @@ export class Echtzeit {
 	private readonly vordergrundWert = signal(this.browser ? this.dokument.visibilityState === 'visible' : true);
 	private readonly quelle = new Subject<EchtzeitEreignis>();
 
-	/** Ein Socket ist offen. */
+	/** Ein Socket ist offen, und der Abgleich darueber ist gelungen. */
 	readonly verbunden: Signal<boolean> = this.verbundenWert.asReadonly();
-	/** Seit mindestens 2 s ohne offenen Socket; dann zeigt die Huelle den Hinweis. */
+	/** Seit mindestens 2 s nicht verbunden (kein Socket oder kein gelungener Abgleich); dann zeigt die Huelle den Hinweis. */
 	readonly getrennt: Signal<boolean> = this.getrenntWert.asReadonly();
 	/** Das Dokument ist sichtbar; nur dann melden Seiten etwas als gelesen (Entscheidung 8). */
 	readonly vordergrund: Signal<boolean> = this.vordergrundWert.asReadonly();
@@ -162,13 +162,9 @@ export class Echtzeit {
 			`${ort.protocol === 'https:' ? 'wss' : 'ws'}://${ort.host}/${encodeURIComponent(slug)}/ws`,
 		);
 		this.socket = s;
+		// Ein offener Socket allein heisst nicht verbunden; das entscheidet der Abgleich danach (abgeglichen).
 		s.onopen = () => {
 			if (this.socket !== s) return;
-			this.wartezeit = ERSTE_WARTEZEIT_MS;
-			this.verbundenWert.set(true);
-			this.getrenntWert.set(false);
-			if (this.hinweis !== null) clearTimeout(this.hinweis);
-			this.hinweis = null;
 			this.gleicheAb();
 		};
 		s.onmessage = (nachricht) => {
@@ -204,22 +200,44 @@ export class Echtzeit {
 		this.abgleiche.add(
 			this.api.sync(slug, this.stand).subscribe({
 				next: (antwort) => {
-					if (nr === this.abgleichNr) this.abgleichOffen = false;
 					this.wendeAn(antwort);
+					// Ein ueberholter Abgleich belegt nichts mehr; der juengste entscheidet.
+					if (nr !== this.abgleichNr) return;
+					this.abgleichOffen = false;
+					if (socket !== null && this.socket === socket) this.abgeglichen();
 					this.weiterNachAbgleich();
 				},
 				error: (roh: unknown) => {
 					const fehler = alsApiFehler(roh);
+					// 401 und 404 gelten auch aus einem ueberholten Abgleich: Sitzung oder Verein sind weg.
 					if (fehler.status === 401 || fehler.status === 404) {
 						this.gibAuf();
 						if (fehler.status === 401) void beiAbgelaufenerSitzung(this.router, slug, fehler);
 						return;
 					}
+					// Ein ueberholter Fehler trennte sonst einen Socket, dessen juengerer Abgleich gelungen ist.
+					if (nr !== this.abgleichNr) return;
 					if (socket !== null && this.socket === socket) this.trenne();
 					this.weiterNachAbgleich();
 				},
 			}),
 		);
+	}
+
+	/**
+	 * Erst ein gelungener Abgleich ueber den offenen Socket macht die Inhalte aktuell: Dann gilt die
+	 * Verbindung, der Hinweis geht weg, und der Backoff faengt wieder bei 1 s an. Verworfen: das schon
+	 * beim Oeffnen zu tun. Scheitert danach jeder Abgleich (REST kaputt, Upgrade gesund), oeffnete der
+	 * Client jede Sekunde neu, weil der Backoff nie wuechse, und der Hinweis kaeme nie, weil jedes Oeffnen
+	 * seinen Zeitgeber vor Ablauf der 2 s loeschte (Re-Review Task 9). Preis: Dauern Upgrade und Abgleich
+	 * zusammen ueber 2 s, steht der Hinweis kurz da, obwohl der Socket schon offen ist.
+	 */
+	private abgeglichen(): void {
+		this.wartezeit = ERSTE_WARTEZEIT_MS;
+		this.verbundenWert.set(true);
+		this.getrenntWert.set(false);
+		if (this.hinweis !== null) clearTimeout(this.hinweis);
+		this.hinweis = null;
 	}
 
 	/** Ohne Socket und ohne geplanten Versuch neu verbinden; ein offener oder geplanter bleibt, wie er ist. */
@@ -230,7 +248,9 @@ export class Echtzeit {
 	/**
 	 * Nach "alles" gilt der Stand des Servers, auch wenn er unter dem bisherigen liegt: Die Datenbank
 	 * kann aus einer Sicherung stammen, und mit dem hoeheren Stand ueberginge der naechste Abgleich die
-	 * Aenderungen bis dorthin. Sonst das Hoechste aus beiden (ein Signal kann den Abgleich ueberholen).
+	 * Aenderungen bis dorthin. Sonst das Hoechste aus beiden. Signale waehrend eines offenen Abgleichs
+	 * haben den Stand nicht gehoben (abgleichOffen); war eines juenger als die Antwort, meldet der
+	 * naechste Abgleich seinen Thread noch einmal. Doppelt gemeldet, nie verloren.
 	 */
 	private wendeAn(antwort: SyncAntwort): void {
 		if (antwort.vollstaendig) {

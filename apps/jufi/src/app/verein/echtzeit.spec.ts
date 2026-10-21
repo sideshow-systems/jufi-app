@@ -123,9 +123,11 @@ describe('Echtzeit', () => {
 		expect(zuletzt().url).toBe(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/demo/ws`);
 		http.expectNone(SYNC);
 
+		// Verbunden heisst: Inhalte sind abgeglichen, nicht nur der Socket ist offen.
 		zuletzt().oeffne();
-		expect(echtzeit.verbunden()).toBe(true);
+		expect(echtzeit.verbunden()).toBe(false);
 		http.expectOne(SYNC).flush(antwort({ stand: 5, vollstaendig: true }));
+		expect(echtzeit.verbunden()).toBe(true);
 		expect(ereignisse).toEqual([{ typ: 'alles' }]);
 	});
 
@@ -167,20 +169,63 @@ describe('Echtzeit', () => {
 	});
 
 	// Review Important 1: Ein gescheiterter Abgleich bei offenem Socket darf die Luecke nicht verschlucken.
-	it('fragt nach einem gescheiterten ersten Abgleich nicht ab dem Stand eines spaeteren Signals', () => {
+	// Prueft das Schliessen nach dem Fehler: Das Signal danach kommt ueber den geschlossenen Socket und
+	// faellt schon am Waechter fuer ersetzte Sockets weg. Den Merker "Abgleich offen" prueft der naechste Test.
+	it('schliesst den Socket nach einem gescheiterten ersten Abgleich und fragt beim naechsten Versuch wieder ohne seit', () => {
 		bereite();
 		vi.spyOn(Math, 'random').mockReturnValue(0.5);
 		echtzeit.starte('demo');
-		zuletzt().oeffne();
+		const s = zuletzt();
+		s.oeffne();
 		http.expectOne(SYNC).flush({ fehler: 'kaputt' }, { status: 500, statusText: 'Server Error' });
-		zuletzt().sende(signal({ stand: 9 }));
+		expect(s.geschlossenMit).toBe(1000);
+		s.sende(signal({ stand: 9 }));
 
-		zeige('visible');
 		vi.advanceTimersByTime(1000);
-		if (FalscherSocket.alle.length > 1) zuletzt().oeffne();
+		expect(FalscherSocket.alle.length).toBe(2);
+		zuletzt().oeffne();
 		http.expectNone(`${SYNC}?seit=9`);
 		http.expectOne(SYNC).flush(antwort({ stand: 9, vollstaendig: true }));
 		expect(ereignisse.at(-1)).toEqual({ typ: 'alles' });
+	});
+
+	// Review Fix-Runde 1: Ein offener Socket mit dauernd scheiterndem Abgleich darf den Backoff nicht zuruecksetzen.
+	it('verdoppelt die Wartezeit, wenn der Abgleich nach dem Oeffnen wiederholt scheitert, und zeigt den Hinweis', () => {
+		bereite();
+		vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const kaputt = () => http.expectOne(SYNC).flush({ fehler: 'kaputt' }, { status: 500, statusText: 'Server Error' });
+		echtzeit.starte('demo');
+
+		zuletzt().oeffne();
+		kaputt();
+		vi.advanceTimersByTime(1000);
+		expect(FalscherSocket.alle.length).toBe(2);
+		zuletzt().oeffne();
+		kaputt();
+
+		vi.advanceTimersByTime(1999);
+		expect(FalscherSocket.alle.length).toBe(2);
+		vi.advanceTimersByTime(1);
+		expect(FalscherSocket.alle.length).toBe(3);
+		expect(echtzeit.getrennt()).toBe(true);
+		expect(echtzeit.verbunden()).toBe(false);
+	});
+
+	// Ein aelterer Abgleich, der nach dem Erfolg eines juengeren scheitert, sagt nichts mehr ueber den Socket.
+	it('laesst den Socket offen, wenn ein ueberholter Abgleich scheitert', () => {
+		bereite();
+		const s = verbinde(5);
+
+		zeige('visible');
+		const alt = http.expectOne(`${SYNC}?seit=5`);
+		zeige('visible');
+		http.expectOne(`${SYNC}?seit=5`).flush(antwort({ stand: 6 }));
+		alt.error(new ProgressEvent('error'));
+
+		expect(s.geschlossenMit).toBeNull();
+		expect(echtzeit.verbunden()).toBe(true);
+		vi.advanceTimersByTime(60_000);
+		expect(FalscherSocket.alle.length).toBe(1);
 	});
 
 	it('hebt den Stand nicht ueber ein Signal, das waehrend eines spaeter gescheiterten Abgleichs kam', () => {
