@@ -102,9 +102,13 @@ export async function mitAenderung<T>(
  * ausrechnen, welche Threads die Aenderung beruehrt. Verworfen: keine Aenderung und nur ein
  * Live-Signal -- ein Client, der in dem Moment getrennt war, erfuehre es nie.
  *
- * Aufrufer rufen es in der Transaktion der Route direkt nach sperreVereinszeile auf (die
- * Vereinszeile ist dann ohnehin gesperrt) und melden den Bus erst nach dem Commit; die
- * Rueckgabe traegt dafuer alles.
+ * Aufrufer rufen es in der Transaktion der Route spaetestens vor dem ersten Schreiben auf: Es
+ * sperrt die Vereinszeile, und was davor geschrieben wird, kann verklemmen (mitAenderung). Wo
+ * die Route sperreVereinszeile ruft, gleich danach
+ * (die Zeile ist dann ohnehin gesperrt); wo ein Pfad ohne Wirkung enden kann, erst vor dem
+ * ersten Schreiben, damit keine Aenderung ohne Wirkung entsteht (Spec 2.6). POST /personen ruft
+ * es ohne sperreVereinszeile; dort sperrt erst dieser Aufruf. Den Bus melden die Aufrufer erst
+ * nach dem Commit; die Rueckgabe traegt dafuer alles.
  */
 export async function vermerkeUmfeld(
 	tx: VereinTx,

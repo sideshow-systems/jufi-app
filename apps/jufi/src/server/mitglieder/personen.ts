@@ -337,8 +337,11 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 					}
 				}
 
-				// Ohne Vereinssperre: angenommen oder nicht entscheidet hier allein der Unique-Index, und
-				// die Sperre liesse die zweite Anfrage nur warten, nicht anders ausgehen.
+				// Ohne sperreVereinszeile: Angenommen oder nicht entscheidet hier allein der Unique-Index
+				// (die Doppelt-Pruefung oben ist nur ein Rat), und die Sperre liesse die zweite Anfrage nur
+				// warten, nicht anders ausgehen. Gesperrt ist die Vereinszeile trotzdem: vermerkeUmfeld
+				// erhoeht ueber mitAenderung den Stand, und das UPDATE haelt sie bis zum Commit; zwei
+				// gleichzeitige Anlagen stellen sich dort an.
 				//
 				// Die ID steht vorab fest, damit die Aenderung die erste schreibende Anweisung ist: Was vor
 				// der Zeile des Vereins geschrieben wird, kann mit einer Transaktion verklemmen, die sie
