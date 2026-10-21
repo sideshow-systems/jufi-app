@@ -155,7 +155,7 @@ Die App hat drei Wege, etwas aus einem Thread weiterzugeben. Keiner läuft von s
 
 - Bei einem **veröffentlichten Thread, der sich an Jungfischer und Familien oder nur an Familien richtet,** steht sein Titel in der Vorschau.
 - Bei **allen anderen** Adressen, also bei Threads nur für Jugendleiter, bei Entwürfen, beim Jugendsprecher-Austausch und bei Adressen, die es nicht gibt, steht der Anzeigename des Vereins. Diese Antworten sind nicht zu unterscheiden; an der Vorschau lässt sich nicht erkennen, ob es einen Thread gibt.
-- Das Bild ist immer das Vereins-Icon. Weitere Angaben enthält die Vorschau nicht, und sie wird nicht zwischengespeichert.
+- Das Bild ist immer das Vereins-Icon. Weitere Angaben enthält die Vorschau nicht. Die App verbietet das Zwischenspeichern der Antwort (`Cache-Control: no-store`); was ein Messenger von der Vorschau behält, entscheidet der Messenger.
 
 Die Vorschau kennt die Person nicht, die den Link abruft, und prüft deshalb keine Untergruppen: Bei einem Thread für eine Untergruppe zeigt sie den Titel jedem, der den Link hat, auch Familien außerhalb der Untergruppe, die den Thread selbst nicht öffnen könnten. Die Adressen der Threads sind zufällig und nicht zu erraten. Den Thread selbst, seine Inhalte und Namen zeigt die Vorschau nie.
 
@@ -170,7 +170,7 @@ Die App setzt genau ein Cookie je Bereich:
 
 Beide Cookies sind für Skripte nicht lesbar (`HttpOnly`), werden nur verschlüsselt übertragen (`Secure`) und nicht an fremde Seiten mitgeschickt (`SameSite=Lax`).
 
-Die Live-Verbindung (WebSocket) unter `/<verein>/ws` hält die Anzeige aktuell, solange die App offen ist. Sie nutzt das Sitzungscookie `jufi_sitzung`, setzt kein weiteres Cookie und überträgt keine zusätzlichen Daten: Der Server meldet nur Änderungen an Threads, die die Person ohnehin sehen darf, und neue Nachrichten im Verlauf. Nur die zufällige Kennung eines Threads, dessen Zielgruppe sich geändert hat oder der gelöscht wurde, geht ohne Prüfung an alle Verbindungen des Vereins, ohne Inhalt. Endet die Sitzung, schließt der Server die Verbindung.
+Die Live-Verbindung (WebSocket) unter `/<verein>/ws` hält die Anzeige aktuell, solange die App offen ist. Sie nutzt das Sitzungscookie `jufi_sitzung`, setzt kein weiteres Cookie und überträgt keine zusätzlichen Daten: Der Server meldet nur Änderungen an Threads, die die Person ohnehin sehen darf, und neue Nachrichten im Verlauf. Nur die zufällige Kennung eines Threads, dessen Zielgruppe sich geändert hat oder der gelöscht wurde, geht ohne Prüfung an alle Verbindungen des Vereins, ohne Inhalt. Ebenso geht ein leeres Signal an alle Verbindungen des Vereins, wenn sich etwas ohne Thread ändert (Rechte, Familien, Untergruppen); es trägt keinen Inhalt. Endet die Sitzung, schließt der Server die Verbindung.
 
 Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur Ihre Wahl der Darstellung ab (hell, dunkel oder wie das System). Sie bleibt, bis Sie sie im Browser löschen, und wird nicht an den Server übertragen.
 

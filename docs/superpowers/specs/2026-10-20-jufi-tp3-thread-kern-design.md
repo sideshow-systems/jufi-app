@@ -564,7 +564,7 @@ Tokens und Bauteile aus TP2. Gemessen bei 375 × 812 und 1280 × 800, hell und d
 
 **Kein Teilen bei Entwürfen:** Der Knopf fehlt dort. Den Link öffnet außer den Bearbeitern niemand (3.1), also hätte das Teilen keinen Empfänger. Verworfen: der Knopf auch im Entwurf — er teilte einen Link ohne Empfänger.
 
-Die „Kopiert“-Meldung (`<jf-meldung />`) sitzt seit Etappe 6 einmal in der Wurzel der App (`app.ts`); vorher stand sie nur im Rahmen der Verwaltung, und weder „Kopiert“ auf der Thread-Seite noch „Gespeichert“ in den Einstellungen war zu sehen. Verworfen: je Hülle eine eigene — die nächste Hülle hätte sie wieder vergessen.
+Die „Kopiert“-Meldung (`<jf-meldung />`) sitzt seit Etappe 6 einmal in der Wurzel der App (`app.ts`); vorher stand sie nur im Rahmen des Plattform-Admins (`admin-rahmen.ts`), und weder „Kopiert“ auf der Thread-Seite noch „Gespeichert“ in den Einstellungen war zu sehen. Verworfen: je Hülle eine eigene — die nächste Hülle hätte sie wieder vergessen.
 
 ### 7.2 Link-Vorschau
 
@@ -623,7 +623,7 @@ Seit Etappe 6 in `apps/jufi/src/rechtstexte/datenschutz.md` nachgetragen:
 - **Speicherdauer:** `Aenderung` 90 Tage (2.6), Gelesen-Stände beim Entfernen gelöscht, Antworten und Nachrichten bleiben als „ehemaliges Mitglied“ (9.2), mit dem Vorbehalt der rechtlichen Prüfung im Platzhalter-Vermerk, den `tools/pruefe-texte.sh` findet.
 - **Ihre Rechte:** der Datenauszug nennt Antworten, Nachrichten und Gelesen-Stände (9.1).
 
-Die Texte bleiben ein Entwurf zur rechtlichen Prüfung; offen sind sie bis zur Einladung der Jugendleiter (Spec 1.2).
+Die Texte bleiben ein Entwurf zur rechtlichen Prüfung; offen sind sie bis zur Einladung der Jugendleiter (TP2 1.2, README „Rechtstexte“).
 
 ### 9.4 Betrieb
 
@@ -646,7 +646,7 @@ Jede Funktion aus Abschnitt 3 testgetrieben mit Grenzfällen: Fristsekunde, Arch
 
 ### 10.3 Ende-zu-Ende
 
-Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kontexten (Thomas und Sandra), darunter die Antwort für zwei Kinder (Rahmen 13), die Live-Aktualisierung, der Austausch mit 404 für Sandra und der Teilen-Text (Kopieren über die Zwischenablage, nicht das Teilen-Blatt). Etappe 6 ergänzt das Fristende (Sandra kann nicht mehr antworten, Thomas trägt nach), die Link-Vorschau mit Titel für Familien und neutral für alles andere sowie die Layout-Messung des Thread-Kopfs mit langem Titel. Dazu Layout-Messungen der neuen Seiten.
+Playwright (`apps/jufi-e2e`): das Bowling-Szenario aus 1.1 mit zwei Browser-Kontexten (Thomas und Sandra), darunter die Antwort für zwei Kinder (Rahmen 13), die Live-Aktualisierung, der Austausch mit 404 für die Mutter und der Teilen-Text (Kopieren über die Zwischenablage, nicht das Teilen-Blatt). Etappe 6 ergänzt zwei Kinder der Mutter (Mia und Mats antworten je für sich) und das Fristende (die Mutter kann nicht mehr antworten, die Leitung trägt nach), die Link-Vorschau mit Titel für Familien und neutral für alles andere sowie die Layout-Messung des Thread-Kopfs mit langem Titel. Dazu Layout-Messungen der neuen Seiten.
 
 ### 10.4 Demo
 
