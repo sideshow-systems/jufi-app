@@ -1,4 +1,5 @@
-import { createPrismaClient, mitAenderung, vereinDb, type PrismaClient } from '@jufi/db';
+import { randomUUID } from 'node:crypto';
+import { createPrismaClient, mitAenderung, vereinDb, vermerkeUmfeld, type PrismaClient } from '@jufi/db';
 import { threadSegment } from '@jufi/domain';
 
 /**
@@ -85,4 +86,97 @@ export async function fuelleAustausch(slug: string, leitungId: string, jetzt: Da
 		}
 		return threadSegment(austausch.id, austausch.titel);
 	});
+}
+
+/**
+ * Legt einen Jungfischer an, dessen erziehungsberechtigte Mutter der Erwachsene ist, und liefert seine ID.
+ * Geschrieben wird wie in POST /personen und PUT /personen/:id/familie/:erwachsenerId: eine Transaktion, die
+ * zuerst mit vermerkeUmfeld den Stand erhoeht (und damit die Vereinszeile sperrt) und danach Person und
+ * Bezugsperson schreibt, beide IDs als Umfeld-Aenderung. Ohne den Vermerk wuesste ein offener Client nie, dass
+ * das Kind da ist.
+ *
+ * Direkt in der Datenbank statt ueber die Oberflaeche, weil der Ablauf Mia schon ueber das Formular anlegt
+ * und ein zweites Kind denselben Weg nur wiederholte; es geht hier um das, was danach mit zwei Kindern
+ * geschieht (Start, Antworten, Teilen). Der Bus bleibt still: Der Ablauf laedt die Seiten danach neu.
+ */
+export async function legeKindAn(
+	slug: string,
+	erwachsenerId: string,
+	vorname: string,
+	nachname: string,
+): Promise<string> {
+	return mitDatenbank(async (prisma) => {
+		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug }, select: { id: true } });
+		const db = vereinDb(prisma, verein.id);
+		const id = randomUUID();
+		await db.$transaction(async (tx) => {
+			await vermerkeUmfeld(tx, verein.id, erwachsenerId, new Date(), [id, erwachsenerId]);
+			// Geboren 2015 wie Mia: ein Kind, das lange minderjaehrig bleibt, damit die Erziehungsberechtigung gilt.
+			await tx.person.create({
+				data: { id, art: 'JUNGFISCHER', vorname, nachname, geburtsdatum: new Date('2015-08-01') },
+				select: { id: true },
+			});
+			await tx.bezugsperson.create({
+				data: { erwachsenerId, jungfischerId: id, beziehung: 'MUTTER', erziehungsberechtigt: true },
+			});
+		});
+		return id;
+	});
+}
+
+/**
+ * Setzt die Frist aller Umfragen des Threads auf `frist` (null = ohne Frist). Je Umfrage eine
+ * MODUL-Aenderung in einer Transaktion (mitAenderung), wie es ein Speichern im Editor taete: So aendert
+ * sich der Stand des Vereins, und die Ansicht der Familie rechnet fristAbgelaufen neu.
+ */
+export async function setzeFrist(
+	slug: string,
+	threadId: string,
+	frist: Date | null,
+	jetzt = new Date(),
+): Promise<void> {
+	await mitDatenbank(async (prisma) => {
+		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug }, select: { id: true } });
+		const db = vereinDb(prisma, verein.id);
+		await db.$transaction((tx) =>
+			mitAenderung(tx, verein.id, null, jetzt, async () => {
+				const umfragen = await tx.umfrageModul.findMany({ where: { threadId }, select: { id: true } });
+				if (umfragen.length === 0) throw new Error(`Thread ${threadId} hat keine Umfrage`);
+				await tx.umfrageModul.updateMany({ where: { threadId }, data: { frist } });
+				return {
+					ergebnis: undefined,
+					aenderungen: umfragen.map((u) => ({ threadId, art: 'MODUL' as const, objektId: u.id })),
+				};
+			}),
+		);
+	});
+}
+
+/**
+ * Die gemeinsame Frist der Umfragen des Threads, zum Zurueckstellen nach einem Test. Haben die Umfragen
+ * verschiedene Fristen, wirft sie: Ein einzelner Wert stellte sie nicht wieder her (setzeFrist setzt alle gleich).
+ */
+export async function leseFrist(slug: string, threadId: string): Promise<Date | null> {
+	return mitDatenbank(async (prisma) => {
+		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug }, select: { id: true } });
+		const umfragen = await vereinDb(prisma, verein.id).umfrageModul.findMany({
+			where: { threadId },
+			select: { frist: true },
+		});
+		if (umfragen.length === 0) throw new Error(`Thread ${threadId} hat keine Umfrage`);
+		const zeiten = new Set(umfragen.map((u) => u.frist?.getTime() ?? null));
+		if (zeiten.size > 1) throw new Error(`Umfragen von ${threadId} haben verschiedene Fristen`);
+		const zeit = [...zeiten][0];
+		return zeit === null ? null : new Date(zeit);
+	});
+}
+
+/**
+ * Setzt die Frist aller Umfragen eine Minute vor `jetzt`, also auf "abgelaufen", ohne dass der Ablauf auf
+ * eine echte Frist warten muss. Eine Minute zurueck statt genau jetzt, weil Server und Test verschiedene
+ * Uhren lesen und "ab jetzt >= frist" sonst an einer Millisekunde haengt. Verworfen: so lange warten, bis
+ * eine echte Frist verstreicht -- der Ablauf liefe dann minutenlang leer.
+ */
+export async function beendeFrist(slug: string, threadId: string, jetzt: Date): Promise<void> {
+	await setzeFrist(slug, threadId, new Date(jetzt.getTime() - 60_000), jetzt);
 }

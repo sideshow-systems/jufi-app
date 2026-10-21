@@ -463,3 +463,108 @@ test.describe('Thread-Editor', () => {
 		}
 	}
 });
+
+/**
+ * Der Kopf der Thread-Seite fuer die Leitung: Zurueck, Titel, Teilen und Bearbeiten teilen sich eine Zeile.
+ * Gemessen wird, dass nichts ueberlaeuft und sich keine zwei der Elemente schneiden; am Handy zusaetzlich,
+ * dass beide Knoepfe 44 px gross sind (unter 480 px bleibt vom Link nur der Stift). Der Titel von Bowling
+ * ist kurz und stellte die Zeile nicht auf die Probe, darum wird danach ein langer, erfundener Titel in
+ * die Ueberschrift gesetzt und noch einmal gemessen. Nur ein Eingriff in die Seite im Browser, nichts
+ * wird gespeichert. Verworfen: einen Thread mit langem Titel anlegen -- das braechte Daten in den Verein,
+ * die die Seitentests oben und der Ablauf nicht erwarten.
+ */
+test.describe('Kopf der Thread-Seite', () => {
+	test.use({ storageState: sitzung('leitung') });
+
+	for (const groesse of GROESSEN) {
+		for (const schema of SCHEMATA) {
+			test.describe(`${groesse.name} ${schema}`, () => {
+				test.use({ viewport: groesse.viewport, colorScheme: schema });
+
+				test('Titel, Teilen und Bearbeiten ueberschneiden sich nicht', async ({ page }) => {
+					await oeffne(page, adresse(`${SLUG}/t/:bowling`));
+					const kopf = page.locator('jf-thread-seite header').first();
+					const teilen = kopf.getByRole('button', { name: 'Stand teilen' });
+					// Am Handy ist der sichtbare Text weg, der Name bleibt: Gefunden wird der Link ueber ihn.
+					const bearbeiten = kopf.getByRole('link', { name: 'Bearbeiten' });
+					const zurueck = kopf.getByRole('link', { name: 'Zurück zur Thread-Liste' });
+					const titel = kopf.getByRole('heading', { level: 1 });
+					await expect(teilen).toBeVisible();
+					await expect(bearbeiten).toBeVisible();
+					const handy = groesse.viewport.width < 768;
+
+					const miss = async (wann: string) => {
+						await keinWaagrechtesScrollen(page);
+						const kaesten: Record<string, { links: number; rechts: number; oben: number; unten: number }> = {};
+						for (const [name, ort] of [
+							['Zurueck', zurueck],
+							['Titel', titel],
+							['Teilen', teilen],
+							['Bearbeiten', bearbeiten],
+						] as const) {
+							const b = await ort.boundingBox();
+							if (!b) throw new Error(`${name} ohne Box (${wann})`);
+							kaesten[name] = { links: b.x, rechts: b.x + b.width, oben: b.y, unten: b.y + b.height };
+						}
+						const namen = Object.keys(kaesten);
+						for (const [i, a] of namen.entries()) {
+							for (const b of namen.slice(i + 1)) {
+								const x = Math.min(kaesten[a].rechts, kaesten[b].rechts) - Math.max(kaesten[a].links, kaesten[b].links);
+								const y = Math.min(kaesten[a].unten, kaesten[b].unten) - Math.max(kaesten[a].oben, kaesten[b].oben);
+								// Halbe Pixel aus gebrochenen Breiten sind keine Ueberlappung.
+								expect(
+									x > 0.5 && y > 0.5,
+									`${a} und ${b} schneiden sich (${wann}): ${JSON.stringify(kaesten[a])} gegen ${JSON.stringify(kaesten[b])}`,
+								).toBe(false);
+							}
+						}
+						for (const name of namen) {
+							expect(kaesten[name].rechts, `${name} ragt rechts aus dem Fenster (${wann})`).toBeLessThanOrEqual(
+								groesse.viewport.width + 0.5,
+							);
+						}
+						if (handy) {
+							for (const name of ['Teilen', 'Bearbeiten']) {
+								const k = kaesten[name];
+								expect(k.rechts - k.links, `${name} unter 44 px breit (${wann})`).toBeGreaterThanOrEqual(44);
+								expect(k.unten - k.oben, `${name} unter 44 px hoch (${wann})`).toBeGreaterThanOrEqual(44);
+							}
+						}
+					};
+
+					await miss('Titel von Bowling');
+					await titel.evaluate((el) => {
+						el.textContent =
+							'Jahreshauptversammlung der Jungfischer Musterbach mit Ehrung der Fischerkoenige und Donaulaengenwanderung';
+					});
+					await miss('langer Titel');
+				});
+			});
+		}
+	}
+});
+
+/**
+ * Die Antwortknoepfe von Bowling am Handy. Der Seitentest oben misst /t/:bowling nur dann auf ihnen, wenn die
+ * Umfrage offen ist; schliesst ein Schritt des Ablaufs ihre Frist und laesst sie so, misst er stumm eine Seite
+ * ohne Knoepfe. Hier steht darum, dass sie da sind (Mia und Mats sind beantwortet, also "ändern"), und dass sie gross genug sind.
+ */
+test.describe('Antwortknoepfe von Bowling am Handy', () => {
+	test.use({ storageState: sitzung('mutter'), viewport: { width: 375, height: 812 } });
+
+	for (const schema of SCHEMATA) {
+		test.describe(schema, () => {
+			test.use({ colorScheme: schema });
+
+			test('Mutter hat je Kind einen Knopf, alle mindestens 44 px', async ({ page }) => {
+				await oeffne(page, adresse(`${SLUG}/t/:bowling`));
+				const knoepfe = page.locator('jf-umfrage-modul .zeile').getByRole('button');
+				await expect(knoepfe).toHaveCount(2);
+				for (const name of ['Antwort für Mia ändern', 'Antwort für Mats ändern']) {
+					await expect(page.getByRole('button', { name })).toBeVisible();
+				}
+				expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
+			});
+		});
+	}
+});

@@ -15,15 +15,17 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
-import { idAusSegment, type ThreadAnsicht, threadSegment, type UmfrageAnsicht } from '@jufi/domain';
+import { idAusSegment, teilenText, type ThreadAnsicht, threadSegment, type UmfrageAnsicht } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext, fehlertextNichtGefunden } from '../../gemeinsam/api-fehler';
 import { IconComponent } from '../../gestaltung/icon';
+import { MeldungService } from '../../gestaltung/meldung';
 import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
 import { betrifft, Echtzeit, type EchtzeitEreignis } from '../echtzeit';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { VerwaltungThreadsApi } from '../verwaltung/threads/threads-api';
 import { InfoModul } from './info-modul';
+import { teile } from './teilen';
 import { TerminModul } from './termin-modul';
 import { ThreadApi } from './thread-api';
 import { ThreadUebersicht } from './thread-uebersicht';
@@ -93,10 +95,24 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 								</span>
 							}
 						</div>
+						<!-- Bei einem Entwurf gaebe es keinen Empfaenger: Den Link oeffnen nur die Bearbeiter (Entscheidung 4). -->
+						@if (!t.entwurf) {
+							<button type="button" class="knopf leise nur-icon" aria-label="Stand teilen" (click)="teileStand(t)">
+								<jf-icon name="teilen" />
+							</button>
+						}
 						@if (t.darfBearbeiten) {
-							<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'threads', t.id]">Bearbeiten</a>
+							<a class="knopf bearbeiten" [routerLink]="['/', slug(), 'verwaltung', 'threads', t.id]">
+								<jf-icon name="stift" />
+								<span>Bearbeiten</span>
+							</a>
 						}
 					</header>
+
+					@if (teilenFallback(); as text) {
+						<!-- Ohne Zwischenablage bleibt der Text zum Markieren, wie bei der Einladung im Admin. -->
+						<textarea readonly rows="8" aria-label="Text zum Teilen" (focus)="markiere($event)">{{ text }}</textarea>
+					}
 
 					@if (wiederherstellFehler(); as text) {
 						<p class="fehler" role="alert">{{ text }}</p>
@@ -252,6 +268,29 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 		jf-karte p + button {
 			margin-top: var(--a3);
 		}
+		/* Unter 480 px bleibt vom Link nur der Stift: Mit Text und Teilen-Knopf schrumpfte der Titel eines langen Namens auf etwa 114 px und liefe ueber sieben Zeilen. Der Text bleibt fuer Screenreader da (gleiche Technik wie die globale Klasse unsichtbar, die sich nicht per Media Query zuschalten laesst). Verworfen: die Knoepfe in eine zweite Zeile umbrechen; der Kopf waere dann doppelt so hoch, und der Zurueck-Pfeil stuende ueber den Aktionen statt neben dem Titel. */
+		@media (max-width: 479px) {
+			.bearbeiten {
+				padding: 0;
+			}
+			.bearbeiten span {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				overflow: hidden;
+				clip: rect(0 0 0 0);
+				white-space: nowrap;
+			}
+		}
+		textarea {
+			width: 100%;
+			box-sizing: border-box;
+			padding: var(--a3);
+			border: 1px solid var(--linie);
+			border-radius: var(--radius-klein);
+			background: var(--karte);
+			resize: vertical;
+		}
 		.fehler {
 			color: var(--fehler);
 		}
@@ -278,6 +317,7 @@ export class ThreadSeite {
 	/** Die Liste der Huelle (Punkt an "Threads"); optional, weil die Seite auch ohne Huelle steht (Tests). */
 	private readonly uebersicht = inject(ThreadUebersicht, { optional: true });
 	private readonly echtzeit = inject(Echtzeit);
+	private readonly meldung = inject(MeldungService);
 	/** Nur gesetzt, solange der Reiter Verlauf offen ist. */
 	private readonly verlauf = viewChild(Verlauf);
 
@@ -287,6 +327,15 @@ export class ThreadSeite {
 	protected readonly hervor = signal<string | null>(null);
 	protected readonly stelltWieder = signal(false);
 	protected readonly wiederherstellFehler = signal<string | null>(null);
+	/** Der Text zum Markieren, wenn weder Teilen noch Kopieren ging. */
+	protected readonly teilenFallback = signal<string | null>(null);
+	/**
+	 * Wahr, solange das Teilen-Blatt offen ist. Ein zweiter Tipp riefe share noch einmal, das mit
+	 * InvalidStateError scheitert; teile fiele auf Kopieren zurueck und meldete zu Unrecht Kopiert.
+	 * Verworfen: den Knopf sperren; ein gesperrter Knopf wirkt am Handy wie ein Defekt, und der
+	 * Tipp ist ohnehin wirkungslos.
+	 */
+	private teilt = false;
 	/**
 	 * Bis hierhin hat die Seite den Thread (Entscheidung 8): der Stand der zuletzt geladenen Ansicht,
 	 * gehoben um den Stand einer Live-Nachricht, solange keine Ladung offen ist (standOffen). Ist eine
@@ -432,6 +481,32 @@ export class ThreadSeite {
 		});
 	}
 
+	/**
+	 * Baut den Text aus der Ansicht, die die Person gerade sieht, und teilt oder kopiert ihn. teile
+	 * wird ohne ein await davor gerufen: Safari verlangt share innerhalb der Nutzergeste. Der Link
+	 * nimmt origin des Fensters statt einer BASIS_URL vom Server (Entscheidung 2); die App ist nur
+	 * unter ihrer Basisadresse erreichbar, beides ist dasselbe.
+	 */
+	protected async teileStand(t: ThreadAnsicht): Promise<void> {
+		const fenster = this.dokument.defaultView;
+		if (!fenster || this.teilt) return;
+		const text = teilenText({ ansicht: t, basisUrl: fenster.location.origin, slug: this.slug(), jetzt: new Date() });
+		this.teilt = true;
+		let ergebnis;
+		try {
+			ergebnis = await teile(text, fenster);
+		} finally {
+			this.teilt = false;
+		}
+		// Nur ein gescheitertes Kopieren zeigt das Feld; ein neuer Versuch, der gelingt, raeumt es weg.
+		this.teilenFallback.set(ergebnis === 'FEHLER' ? text : null);
+		if (ergebnis === 'KOPIERT') this.meldung.zeige('Kopiert');
+	}
+
+	protected markiere(ereignis: Event): void {
+		(ereignis.target as HTMLTextAreaElement).select();
+	}
+
 	protected neu(): void {
 		void this.lade(this.slug(), this.id());
 	}
@@ -444,6 +519,8 @@ export class ThreadSeite {
 		this.thread.set(null);
 		this.fehler.set(null);
 		this.hervor.set(null);
+		// Der Text gehoert zum Thread davor; ein anderer Thread zeigte sonst fremden Text unter seinem Kopf.
+		this.teilenFallback.set(null);
 		clearTimeout(this.hervorUhr);
 		this.gescrollt = null;
 		// Ohne lesbare Id gibt es nichts zu fragen; dieselbe Antwort wie bei 404, ohne Anfrage.

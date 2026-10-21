@@ -68,11 +68,13 @@ describe('fuehreAus', () => {
 	it('demo einspielen liefert 0, meldet den Verein und druckt die Adresse jedes Threads', async () => {
 		ausgabe.length = 0;
 		expect(await fuehreAus(['demo', 'einspielen'], deps)).toBe(0);
-		expect(ausgabe[0]).toBe('Demo-Verein angelegt: /demo/ (10 Personen)');
-		expect(ausgabe).toHaveLength(4);
+		expect(ausgabe[0]).toBe('Demo-Verein angelegt: /demo/ (11 Personen)');
+		expect(ausgabe).toHaveLength(6);
 		expect(ausgabe[1]).toMatch(/^Wichtige Infos: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-wichtige-infos$/);
 		expect(ausgabe[2]).toMatch(/^🎳 Bowling: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-bowling$/);
-		expect(ausgabe[3]).toMatch(
+		expect(ausgabe[3]).toMatch(/^Zeltlager \d{4}: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-zeltlager-\d{4}$/);
+		expect(ausgabe[4]).toMatch(/^🎣 Fischerfest: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-fischerfest$/);
+		expect(ausgabe[5]).toMatch(
 			/^Jugendsprecher-Austausch: https:\/\/jufi\.example\.org\/demo\/t\/[a-z0-9]+-jugendsprecher-austausch$/,
 		);
 	});
@@ -87,7 +89,7 @@ describe('fuehreAus', () => {
 		};
 		expect(await fuehreAus(['demo', 'einspielen'], ohneBasis)).toBe(0);
 		expect(ausgabe[1]).toMatch(/^Wichtige Infos: \/demo\/t\/[a-z0-9]+-wichtige-infos$/);
-		expect(ausgabe).toHaveLength(4);
+		expect(ausgabe).toHaveLength(6);
 	});
 
 	it('die Hilfe nennt alle Befehle', async () => {

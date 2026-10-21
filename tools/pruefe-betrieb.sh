@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Live-Pruefung der echten App: Health, Routing, Kopf, Manifest und Icons,
-# WebSocket-Upgrade, optional Mail-DNS (SPF, DMARC, DKIM). Nur lesend, aendert
+# WebSocket-Upgrade, Link-Vorschau, optional Mail-DNS (SPF, DMARC, DKIM). Nur lesend, aendert
 # nichts.
 #
 # Aufruf:
@@ -211,7 +211,33 @@ if [[ -n "$SLUG" ]]; then
 	esac
 fi
 
-# --- 8. Mail-DNS --------------------------------------------------------------
+# --- 8. Link-Vorschau ---------------------------------------------------------
+# Eine Thread-Adresse ohne Cookie muss die Open-Graph-Tags im Kopf tragen, wie ein
+# Messenger sie holt. Die ID "vorschaupruefung" gibt es nicht: Die Antwort ist
+# dieselbe wie fuer jeden Thread, den die Person nicht sehen darf, und traegt den
+# Vereinsnamen. Geprueft wird also die Kette (Traefik, App, Angular-Seite), nicht
+# ein Thread -- das Skript braeuchte sonst Zugangsdaten oder einen echten Titel.
+# Das Bild muss die BASIS_URL der App tragen; weicht --url davon ab, schlaegt das
+# hier an, wie beim Origin des WebSockets.
+if [[ -n "$SLUG" ]]; then
+	VORSCHAU_KOPF="$(mktemp)"
+	VORSCHAU_TEXT="$(curl -sS --max-time 15 -D "$VORSCHAU_KOPF" -w '\n%{http_code}' "$URL/$SLUG/t/vorschaupruefung" 2>"$CURLERR" || true)"
+	VORSCHAU_STATUS="${VORSCHAU_TEXT##*$'\n'}"
+	VORSCHAU_KOERPER="${VORSCHAU_TEXT%$'\n'*}"
+	VORSCHAU_CACHE="$(tr -d '\r' <"$VORSCHAU_KOPF" | grep -i '^cache-control:' || true)"
+	rm -f "$VORSCHAU_KOPF"
+	if [[ "$VORSCHAU_STATUS" != 200 ]]; then
+		nok "Link-Vorschau $SLUG: Status ${VORSCHAU_STATUS:-keiner} statt 200 $(in_klammern)"
+	elif ! grep -qi 'no-store' <<<"$VORSCHAU_CACHE"; then
+		nok "Link-Vorschau $SLUG: Kopf cache-control: no-store fehlt (${VORSCHAU_CACHE:-kein cache-control})"
+	elif ! grep -qF "property=\"og:image\" content=\"$URL/$SLUG/icon-512.png\"" <<<"$VORSCHAU_KOERPER"; then
+		nok "Link-Vorschau $SLUG: og:image mit $URL/$SLUG/icon-512.png fehlt im Kopf"
+	else
+		ok "Link-Vorschau $SLUG: 200, no-store, og:image im Kopf"
+	fi
+fi
+
+# --- 9. Mail-DNS --------------------------------------------------------------
 # Mit ausdruecklichem Server 1.1.1.1, damit das Ergebnis nicht davon abhaengt,
 # was der lokale Resolver noch zwischengespeichert hat.
 # Setzt TXT_AUS (Zeilen ohne Anfuehrungszeichen) und TXT_FEHLER (Ursache, leer

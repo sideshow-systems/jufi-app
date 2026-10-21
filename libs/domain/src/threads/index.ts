@@ -14,3 +14,5 @@ export * from './vergleich.js';
 export * from './verwaltung.js';
 export * from './liste.js';
 export * from './echtzeit.js';
+export * from './teilen.js';
+export * from './vorschau.js';

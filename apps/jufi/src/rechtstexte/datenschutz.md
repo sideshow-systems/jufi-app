@@ -62,6 +62,18 @@ Jugendleiter sind Erwachsene mit mindestens einem Recht im Verein. Zusätzlich z
 
 Für Einladungen (auch die erste Einladung und neue Zugangslinks der Leitung durch den Plattform-Admin) und zum Zurücksetzen des Zugangs schreibt die App E-Mails mit Empfängeradresse, Betreff und Text in eine Warteschlange und versendet sie von dort.
 
+**Threads**
+
+Ein Thread ist ein Aushang des Vereins mit Verlauf, etwa für eine Veranstaltung. Dazu werden gespeichert:
+
+- die Inhalte der Threads und ihrer Module: Titel, Zielgruppe (Untergruppen und wer ihn sehen darf), Info-Text, Termine (Datum, Zeit, Ort, Treffpunkt) und Umfragen mit Frage, Optionen und Frist, außerdem wer den Thread angelegt hat und wann
+- Antworten auf Umfragen: für wen (Jungfischer oder Erwachsene), von wem sie eingetragen wurden, die gewählten Optionen und der Zeitpunkt. Eine Antwort für ein Kind kann das Kind, seine Familie oder ein Jugendleiter eingetragen haben, etwa nach einem Telefonat.
+- Nachrichten im Verlauf eines Threads: Absender, Zeitpunkt und Text. Löscht jemand eine Nachricht, wird ihr Text geleert; die Zeile mit Absender und Zeitpunkt bleibt als „Nachricht gelöscht“ stehen.
+- der Gelesen-Stand je Person und Thread: bis zu welchem Stand die Person den Thread und seinen Verlauf gesehen hat und wann, damit die App „neu“ und ungelesene Nachrichten anzeigen kann
+- ein Änderungsprotokoll (`Aenderung`): je Änderung nur Kennungen, also der Stand, die Kennung des Threads und des geänderten Objekts, die Art der Änderung, die Kennung der handelnden Person und der Zeitpunkt; keine Inhalte
+
+Der Jugendsprecher-Austausch ist ein solcher Thread, den jeder Verein von Anfang an hat. Er ist nur für Jugendleiter und Jungfischer mit dem Merkmal Jugendsprecher sichtbar.
+
 **Plattform-Admin**
 
 Benutzername, Passwort-Hash, verschlüsselter zweiter Faktor mit gehashten Wiederherstellungscodes, Passkeys, Sitzungen mit Browserkennung und das Protokoll seiner Aktionen (siehe „Protokolle“).
@@ -77,6 +89,14 @@ Offizieller Name, Anzeigename, Vereinsfarbe, ein freier Kontakttext und das Vere
 - **Familien und Jungfischer** sehen sich selbst, die eigenen Jungfischer und deren Familie sowie die Namen aller Jugendleiter als Ansprechpartner. Den freien Kontakttext, den der Verein in seinen Einstellungen hinterlegt, sehen alle Angemeldeten auf der Startseite, auch Kinder. Ein Mitgliederverzeichnis gibt es für sie nicht.
 - Entfernte Personen sieht niemand mehr.
 
+**Threads**
+
+- **Wer einen Thread sieht:** Jugendleiter sehen alle Threads, auch Entwürfe. Familien und Jungfischer sehen nur veröffentlichte Threads, deren Zielgruppe (Untergruppen und Rollenfilter) sie einschließt. Was jemand nicht sehen darf, ist für ihn „nicht gefunden“.
+- **Namen in Threads:** Wer in einem Thread schreibt oder antwortet, erscheint für alle Leser des Threads mit Vorname und Initiale des Nachnamens („Lena M.“). Erwachsene Bezugspersonen stehen zusätzlich mit ihrer Rolle gegenüber den Kindern („Sandra M. (Mutter von Max)“), Jugendleiter mit dem Zusatz „Jugendleiter“. Damit ist für die Leser eines Threads erkennbar, welches Kind zu welchem Erwachsenen gehört. Entfernte Personen erscheinen als „ehemaliges Mitglied“.
+- **Ergebnisse von Umfragen:** Je nach Einstellung des Threads sehen alle Leser die Namen der Antwortenden („für alle“), nur eine Summe („nur als Summe“) oder nur Jugendleiter etwas („nur Jugendleiter“). Die eigene Antwort sieht jeder immer. Jugendleiter mit dem Recht „Antworten im Detail“ und wer den Thread bearbeiten darf, sehen immer die Namen und wer noch nicht geantwortet hat.
+- **„eingetragen von“:** Wer eine Antwort für eine andere Person eingetragen hat, sehen nur Jugendleiter in den Ergebnissen. In den eigenen Antwortzeilen sieht jeder, wer für ihn oder seine Kinder eingetragen hat.
+- **Gelesen-Stand:** Er dient nur der Anzeige für die Person selbst („neu“, ungelesene Nachrichten). Andere sehen nicht, wer einen Thread gelesen hat.
+
 ## Zwecke
 
 - **Stammdaten der Jungfischer und Familien:** Organisation der Jugendgruppe, Zuordnung der Kinder zu ihren Familien und Untergruppen, Ansprechpartner für den Verein.
@@ -86,6 +106,7 @@ Offizieller Name, Anzeigename, Vereinsfarbe, ein freier Kontakttext und das Vere
 - **E-Mail-Adresse:** Anmeldung Erwachsener, Versand von Einladungen und Links zum Zurücksetzen des Zugangs.
 - **Anmelde- und Sitzungsdaten:** sichere Anmeldung, Schutz vor fremden Zugriffen, Übersicht der eigenen Geräte und Sitzungen.
 - **Einwilligungen:** Nachweis, wer wann in welcher Textfassung für ein Kind eingewilligt oder widerrufen hat.
+- **Threads, Antworten und Verlauf:** Informationen und Termine an die Familien eines Vereins bringen, Zu- und Absagen einsammeln, Rückfragen im Verlauf beantworten. Der Gelesen-Stand zeigt, was für die Person neu ist; das Änderungsprotokoll hält die Anzeigen aller Geräte aktuell (Live-Verbindung, siehe „Cookies und lokale Speicherung“).
 - **Protokoll des Plattform-Admins:** Nachweis, wer wann was an einem Verein getan hat.
 - **Vereinsdaten und Logo:** Darstellung des Vereins in der App, auf dem Home-Bildschirm und in E-Mails.
 
@@ -99,6 +120,7 @@ Offizieller Name, Anzeigename, Vereinsfarbe, ein freier Kontakttext und das Vere
 - Anmeldung, Sitzungen und Sicherheitsmaßnahmen
 - der Versand von E-Mails
 - die Aufbewahrung der Einwilligungen als Nachweis, auch nach dem Entfernen einer Person
+- Threads, Antworten und Nachrichten, auch dass sie nach dem Entfernen einer Person bestehen bleiben (siehe „Speicherdauer und Löschung“)
 - das Protokoll des Plattform-Admins
 - die Sicherungskopien]
 
@@ -121,6 +143,22 @@ Offizieller Name, Anzeigename, Vereinsfarbe, ein freier Kontakttext und das Vere
 - **Fehlversuche:** Nach drei falschen Anmeldeversuchen wartet die App zunehmend länger (höchstens 15 Minuten). Dafür merkt sie sich Kennung und IP-Adresse nur im Arbeitsspeicher; der Eintrag zählt 15 Minuten nach dem letzten Fehlversuch nicht mehr und wird spätestens bei einem Neustart verworfen.
 - Die Verbindung ist verschlüsselt (HTTPS).
 
+## Teilen, Kalender und Karten
+
+Die App hat drei Wege, etwas aus einem Thread weiterzugeben. Keiner läuft von selbst; jeder beginnt mit einem Antippen.
+
+- **Teilen:** „Stand teilen“ baut im eigenen Gerät einen Text aus dem Thread: Titel, Termin, die Zahlen und, soweit die Person sie sehen darf, die Namen aus den Ergebnissen (Vorname und Initiale), dazu den Link zum Thread. Am Handy öffnet das Gerät sein Teilen-Blatt, am Rechner kopiert die App den Text in die Zwischenablage. Wohin der Text geht, etwa in eine WhatsApp-Gruppe, entscheidet die Person; die App sendet nichts selbst an WhatsApp oder einen anderen Dienst. Mit dem Text verlassen die Namen die App: Ab dort gelten die Regeln des Dienstes und liegt es bei der Person, wem sie ihn schickt. Entwürfe lassen sich nicht teilen.
+- **Kalender:** Unter „In Kalender eintragen“ erzeugt „Kalender des Telefons“ eine Datei im eigenen Gerät; dabei wird nichts übertragen. Der Weg „Google Kalender“ öffnet erst nach dem Antippen eine Adresse bei Google und überträgt damit Titel, Zeit, Ort, Treffpunkt und den Link zum Thread an Google. Die App kennt dabei keine Personennamen.
+- **Karten:** Der Ort eines Termins ist ein Link. Erst nach dem Antippen wird er an den Kartenanbieter übertragen: je nach Gerät an die Karten-App des Geräts oder an die Suche von Google Maps. Eingebettet ist nichts.
+
+**Link-Vorschau.** Wird ein Link zu einem Thread in einen Messenger eingefügt, ruft der Messenger die Adresse selbst ab, ohne Anmeldung, und liest daraus Titel und Bild für die Vorschau. Die App antwortet dort so:
+
+- Bei einem **veröffentlichten Thread, der sich an Jungfischer und Familien oder nur an Familien richtet,** steht sein Titel in der Vorschau.
+- Bei **allen anderen** Adressen, also bei Threads nur für Jugendleiter, bei Entwürfen, beim Jugendsprecher-Austausch und bei Adressen, die es nicht gibt, steht der Anzeigename des Vereins. Diese Antworten sind nicht zu unterscheiden; an der Vorschau lässt sich nicht erkennen, ob es einen Thread gibt.
+- Das Bild ist immer das Vereins-Icon. Weitere Angaben enthält die Vorschau nicht. Die App verbietet das Zwischenspeichern der Antwort (`Cache-Control: no-store`); was ein Messenger von der Vorschau behält, entscheidet der Messenger.
+
+Die Vorschau kennt die Person nicht, die den Link abruft, und prüft deshalb keine Untergruppen: Bei einem Thread für eine Untergruppe zeigt sie den Titel jedem, der den Link hat, auch Familien außerhalb der Untergruppe, die den Thread selbst nicht öffnen könnten. Die Adressen der Threads sind zufällig und nicht zu erraten. Den Thread selbst, seine Inhalte und Namen zeigt die Vorschau nie.
+
 ## Cookies und lokale Speicherung
 
 Die App setzt genau ein Cookie je Bereich:
@@ -131,6 +169,8 @@ Die App setzt genau ein Cookie je Bereich:
 | `jufi_admin`   | Anmeldung des Plattform-Admins | nur den Bereich `/admin/`    | 12 Stunden, ohne Verlängerung                                                       |
 
 Beide Cookies sind für Skripte nicht lesbar (`HttpOnly`), werden nur verschlüsselt übertragen (`Secure`) und nicht an fremde Seiten mitgeschickt (`SameSite=Lax`).
+
+Die Live-Verbindung (WebSocket) unter `/<verein>/ws` hält die Anzeige aktuell, solange die App offen ist. Sie nutzt das Sitzungscookie `jufi_sitzung`, setzt kein weiteres Cookie und überträgt keine zusätzlichen Daten: Der Server meldet nur Änderungen an Threads, die die Person ohnehin sehen darf, und neue Nachrichten im Verlauf. Nur die zufällige Kennung eines Threads, dessen Zielgruppe sich geändert hat oder der gelöscht wurde, geht ohne Prüfung an alle Verbindungen des Vereins, ohne Inhalt. Ebenso geht ein leeres Signal an alle Verbindungen des Vereins, wenn sich etwas ohne Thread ändert (Rechte, Familien, Untergruppen); es trägt keinen Inhalt. Endet die Sitzung, schließt der Server die Verbindung.
 
 Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur Ihre Wahl der Darstellung ab (hell, dunkel oder wie das System). Sie bleibt, bis Sie sie im Browser löschen, und wird nicht an den Server übertragen.
 
@@ -145,6 +185,10 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 ## Speicherdauer und Löschung
 
 - **Personen:** bleiben gespeichert, bis die Verwaltung sie aus der Gruppe entfernt. Beim Entfernen werden Name, Geburtsdatum, E-Mail-Adresse, Rechte und Jugendsprecher-Merkmal geleert; Zugang, Passwort, Passkeys, zweiter Faktor, Sitzungen, Einladungen, Familienzuordnungen und Untergruppen werden gelöscht. Es bleibt ein Datensatz ohne Namen und Kontaktdaten (unter anderem Art der Person sowie Zeitpunkt von Anlage und Entfernen), damit Einwilligungen und spätere Verweise als „ehemaliges Mitglied“ erhalten bleiben.
+- **Threads, Antworten und Nachrichten:** bleiben stehen, bis der Verein den Thread löscht. Ein Thread mit Antworten oder nicht gelöschten Nachrichten lässt sich nicht löschen, er kommt ins Archiv und bleibt lesbar; ein Thread mit Termin kommt in der Regel sieben Tage nach seinem letzten Termin von selbst ins Archiv. Eine gelöschte Nachricht verliert ihren Text sofort.
+- **Änderungsprotokoll (`Aenderung`):** Einträge werden nach 90 Tagen gelöscht, beim Start der App und danach alle 24 Stunden.
+- **Gelesen-Stände:** werden gelöscht, wenn die Person entfernt wird.
+- **Antworten und Nachrichten einer entfernten Person:** bleiben stehen, damit Ergebnisse und Verlauf der anderen verständlich bleiben, auch der Text der Nachrichten. Sie erscheinen als „ehemaliges Mitglied“, weil ihr Name beim Entfernen geleert wurde. [Ob Antworten und Nachrichten nach dem Entfernen einer Person so stehen bleiben dürfen, steht unter dem Vorbehalt der rechtlichen Prüfung — liefert der Eigentümer]
 - **Einwilligungen:** werden nie gelöscht, nur widerrufen, und bleiben auch nach dem Entfernen der Person als Nachweis stehen.
 - **Sitzungen:** enden 90 Tage nach der letzten Verlängerung oder beim Abmelden; abgelaufene Sitzungen löscht die App selbsttätig.
 - **Einladungen:** Ein neuer Link ersetzt den alten derselben Art; eingelöste und abgelaufene, nie eingelöste Einladungen bleiben bis dahin oder bis zum Entfernen der Person stehen. [Löschfrist für abgelaufene Einladungen — liefert der Eigentümer; im Code ist keine festgelegt] Beim Einlösen eines neuen Links für einen bestehenden Zugang werden altes Passwort, Passkeys, zweiter Faktor und alle Sitzungen gelöscht.
@@ -164,7 +208,7 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 
 - **Hetzner** ([Firma und Anschrift der Hetzner-Gesellschaft, Standort des Rechenzentrums, Vertrag zur Auftragsverarbeitung — liefert der Eigentümer]): Server und Datenbank, Versand der E-Mails über den Mailserver von Hetzner und Speicher für die Sicherungskopien.
 - **Keine Drittanbieter-Einbindungen:** Die App lädt keine Schriften, Skripte, Bilder oder sonstige Inhalte von fremden Servern und bindet keine Analyse-, Werbe- oder Social-Media-Dienste ein.
-- Die App selbst gibt keine Daten an weitere Dienste weiter. [Übermittlung in Länder außerhalb der EU: Bestätigung für Hosting, Mailversand und Sicherung — liefert der Eigentümer]
+- Die App selbst gibt keine Daten an weitere Dienste weiter. Was die Person selbst über „Teilen“, „Google Kalender“ oder einen Karten-Link anstößt, steht unter „Teilen, Kalender und Karten“. [Übermittlung in Länder außerhalb der EU: Bestätigung für Hosting, Mailversand und Sicherung — liefert der Eigentümer]
 - Innerhalb des Vereins sehen Jugendleiter und Familien Daten nur im Umfang von „Wer im Verein was sieht“.
 
 ## Ihre Rechte
@@ -173,7 +217,7 @@ Im Speicher Ihres Browsers (`localStorage`) legt die App unter `jufi:thema` nur 
 
 In der App gilt:
 
-- **Auskunft:** Unter „Profil“ lädt „Meine Daten herunterladen“ eine Datei mit Ihren gespeicherten Angaben: Personendaten samt Rechten, ob ein Zugang erlaubt ist und wann die Volljährigkeit geprüft wurde; Zugang (Anmeldename, ob Passwort und zweiter Faktor gesetzt sind, Zeitpunkte); ob Wiederherstellungscodes eingerichtet sind und wie viele noch unbenutzt sind; noch gültige Einladungs- und Rücksetzlinks mit Erzeugung und Ablauf; Namen der Passkeys, Sitzungen, Familie (mit Zeitpunkt der Zuordnung), Untergruppen und Einwilligungen. Über andere Personen enthält die Datei nur Namen, Beziehung und Erziehungsberechtigung, bei Ihren Kindern zusätzlich, ob deren Zugang erlaubt ist. Nur bei minderjährigen Kindern, für die Sie erziehungsberechtigt sind, kommen hinzu, wann die Volljährigkeit geprüft wurde und welche Links für sie noch gültig sind (Art, Erzeugung, Ablauf). Passwort-Hash, die Wiederherstellungscodes selbst, Links, Geheimnisse und Schlüssel enthält sie nicht. Ebenfalls nicht enthalten sind technische Kennungen, die vollständige Browserkennung der Sitzungen, die Abschriften verschickter E-Mails in der Versandwarteschlange und Einladungen, die Sie für andere erzeugt haben, soweit sie nicht als noch gültige Links Ihrer Kinder aufgeführt sind. [Weg zur Auskunft über diese Angaben — liefert der Eigentümer] Für Kinder ohne eigenen Zugang gibt es keinen eigenen Auszug in der App. [Weg zur Auskunft für Personen ohne Zugang — liefert der Eigentümer]
+- **Auskunft:** Unter „Profil“ lädt „Meine Daten herunterladen“ eine Datei mit Ihren gespeicherten Angaben: Personendaten samt Rechten, ob ein Zugang erlaubt ist und wann die Volljährigkeit geprüft wurde; Zugang (Anmeldename, ob Passwort und zweiter Faktor gesetzt sind, Zeitpunkte); ob Wiederherstellungscodes eingerichtet sind und wie viele noch unbenutzt sind; noch gültige Einladungs- und Rücksetzlinks mit Erzeugung und Ablauf; Namen der Passkeys, Sitzungen, Familie (mit Zeitpunkt der Zuordnung), Untergruppen und Einwilligungen. Zu den Threads enthält sie Ihre Antworten und die Antworten für Ihre zugeordneten Kinder, auch wenn jemand anderes sie eingetragen hat (Thread, Frage, gewählte Optionen, für wen, von wem, wann; die Namen stehen wie bei den übrigen Angaben als „ich“ oder mit vollem Namen), Ihre eigenen Nachrichten im Verlauf (Thread, Zeitpunkt, Text; bei gelöschten Nachrichten ohne Text) und Ihre Gelesen-Stände (Thread, Zeitpunkt). Über andere Personen enthält die Datei nur Namen, Beziehung und Erziehungsberechtigung, bei Ihren Kindern zusätzlich, ob deren Zugang erlaubt ist. Nur bei minderjährigen Kindern, für die Sie erziehungsberechtigt sind, kommen hinzu, wann die Volljährigkeit geprüft wurde und welche Links für sie noch gültig sind (Art, Erzeugung, Ablauf). Passwort-Hash, die Wiederherstellungscodes selbst, Links, Geheimnisse und Schlüssel enthält sie nicht. Ebenfalls nicht enthalten sind die Threads selbst, Nachrichten anderer, Antworten, die Sie für Kinder anderer Familien nachgetragen haben, technische Kennungen, die vollständige Browserkennung der Sitzungen, die Abschriften verschickter E-Mails in der Versandwarteschlange und Einladungen, die Sie für andere erzeugt haben, soweit sie nicht als noch gültige Links Ihrer Kinder aufgeführt sind. [Weg zur Auskunft über diese Angaben — liefert der Eigentümer] Für Kinder ohne eigenen Zugang gibt es keinen eigenen Auszug in der App. [Weg zur Auskunft für Personen ohne Zugang — liefert der Eigentümer]
 - **Berichtigung:** Im Profil sind Name und Kennung nur lesbar. Namen, Geburtsdatum, E-Mail-Adresse, Untergruppen und Familienzuordnungen ändert die Verwaltung des Vereins (Recht „Mitglieder verwalten“); Angaben zu Jugendleitern ändert nur, wer „Jugendleiter & Rechte verwalten“ hat. Die E-Mail-Adresse eines Erwachsenen, der bereits einen Zugang eingerichtet hat, lässt sich in der App derzeit nicht ändern. Passwort, Passkeys und zweiten Faktor verwalten Sie selbst im Profil.
 - **Erziehungsberechtigte** können unter „Meine Jungfischer“ den Zugang ihres Kindes erlauben oder entziehen, einen neuen Link erzeugen und ihre Einwilligung geben oder widerrufen. Namen und Zuordnungen ändern sie nicht; das bleibt beim Verein.
 - **Löschung:** Ein Konto löscht man in der App nicht selbst; das Entfernen übernimmt die Verwaltung des Vereins (siehe „Speicherdauer und Löschung“).

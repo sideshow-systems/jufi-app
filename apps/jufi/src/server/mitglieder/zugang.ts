@@ -92,8 +92,8 @@ export async function hatEinwilligung(tx: Transaktion, kind: Person, jetzt: Date
  * sonst den Unique-Index); Einwilligungen bleiben ausdruecklich stehen.
  *
  * Verknuepfungen fallen in beiden Richtungen: ein Grabstein hat weder Familie noch
- * Untergruppen. Kinder eines entfernten Erwachsenen verlieren dadurch womoeglich ihre
- * einzige gueltige Einwilligung; sie werden danach geprueft.
+ * Untergruppen noch Gelesen-Staende. Kinder eines entfernten Erwachsenen verlieren dadurch
+ * womoeglich ihre einzige gueltige Einwilligung; sie werden danach geprueft.
  *
  * Aufrufer: DELETE /personen/:id, unter sperreVereinszeile und mit geprueften Rechten.
  */
@@ -116,6 +116,11 @@ export async function entferne(tx: Transaktion, personId: string, jetzt: Date): 
 	await loescheEinladungen(tx, { personId });
 	await tx.bezugsperson.deleteMany({ where: { OR: [{ erwachsenerId: personId }, { jungfischerId: personId }] } });
 	await tx.untergruppeMitglied.deleteMany({ where: { personId } });
+	// Gelesen-Staende sind Kontrolldaten der Person, kein Beitrag zum Thread. Antworten und Nachrichten
+	// bleiben dagegen samt Text stehen (Spec 9.2): Die Umfrage zaehlt weiter, der Verlauf bleibt lesbar,
+	// und ihr Autor ist nur noch ein Grabstein. Verworfen: Text und Antworten mitloeschen, dann
+	// kippten Ergebnisse und Gespraeche anderer.
+	await tx.gelesenStand.deleteMany({ where: { personId } });
 
 	const kinder = await tx.person.findMany({
 		where: { id: { in: alsErwachsener.map((z) => z.jungfischerId) }, entferntAm: null },
