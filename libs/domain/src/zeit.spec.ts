@@ -1,4 +1,4 @@
-import { berlinerTag, berlinerUhrzeit, berlinZeitpunkt, tagPlus } from './zeit.js';
+import { berlinerTag, berlinerUhrzeit, berlinZeitpunkt, istKalendertag, tagPlus } from './zeit.js';
 
 describe('berlinerTag', () => {
 	it('liefert den Berliner Kalendertag, auch wenn UTC noch beim Vortag liegt', () => {
@@ -75,5 +75,20 @@ describe('berlinerUhrzeit', () => {
 
 	it('nennt Mitternacht als 00:00 und nicht als 24:00', () => {
 		expect(berlinerUhrzeit(new Date('2026-10-23T22:00:00Z'))).toBe('00:00');
+	});
+});
+
+describe('istKalendertag', () => {
+	it('nimmt echte Tage an, auch den Schalttag', () => {
+		expect(istKalendertag('2026-02-28')).toBe(true);
+		expect(istKalendertag('2028-02-29')).toBe(true);
+	});
+
+	it('lehnt Tage ab, die es nicht gibt, und falsche Formen', () => {
+		expect(istKalendertag('2026-02-29')).toBe(false);
+		expect(istKalendertag('2026-02-30')).toBe(false);
+		expect(istKalendertag('2026-13-01')).toBe(false);
+		expect(istKalendertag('2026-1-01')).toBe(false);
+		expect(istKalendertag('')).toBe(false);
 	});
 });

@@ -1,4 +1,4 @@
-import { createPrismaClientFromEnv } from '@jufi/db';
+import { createPrismaClientFromEnv, mitAenderung, vereinDb } from '@jufi/db';
 import type { VerlaufAnsicht } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -6,8 +6,10 @@ import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
+import { ThreadAbbruch, Wiederholung } from './fehler.js';
 import { Fensterzaehler } from './fenster.js';
 import { legeThreadAn, ordneZu } from './test-threads.js';
+import { schreibeNachricht } from './verlauf.js';
 
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
@@ -410,6 +412,127 @@ describe('Verlauf lesen, schreiben und loeschen', () => {
 				body: { text: 'Hallo', clientId: 'ohne-1' },
 			});
 			expect(r.status).toBe(401);
+		});
+	});
+
+	/**
+	 * Die Arbeit der Route unter der Sperre, direkt aufgerufen: So laesst sich ein Thread
+	 * "zwischen der Pruefung vor der Transaktion und dem Schreiben" aendern, indem der Test ihn
+	 * vor dem Aufruf in der Datenbank aendert. Verworfen: ein Testhaken in deps, der mitten in
+	 * die Route greift -- Produktionscode nur fuer den Test.
+	 */
+	describe('schreibeNachricht unter der Sperre', () => {
+		function schreibeDirekt(
+			s: Awaited<ReturnType<typeof szenario>>,
+			personId: string,
+			threadId: string,
+			clientId: string,
+		) {
+			return vereinDb(prisma, s.verein.id).$transaction((tx) =>
+				mitAenderung(tx, s.verein.id, personId, JETZT, (stand) =>
+					schreibeNachricht(tx, { personId, threadId, text: 'Hallo', clientId, zeit: JETZT }, stand),
+				),
+			);
+		}
+
+		/** Erwartet den Abbruch, und dass weder Zeile noch Stand uebrig bleiben. */
+		async function erwarteAbbruch(
+			s: Awaited<ReturnType<typeof szenario>>,
+			personId: string,
+			threadId: string,
+			status: number,
+			antwort: object,
+		) {
+			const vorher = await s.stand();
+			const fehler = await schreibeDirekt(s, personId, threadId, randomUUID()).catch((e: unknown) => e);
+			expect(fehler).toBeInstanceOf(ThreadAbbruch);
+			expect(fehler).toMatchObject({ status, antwort: expect.objectContaining(antwort) });
+			expect(await s.zeilen(threadId)).toBe(0);
+			expect(await s.stand()).toBe(vorher);
+		}
+
+		it('ohne Aenderung dazwischen schreibt sie die Nachricht mit dem Stand der Transaktion', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const vorher = await s.stand();
+
+			const { stand, ergebnis, aenderungen } = await schreibeDirekt(s, s.sandra.personId, t.threadId, 'direkt-1');
+
+			expect(stand).toBe(vorher + 1);
+			expect(ergebnis).toMatchObject({ threadId: t.threadId, autorId: s.sandra.personId, text: 'Hallo', stand });
+			expect(aenderungen).toEqual([{ threadId: t.threadId, art: 'VERLAUF', objektId: ergebnis.id }]);
+		});
+
+		it('inzwischen archiviert: 409 ARCHIVIERT, nichts geschrieben, kein Stand', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await prisma.thread.update({ where: { id: t.threadId }, data: { archivModus: 'ARCHIVIERT' } });
+			await erwarteAbbruch(s, s.sandra.personId, t.threadId, 409, { code: 'ARCHIVIERT' });
+		});
+
+		it('inzwischen auf Nur Aushang gestellt: 409 NUR_AUSHANG', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await prisma.thread.update({ where: { id: t.threadId }, data: { modus: 'AUSHANG' } });
+			await erwarteAbbruch(s, s.sandra.personId, t.threadId, 409, { code: 'NUR_AUSHANG' });
+		});
+
+		it('Zielgruppe inzwischen nur noch Jugendleiter: Sandra sieht den Thread nicht mehr, 404', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await prisma.thread.update({ where: { id: t.threadId }, data: { rollenfilter: 'NUR_JUGENDLEITER' } });
+			await erwarteAbbruch(s, s.sandra.personId, t.threadId, 404, NICHT_GEFUNDEN);
+		});
+
+		it('Familie inzwischen aufgeloest: Hans gehoert nicht mehr zur Zielgruppe, 404', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await prisma.bezugsperson.deleteMany({ where: { erwachsenerId: s.hans.personId } });
+			await erwarteAbbruch(s, s.hans.personId, t.threadId, 404, NICHT_GEFUNDEN);
+		});
+
+		it('Person inzwischen entfernt: 404', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await prisma.person.update({ where: { id: s.sandra.personId }, data: { entferntAm: JETZT } });
+			await erwarteAbbruch(s, s.sandra.personId, t.threadId, 404, NICHT_GEFUNDEN);
+		});
+
+		it('Thread inzwischen geloescht: 404', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await prisma.thread.delete({ where: { id: t.threadId } });
+			const fehler = await schreibeDirekt(s, s.sandra.personId, t.threadId, 'weg-1').catch((e: unknown) => e);
+			expect(fehler).toBeInstanceOf(ThreadAbbruch);
+			expect(fehler).toMatchObject({ status: 404, antwort: NICHT_GEFUNDEN });
+		});
+
+		it('dieselbe clientId nach dem Archivieren bleibt eine Wiederholung, keine 409 (Spec 4.2)', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			await schreibeDirekt(s, s.sandra.personId, t.threadId, 'wieder-1');
+			await prisma.thread.update({ where: { id: t.threadId }, data: { archivModus: 'ARCHIVIERT' } });
+			const vorher = await s.stand();
+
+			const fehler = await schreibeDirekt(s, s.sandra.personId, t.threadId, 'wieder-1').catch((e: unknown) => e);
+
+			expect(fehler).toBeInstanceOf(Wiederholung);
+			expect(await s.zeilen(t.threadId)).toBe(1);
+			expect(await s.stand()).toBe(vorher);
+		});
+
+		it('dieselbe clientId ueber die Route nach dem Archivieren: 200 mit der gespeicherten Nachricht', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const body = { text: 'Bin dabei', clientId: 'route-1' };
+			const erste = await s.schreibe(t.threadId, body, s.sandra.cookie);
+			expect(erste.status).toBe(201);
+			await prisma.thread.update({ where: { id: t.threadId }, data: { archivModus: 'ARCHIVIERT' } });
+
+			const zweite = await s.schreibe(t.threadId, body, s.sandra.cookie);
+
+			expect(zweite.status).toBe(200);
+			expect(((await zweite.json()) as Geschrieben).eintrag.id).toBe(((await erste.json()) as Geschrieben).eintrag.id);
 		});
 	});
 

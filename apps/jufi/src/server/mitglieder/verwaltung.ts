@@ -1,4 +1,4 @@
-import type { Bezugsperson, Person, VereinDb } from '@jufi/db';
+import type { Bezugsperson, Person, VereinDb, VereinTx } from '@jufi/db';
 import type { PersonSicht } from '@jufi/domain';
 import type { Response } from 'express';
 
@@ -13,7 +13,9 @@ import type { Response } from 'express';
  * Geliefert werden die ganzen Zeilen (Untertypen von PersonSicht und Zuordnung),
  * damit Aufrufer Namen und Beziehung nicht noch einmal laden.
  */
-export async function ladeUmfeld(db: VereinDb): Promise<{ personen: Person[]; zuordnungen: Bezugsperson[] }> {
+export async function ladeUmfeld(
+	db: VereinDb | VereinTx,
+): Promise<{ personen: Person[]; zuordnungen: Bezugsperson[] }> {
 	const [personen, zuordnungen] = await Promise.all([
 		db.person.findMany({
 			where: { entferntAm: null },

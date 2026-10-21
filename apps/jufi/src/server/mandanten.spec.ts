@@ -22,8 +22,13 @@ interface Kontext {
 	gesperrt: { slug: string };
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
-	/** Cookie einer Person aus eigen mit Verwaltungs-, Rechte- und Einstellungsrecht: sieht in eigen alles, in fremd nichts. */
+	/**
+	 * Cookie einer Person aus eigen mit Verwaltungs-, Rechte-, Einstellungs-, Thread-erstellen-
+	 * und Antworten-im-Detail-Recht: sieht in eigen alles, in fremd nichts.
+	 */
 	eigenerLeiter: string;
+	/** Die Person hinter eigenerLeiter, damit ein Fall einen Thread anlegen kann, den sie bearbeiten darf. */
+	eigenerLeiterId: string;
 	/** Eine Person im Verein fremd. */
 	fremdePersonId: string;
 	/** Ein volljaehriges Kind im Verein fremd. */
@@ -129,6 +134,28 @@ async function fremdeAntworten(k: Kontext) {
 /** Ein frischer Thread in eigen, den die Verwaltung von eigen sieht und in dem sie schreiben darf. */
 async function eigenerThread(k: Kontext): Promise<string> {
 	return (await legeThreadAn(k.prisma, k.eigen, new Date(), { titel: 'Eigener Thread' })).threadId;
+}
+
+/** Ein gueltiger Thread-Entwurf mit einer Info, fuer die Untergruppen-IDs, die ein Fall pruefen will. */
+function mandantEntwurf(untergruppenIds: string[]) {
+	return {
+		titel: 'Mandant',
+		modus: 'KOMMENTARE',
+		rollenfilter: 'JUNGFISCHER_FAMILIE',
+		alleUntergruppen: untergruppenIds.length === 0,
+		untergruppenIds,
+		module: [{ typ: 'INFO', id: null, titel: null, text: 'Hallo' }],
+	};
+}
+
+/** Alles, was Anlegen oder Ersetzen eines Threads in fremd veraendern koennte. */
+async function fremdeThreads(k: Kontext) {
+	return {
+		threads: await k.prisma.thread.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
+		module: await k.prisma.threadModul.count({ where: { vereinId: k.fremd.id } }),
+		zuordnungen: await k.prisma.threadUntergruppe.count({ where: { vereinId: k.fremd.id } }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
 }
 
 /**
@@ -486,6 +513,153 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		);
 		expect(await fremderVerlauf(k)).toEqual(vorher);
 	},
+	'GET /verwaltung/threads': async (k) => {
+		const pfad = '/api/v1/verwaltung/threads';
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const liste = (await r.json()) as { threads: { id: string; titel: string }[]; untergruppen: { id: string }[] };
+		// Weder der Thread noch die Untergruppe aus fremd erscheinen in der Liste von eigen.
+		expect(liste.threads.map((t) => t.id)).not.toContain(k.fremderThread.threadId);
+		expect(liste.threads.map((t) => t.titel)).not.toContain('Fremder Thread');
+		// Positiv: Der eigene Austausch steht in der Liste, sie ist also nicht nur leer.
+		expect(liste.threads.map((t) => t.titel)).toContain('Jugendsprecher-Austausch');
+		expect(liste.untergruppen.map((g) => g.id)).not.toContain(k.fremdeGruppeId);
+	},
+	'GET /threads/:id/bearbeitung': async (k) => {
+		const hole = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/bearbeitung`, { cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await hole(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await hole(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters ist bearbeitbar, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await hole(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+	},
+	'GET /threads/:id/antworten': async (k) => {
+		const hole = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/antworten`, { cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await hole(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await hole(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: "Antworten im Detail" genuegt an einem eigenen Thread, das Recht fehlt also nicht.
+		expect((await hole(k.eigen.slug, await eigenerThread(k), k.eigenerLeiter)).status).toBe(200);
+	},
+	'POST /threads': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const lege = (slug: string, untergruppenIds: string[], cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads`, {
+				methode: 'POST',
+				body: { entwurf: mandantEntwurf(untergruppenIds) },
+				cookie,
+			});
+		expect((await lege(k.gesperrt.slug, [], k.eigenerLeiter)).status).toBe(404);
+		expect((await lege(k.fremd.slug, [], k.eigenerLeiter)).status).toBe(401);
+		// Die Untergruppe aus fremd gibt es in eigen nicht: 400 am Feld, nicht 404 aus einem P2003.
+		const r = await lege(k.eigen.slug, [k.fremdeGruppeId], k.eigenerLeiter);
+		expect(r.status).toBe(400);
+		expect(await r.json()).toEqual({ fehler: 'Diese Untergruppe gibt es nicht mehr.', feld: 'zielgruppe' });
+		// Gegenprobe: Mit dem Recht entsteht in eigen ein Thread, das Recht fehlt also nicht.
+		expect((await lege(k.eigen.slug, [], k.eigenerLeiter)).status).toBe(201);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'PUT /threads/:id': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const ersetze = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}`, {
+				methode: 'PUT',
+				body: { version: 0, entwurf: mandantEntwurf([]) },
+				cookie,
+			});
+		const fremder = k.fremderThread.threadId;
+		expect((await ersetze(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await ersetze(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await ersetze(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters laesst sich ersetzen, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await ersetze(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'POST /threads/:id/veroeffentlichen': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const veroeffentliche = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/veroeffentlichen`, { methode: 'POST', cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await veroeffentliche(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await veroeffentliche(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await veroeffentliche(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Entwurf des Leiters laesst sich veroeffentlichen, das Recht fehlt also nicht.
+		const entwurf = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			veroeffentlicht: false,
+		});
+		expect((await veroeffentliche(k.eigen.slug, entwurf.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'PUT /threads/:id/archiv': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const archiviere = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/archiv`, {
+				methode: 'PUT',
+				body: { archiviert: true },
+				cookie,
+			});
+		const fremder = k.fremderThread.threadId;
+		expect((await archiviere(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await archiviere(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await archiviere(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters laesst sich archivieren, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await archiviere(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'PUT /threads/:id/angepinnt': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const pinne = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}/angepinnt`, {
+				methode: 'PUT',
+				body: { angepinnt: true },
+				cookie,
+			});
+		const fremder = k.fremderThread.threadId;
+		expect((await pinne(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await pinne(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await pinne(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener Thread des Leiters laesst sich anpinnen, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await pinne(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
+	'DELETE /threads/:id': async (k) => {
+		const vorher = await fremdeThreads(k);
+		const loesche = (slug: string, threadId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/threads/${threadId}`, { methode: 'DELETE', cookie });
+		const fremder = k.fremderThread.threadId;
+		expect((await loesche(k.gesperrt.slug, fremder, k.eigenerLeiter)).status).toBe(404);
+		expect((await loesche(k.fremd.slug, fremder, k.eigenerLeiter)).status).toBe(401);
+		const r = await loesche(k.eigen.slug, fremder, k.eigenerLeiter);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Ein eigener leerer Thread des Leiters laesst sich loeschen, das Recht fehlt also nicht.
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), { erstelltVonId: k.eigenerLeiterId });
+		expect((await loesche(k.eigen.slug, eigener.threadId, k.eigenerLeiter)).status).toBe(204);
+		expect(await fremdeThreads(k)).toEqual(vorher);
+	},
 	'DELETE /verlauf/:eintragId': async (k) => {
 		const vorher = await fremderVerlauf(k);
 		const loesche = (slug: string, cookie?: string) =>
@@ -821,7 +995,7 @@ describe('Mandanten-Test', () => {
 		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
 		const leiter = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
-			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE', 'EINSTELLUNGEN'],
+			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE', 'EINSTELLUNGEN', 'THREADS_ERSTELLEN', 'ANTWORTEN_DETAIL'],
 		});
 		const fremderPasskey = await prisma.passkey.create({
 			data: {
@@ -894,6 +1068,7 @@ describe('Mandanten-Test', () => {
 			gesperrt,
 			eigenesCookie: cookie,
 			eigenerLeiter: leiter.cookie,
+			eigenerLeiterId: leiter.personId,
 			fremdePersonId: nachbar.personId,
 			fremdesKindId: fremdesKind.id,
 			fremdeGruppeId: fremdeGruppe.id,

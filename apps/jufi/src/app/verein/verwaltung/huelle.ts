@@ -27,7 +27,7 @@ import { VereinsLogoComponent } from '../vereins-logo';
 
 interface Punkt {
 	/** Schluessel des aktiven Punkts; Personenseite und Anlegen gehoeren zu Mitglieder. */
-	schluessel: 'mitglieder' | 'untergruppen' | 'rechte' | 'einstellungen';
+	schluessel: 'mitglieder' | 'threads' | 'untergruppen' | 'rechte' | 'einstellungen';
 	/** Pfad unterhalb von verwaltung, leer fuer die Mitgliederliste. */
 	pfad: string[];
 	text: string;
@@ -38,6 +38,9 @@ interface Punkt {
 
 const PUNKTE: Punkt[] = [
 	{ schluessel: 'mitglieder', pfad: [], text: 'Mitglieder', icon: 'personen' },
+	// Ohne recht wie Mitglieder: Die Liste ist fuer alle Jugendleiter da, ohne Schreibrechte nur lesbar (TP3-Spec 6.6);
+	// wer gar nichts darf, hat ohnehin keine Leiste (zugang); das 404 der Liste ist nur das Sicherheitsnetz.
+	{ schluessel: 'threads', pfad: ['threads'], text: 'Threads', icon: 'threads' },
 	{ schluessel: 'untergruppen', pfad: ['untergruppen'], text: 'Untergruppen', icon: 'liste', recht: 'MITGLIEDER' },
 	{
 		schluessel: 'rechte',

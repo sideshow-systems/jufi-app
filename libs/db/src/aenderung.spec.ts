@@ -155,6 +155,26 @@ describe('mitAenderung', () => {
 		}
 	});
 
+	it('LISTE schreibt die Aenderung, laesst die Aktivitaet des Threads aber unberuehrt', async () => {
+		const v = await verein();
+		const p = await leiter(v.id);
+		const db = vereinDb(prisma, v.id);
+		const t = await thread(v.id, p.id);
+
+		await db.$transaction((tx) =>
+			mitAenderung(tx, v.id, p.id, JETZT, async () => ({
+				ergebnis: null,
+				aenderungen: [{ threadId: t.id, art: 'LISTE' as const, objektId: t.id }],
+			})),
+		);
+
+		const danach = await prisma.thread.findUniqueOrThrow({ where: { id: t.id } });
+		expect(danach.letzteAktivitaetAm).toEqual(new Date('2026-01-01T00:00:00Z'));
+		expect(danach.letzteAktivitaetStand).toBe(0);
+		const zeilen = await prisma.aenderung.findMany({ where: { vereinId: v.id } });
+		expect(zeilen.map((z) => [z.stand, z.art, z.threadId])).toEqual([[1, 'LISTE', t.id]]);
+	});
+
 	it('zweiter Verein zaehlt unabhaengig', async () => {
 		const a = await verein();
 		const b = await verein();

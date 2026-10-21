@@ -44,11 +44,12 @@ describe('Verwaltungs-Huelle', () => {
 		);
 	}
 
-	it('zeigt der Leitung vier Punkte und Zur App', async () => {
+	it('zeigt der Leitung fünf Punkte und Zur App', async () => {
 		const { seite } = await oeffneSeite('/demo/verwaltung', ichMit(LEITUNG), LISTE);
 
 		expect(punkte(seite)).toEqual([
 			'Mitglieder',
+			'Threads',
 			'Untergruppen',
 			'Jugendleiter & Rechte',
 			'Vereinseinstellungen',
@@ -57,6 +58,7 @@ describe('Verwaltungs-Huelle', () => {
 		const href = (text: string) =>
 			[...seite.querySelectorAll('nav a')].find((a) => a.textContent?.includes(text))?.getAttribute('href');
 		expect(href('Mitglieder')).toBe('/demo/verwaltung');
+		expect(href('Threads')).toBe('/demo/verwaltung/threads');
 		expect(href('Untergruppen')).toBe('/demo/verwaltung/untergruppen');
 		expect(href('Jugendleiter & Rechte')).toBe('/demo/verwaltung/rechte');
 		expect(href('Vereinseinstellungen')).toBe('/demo/verwaltung/einstellungen');
@@ -72,17 +74,17 @@ describe('Verwaltungs-Huelle', () => {
 		expect(seite.querySelector('aside .abzeichen')?.textContent?.trim()).toBe('JD');
 	});
 
-	it('zeigt einem Betreuer nur Mitglieder und Zur App und fragt keine Hinweise ab', async () => {
+	it('zeigt einem Betreuer nur Mitglieder, Threads und Zur App und fragt keine Hinweise ab', async () => {
 		const { seite, http } = await oeffneSeite('/demo/verwaltung', ichMit(['ANTWORTEN_DETAIL']), LISTE);
 
-		expect(punkte(seite)).toEqual(['Mitglieder', 'Zur App']);
+		expect(punkte(seite)).toEqual(['Mitglieder', 'Threads', 'Zur App']);
 		http.expectNone(`${API}/verwaltung/hinweise`);
 	});
 
 	it('zeigt einem Jugendleiter ohne Einstellungen keinen Punkt dafuer', async () => {
 		const { seite } = await oeffneSeite('/demo/verwaltung', ichMit(['MITGLIEDER', 'JUGENDLEITER_RECHTE']), LISTE);
 
-		expect(punkte(seite)).toEqual(['Mitglieder', 'Untergruppen', 'Jugendleiter & Rechte', 'Zur App']);
+		expect(punkte(seite)).toEqual(['Mitglieder', 'Threads', 'Untergruppen', 'Jugendleiter & Rechte', 'Zur App']);
 	});
 
 	it('zeigt einer Person ohne Rechte Nicht gefunden ohne Leiste und laedt nichts', async () => {
@@ -274,11 +276,14 @@ describe('Verwaltungs-Huelle', () => {
 		expect(seite.textContent).toContain('← Zur Mitgliederliste');
 	});
 
-	it.each([['/demo/verwaltung/untergruppen', 'Untergruppen', [['/untergruppen', { untergruppen: [] }]]]] as [
-		string,
-		string,
-		[string, object][],
-	][])('macht auf %s den Punkt %s aktiv', async (url, text, daten) => {
+	it.each([
+		['/demo/verwaltung/untergruppen', 'Untergruppen', [['/untergruppen', { untergruppen: [] }]]],
+		[
+			'/demo/verwaltung/threads',
+			'Threads',
+			[['/verwaltung/threads', { threads: [], untergruppen: [], darfErstellen: true }]],
+		],
+	] as [string, string, [string, object][]][])('macht auf %s den Punkt %s aktiv', async (url, text, daten) => {
 		const { seite } = await oeffneSeite(url, ichMit(['MITGLIEDER']), daten);
 
 		const aktiv = [...seite.querySelectorAll('nav a[aria-current="page"]')].map((a) => a.textContent?.trim());
@@ -287,11 +292,25 @@ describe('Verwaltungs-Huelle', () => {
 		expect(seite.textContent).not.toContain('Zur Mitgliederliste');
 	});
 
+	it('macht auf threads/:id/antworten den Punkt Threads aktiv', async () => {
+		const { seite } = await oeffneSeite('/demo/verwaltung/threads/t1/antworten', ichMit(['MITGLIEDER']), [
+			['/threads/t1/antworten', { threadId: 't1', segment: 't1-x', titel: 'X', darfNachtragen: false, umfragen: [] }],
+		]);
+
+		const aktiv = [...seite.querySelectorAll('nav a[aria-current="page"]')].map((a) => a.textContent?.trim());
+		expect(aktiv).toEqual(['Threads']);
+	});
+
 	// Die Leiste nennt den Verein schon; jede Seite hat darum eine eigene Ueberschrift mit ihrem Namen (Ruling R8).
 	it.each([
 		['/demo/verwaltung', 'Mitglieder', LISTE],
 		['/demo/verwaltung/neu', 'Person anlegen', [['/untergruppen', { untergruppen: [] }]]],
 		['/demo/verwaltung/untergruppen', 'Untergruppen', [['/untergruppen', { untergruppen: [] }]]],
+		[
+			'/demo/verwaltung/threads',
+			'Threads',
+			[['/verwaltung/threads', { threads: [], untergruppen: [], darfErstellen: true }]],
+		],
 		['/demo/verwaltung/rechte', 'Jugendleiter & Rechte', [['/personen', { personen: [] }]]],
 	] as [string, string, [string, object][]][])('hat auf %s genau die Ueberschrift %s', async (url, titel, daten) => {
 		const { seite } = await oeffneSeite(url, ichMit(LEITUNG), daten);

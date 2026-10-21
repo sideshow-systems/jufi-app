@@ -1,4 +1,4 @@
-import type { VereinDb } from '@jufi/db';
+import type { VereinDb, VereinTx } from '@jufi/db';
 import {
 	baueUmfeld,
 	type AntwortDaten,
@@ -16,8 +16,12 @@ import { ladeUmfeld } from '../mitglieder/verwaltung.js';
  * ThreadPerson und Bezug, es braucht also keine Umwandlung; baueUmfeld laesst Entfernte
  * samt ihren Zuordnungen und Mitgliedschaften weg. Verworfen: ladeUmfeld nachbauen --
  * zwei Stellen, die entscheiden, wer "im Verein" ist, laufen auseinander.
+ *
+ * Nimmt auch die Transaktion einer Schreibroute: Nachrichten und Antworten entscheiden unter
+ * der Sperre noch einmal, ob die Person im Thread schreiben darf bzw. gefragt ist, und das
+ * haengt an Familie, Untergruppen und Jugendsprecher-Merkmal (Plan-Entscheidung 3).
  */
-export async function ladeThreadUmfeld(db: VereinDb): Promise<Umfeld> {
+export async function ladeThreadUmfeld(db: VereinDb | VereinTx): Promise<Umfeld> {
 	const [{ personen, zuordnungen }, mitgliedschaften] = await Promise.all([
 		ladeUmfeld(db),
 		db.untergruppeMitglied.findMany({ select: { personId: true, untergruppeId: true } }),
@@ -48,25 +52,29 @@ function tag(datum: Date): string {
 }
 
 /**
- * Ein Thread mit allen Modulen, Optionen und Antworten, oder null, wenn es ihn im Verein
- * nicht gibt (ein fremder Verein ist ueber vereinDb ebenfalls "nicht da"). Eine Abfrage je
- * Tabelle statt einer verschachtelten: die Zahl der Abfragen haengt so nicht von der Zahl
- * der Module ab, und jede Reihenfolge steht sichtbar im orderBy.
+ * Alle Threads des Vereins (oder nur die mit den gegebenen IDs) mit Modulen, Optionen und
+ * Antworten, in der Reihenfolge der Liste der Verwaltung: neueste zuerst, bei gleicher
+ * Anlegezeit nach ID. Eine Abfrage je Tabelle statt einer verschachtelten und statt einer
+ * Abfragefolge je Thread: die Zahl der Abfragen haengt weder von der Zahl der Module noch von
+ * der der Threads ab, und jede Reihenfolge steht sichtbar im orderBy. Verworfen: die Liste der
+ * Verwaltung ruft ladeThread je Thread -- bei dreissig Threads waere das ein paar hundert
+ * Abfragen fuer eine Seite.
  *
  * Welche Untertabelle gilt, entscheidet `typ` des Moduls. Verworfen: die vorhandene
  * Untertabelle nehmen -- hinge an einem INFO-Modul von Hand eine Terminzeile, bestimmte
  * die Reihenfolge der Pruefungen, was die Karte zeigt. Ein Modul ohne die Zeile seines
  * Typs (kaputte Daten) wird uebersprungen, damit ein Thread nicht an einer Zeile haengt.
  */
-export async function ladeThread(db: VereinDb, threadId: string): Promise<GeladenerThread | null> {
-	const thread = await db.thread.findUnique({
-		where: { id: threadId },
+export async function ladeThreads(db: VereinDb | VereinTx, threadIds?: readonly string[]): Promise<GeladenerThread[]> {
+	const threads = await db.thread.findMany({
+		where: threadIds ? { id: { in: [...threadIds] } } : undefined,
 		include: { untergruppen: { select: { untergruppeId: true }, orderBy: { untergruppeId: 'asc' } } },
+		orderBy: [{ angelegtAm: 'desc' }, { id: 'asc' }],
 	});
-	if (!thread) return null;
+	if (threads.length === 0) return [];
 
 	const moduleZeilen = await db.threadModul.findMany({
-		where: { threadId },
+		where: { threadId: { in: threads.map((t) => t.id) } },
 		orderBy: [{ position: 'asc' }, { id: 'asc' }],
 	});
 	const ids = moduleZeilen.map((m) => m.id);
@@ -93,15 +101,15 @@ export async function ladeThread(db: VereinDb, threadId: string): Promise<Gelade
 	const umfrageVon = new Map(umfragen.map((u) => [u.id, u]));
 	const rang = new Map(optionen.map((o, i) => [o.id, i]));
 
-	const module: ModulDaten[] = [];
-	for (const m of moduleZeilen) {
+	const modulVon = (m: (typeof moduleZeilen)[number]): ModulDaten | null => {
 		const titel = m.titel;
 		if (m.typ === 'INFO') {
 			const info = infoVon.get(m.id);
-			if (info) module.push({ typ: 'INFO', id: m.id, titel, text: info.text });
-		} else if (m.typ === 'TERMIN') {
+			return info ? { typ: 'INFO', id: m.id, titel, text: info.text } : null;
+		}
+		if (m.typ === 'TERMIN') {
 			const t = terminVon.get(m.id);
-			if (!t) continue;
+			if (!t) return null;
 			const termin: TerminDaten = {
 				modulId: m.id,
 				startDatum: tag(t.startDatum),
@@ -111,37 +119,36 @@ export async function ladeThread(db: VereinDb, threadId: string): Promise<Gelade
 				ort: t.ort,
 				treffpunkt: t.treffpunkt,
 			};
-			module.push({ typ: 'TERMIN', id: m.id, titel, termin });
-		} else {
-			const u = umfrageVon.get(m.id);
-			if (!u) continue;
-			const umfrage: UmfrageDaten = {
-				modulId: m.id,
-				frage: u.frage,
-				einheit: u.einheit,
-				mehrfach: u.mehrfach,
-				teilnahme: u.teilnahme,
-				vielleicht: u.vielleicht,
-				frist: u.frist,
-				ergebnisse: u.ergebnisse,
-				optionen: optionen
-					.filter((o) => o.umfrageId === u.id)
-					.map((o) => ({ id: o.id, schluessel: o.schluessel, text: o.text })),
-				antworten: antworten
-					.filter((a) => a.umfrageId === u.id)
-					.map((a): AntwortDaten => ({
-						fuerId: a.fuerId,
-						vonId: a.vonId,
-						// In der Reihenfolge der Optionen, nicht der Datenbank: die Ansicht ist so unabhaengig vom Zufall.
-						optionIds: a.optionen.map((o) => o.optionId).sort((x, y) => (rang.get(x) ?? 0) - (rang.get(y) ?? 0)),
-						abgegebenAm: a.abgegebenAm,
-					})),
-			};
-			module.push({ typ: 'UMFRAGE', id: m.id, titel, umfrage });
+			return { typ: 'TERMIN', id: m.id, titel, termin };
 		}
-	}
+		const u = umfrageVon.get(m.id);
+		if (!u) return null;
+		const umfrage: UmfrageDaten = {
+			modulId: m.id,
+			frage: u.frage,
+			einheit: u.einheit,
+			mehrfach: u.mehrfach,
+			teilnahme: u.teilnahme,
+			vielleicht: u.vielleicht,
+			frist: u.frist,
+			ergebnisse: u.ergebnisse,
+			optionen: optionen
+				.filter((o) => o.umfrageId === u.id)
+				.map((o) => ({ id: o.id, schluessel: o.schluessel, text: o.text })),
+			antworten: antworten
+				.filter((a) => a.umfrageId === u.id)
+				.map((a): AntwortDaten => ({
+					fuerId: a.fuerId,
+					vonId: a.vonId,
+					// In der Reihenfolge der Optionen, nicht der Datenbank: die Ansicht ist so unabhaengig vom Zufall.
+					optionIds: a.optionen.map((o) => o.optionId).sort((x, y) => (rang.get(x) ?? 0) - (rang.get(y) ?? 0)),
+					abgegebenAm: a.abgegebenAm,
+				})),
+		};
+		return { typ: 'UMFRAGE', id: m.id, titel, umfrage };
+	};
 
-	return {
+	return threads.map((thread) => ({
 		kopf: {
 			id: thread.id,
 			art: thread.art,
@@ -155,8 +162,23 @@ export async function ladeThread(db: VereinDb, threadId: string): Promise<Gelade
 			veroeffentlichtAm: thread.veroeffentlichtAm,
 			erstelltVonId: thread.erstelltVonId,
 		},
-		module,
-	};
+		module: moduleZeilen
+			.filter((m) => m.threadId === thread.id)
+			.flatMap((m) => {
+				const modul = modulVon(m);
+				return modul ? [modul] : [];
+			}),
+	}));
+}
+
+/**
+ * Ein Thread mit allen Modulen, Optionen und Antworten, oder null, wenn es ihn im Verein
+ * nicht gibt (ein fremder Verein ist ueber vereinDb ebenfalls "nicht da"). Nimmt auch die
+ * Transaktion einer Schreibroute: Dort wird der Thread nach der Sperre der Vereinszeile
+ * geladen, damit Pruefung und Schreiben denselben Stand sehen (Plan-Entscheidung 3).
+ */
+export async function ladeThread(db: VereinDb | VereinTx, threadId: string): Promise<GeladenerThread | null> {
+	return (await ladeThreads(db, [threadId]))[0] ?? null;
 }
 
 /** Zu welchem Thread ein Modul gehoert und welcher Art es ist; null, wenn es im Verein kein solches Modul gibt. */

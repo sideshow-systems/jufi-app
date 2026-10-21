@@ -1,4 +1,4 @@
-import { mitAenderung, type VereinDb } from '@jufi/db';
+import { mitAenderung, type AenderungEingabe, type VereinDb, type VereinTx } from '@jufi/db';
 import {
 	darfLoeschenNachricht,
 	schreibSperre,
@@ -97,7 +97,7 @@ interface ThreadLage {
  * gibt oder die Person nicht (mehr) im Umfeld steht. Ob sie ihn sehen oder darin schreiben
  * darf, entscheidet die Route: Lesen und Loeschen fragen siehtThread, Schreiben schreibSperre.
  */
-async function ladeLage(db: VereinDb, personId: string, threadId: string): Promise<ThreadLage | null> {
+async function ladeLage(db: VereinDb | VereinTx, personId: string, threadId: string): Promise<ThreadLage | null> {
 	const [umfeld, thread] = await Promise.all([ladeThreadUmfeld(db), ladeThread(db, threadId)]);
 	const mich = umfeld.personen.get(personId);
 	return thread && mich ? { mich, thread, umfeld } : null;
@@ -112,6 +112,51 @@ async function ladeLage(db: VereinDb, personId: string, threadId: string): Promi
 function urteil(vorhanden: Eintrag, personId: string, threadId: string): Wiederholung<Eintrag> | ThreadAbbruch {
 	const dieselbe = vorhanden.art === 'NACHRICHT' && vorhanden.autorId === personId && vorhanden.threadId === threadId;
 	return dieselbe ? new Wiederholung(vorhanden) : new ThreadAbbruch(409, CLIENT_ID_VERGEBEN);
+}
+
+/**
+ * Die Arbeit des Schreibens, innerhalb von mitAenderung (die Vereinszeile ist dann gesperrt).
+ * Reihenfolge: erst die clientId (eine Wiederholung bleibt 200, auch wenn der Thread
+ * inzwischen archiviert ist, Spec 4.2), dann Thread und Person neu laden und dieselben
+ * Pruefungen wie vor der Transaktion wiederholen, dann schreiben. Der Editor aendert Modus,
+ * Zielgruppe, Archiv und Fristen unter derselben Sperre; ohne die zweite Pruefung stuende eine
+ * Nachricht in einem Thread, den die Person gar nicht mehr sieht, oder im Archiv (Plan-
+ * Entscheidung 3, Gesamtreview Etappe 2 M5). Das Umfeld wird vollstaendig neu geladen: Ob
+ * jemand noch gefragt ist, haengt an Familie, Untergruppen und Jugendsprecher-Merkmal, und
+ * Mitgliederverwaltung und Editor aendern jedes davon. Verworfen: nur die Person laden wie
+ * ichUnterSperre -- die genuegt dem Jugendleiter, nicht der Mutter, deren Sicht an ihrer
+ * Zuordnung haengt. Preis: Personen, Zuordnungen und Mitgliedschaften des Vereins unter der
+ * Sperre (wenige hundert Zeilen); die Route ruft das erst, wenn die Vorabpruefung bestanden ist.
+ *
+ * Ein Fehler wird geworfen, damit mitAenderung den Stand zurueckrollt: ThreadAbbruch fuer die
+ * Sperre, Wiederholung/ThreadAbbruch fuer die clientId (urteil).
+ */
+export async function schreibeNachricht(
+	tx: VereinTx,
+	eingabe: { personId: string; threadId: string; text: string; clientId: string; zeit: Date },
+	stand: number,
+): Promise<{ ergebnis: Eintrag; aenderungen: readonly AenderungEingabe[] }> {
+	const { personId, threadId, text, clientId, zeit } = eingabe;
+	const vorhanden = await tx.verlaufEintrag.findFirst({ where: { clientId }, select: AUSWAHL });
+	if (vorhanden) throw urteil(vorhanden, personId, threadId);
+
+	const u = await ladeLage(tx, personId, threadId);
+	if (!u) throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
+	const sperre = schreibSperre(
+		u.mich,
+		u.thread.kopf,
+		u.umfeld,
+		threadDatenAus(u.thread.kopf, u.thread.module).termine,
+		zeit,
+	);
+	if (sperre === 'NICHT_GEFUNDEN') throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
+	if (sperre) throw new ThreadAbbruch(409, SPERRE_ANTWORT[sperre]);
+
+	const eintrag = await tx.verlaufEintrag.create({
+		data: { threadId, art: 'NACHRICHT', autorId: personId, text, stand, angelegtAm: zeit, clientId },
+		select: AUSWAHL,
+	});
+	return { ergebnis: eintrag, aenderungen: [{ threadId, art: 'VERLAUF' as const, objektId: eintrag.id }] };
 }
 
 /** GET/POST /threads/:id/verlauf und DELETE /verlauf/:eintragId. */
@@ -213,26 +258,13 @@ export function verlaufRouten(router: Router, deps: VolleAppDeps): void {
 			let fehler: unknown;
 			try {
 				const { ergebnis } = await db.$transaction((tx) =>
-					mitAenderung(tx, verein.id, person.id, zeit, async (stand) => {
-						const vorhanden = await tx.verlaufEintrag.findFirst({
-							where: { clientId: eingabe.clientId },
-							select: AUSWAHL,
-						});
-						if (vorhanden) throw urteil(vorhanden, person.id, threadId);
-						const eintrag = await tx.verlaufEintrag.create({
-							data: {
-								threadId,
-								art: 'NACHRICHT',
-								autorId: person.id,
-								text: eingabe.text,
-								stand,
-								angelegtAm: zeit,
-								clientId: eingabe.clientId,
-							},
-							select: AUSWAHL,
-						});
-						return { ergebnis: eintrag, aenderungen: [{ threadId, art: 'VERLAUF' as const, objektId: eintrag.id }] };
-					}),
+					mitAenderung(tx, verein.id, person.id, zeit, (stand) =>
+						schreibeNachricht(
+							tx,
+							{ personId: person.id, threadId, text: eingabe.text, clientId: eingabe.clientId, zeit },
+							stand,
+						),
+					),
 				);
 				return void res.status(201).json(antwort(ergebnis));
 			} catch (error) {

@@ -2,7 +2,7 @@ import type { TerminDaten } from '../module/termin/termin.js';
 import { antwortZeilen, auswertung, darfAntworten, type Auswertung } from './antworten.js';
 import { istArchiviert } from './archiv.js';
 import { eingetragenVon } from './namen.js';
-import { schreibSperre, type SchreibSperre } from './rechte.js';
+import { darfArchivieren, darfBearbeiten, schreibSperre, type SchreibSperre } from './rechte.js';
 import { siehtThread } from './sichtbarkeit.js';
 import { ungeleseneNachrichten, type NachrichtenEingabe } from './start.js';
 import type {
@@ -74,6 +74,11 @@ export interface ThreadAnsicht {
 	archiviert: boolean;
 	stand: number;
 	schreibSperre: SchreibSperre | null;
+	// Die Oberflaeche zeigt "Bearbeiten" und "Archivieren" nur, wenn die Regel es erlaubt;
+	// verworfen: das Recht im Client aus Rechten und Ersteller herzuleiten, weil dort
+	// der Austausch und der fremde Thread eines Jugendleiters leicht vergessen wuerden.
+	darfBearbeiten: boolean;
+	darfArchivieren: boolean;
 	/** eintraege zaehlt die Nachrichten (geloeschte eingeschlossen), keine Systemeintraege; der Name stammt aus der Wire-Form. */
 	verlauf: { eintraege: number; ungelesen: number };
 	module: ModulAnsicht[];
@@ -158,6 +163,8 @@ export function threadAnsicht(e: AnsichtEingabe): ThreadAnsicht | null {
 		archiviert: istArchiviert(e.kopf, termine, e.jetzt),
 		stand: e.stand,
 		schreibSperre: schreibSperre(e.ich, e.kopf, e.umfeld, termine, e.jetzt),
+		darfBearbeiten: darfBearbeiten(e.ich, e.kopf),
+		darfArchivieren: darfArchivieren(e.ich, e.kopf),
 		verlauf: {
 			eintraege: e.verlaufEintraege,
 			ungelesen: ungeleseneNachrichten({

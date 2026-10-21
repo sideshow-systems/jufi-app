@@ -1,8 +1,9 @@
 import { type Browser, type BrowserContext, expect, type Locator, type Page, test } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { berlinerTag, tagPlus, threadSegment } from '@jufi/domain';
 import { passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
-import { legeE2eThreadAn, personIdMitMail } from './threads';
+import { fuelleAustausch, personIdMitMail } from './threads';
 
 /**
  * Der Weg aus Spec 9 von Anfang bis Ende: Der Admin legt den Verein an, die Leitung
@@ -22,6 +23,10 @@ const MUTTER_MAIL = 'mara@example.test';
 let leitungLink = '';
 let mutterLink = '';
 let kindLink = '';
+/** Segmente der Thread-Seiten und die ID fuer die Verwaltungspfade; die Leitung legt Bowling im Editor an. */
+let bowling = '';
+let bowlingId = '';
+let austausch = '';
 
 /** Ein neuer Kontext mit eigenem virtuellen Authenticator und seiner ersten Seite. */
 async function person(browser: Browser): Promise<{ kontext: BrowserContext; seite: Page }> {
@@ -220,12 +225,71 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await kontext.close();
 	});
 
-	test('Mutter antwortet fuer Mia und schreibt im Verlauf, Mia und Leitung sehen es', async ({ browser }) => {
-		const leitungId = await personIdMitMail(SLUG, LEITUNG_MAIL);
-		const { bowling, austausch } = await legeE2eThreadAn(SLUG, leitungId, new Date());
-		const ids = JSON.parse(await readFile(join(ZUSTAND, 'ids.json'), 'utf8')) as Record<string, string>;
-		await writeFile(join(ZUSTAND, 'ids.json'), JSON.stringify({ ...ids, bowling, austausch }, null, '\t'));
+	test('Leitung legt Bowling im Editor an, speichert den Entwurf und veroeffentlicht', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'leitung');
+		// Die Frist wie bisher in threads.ts: sieben Berliner Tage nach jetzt, 18 Uhr (die Vorgabe des Felds).
+		const fristTag = tagPlus(berlinerTag(new Date()), 7);
 
+		await seite.goto(`/${SLUG}/verwaltung/threads`);
+		await seite.getByRole('link', { name: 'Neuer Thread' }).click();
+		await expect(seite.getByRole('heading', { name: 'Neuer Thread', level: 1 })).toBeVisible();
+		await seite.getByLabel('Titel', { exact: true }).fill('🎳 Bowling');
+		const hinzufuegen = seite.getByRole('group', { name: 'Modul hinzufügen' });
+		const vorschau = seite.getByRole('region', { name: 'Vorschau am Handy' });
+
+		// Fett ueber die Knopfleiste: Ohne Auswahl setzt sie einen markierten Platzhalter, den das
+		// Weitertippen ersetzt, und der Cursor steht danach noch im Textfeld.
+		await hinzufuegen.getByRole('button', { name: 'Info-Text' }).click();
+		const text = seite.getByRole('textbox', { name: 'Text', exact: true });
+		await text.fill('Wir gehen zusammen ');
+		await seite.getByRole('toolbar', { name: 'Formatierung' }).getByRole('button', { name: 'Fett' }).click();
+		await seite.keyboard.type('Bowling');
+		await seite.keyboard.press('End');
+		await seite.keyboard.type('. Bitte bis zur Frist anmelden.');
+		await expect(text).toHaveValue('Wir gehen zusammen **Bowling**. Bitte bis zur Frist anmelden.');
+		await expect(vorschau.locator('jf-info-modul strong', { hasText: 'Bowling' })).toBeVisible();
+
+		await hinzufuegen.getByRole('button', { name: 'Termin' }).click();
+		await seite.getByLabel('Ort (optional)').fill('Bowlingcenter');
+
+		// Die erste Umfrage ist die Teilnahme-Vorlage, zunaechst ohne Frist.
+		await hinzufuegen.getByRole('button', { name: 'Umfrage' }).click();
+		await expect(seite.getByRole('checkbox', { name: 'Teilnahme-Umfrage' })).toBeChecked();
+		await seite.getByRole('checkbox', { name: 'ohne Frist' }).uncheck();
+		await seite.getByLabel('Datum', { exact: true }).fill(fristTag);
+		await expect(seite.getByLabel('Uhrzeit', { exact: true })).toHaveValue('18:00');
+
+		await seite.getByRole('button', { name: 'Entwurf speichern' }).click();
+		await expect(seite.getByRole('status').filter({ hasText: 'Entwurf gespeichert' })).toBeVisible();
+		// Nach dem ersten Speichern steht die ID in der Adresse statt "neu".
+		await expect(seite).toHaveURL(new RegExp(`/${SLUG}/verwaltung/threads/(?!neu$)[^/]+$`));
+		bowlingId = new URL(seite.url()).pathname.split('/').pop() ?? '';
+		expect(bowlingId).not.toBe('');
+
+		await seite.getByRole('link', { name: 'Zur Liste' }).click();
+		const entwuerfe = seite.getByRole('region', { name: 'Entwürfe' });
+		await expect(entwuerfe.getByRole('link', { name: '🎳 Bowling' })).toBeVisible();
+		await entwuerfe.getByRole('link', { name: '🎳 Bowling' }).click();
+
+		await expect(seite.getByRole('heading', { name: 'Thread bearbeiten', level: 1 })).toBeVisible();
+		await seite.getByRole('button', { name: 'Veröffentlichen' }).click();
+		await expect(seite.getByRole('status').filter({ hasText: 'Veröffentlicht' })).toBeVisible();
+		await expect(seite.getByRole('button', { name: 'Veröffentlichen' })).toHaveCount(0);
+
+		await seite.getByRole('link', { name: 'Thread ansehen' }).click();
+		await expect(seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		await expect(seite).toHaveURL(new RegExp(`/${SLUG}/t/[^/]+$`));
+		bowling = new URL(seite.url()).pathname.split('/').pop() ?? '';
+		expect(bowling).toBe(threadSegment(bowlingId, '🎳 Bowling'));
+		await kontext.close();
+
+		const leitungId = await personIdMitMail(SLUG, LEITUNG_MAIL);
+		austausch = await fuelleAustausch(SLUG, leitungId, new Date());
+		const ids = JSON.parse(await readFile(join(ZUSTAND, 'ids.json'), 'utf8')) as Record<string, string>;
+		await writeFile(join(ZUSTAND, 'ids.json'), JSON.stringify({ ...ids, bowling, bowlingId, austausch }, null, '\t'));
+	});
+
+	test('Mutter antwortet fuer Mia und schreibt im Verlauf, Mia und Leitung sehen es', async ({ browser }) => {
 		const mutter = await ausSitzung(browser, 'mutter');
 		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
 		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
@@ -265,6 +329,59 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await leitung.seite.getByRole('navigation', { name: 'Ansicht' }).getByRole('link', { name: 'Verlauf' }).click();
 		await expect(leitung.seite.getByLabel('Nachricht schreiben')).toBeVisible();
 		await leitung.kontext.close();
+	});
+
+	test('Leitung traegt fuer Mia nach, Mia sieht es', async ({ browser }) => {
+		const leitung = await ausSitzung(browser, 'leitung');
+		await leitung.seite.goto(`/${SLUG}/verwaltung/threads`);
+		await leitung.seite
+			.getByRole('region', { name: 'Aktiv' })
+			.getByRole('listitem')
+			.filter({ hasText: '🎳 Bowling' })
+			.getByRole('link', { name: 'Antworten' })
+			.click();
+		await expect(leitung.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+
+		// Die Gruppe nach ihrer Ueberschrift ("✓ Dabei (1)"), nicht irgendein Text mit Mias Namen.
+		const gruppe = (titel: string) =>
+			leitung.seite
+				.locator('section[data-gruppe]')
+				.filter({ has: leitung.seite.getByRole('heading', { name: titel }) });
+		await expect(gruppe('✓ Dabei')).toContainText('Mia M.');
+		await gruppe('✓ Dabei').getByRole('button', { name: 'Eintragen für Mia M.' }).click();
+		await leitung.seite
+			.getByRole('group', { name: 'Antwort für Mia M.' })
+			.getByRole('button', { name: '? Vielleicht' })
+			.click();
+		await expect(gruppe('? Vielleicht')).toContainText('Mia M.');
+		await expect(gruppe('? Vielleicht')).toContainText('eingetragen von Lea L.');
+		await expect(gruppe('✓ Dabei').getByRole('heading')).toHaveText('✓ Dabei (0)');
+		await leitung.kontext.close();
+
+		const kind = await ausSitzung(browser, 'kind');
+		await kind.seite.goto(`/${SLUG}/t/${bowling}`);
+		const zeileDu = kind.seite.locator('jf-umfrage-modul .zeile').filter({ hasText: 'Du' });
+		await expect(zeileDu).toContainText('? Vielleicht');
+		await expect(zeileDu).toContainText('eingetragen von Lea L.');
+		await kind.kontext.close();
+	});
+
+	test('Leitung archiviert Bowling im Editor und stellt es auf der Thread-Seite wieder her', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'leitung');
+		await seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}`);
+		await expect(seite.getByRole('heading', { name: 'Thread bearbeiten', level: 1 })).toBeVisible();
+		await seite.getByRole('button', { name: 'Archivieren' }).click();
+		// Der Knopf wechselt erst mit der Antwort des Servers; vorher waere "Thread ansehen" ein Wettlauf.
+		await expect(seite.getByRole('button', { name: 'Wiederherstellen' })).toBeVisible();
+
+		await seite.getByRole('link', { name: 'Thread ansehen' }).click();
+		await expect(seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		const marke = seite.locator('header').getByText('Archiviert', { exact: true });
+		await expect(marke).toBeVisible();
+		await seite.getByRole('button', { name: 'Wiederherstellen' }).click();
+		await expect(marke).toHaveCount(0);
+		await expect(seite.getByRole('button', { name: 'Wiederherstellen' })).toHaveCount(0);
+		await kontext.close();
 	});
 
 	test('Ohne Sitzung fuehrt die Anmeldung zur aufgerufenen Seite zurueck', async ({ browser }) => {

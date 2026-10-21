@@ -239,6 +239,30 @@ describe('threadAnsicht: Verlauf und Kopf', () => {
 	});
 });
 
+describe('threadAnsicht: Bearbeitungsrechte', () => {
+	it('laesst Thomas bearbeiten und archivieren, Sandra nicht', () => {
+		expect(ansichtVon('thomas', kopf(), [])).toMatchObject({ darfBearbeiten: true, darfArchivieren: true });
+		expect(ansichtVon('sandra', kopf(), [])).toMatchObject({ darfBearbeiten: false, darfArchivieren: false });
+	});
+
+	it('laesst Petra mit nur Threads erstellen den Thread eines anderen nicht bearbeiten', () => {
+		expect(ansichtVon('petra', kopf(), [])).toMatchObject({ darfBearbeiten: false, darfArchivieren: false });
+		expect(ansichtVon('petra', kopf({ erstelltVonId: 'petra' }), [])).toMatchObject({
+			darfBearbeiten: true,
+			darfArchivieren: true,
+		});
+	});
+
+	it('laesst am Austausch einen Inhaber von Alle Threads bearbeiten, aber nicht archivieren', () => {
+		const austausch = kopf({
+			id: 'austausch',
+			art: 'JUGENDSPRECHER_AUSTAUSCH',
+			rollenfilter: 'JUGENDLEITER_JUGENDSPRECHER',
+		});
+		expect(ansichtVon('thomas', austausch, [])).toMatchObject({ darfBearbeiten: true, darfArchivieren: false });
+	});
+});
+
 describe('umfrageAnsicht', () => {
 	it('liefert dieselbe Ansicht wie im Thread', () => {
 		const modul = umfrageModul();

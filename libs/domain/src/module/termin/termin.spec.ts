@@ -91,6 +91,16 @@ describe('terminZeit', () => {
 });
 
 describe('terminFehler', () => {
+	it('lehnt ein Datum ab, das es nicht gibt, und prueft das vor allem anderen', () => {
+		expect(terminFehler(termin({ startDatum: '2026-02-30' }))).toBe('Bitte ein gültiges Datum.');
+		expect(terminFehler(termin({ endDatum: '2026-02-30' }))).toBe('Bitte ein gültiges Datum.');
+		// Ende vor Start und kaputte Uhrzeit kaemen sonst zuerst.
+		expect(terminFehler(termin({ startDatum: '2026-10-17', endDatum: '2026-02-30', beginn: '25:00' }))).toBe(
+			'Bitte ein gültiges Datum.',
+		);
+		expect(terminFehler(termin({ startDatum: '2026-13-01', beginn: '25:00' }))).toBe('Bitte ein gültiges Datum.');
+	});
+
 	it('lehnt ein Enddatum vor dem Startdatum ab', () => {
 		expect(terminFehler(termin({ endDatum: '2026-10-16' }))).toBe('Das Enddatum liegt vor dem Startdatum.');
 	});

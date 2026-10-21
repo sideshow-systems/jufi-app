@@ -15,8 +15,10 @@ export interface AenderungEingabe {
  * gehoert nicht hierher: Sie wird als THREAD gemeldet (der Verlaufseintrag dazu als
  * VERLAUF) und schiebt den Thread nach oben, weil er fuer die Zielgruppe erst jetzt
  * erscheint.
+ * LISTE (Anpinnen und Archivieren) gehoert dazu: Verworfen ist THREAD, denn jedes
+ * Anpinnen schoebe den Thread nach oben und hiesse bei allen "Aushang geaendert".
  */
-const OHNE_AKTIVITAET: readonly AenderungArt[] = ['GELOESCHT', 'SICHTBARKEIT'];
+const OHNE_AKTIVITAET: readonly AenderungArt[] = ['GELOESCHT', 'SICHTBARKEIT', 'LISTE'];
 
 /**
  * Fuehrt die Arbeit einer schreibenden Route unter einem eigenen Aenderungsstand aus

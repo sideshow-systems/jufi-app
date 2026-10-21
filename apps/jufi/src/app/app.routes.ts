@@ -4,6 +4,7 @@ import { PlattformStartComponent } from './seiten/plattform-start';
 import { mitgliedAngemeldet } from './verein/mitglied-waechter';
 import { MitgliederHuelle } from './verein/mitglieder-huelle';
 import { VerwaltungHuelle } from './verein/verwaltung/huelle';
+import { ungespeichertWaechter } from './verein/verwaltung/threads/ungespeichert';
 
 /**
  * Die Router-Einstellungen gehoeren zu den Routen und stehen deshalb hier; die Tests
@@ -75,6 +76,26 @@ export const routes: Routes = [
 					{
 						path: 'personen/:id',
 						loadComponent: () => import('./verein/verwaltung/personenseite').then((m) => m.PersonenseiteComponent),
+					},
+					// threads/neu vor threads/:id, sonst waere "neu" eine Thread-ID.
+					{
+						path: 'threads',
+						loadComponent: () => import('./verein/verwaltung/threads/liste').then((m) => m.ThreadListeComponent),
+					},
+					{
+						path: 'threads/neu',
+						loadComponent: () => import('./verein/verwaltung/threads/editor').then((m) => m.ThreadEditorComponent),
+						canDeactivate: [ungespeichertWaechter],
+					},
+					{
+						path: 'threads/:id',
+						loadComponent: () => import('./verein/verwaltung/threads/editor').then((m) => m.ThreadEditorComponent),
+						canDeactivate: [ungespeichertWaechter],
+					},
+					{
+						path: 'threads/:id/antworten',
+						loadComponent: () =>
+							import('./verein/verwaltung/threads/antworten').then((m) => m.ThreadAntwortenComponent),
 					},
 					{
 						path: 'untergruppen',

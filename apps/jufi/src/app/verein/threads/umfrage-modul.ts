@@ -9,8 +9,12 @@ import { ThreadApi } from './thread-api';
 
 type PillenArt = 'ok' | 'offen' | 'neutral';
 
-/** Zeichen und Pillenfarbe der Teilnahme-Optionen (Spec 6.3: "✓ Dabei", "? Vielleicht", "✗ Abgesagt"). */
-const TEILNAHME_ZEICHEN: Record<string, { zeichen: string; art: PillenArt }> = {
+/**
+ * Zeichen und Pillenfarbe der Teilnahme-Optionen (Spec 6.3: "✓ Dabei", "? Vielleicht", "✗ Abgesagt").
+ * Exportiert fuer die Antworten-Uebersicht der Verwaltung: Dieselbe Option soll dort dasselbe
+ * Zeichen tragen wie in der Sicht der Familie; eine Kopie liefe beim naechsten Zeichen auseinander.
+ */
+export const TEILNAHME_ZEICHEN: Record<string, { zeichen: string; art: PillenArt }> = {
 	dabei: { zeichen: '✓', art: 'ok' },
 	vielleicht: { zeichen: '?', art: 'neutral' },
 	abgesagt: { zeichen: '✗', art: 'offen' },
@@ -60,6 +64,13 @@ interface ErgebnisZeile {
 		}
 		@if (frist(); as f) {
 			<p class="frist" [class.vorbei]="fristVorbei()">{{ f }}</p>
+		}
+		@if (vorschau()) {
+			<span class="optionen" role="group" aria-label="Antworten">
+				@for (k of knoepfe(); track k.id) {
+					<button type="button" class="knopf klein" disabled>{{ k.text }}</button>
+				}
+			</span>
 		}
 
 		@for (z of zeilen(); track z.fuerId) {
@@ -232,6 +243,13 @@ interface ErgebnisZeile {
 export class UmfrageModul {
 	readonly modul = input.required<UmfrageAnsicht>();
 	readonly slug = input.required<string>();
+	/**
+	 * Die Vorschau des Editors: Sie hat keine Zeilen, also auch keine Knoepfe zum Antworten, und
+	 * zeigte ohne diesen Schalter nur die Frage. Die Antworten erscheinen deshalb einmal als gesperrte
+	 * Knoepfe, so wie die Mitglieder sie sehen werden. Verworfen: eine erfundene Zeile "Du" in der
+	 * Vorschau, deren Knoepfe die API riefen.
+	 */
+	readonly vorschau = input(false);
 	/** Die Ansicht des Servers nach einer Antwort; die Seite setzt sie in ihren Thread ein. */
 	readonly geaendert = output<UmfrageAnsicht>();
 
@@ -370,7 +388,8 @@ export class UmfrageModul {
 	}
 }
 
-function teilnahmeText(schluessel: string, text: string): string {
+/** Siehe TEILNAHME_ZEICHEN: ebenfalls fuer die Antworten-Uebersicht, damit der Text der Knoepfe derselbe ist. */
+export function teilnahmeText(schluessel: string, text: string): string {
 	const zeichen = TEILNAHME_ZEICHEN[schluessel]?.zeichen;
 	const fest = TEILNAHME_OPTIONEN.find((o) => o.schluessel === schluessel)?.text ?? text;
 	return zeichen ? `${zeichen} ${fest}` : text;

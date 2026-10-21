@@ -15,10 +15,11 @@ import {
 import { Router, RouterLink } from '@angular/router';
 import { idAusSegment, type ThreadAnsicht, threadSegment, type UmfrageAnsicht } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
-import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
+import { type ApiFehler, alsApiFehler, fehlertext, fehlertextNichtGefunden } from '../../gemeinsam/api-fehler';
 import { IconComponent } from '../../gestaltung/icon';
 import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
+import { VerwaltungThreadsApi } from '../verwaltung/threads/threads-api';
 import { InfoModul } from './info-modul';
 import { TerminModul } from './termin-modul';
 import { ThreadApi } from './thread-api';
@@ -62,11 +63,28 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 									}
 									@if (t.archiviert) {
 										<jf-pille art="neutral">Archiviert</jf-pille>
+										@if (t.darfArchivieren) {
+											<button
+												type="button"
+												class="knopf leise klein"
+												[disabled]="stelltWieder()"
+												(click)="stelleWieder(t)"
+											>
+												Wiederherstellen
+											</button>
+										}
 									}
 								</span>
 							}
 						</div>
+						@if (t.darfBearbeiten) {
+							<a class="knopf" [routerLink]="['/', slug(), 'verwaltung', 'threads', t.id]">Bearbeiten</a>
+						}
 					</header>
+
+					@if (wiederherstellFehler(); as text) {
+						<p class="fehler" role="alert">{{ text }}</p>
+					}
 
 					@if (mitVerlauf()) {
 						<nav class="reiter" aria-label="Ansicht">
@@ -237,6 +255,7 @@ export class ThreadSeite {
 	readonly reiter = input<string | undefined>(undefined);
 
 	private readonly api = inject(ThreadApi);
+	private readonly verwaltung = inject(VerwaltungThreadsApi);
 	private readonly router = inject(Router);
 	private readonly dokument = inject(DOCUMENT);
 	private readonly injector = inject(Injector);
@@ -245,6 +264,8 @@ export class ThreadSeite {
 	protected readonly thread = signal<ThreadAnsicht | null>(null);
 	private readonly fehler = signal<ApiFehler | null>(null);
 	protected readonly hervor = signal<string | null>(null);
+	protected readonly stelltWieder = signal(false);
+	protected readonly wiederherstellFehler = signal<string | null>(null);
 
 	protected readonly fehlertext = computed(() => {
 		const f = this.fehler();
@@ -374,6 +395,33 @@ export class ThreadSeite {
 			}
 			this.fehler.set(fehler);
 			this.zustand.set('fehler');
+		}
+	}
+
+	/**
+	 * Holt einen archivierten Thread zurueck und laedt die Ansicht neu, statt die Marke lokal zu
+	 * entfernen: Ob und wo der Thread danach in den Listen steht, rechnet der Server. Die Rechte
+	 * (darfArchivieren) kommen aus der Ansicht; scheitert es trotzdem (404), steht der Satz der
+	 * Seite und der Knopf bleibt fuer einen neuen Versuch.
+	 */
+	protected async stelleWieder(t: ThreadAnsicht): Promise<void> {
+		// Der zweite Tipp eines Doppeltipps kommt an, bevor der Knopf als gesperrt gezeichnet ist.
+		if (this.stelltWieder()) return;
+		const slug = this.slug();
+		const lauf = this.lauf;
+		this.stelltWieder.set(true);
+		this.wiederherstellFehler.set(null);
+		try {
+			await firstValueFrom(this.verwaltung.archiviere(slug, t.id, false));
+			if (lauf !== this.lauf) return;
+			await this.lade(slug, t.id);
+		} catch (ursache) {
+			if (lauf !== this.lauf) return;
+			const fehler = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, slug, fehler)) return;
+			this.wiederherstellFehler.set(fehlertextNichtGefunden(fehler));
+		} finally {
+			this.stelltWieder.set(false);
 		}
 	}
 

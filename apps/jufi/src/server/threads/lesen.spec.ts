@@ -19,6 +19,8 @@ const ANSICHT_SCHLUESSEL = [
 	'angepinnt',
 	'archiviert',
 	'art',
+	'darfArchivieren',
+	'darfBearbeiten',
 	'entwurf',
 	'id',
 	'module',

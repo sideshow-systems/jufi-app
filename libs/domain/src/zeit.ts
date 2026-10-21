@@ -88,3 +88,18 @@ export function tagPlus(tag: string, tage: number): string {
 	const d = new Date(Date.UTC(j, m - 1, t + tage));
 	return `${d.getUTCFullYear()}-${zwei(d.getUTCMonth() + 1)}-${zwei(d.getUTCDate())}`;
 }
+
+const TAG = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 'JJJJ-MM-TT' und ein Tag, den es gibt. 2026-02-30 passt auf die Form, aber
+ * Date.UTC rollt ihn still in den Maerz; darum wird der Tag zurueckgelesen.
+ * Verworfen: nur die Form pruefen (der Editor schriebe ein Datum, das die
+ * Datenbank als Maerz speichert) und Date.parse (laeuft je nach Laufzeit anders).
+ */
+export function istKalendertag(tag: string): boolean {
+	if (!TAG.test(tag)) return false;
+	const [j, m, t] = tag.split('-').map(Number);
+	const d = new Date(Date.UTC(j, m - 1, t));
+	return d.getUTCFullYear() === j && d.getUTCMonth() === m - 1 && d.getUTCDate() === t;
+}

@@ -67,6 +67,8 @@ function thread(zusatz: Partial<ThreadAnsicht> = {}): ThreadAnsicht {
 		archiviert: false,
 		stand: 42,
 		schreibSperre: null,
+		darfBearbeiten: false,
+		darfArchivieren: false,
 		verlauf: { eintraege: 3, ungelesen: 2 },
 		module: MODULE,
 		...zusatz,
@@ -575,6 +577,83 @@ describe('Thread-Seite', () => {
 			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread() });
 
 			expect(seite.querySelector('jf-pille')).toBeNull();
+		});
+	});
+
+	describe('Bearbeiten und Wiederherstellen', () => {
+		const bearbeiten = (seite: HTMLElement) =>
+			[...seite.querySelectorAll<HTMLAnchorElement>('header a')].find((a) => a.textContent?.includes('Bearbeiten'));
+		const wiederherstellen = (seite: HTMLElement) =>
+			[...seite.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Wiederherstellen'));
+
+		it('hat Bearbeiten nur mit darfBearbeiten und fuehrt in den Editor', async () => {
+			const mit = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ darfBearbeiten: true }) });
+			expect(bearbeiten(mit.seite)?.getAttribute('href')).toBe('/demo/verwaltung/threads/ck1');
+		});
+
+		it('hat ohne darfBearbeiten kein Bearbeiten', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ darfArchivieren: true }) });
+			expect(bearbeiten(seite)).toBeUndefined();
+		});
+
+		it('hat Wiederherstellen nur bei einem archivierten Thread und mit darfArchivieren', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ archiviert: true, darfArchivieren: true }),
+			});
+			expect(wiederherstellen(seite)).toBeTruthy();
+		});
+
+		it('hat Wiederherstellen nicht ohne darfArchivieren', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ archiviert: true, darfBearbeiten: true }),
+			});
+			expect(text(seite)).toContain('Archiviert');
+			expect(wiederherstellen(seite)).toBeUndefined();
+		});
+
+		it('hat Wiederherstellen nicht bei einem Thread, der nicht archiviert ist', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ darfArchivieren: true }) });
+			expect(wiederherstellen(seite)).toBeUndefined();
+		});
+
+		it('stellt wieder her und laedt den Thread neu', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ archiviert: true, darfArchivieren: true }),
+			});
+			wiederherstellen(seite)?.click();
+
+			await vi.waitFor(() => {
+				const anfrage = http.expectOne('/demo/api/v1/threads/ck1/archiv');
+				expect(anfrage.request.method).toBe('PUT');
+				expect(anfrage.request.body).toEqual({ archiviert: false });
+				anfrage.flush({});
+			});
+			await antworteThread('ck1', thread({ darfArchivieren: true }));
+			await quittiereGelesen();
+			await beendeSeite(harness);
+
+			expect(text(seite)).not.toContain('Archiviert');
+			expect(wiederherstellen(seite)).toBeUndefined();
+		});
+
+		it('zeigt einen Fehler beim Wiederherstellen und laesst den Knopf stehen', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ archiviert: true, darfArchivieren: true }),
+			});
+			wiederherstellen(seite)?.click();
+			await vi.waitFor(() =>
+				http
+					.expectOne('/demo/api/v1/threads/ck1/archiv')
+					.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' }),
+			);
+			await beendeSeite(harness);
+
+			expect(seite.querySelector('[role="alert"]')?.textContent).toContain('Nicht gefunden oder keine Berechtigung');
+			expect(wiederherstellen(seite)).toBeTruthy();
 		});
 	});
 });
