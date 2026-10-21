@@ -133,6 +133,43 @@ describe('GET /threads', () => {
 			expect((await s.zeile(s.sandra.cookie, t.threadId))?.neu).toBe(true);
 		});
 
+		it('die Antwort einer anderen Familie macht Bowling fuer Sandra nur neu, wenn sie Ergebnisse sieht', async () => {
+			const s = await szenario();
+			const peter = await legeMitgliedAn(prisma, s.verein, { jetzt: JETZT, art: 'ERWACHSENER', vorname: 'Peter' });
+			const paul = await legeMitgliedAn(prisma, s.verein, { jetzt: JETZT, art: 'JUNGFISCHER', vorname: 'Paul' });
+			await ordneZu(prisma, s.verein, peter.personId, paul.personId);
+
+			const nachAntwort = async (ergebnisse: 'JUGENDLEITER' | 'ALLE') => {
+				const t = await s.bowling(`Bowling ${ergebnisse}`, {
+					module: [{ typ: 'UMFRAGE', teilnahme: true, ergebnisse }],
+				});
+				const ansicht = (await (
+					await sende(server.url, s.api(`/threads/${t.threadId}`), { cookie: s.sandra.cookie })
+				).json()) as ThreadAnsicht;
+				const gelesen = await sende(server.url, s.api(`/threads/${t.threadId}/gelesen`), {
+					methode: 'PUT',
+					body: { bereich: 'uebersicht', bis: ansicht.stand },
+					cookie: s.sandra.cookie,
+				});
+				expect(gelesen.status).toBe(204);
+				expect((await s.zeile(s.sandra.cookie, t.threadId))?.neu).toBe(false);
+
+				const antwort = await sende(server.url, s.api(`/umfragen/${t.modulIds[0]}/antworten/${paul.personId}`), {
+					methode: 'PUT',
+					body: { optionIds: [t.optionIds['dabei']], clientId: randomUUID() },
+					cookie: peter.cookie,
+				});
+				expect(antwort.status).toBe(200);
+				return {
+					sandra: (await s.zeile(s.sandra.cookie, t.threadId))?.neu,
+					thomas: (await s.zeile(s.thomas.cookie, t.threadId))?.neu,
+				};
+			};
+
+			expect(await nachAntwort('JUGENDLEITER')).toEqual({ sandra: false, thomas: true });
+			expect(await nachAntwort('ALLE')).toEqual({ sandra: true, thomas: true });
+		});
+
 		it('ein Thread vor dem Zugang ist ohne Gelesen-Zeile nicht neu', async () => {
 			const s = await szenario();
 			const alt = await legeThreadAn(prisma, s.verein, new Date('2026-10-01T10:00:00Z'), {

@@ -658,3 +658,41 @@ describe('Thread-Seite', () => {
 		});
 	});
 });
+
+// Eigener Block, weil die Liste der Huelle hier nicht vom Interceptor beantwortet werden darf:
+// Geprueft wird gerade, dass nach dem Gelesen-Stand eine weitere Listenanfrage kommt.
+describe('Thread-Seite mit der Liste der Huelle', () => {
+	const LISTE = '/demo/api/v1/threads';
+	let http: HttpTestingController;
+
+	beforeEach(() => {
+		TestBed.configureTestingModule({ providers: adminTestAnbieter({ eigeneThreadListe: true }) });
+		http = TestBed.inject(HttpTestingController);
+	});
+
+	afterEach(() => http.verify());
+
+	it('fragt die Liste nach dem Gelesen-Stand erneut, auch wenn ihre Anfrage zum Pfadwechsel schon beantwortet ist', async () => {
+		const harness = await RouterTestingHarness.create();
+		const navigation = harness.navigateByUrl('/demo/t/ck1-bowling');
+		await vi.waitFor(() => http.expectOne('/demo/api/v1/ich').flush(ICH));
+		await navigation;
+		await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1').flush(thread()));
+		// Die Listenanfrage der Huelle ist beantwortet, bevor der Gelesen-Stand ankommt: der Fall "schnell zurueck".
+		await vi.waitFor(() => expect(http.match(LISTE).map((r) => r.flush({ threads: [], archiv: 0 }))).not.toEqual([]));
+
+		await vi.waitFor(() => {
+			const gelesen = http.expectOne('/demo/api/v1/threads/ck1/gelesen');
+			expect(gelesen.request.method).toBe('PUT');
+			gelesen.flush(null, { status: 204, statusText: 'No Content' });
+		});
+
+		await vi.waitFor(() => {
+			const erneut = http.expectOne(LISTE);
+			expect(erneut.request.method).toBe('GET');
+			erneut.flush({ threads: [], archiv: 0 });
+		});
+		for (const kopf of http.match('/demo/api/v1/verein')) kopf.flush(VEREIN);
+		await harness.fixture.whenStable();
+	});
+});

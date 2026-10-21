@@ -2,7 +2,7 @@ import { threadDatenAus, type ModulDaten } from './ansicht.js';
 import { istArchiviert } from './archiv.js';
 import { threadSegment } from './pfad.js';
 import { siehtThread } from './sichtbarkeit.js';
-import { istNeu, nachAktivitaet, type NeuAenderung } from './start.js';
+import { istNeu, nachAktivitaet, neuEingabeFuer, type NeuAenderung } from './start.js';
 import type { ThreadKopf, ThreadPerson, Umfeld } from './typen.js';
 import { naechsterTerminText } from './verwaltung.js';
 
@@ -100,16 +100,7 @@ export function threadListe(e: {
 			archiviert,
 			entwurf: t.kopf.veroeffentlichtAm === null,
 			naechsterTermin: naechsterTerminText(t.kopf, daten.termine, e.jetzt),
-			neu:
-				!archiviert &&
-				istNeu({
-					personId: e.ich.id,
-					zugangSeit: e.zugangSeit,
-					gelesenBis: t.gelesenBis,
-					erstelltVonId: t.kopf.erstelltVonId,
-					veroeffentlichtAm: t.kopf.veroeffentlichtAm,
-					aenderungen: t.aenderungen,
-				}),
+			neu: !archiviert && istNeu(neuEingabeFuer(e.ich, t, daten.umfragen, e.zugangSeit)),
 		});
 	}
 	return { threads: zeilen, archiv };

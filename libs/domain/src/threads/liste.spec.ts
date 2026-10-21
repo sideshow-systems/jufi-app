@@ -210,6 +210,28 @@ describe('threadListe', () => {
 			const l = liste('sandra', [listenThread({}, [], { gelesenBis: null })]);
 			expect(l.threads[0].neu).toBe(true);
 		});
+
+		describe('nach der Antwort einer anderen Familie', () => {
+			const mitUmfrage = (ergebnisse: UmfrageDaten['ergebnisse']) =>
+				listenThread({}, [{ ...umfrageModul, umfrage: { ...umfrage, ergebnisse } }], {
+					aenderungen: [{ ...fremd(5, 'ANTWORT'), urheberId: 'peter' }],
+				});
+			const neuFuer = (ich: string, ergebnisse: UmfrageDaten['ergebnisse']) =>
+				liste(ich, [mitUmfrage(ergebnisse)]).threads[0].neu;
+
+			it('ist fuer Sandra nicht neu, wenn nur Jugendleiter Ergebnisse sehen', () => {
+				expect(neuFuer('sandra', 'JUGENDLEITER')).toBe(false);
+			});
+
+			it('ist fuer Sandra neu bei Ergebnissen fuer alle oder als Summe', () => {
+				expect(neuFuer('sandra', 'ALLE')).toBe(true);
+				expect(neuFuer('sandra', 'SUMME')).toBe(true);
+			});
+
+			it('ist fuer Petra neu, auch wenn nur Jugendleiter Ergebnisse sehen', () => {
+				expect(neuFuer('petra', 'JUGENDLEITER')).toBe(true);
+			});
+		});
 	});
 
 	describe('Suche', () => {

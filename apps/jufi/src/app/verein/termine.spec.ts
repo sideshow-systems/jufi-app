@@ -119,6 +119,14 @@ describe('Termine', () => {
 			http.expectNone(`${API}/termine?monat=xyz`);
 		});
 
+		it('nimmt bei einem wiederholten Monat den aktuellen statt eines der beiden', async () => {
+			// Beide Werte gueltig und keiner der aktuelle: Gewaehlt werden darf weder der erste noch der letzte.
+			await oeffne('/demo/termine?monat=2026-09&monat=2026-10', '2026-11');
+
+			expect(ueberschrift()).toBe('November 2026');
+			http.expectNone((r) => r.url === `${API}/termine` && r.params.get('monat') !== '2026-11');
+		});
+
 		it('blaettert mit Voriger Monat und schreibt den Monat in die Adresse', async () => {
 			await oeffne('/demo/termine', '2026-11');
 

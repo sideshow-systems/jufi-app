@@ -1,11 +1,19 @@
 import { naechsteTermine, type TerminDaten, type TerminEintrag } from '../module/termin/termin.js';
-import { antwortZeilen } from './antworten.js';
+import { antwortZeilen, ergebnisAnsicht } from './antworten.js';
 import { threadDatenAus } from './ansicht.js';
 import { istArchiviert } from './archiv.js';
 import type { ListenThread } from './liste.js';
 import { threadSegment } from './pfad.js';
 import { siehtThread } from './sichtbarkeit.js';
-import type { AenderungArt, ThreadDaten, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
+import type {
+	AenderungArt,
+	ThreadDaten,
+	ThreadKopf,
+	ThreadModus,
+	ThreadPerson,
+	Umfeld,
+	UmfrageDaten,
+} from './typen.js';
 
 export interface OffenerPunkt {
 	threadId: string;
@@ -87,16 +95,58 @@ export interface NeuEingabe {
 	erstelltVonId: string | null;
 	veroeffentlichtAm: Date | null;
 	aenderungen: readonly NeuAenderung[];
+	/** Ob die Person in mindestens einer Umfrage des Threads Ergebnisse sieht (siehtErgebnisse). */
+	antwortenSichtbar: boolean;
 }
 
-// Die Auswahl, die "neu" ausmacht: fremd, nicht LISTE, über dem Stand (ohne Stand: ab dem
-// Zugang). Eigene Funktion, weil die Startseite aus denselben Änderungen ihre Kurzangabe
-// bildet ("Neue Antworten") und sonst eine zweite Auslegung von "fremd" entstünde.
+// Spec 3.9: Eine fremde Antwort ist nur dann etwas Neues, wenn die Person
+// Ergebnisse sieht. Bei "Ergebnisse: nur Jugendleiter" sieht eine Familie nach dem Öffnen
+// nichts Geändertes; der Punkt zeigte auf nichts und leuchtete mit jeder weiteren Antwort
+// wieder auf. Entschieden wird über ergebnisAnsicht, damit "sieht Ergebnisse" hier und in
+// der Auswertung dasselbe heißt.
+// Verworfen: je Antwort genau zu prüfen, ob die Person deren Umfrage auswerten darf —
+// dafür fehlt NeuAenderung der Weg von objektId zur Umfrage (Etappe 5). Kosten: Die
+// Antwort des anderen Elternteils für das eigene Kind in einer Nur-Jugendleiter-Umfrage
+// macht den Thread nicht neu, und sieht die Person Ergebnisse in einer anderen Umfrage
+// des Threads, zählt auch eine Antwort in der verborgenen.
+export function siehtErgebnisse(
+	ich: ThreadPerson,
+	kopf: ThreadKopf,
+	umfragen: readonly Pick<UmfrageDaten, 'ergebnisse'>[],
+): boolean {
+	return umfragen.some((u) => ergebnisAnsicht(ich, u, kopf) !== 'NICHTS');
+}
+
+// Die Eingabe für istNeu aus einem geladenen Thread. Liste und Startseite bauen sie hier,
+// damit beide dieselben Felder (auch antwortenSichtbar) gleich belegen.
+export function neuEingabeFuer(
+	ich: ThreadPerson,
+	t: Pick<ListenThread, 'kopf' | 'gelesenBis' | 'aenderungen'>,
+	umfragen: readonly Pick<UmfrageDaten, 'ergebnisse'>[],
+	zugangSeit: Date,
+): NeuEingabe {
+	return {
+		personId: ich.id,
+		zugangSeit,
+		gelesenBis: t.gelesenBis,
+		erstelltVonId: t.kopf.erstelltVonId,
+		veroeffentlichtAm: t.kopf.veroeffentlichtAm,
+		aenderungen: t.aenderungen,
+		antwortenSichtbar: siehtErgebnisse(ich, t.kopf, umfragen),
+	};
+}
+
+// Die Auswahl, die "neu" ausmacht: fremd, nicht LISTE, keine ANTWORT ohne sichtbare
+// Ergebnisse, über dem Stand (ohne Stand: ab dem Zugang). Eigene Funktion, weil die
+// Startseite aus denselben Änderungen ihre Kurzangabe bildet ("Neue Antworten") und sonst
+// eine zweite Auslegung von "fremd" entstünde.
 // LISTE (Anpinnen, Archivieren) ändert nichts am Inhalt: Wer einen Thread anpinnt, hat
 // ihn für die anderen nicht neu geschrieben. Verworfen: die Art erst in der Abfrage des
 // Servers auszufiltern — die Regel gehört hierher und ist so ohne Datenbank prüfbar.
 function fremdeNeueAenderungen(e: NeuEingabe): NeuAenderung[] {
-	const fremd = e.aenderungen.filter((a) => a.urheberId !== e.personId && a.art !== 'LISTE');
+	const fremd = e.aenderungen.filter(
+		(a) => a.urheberId !== e.personId && a.art !== 'LISTE' && (a.art !== 'ANTWORT' || e.antwortenSichtbar),
+	);
 	if (e.gelesenBis !== null) {
 		const gelesen = e.gelesenBis;
 		return fremd.filter((a) => a.stand > gelesen);
@@ -276,15 +326,8 @@ export function startAnsicht(e: {
 	}));
 
 	const neu: NeuEintrag[] = [];
-	for (const { t } of aktiv.sort((a, b) => nachAktivitaet(a.t, b.t))) {
-		const eingabe: NeuEingabe = {
-			personId: e.ich.id,
-			zugangSeit: e.zugangSeit,
-			gelesenBis: t.gelesenBis,
-			erstelltVonId: t.kopf.erstelltVonId,
-			veroeffentlichtAm: t.kopf.veroeffentlichtAm,
-			aenderungen: t.aenderungen,
-		};
+	for (const { t, daten } of aktiv.sort((a, b) => nachAktivitaet(a.t, b.t))) {
+		const eingabe = neuEingabeFuer(e.ich, t, daten.umfragen, e.zugangSeit);
 		if (!istNeu(eingabe)) continue;
 		neu.push({
 			threadId: t.kopf.id,

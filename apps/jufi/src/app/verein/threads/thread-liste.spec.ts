@@ -333,6 +333,16 @@ describe('Thread-Liste', () => {
 			expect(titel(archiv())).toEqual(['Zeltlager 2025']);
 		});
 
+		it('nimmt einen wiederholten Parameter suche als keine Suche, ohne Fehler', async () => {
+			const fehler = vi.spyOn(console, 'error');
+			await oeffne('/demo/threads?suche=a&suche=b');
+
+			expect((seite.querySelector('input[type="search"]') as HTMLInputElement).value).toBe('');
+			expect(titel(abschnitt('Aktiv') as HTMLElement)).toEqual(['Bowling', 'Kegeln · Entwurf']);
+			expect(fehler).not.toHaveBeenCalled();
+			fehler.mockRestore();
+		});
+
 		it('uebernimmt eine Aenderung der Adresse von aussen (Zurueck im Browser) ins Feld und sucht sofort', async () => {
 			await oeffne();
 

@@ -6,6 +6,7 @@ import {
 	istNeu,
 	NEU_HOECHSTENS,
 	neuKurzangabe,
+	siehtErgebnisse,
 	startAnsicht,
 	ungeleseneNachrichten,
 	type NeuAenderung,
@@ -185,6 +186,7 @@ describe('istNeu', () => {
 		erstelltVonId: 'thomas' as string | null,
 		veroeffentlichtAm: new Date('2026-10-21T10:00:00Z') as Date | null,
 		aenderungen: [] as NeuAenderung[],
+		antwortenSichtbar: true,
 	};
 	const aenderung = (
 		stand: number,
@@ -282,6 +284,45 @@ describe('istNeu', () => {
 
 	it('ist ein Entwurf ohne Gelesen-Stand nicht durch die Veroeffentlichung neu', () => {
 		expect(istNeu({ ...basis, gelesenBis: null, veroeffentlichtAm: null })).toBe(false);
+	});
+
+	it('zaehlt eine fremde ANTWORT nur, wenn die Person Ergebnisse sieht', () => {
+		const antwort = [aenderung(5, 'peter', undefined, 'ANTWORT')];
+		expect(istNeu({ ...basis, aenderungen: antwort })).toBe(true);
+		expect(istNeu({ ...basis, aenderungen: antwort, antwortenSichtbar: false })).toBe(false);
+	});
+
+	it('zaehlt ohne sichtbare Ergebnisse andere fremde Aenderungen weiter', () => {
+		expect(
+			istNeu({
+				...basis,
+				antwortenSichtbar: false,
+				aenderungen: [aenderung(5, 'peter', undefined, 'ANTWORT'), aenderung(6, 'thomas', undefined, 'MODUL')],
+			}),
+		).toBe(true);
+	});
+});
+
+describe('siehtErgebnisse', () => {
+	const bowling = kopf();
+
+	it('verneint fuer eine Familie, wenn nur Jugendleiter Ergebnisse sehen', () => {
+		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'JUGENDLEITER' })])).toBe(false);
+	});
+
+	it('bejaht fuer eine Familie bei Ergebnissen fuer alle oder als Summe', () => {
+		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'ALLE' })])).toBe(true);
+		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'SUMME' })])).toBe(true);
+	});
+
+	it('bejaht fuer eine Jugendleiterin, auch wenn nur Jugendleiter Ergebnisse sehen', () => {
+		expect(siehtErgebnisse(person('petra'), bowling, [umfrage({ ergebnisse: 'JUGENDLEITER' })])).toBe(true);
+	});
+
+	it('bejaht, sobald eine von mehreren Umfragen Ergebnisse zeigt, und verneint ohne Umfrage', () => {
+		const zwei = [umfrage({ ergebnisse: 'JUGENDLEITER' }), umfrage({ modulId: 'm-2', ergebnisse: 'SUMME' })];
+		expect(siehtErgebnisse(person('sandra'), bowling, zwei)).toBe(true);
+		expect(siehtErgebnisse(person('sandra'), bowling, [])).toBe(false);
 	});
 });
 
@@ -524,7 +565,32 @@ describe('startAnsicht', () => {
 		});
 
 		it('nennt bei nur einer fremden ANTWORT-Aenderung Neue Antworten', () => {
-			const t = startThread({}, [], { aenderungen: [aenderung(5, 'ANTWORT')] });
+			const t = startThread({}, [umfrageModul()], { aenderungen: [aenderung(5, 'ANTWORT')] });
+			expect(angaben('sandra', [t])).toEqual(['Neue Antworten']);
+		});
+
+		describe('Antworten in einer Umfrage mit Ergebnissen nur fuer Jugendleiter', () => {
+			const nurLeiter = (aenderungen: NeuAenderung[]) =>
+				startThread({}, [umfrageModul({ ergebnisse: 'JUGENDLEITER' })], { aenderungen });
+
+			it('nennt Sandra den Thread nach Peters Antwort nicht', () => {
+				expect(neuFuer('sandra', [nurLeiter([aenderung(5, 'ANTWORT', 'peter')])])).toEqual([]);
+			});
+
+			it('nennt Sandra bei Antwort und geaendertem Aushang nur den Aushang', () => {
+				const t = nurLeiter([aenderung(5, 'ANTWORT', 'peter'), aenderung(6, 'MODUL')]);
+				expect(angaben('sandra', [t])).toEqual(['Aushang geändert']);
+			});
+
+			it('nennt Petra Neue Antworten', () => {
+				expect(angaben('petra', [nurLeiter([aenderung(5, 'ANTWORT', 'peter')])])).toEqual(['Neue Antworten']);
+			});
+		});
+
+		it('nennt Sandra Neue Antworten, wenn sie Ergebnisse als Summe sieht', () => {
+			const t = startThread({}, [umfrageModul({ ergebnisse: 'SUMME' })], {
+				aenderungen: [aenderung(5, 'ANTWORT', 'peter')],
+			});
 			expect(angaben('sandra', [t])).toEqual(['Neue Antworten']);
 		});
 

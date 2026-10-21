@@ -221,8 +221,12 @@ export class ThreadListeComponent {
 	/** Kommt aus dem Pfad (withComponentInputBinding). */
 	readonly slug = input.required<string>();
 
-	/** Die Suche aus der Adresse (?suche=); so fuehrt ein geteilter Link und der Zurueck-Pfeil aus einem Thread zur selben Suche. */
-	readonly suche = input<string | undefined>(undefined);
+	/**
+	 * Die Suche aus der Adresse (?suche=); so fuehren ein geteilter Link und das Zurueck des Browsers
+	 * aus einem Thread zur selben Suche (der Zurueck-Pfeil der Thread-Seite fuehrt zur Liste ohne Suche).
+	 * Ein wiederholter Parameter (?suche=a&suche=b) kommt als Liste an und gilt als keine Suche.
+	 */
+	readonly suche = input<string | string[] | undefined>(undefined);
 
 	private readonly api = inject(ThreadApi);
 	private readonly uebersicht = inject(ThreadUebersicht);
@@ -303,7 +307,8 @@ export class ThreadListeComponent {
 		// Antwort der eigenen Navigation den Text zurueck, den die Person inzwischen weitergetippt hat.
 		// Von aussen kommen der Aufruf mit ?suche= und Vor und Zurueck im Browser; beide suchen sofort.
 		effect(() => {
-			const roh = this.suche() ?? '';
+			const suche = this.suche();
+			const roh = typeof suche === 'string' ? suche : '';
 			untracked(() => {
 				const wert = roh.trim();
 				if (wert === this.urlStand) return;

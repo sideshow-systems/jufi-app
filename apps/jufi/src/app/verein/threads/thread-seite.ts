@@ -23,6 +23,7 @@ import { VerwaltungThreadsApi } from '../verwaltung/threads/threads-api';
 import { InfoModul } from './info-modul';
 import { TerminModul } from './termin-modul';
 import { ThreadApi } from './thread-api';
+import { ThreadUebersicht } from './thread-uebersicht';
 import { UmfrageModul } from './umfrage-modul';
 import { Verlauf } from './verlauf';
 
@@ -263,6 +264,8 @@ export class ThreadSeite {
 	private readonly router = inject(Router);
 	private readonly dokument = inject(DOCUMENT);
 	private readonly injector = inject(Injector);
+	/** Die Liste der Huelle (Punkt an "Threads"); optional, weil die Seite auch ohne Huelle steht (Tests). */
+	private readonly uebersicht = inject(ThreadUebersicht, { optional: true });
 
 	protected readonly zustand = signal<Zustand>('laedt');
 	protected readonly thread = signal<ThreadAnsicht | null>(null);
@@ -479,12 +482,21 @@ export class ThreadSeite {
 	/**
 	 * Schlaegt das Melden fehl, bleibt es unbemerkt: Der Stand holt sich beim naechsten Oeffnen
 	 * nach, und ein Fehlerblock fuer etwas, das die Person nicht ausgeloest hat, waere falscher Alarm.
+	 *
+	 * Nach dem Melden fragt die Liste der Huelle neu. Ihre eigene Anfrage zum Pfadwechsel genuegt
+	 * nicht: Tippt die Person gleich nach dem Oeffnen auf Zurueck, kann die Listenanfrage vor dem
+	 * Gelesen-Stand beantwortet sein, und der Punkt bliebe bis zur naechsten Seite stehen. Ebenso
+	 * erlischt er jetzt, wenn gelesen wird, ohne dass sich der Pfad aendert (Wechsel vom Verlauf
+	 * zur Uebersicht). Verworfen: in der Huelle auf jeden Gelesen-Stand zu lauschen -- die Seite
+	 * weiss als einzige, wann er angekommen ist.
 	 */
 	private async meldeGelesen(t: ThreadAnsicht): Promise<void> {
 		try {
 			await firstValueFrom(this.api.gelesen(this.slug(), t.id, { bereich: 'uebersicht', bis: t.stand }));
 		} catch {
 			// siehe oben
+			return;
 		}
+		this.uebersicht?.neuLaden();
 	}
 }

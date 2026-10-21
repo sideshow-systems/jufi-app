@@ -183,9 +183,11 @@ export class MitgliederHuelle {
 		effect(() => this.uebersicht.slug.set(this.slug()));
 		// Lesen und Antworten aendern "neu"; nach jeder Navigation neu zu fragen ist einfacher als
 		// jede Seite zu bitten, den Punkt nachzuziehen (verworfen: Rueckmeldung der Seiten an die Huelle).
+		// Einzige Ausnahme ist der Gelesen-Stand der Thread-Seite: Sie fragt nach dessen Ankunft selbst
+		// neu (ThreadUebersicht.neuLaden), weil die Anfrage dieses Pfadwechsels ihn ueberholen kann.
 		// Eine Navigation, die nur die Parameter der Adresse aendert (die Suche der Thread-Liste, der Reiter
-		// eines Threads), liest und antwortet nichts und fragt deshalb nicht: Sonst kostete jede Suche
-		// eine Anfrage, deren Antwort die Seite gar nicht zeigt.
+		// eines Threads), fragt deshalb nicht: Sonst kostete jede Suche eine Anfrage, deren Antwort die
+		// Seite gar nicht zeigt; ein Gelesen-Stand beim Reiterwechsel kommt ueber die Thread-Seite.
 		let letzterPfad: string | undefined;
 		this.router.events
 			.pipe(

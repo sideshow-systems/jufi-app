@@ -220,8 +220,12 @@ export class TermineComponent {
 	/** Kommt aus dem Pfad (withComponentInputBinding). */
 	readonly slug = input.required<string>();
 
-	/** JJJJ-MM aus der Adresse; fehlt er oder ist er ungueltig, gilt der aktuelle Monat. */
-	readonly monat = input<string | undefined>(undefined);
+	/**
+	 * JJJJ-MM aus der Adresse; fehlt er oder ist er ungueltig, gilt der aktuelle Monat. Ein
+	 * wiederholter Parameter (?monat=a&monat=b) kommt als Liste an und gilt als fehlend, statt dass
+	 * erst das Muster in monatAus ihn zufaellig verwirft.
+	 */
+	readonly monat = input<string | string[] | undefined>(undefined);
 
 	private readonly api = inject(ThreadApi);
 	private readonly router = inject(Router);
@@ -241,7 +245,8 @@ export class TermineComponent {
 	private readonly heute = berlinerTag(new Date());
 
 	private readonly gewaehlt = computed(() => {
-		const aus = monatAus(this.monat() ?? '') ?? monatAus(this.heute.slice(0, 7));
+		const monat = this.monat();
+		const aus = monatAus(typeof monat === 'string' ? monat : '') ?? monatAus(this.heute.slice(0, 7));
 		// Nur fuer den Typ: heute ist immer ein gueltiges Datum, der zweite Zweig also nicht erreichbar.
 		return aus ?? { jahr: 1970, monat: 1 };
 	});
