@@ -90,20 +90,42 @@ async function oeffneVerbunden(seite: Page, pfad: string): Promise<WebSocket> {
 		(r) => new URL(r.url()).pathname === `/${SLUG}/api/v1/sync` && r.status() === 200,
 	);
 	await seite.goto(pfad);
-	const ws = await socket;
-	await abgleich;
+	// Beide zusammen: Scheitert das Warten auf den Socket, bliebe das auf den Abgleich sonst unbeachtet
+	// stehen und meldete sich spaeter als unbehandelte Ablehnung neben der eigentlichen Meldung.
+	const [ws] = await Promise.all([socket, abgleich]);
 	expect(ws.isClosed(), 'Socket nach dem ersten Abgleich zu; nimmt der Server das Upgrade an?').toBe(false);
 	return ws;
 }
 
 /**
  * Das Signal kam ueber denselben Socket, der seit dem Oeffnen steht. Ohne Abbruch gab es keinen
- * Abgleich nach Neuverbinden, also hat das Signal die Seite aktualisiert, nicht ein Nachholen.
+ * Abgleich nach Neuverbinden, also hat das Signal die Seite aktualisiert, nicht ein Nachholen. Der
+ * dritte Anlass fuer einen Abgleich, die Rueckkehr in den Vordergrund, kommt hier nicht vor: Jeder
+ * Kontext hat seine eigene, stets sichtbare Seite, und gewechselt wird zwischen ihnen nicht.
  */
-async function kamLive(ws: WebSocket, signal: Promise<unknown>): Promise<void> {
-	await signal;
+async function kamLive<T>(ws: WebSocket, signal: Promise<T>): Promise<T> {
+	const wert = await signal;
 	expect(ws.isClosed(), 'Socket zwischendurch zu; kam die Aenderung ueber den Abgleich statt live?').toBe(false);
+	return wert;
 }
+
+/** Ein Signal des Hubs aus einem Frame, oder null, wenn der Frame keines ist. */
+function alsSignal(payload: string | Buffer): { stand: number; threadId: string | null; art: string } | null {
+	try {
+		const wert = JSON.parse(typeof payload === 'string' ? payload : payload.toString('utf8')) as unknown;
+		return wert && typeof wert === 'object' && 'stand' in wert && 'art' in wert
+			? (wert as { stand: number; threadId: string | null; art: string })
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Entprellen der Nachlader (Entscheidung 10). Nur fuer den Beweis, dass etwas ausbleibt: Laedt ein
+ * Fehler die Ansicht ueber einen Nachlader nach, geht die Anfrage erst nach dieser Zeit hinaus.
+ */
+const ENTPRELLEN_MS = 250;
 
 test.describe.serial('Ablauf von Verein bis Kind', () => {
 	test('Admin richtet sich ein und legt den Verein an', async ({ browser }) => {
@@ -456,8 +478,7 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 
 		// Zu beweisen ist, dass etwas nicht geschieht: Der Zaehler darf nicht einmal kurz erscheinen.
 		// toHaveCount(0) am Ende bestuende auch, wenn er auf 1 sprang und nach dem Melden wieder fiel.
-		// Ein Beobachter im Browser haelt jedes Erscheinen fest. Verworfen: eine feste Wartezeit -- sie
-		// saehe nur ihren Augenblick und kostete jeden Lauf Sekunden.
+		// Ein Beobachter im Browser haelt jedes Erscheinen fest.
 		await leitung.seite.evaluate(() => {
 			const fenster = window as unknown as { zahlGesehen: boolean };
 			fenster.zahlGesehen = false;
@@ -465,15 +486,37 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 				if (document.querySelector('nav[aria-label="Ansicht"] .zahl')) fenster.zahlGesehen = true;
 			}).observe(document.body, { childList: true, subtree: true, characterData: true });
 		});
-		const signal = ws.waitForEvent('framereceived');
-		// Die Meldung nach der Live-Nachricht; erst danach kennt der Server den neuen Stand als gelesen,
-		// und jede spaetere Aktualisierung brachte ebenfalls 0.
-		const gelesen = leitung.seite.waitForResponse(
-			(r) =>
-				r.request().method() === 'PUT' &&
-				new URL(r.url()).pathname.endsWith('/gelesen') &&
-				(r.request().postDataJSON() as { bereich?: string }).bereich === 'verlauf',
-		);
+		// Der Zaehler kaeme nur mit einer neu geladenen Ansicht (GET /threads/<id>); fuer eine Live-Nachricht
+		// im offenen Verlauf laedt die Seite weder sie noch den Verlauf. Gezaehlt wird ab dem Signal: Der
+		// Abgleich beim Oeffnen laedt beides einmal, und das ist laengst vorbei, wenn die Mutter sendet.
+		let nachSignal = false;
+		const ladenNachSignal: string[] = [];
+		leitung.seite.on('request', (r) => {
+			const pfad = new URL(r.url()).pathname;
+			if (nachSignal && r.method() === 'GET' && pfad.startsWith(`/${SLUG}/api/v1/threads/${bowlingId}`)) {
+				ladenNachSignal.push(pfad);
+			}
+		});
+		// Alle Gelesen-Meldungen des Verlaufs mit ihrem Stand; die beim Oeffnen hat einen kleineren.
+		const meldungen: { bis: number; status: number }[] = [];
+		leitung.seite.on('response', (r) => {
+			if (r.request().method() !== 'PUT' || !new URL(r.url()).pathname.endsWith(`/threads/${bowlingId}/gelesen`)) {
+				return;
+			}
+			const koerper = r.request().postDataJSON() as { bereich?: string; bis?: number };
+			if (koerper.bereich === 'verlauf' && typeof koerper.bis === 'number') {
+				meldungen.push({ bis: koerper.bis, status: r.status() });
+			}
+		});
+		const istNachricht = (payload: string | Buffer) => {
+			const s = alsSignal(payload);
+			return s?.art === 'VERLAUF' && s.threadId === bowlingId;
+		};
+		// Vor waitForEvent angemeldet, also vor ihm gerufen: Ab diesem Frame zaehlt jedes Laden.
+		ws.on('framereceived', (f) => {
+			if (istNachricht(f.payload)) nachSignal = true;
+		});
+		const signal = ws.waitForEvent('framereceived', { predicate: (f) => istNachricht(f.payload) });
 
 		const mutter = await ausSitzung(browser, 'mutter');
 		await mutter.seite.goto(`/${SLUG}/t/${bowling}?reiter=verlauf`);
@@ -484,8 +527,22 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await expect(leitung.seite.getByRole('listitem').filter({ hasText: 'Wir kommen zu zweit' })).toBeVisible({
 			timeout: 5000,
 		});
-		await kamLive(ws, signal);
-		expect((await gelesen).status()).toBe(204);
+		const frame = await kamLive(ws, signal);
+		const stand = alsSignal(frame.payload)?.stand;
+		expect(stand, 'Signal ohne Stand').toBeDefined();
+		// Genau der Stand der Live-Nachricht: Die Seite meldet ihn, ohne die Ansicht neu zu laden (Entscheidung 8).
+		await expect
+			.poll(() => meldungen.find((m) => m.bis === stand)?.status, {
+				message: `keine Gelesen-Meldung bis ${stand}, gemeldet: ${JSON.stringify(meldungen)}`,
+				timeout: 5000,
+			})
+			.toBe(204);
+		// Die eine feste Wartezeit des Ablaufs, denn zu zeigen ist ein Ausbleiben: Ein Neuladen aus dem
+		// Signal ginge sofort hinaus (die Seite ruft ohne Entprellen), ueber einen Nachlader erst nach
+		// ENTPRELLEN_MS. Gewartet wird darueber hinaus und nicht auf die Antwort: Es zaehlt schon, ob die
+		// Anfrage hinausging. Verworfen: ohne Wartezeit pruefen -- ein entprelltes Neuladen fiele durch.
+		await leitung.seite.waitForTimeout(ENTPRELLEN_MS * 2);
+		expect(ladenNachSignal, 'Ansicht oder Verlauf nach dem Signal neu geladen').toEqual([]);
 		await expect(reiter.locator('.zahl')).toHaveCount(0);
 		const gesehen = await leitung.seite.evaluate(() => (window as unknown as { zahlGesehen: boolean }).zahlGesehen);
 		expect(gesehen, 'Zaehler am Reiter Verlauf erschien').toBe(false);

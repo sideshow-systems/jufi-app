@@ -17,7 +17,9 @@ import { kontrast } from '../../jufi/src/app/gestaltung/farben';
  */
 export async function keinWaagrechtesScrollen(page: Page): Promise<void> {
 	const { breite, fenster, taeter } = await page.evaluate(() => {
-		const fenster = window.innerWidth;
+		// clientWidth statt innerWidth: Ein klassischer Scrollbalken zaehlt in innerWidth mit, und um seine
+		// Breite liesse die Pruefung sonst Ueberlauf durch. Headless sind die Balken ueberlagert, beide gleich.
+		const fenster = document.documentElement.clientWidth;
 		// Die innersten Elemente, die rechts hinausragen: Sie nennt die Meldung, damit ein roter Lauf
 		// gleich sagt, wo es liegt, statt nur um wie viel.
 		const raus = Array.from(document.body.querySelectorAll('*')).filter(
@@ -30,9 +32,7 @@ export async function keinWaagrechtesScrollen(page: Page): Promise<void> {
 		});
 		return { breite: document.documentElement.scrollWidth, fenster, taeter };
 	});
-	expect(breite, `scrollWidth ${breite} bei Fensterbreite ${fenster}: ${taeter.join(', ')}`).toBeLessThanOrEqual(
-		fenster,
-	);
+	expect(breite, `scrollWidth ${breite} bei clientWidth ${fenster}: ${taeter.join(', ')}`).toBeLessThanOrEqual(fenster);
 }
 
 /**
