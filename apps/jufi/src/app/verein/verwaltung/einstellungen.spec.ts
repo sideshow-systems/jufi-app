@@ -16,6 +16,8 @@ const EINSTELLUNGEN = {
 	logoStand: null as string | null,
 };
 
+const SPEICHER = { verbrauchBytes: 1288490189, grenzeMb: 5120 };
+
 const VEREIN = { slug: 'demo', anzeigename: 'Jungfischer Demo', farbe: '#1d4ed8', hatLogo: false, logoStand: null };
 
 /** Der Wert der Eigenschaft auf html, wie ihn die ganze App sieht. */
@@ -34,8 +36,15 @@ describe('Vereinseinstellungen', () => {
 	});
 	afterEach(() => TestBed.inject(HttpTestingController).verify());
 
-	async function oeffne(einstellungen: object = EINSTELLUNGEN, rechte = ['EINSTELLUNGEN']) {
-		return oeffneSeite('/demo/verwaltung/einstellungen', ichMit(rechte), [['/einstellungen', einstellungen]]);
+	async function oeffne(
+		einstellungen: object = EINSTELLUNGEN,
+		rechte = ['EINSTELLUNGEN'],
+		speicher: object = SPEICHER,
+	) {
+		return oeffneSeite('/demo/verwaltung/einstellungen', ichMit(rechte), [
+			['/einstellungen', einstellungen],
+			['/speicher', speicher],
+		]);
 	}
 
 	/** Beantwortet das Neuladen des Vereins nach dem Speichern: genau eine Anfrage. */
@@ -458,6 +467,7 @@ describe('Vereinseinstellungen', () => {
 			await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ichMit(['MITGLIEDER'])));
 			await navigation;
 			await vi.waitFor(() => http.expectOne(`${API}/einstellungen`).flush(koerper, { status, statusText: 'Fehler' }));
+			http.expectOne(`${API}/speicher`).flush(SPEICHER);
 			await vi.waitFor(() => http.expectOne(`${API}/verein`).flush(VEREIN));
 			await stabil(harness);
 			return { harness, seite: harness.routeNativeElement as HTMLElement, http };
@@ -474,6 +484,7 @@ describe('Vereinseinstellungen', () => {
 			expect(feld(seite, '[role="alert"]').textContent).toContain('Unerwarteter Fehler');
 			knopf(seite, 'Nochmal versuchen').click();
 			http.expectOne(`${API}/einstellungen`).flush(EINSTELLUNGEN);
+			http.expectOne(`${API}/speicher`).flush(SPEICHER);
 			await stabil(harness);
 			expect(feld<HTMLInputElement>(seite, 'input[name="anzeigename"]').value).toBe('Jungfischer Demo');
 		});
@@ -493,6 +504,46 @@ describe('Vereinseinstellungen', () => {
 				expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo%2Fverwaltung%2Feinstellungen'),
 			);
 			http.match(`${API}/verein`);
+			http.match(`${API}/speicher`);
+		});
+	});
+
+	describe('Speicher', () => {
+		const karte = (seite: HTMLElement) => feld(seite, '[data-karte="speicher"]');
+		const text = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+		it('zeigt den Speicherstand aus GET /speicher in einem eigenen Abschnitt', async () => {
+			const { seite } = await oeffne();
+
+			expect(text(feld(karte(seite), 'h2'))).toBe('Speicher');
+			expect(text(feld(karte(seite), '.speicher'))).toBe('1,2 GB von 5,0 GB belegt');
+			expect(karte(seite).querySelector('.speicher-warnung')).toBeNull();
+		});
+
+		it('warnt ab 90 Prozent', async () => {
+			const { seite } = await oeffne(EINSTELLUNGEN, ['EINSTELLUNGEN'], {
+				verbrauchBytes: 9 * 1024 * 1024,
+				grenzeMb: 10,
+			});
+
+			expect(text(feld(karte(seite), '.speicher-warnung'))).toBe('Der Speicher ist fast voll.');
+		});
+
+		it('laesst die Seite benutzbar, wenn der Speicherstand nicht kommt', async () => {
+			const http = TestBed.inject(HttpTestingController);
+			const harness = await RouterTestingHarness.create();
+			const navigation = harness.navigateByUrl('/demo/verwaltung/einstellungen');
+			await vi.waitFor(() => http.expectOne(`${API}/ich`).flush(ichMit(['EINSTELLUNGEN'])));
+			await navigation;
+			await vi.waitFor(() => http.expectOne(`${API}/einstellungen`).flush(EINSTELLUNGEN));
+			http.expectOne(`${API}/speicher`).error(new ProgressEvent('error'));
+			await vi.waitFor(() => http.expectOne(`${API}/verein`).flush(VEREIN));
+			await vi.waitFor(() => {
+				harness.detectChanges();
+				const seite = harness.routeNativeElement as HTMLElement;
+				expect(text(karte(seite))).toContain('Der Speicherstand konnte nicht geladen werden.');
+				expect(feld<HTMLInputElement>(seite, 'input[name="anzeigename"]').value).toBe('Jungfischer Demo');
+			});
 		});
 	});
 });

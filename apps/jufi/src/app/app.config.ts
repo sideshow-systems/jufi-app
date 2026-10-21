@@ -1,8 +1,9 @@
-import { provideHttpClient, withFetch } from '@angular/common/http';
+import { HttpXhrBackend, provideHttpClient, withFetch } from '@angular/common/http';
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideRouter, withNavigationErrorHandler } from '@angular/router';
 import { routerFeatures, routes } from './app.routes';
 import { chunkFehlerHandler } from './chunk-fehler';
+import { HOCHLADE_BACKEND } from './verein/dateien-api';
 
 export const appConfig: ApplicationConfig = {
 	providers: [
@@ -12,5 +13,6 @@ export const appConfig: ApplicationConfig = {
 		// sessionStorage, und der Handler laedt dann nicht neu (try/catch in chunk-fehler.ts).
 		provideRouter(routes, ...routerFeatures, withNavigationErrorHandler(chunkFehlerHandler())),
 		provideHttpClient(withFetch()),
+		{ provide: HOCHLADE_BACKEND, useClass: HttpXhrBackend },
 	],
 };

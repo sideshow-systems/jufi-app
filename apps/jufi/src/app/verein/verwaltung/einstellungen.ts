@@ -11,7 +11,7 @@ import {
 	untracked,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { initialen, LOGO_MAX_BYTES, LOGO_ZU_GROSS } from '@jufi/domain';
+import { initialen, LOGO_MAX_BYTES, LOGO_ZU_GROSS, type SpeicherAntwort } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
@@ -19,9 +19,11 @@ import { vereinsfarben } from '../../gestaltung/farben';
 import { MeldungService } from '../../gestaltung/meldung';
 import { ThemaService } from '../../gestaltung/thema';
 import { KarteComponent } from '../../gestaltung/ui';
+import { DateienApi } from '../dateien-api';
 import { type Einstellungen, type EinstellungenAenderung, MitgliederApi } from '../mitglieder-api';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { logoAdresse, VereinKontext } from '../verein-kontext';
+import { SpeicherstandComponent } from './speicherstand';
 
 type Bereich = 'verein' | 'farbe' | 'logo';
 
@@ -43,7 +45,7 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
  */
 @Component({
 	selector: 'jf-einstellungen',
-	imports: [KarteComponent],
+	imports: [KarteComponent, SpeicherstandComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<h1>Vereinseinstellungen</h1>
@@ -227,6 +229,17 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 						}
 					</div>
 				</jf-karte>
+
+				<jf-karte>
+					<div class="speicher-karte" data-karte="speicher">
+						<h2>Speicher</h2>
+						@if (speicher(); as stand) {
+							<jf-speicherstand [stand]="stand" />
+						} @else if (speicherFehler()) {
+							<p class="gedaempft klein">Der Speicherstand konnte nicht geladen werden.</p>
+						}
+					</div>
+				</jf-karte>
 			</div>
 		}
 	`,
@@ -248,7 +261,8 @@ const VEREIN_FELDER = ['name', 'anzeigename', 'kontakt'];
 			gap: var(--a4);
 		}
 		form,
-		.logo-karte {
+		.logo-karte,
+		.speicher-karte {
 			display: grid;
 			gap: var(--a3);
 		}
@@ -340,6 +354,7 @@ export class EinstellungenComponent implements OnInit {
 	readonly slug = input.required<string>();
 
 	private readonly api = inject(MitgliederApi);
+	private readonly dateienApi = inject(DateienApi);
 	private readonly router = inject(Router);
 	private readonly kontext = inject(VereinKontext);
 	private readonly thema = inject(ThemaService);
@@ -357,6 +372,10 @@ export class EinstellungenComponent implements OnInit {
 	protected readonly aktiv = signal<Bereich | null>(null);
 	protected readonly laeuft = computed(() => this.aktiv() !== null);
 	protected readonly fehler = signal<{ bereich: Bereich; feld: string | null; text: string } | null>(null);
+
+	/** Der Speicherstand ist Beiwerk: Scheitert er, bleibt die Seite benutzbar und die Karte sagt es. */
+	protected readonly speicher = signal<SpeicherAntwort | null>(null);
+	protected readonly speicherFehler = signal(false);
 
 	protected readonly name = signal('');
 	protected readonly anzeigename = signal('');
@@ -426,6 +445,7 @@ export class EinstellungenComponent implements OnInit {
 		const nr = ++this.ladeNr;
 		this.ladefehler.set(null);
 		this.nichtGefunden.set(false);
+		void this.ladeSpeicher(nr);
 		try {
 			const stand = await firstValueFrom(this.api.einstellungen(this.slug()));
 			if (nr !== this.ladeNr) return;
@@ -438,6 +458,20 @@ export class EinstellungenComponent implements OnInit {
 			if (await beiAbgelaufenerSitzung(this.router, this.slug(), f)) return;
 			if (f.status === 404) this.nichtGefunden.set(true);
 			else this.ladefehler.set(fehlertext(f));
+		}
+	}
+
+	/** Gehoert zum Ladevorgang nr: Die Antwort eines veralteten darf den neueren Stand nicht ueberschreiben. */
+	private async ladeSpeicher(nr: number): Promise<void> {
+		try {
+			const stand = await firstValueFrom(this.dateienApi.speicher(this.slug()));
+			if (nr !== this.ladeNr) return;
+			this.speicher.set(stand);
+			this.speicherFehler.set(false);
+		} catch (ursache) {
+			if (nr !== this.ladeNr) return;
+			// Eine abgelaufene Sitzung meldet die Hauptanfrage selbst; hier genuegt der Hinweis in der Karte.
+			if (alsApiFehler(ursache).status !== 401) this.speicherFehler.set(true);
 		}
 	}
 

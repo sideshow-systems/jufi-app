@@ -123,7 +123,7 @@ describe('Medien', () => {
 		const satzung = zeilen()[0];
 		expect(text(satzung.querySelector('.zusatz') as Element)).toBe('PDF · 1,5 MB');
 		expect(satzung.querySelector('jf-icon')).not.toBeNull();
-		expect(text(zeilen()[1].querySelector('.zusatz') as Element)).toBe('Word · 0,0 MB');
+		expect(text(zeilen()[1].querySelector('.zusatz') as Element)).toBe('Word · 20 KB');
 	});
 
 	it.each([

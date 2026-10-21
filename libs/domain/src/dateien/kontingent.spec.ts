@@ -21,6 +21,19 @@ describe('speicherText', () => {
 		expect(speicherText(5 * 1024 ** 3)).toBe('5,0 GB');
 	});
 
+	it('zeigt Kleines in ganzen KB statt als 0,0 MB', () => {
+		expect(speicherText(20000)).toBe('20 KB');
+		expect(speicherText(20480)).toBe('20 KB');
+		expect(speicherText(1)).toBe('1 KB');
+		expect(speicherText(MB / 2)).toBe('512 KB');
+	});
+
+	it('wechselt auf MB nach dem gerundeten Wert, nicht schon bei 1000 KB', () => {
+		expect(speicherText(0.94 * MB)).toBe('963 KB');
+		expect(speicherText(0.96 * MB)).toBe('1,0 MB');
+		expect(speicherText(MB)).toBe('1,0 MB');
+	});
+
 	it('springt nicht auf 1024,0 MB', () => {
 		expect(speicherText(1024 ** 3 - 1)).toBe('1,0 GB');
 	});
