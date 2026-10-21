@@ -219,7 +219,21 @@ else
 	# Das Verzeichnis tmp enthaelt halbe Uploads, die nach einer Stunde ohnehin
 	# aufgeraeumt werden; sie gehoeren in keinen Snapshot.
 	step 'restic backup (Dateien)'
+	# Exit 3 heisst bei restic: Snapshot geschrieben, aber einzelne Dateien waren nicht lesbar.
+	# Hier trifft das fast nur eine Datei, die waehrend der Sicherung geloescht wurde (der
+	# Aufraeumer laeuft im Betrieb weiter); das ist eine Warnung, kein Abbruch. Jeder andere
+	# Code (Ablage weg, falsches Passwort) bricht ab. Ob der Snapshot taugt, entscheidet
+	# darunter die Pruefung auf einen Snapshot von heute. Verworfen: jeden Code ausser 0 als
+	# Abbruch -- eine geloeschte Datei risse sonst die ganze Sicherung der Nacht ein.
+	set +e
 	restic backup --tag jufi-dateien --exclude "$MP/tmp" "$MP"
+	BACKUP_CODE=$?
+	set -e
+	case "$BACKUP_CODE" in
+		0) ;;
+		3) warn 'restic konnte einzelne Dateien nicht lesen (Exit 3), vermutlich waehrend der Sicherung geloescht -- der Snapshot ist geschrieben.' ;;
+		*) fail "restic backup der Dateien gescheitert (Exit $BACKUP_CODE)." ;;
+	esac
 
 	# Wie beim Dump: restic legt auch bei unlesbarer Quelle einen Snapshot an.
 	# Geprueft wird also, dass ein Snapshot von heute existiert (Zeit in der Zone
@@ -230,11 +244,12 @@ else
 		|| fail "Kein Snapshot der Dateien von heute (letzter: ${SNAP_TAG:-keiner}). Nichts aufgeraeumt."
 	note "Snapshot der Dateien vom $SNAP_TAG"
 
-	# Gleiche Werte wie beim Dump. Ohne `--group-by` gruppiert restic nach
-	# host,paths; der Pfad ist hier bei jedem Lauf derselbe, also genuegt die
-	# Vorgabe, und die Regeln greifen je Volume-Pfad.
+	# Gleiche Werte und gleiches `--group-by host,tags` wie beim Dump. Der Pfad ist hier zwar
+	# bei jedem Lauf derselbe, aber ein neuer Mountpoint (Docker-Umzug, anderer Datenpfad)
+	# bildete mit der Vorgabe host,paths eine zweite Gruppe, und fuer sie liefen die keep-Regeln
+	# getrennt: der alte Pfad behielte seine Staende fuer immer.
 	step 'Aufraeumen (Dateien): 7 taeglich / 4 woechentlich / 6 monatlich'
-	restic forget --tag jufi-dateien --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+	restic forget --tag jufi-dateien --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --group-by host,tags --prune
 fi
 
 # Verworfen: eine zweite, kuerzere lokale Aufbewahrung, sobald die Ablage ausser

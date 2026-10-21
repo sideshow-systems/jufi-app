@@ -123,7 +123,7 @@ Mit `sharp`, aus der Temp-Datei, nicht aus einem Puffer:
 - **Das Original wird verworfen.** Verworfen: Original zusätzlich aufbewahren — 3–8 MB je Foto, die Sicherung wüchse entsprechend, und 2560 px reichen fürs Handy und für Abzüge bis etwa 20 × 30 cm.
 - **Immer nur eine Verarbeitung gleichzeitig** je Prozess (`sharp.concurrency(1)`, Cache aus, eigene Warteschlange). Bis zu 8 Fotos warten; darüber 503 `BESCHAEFTIGT`, der Client wiederholt nach kurzer Pause.
 
-**Abnahme von Etappe 1:** Ein 48-Megapixel-JPEG und ein 20-MB-PNG werden im gebauten Image unter `mem_limit: 256m` verarbeitet, ohne dass der Kernel die App beendet; der Spitzenverbrauch steht im Bericht. Reicht der Speicher nicht, wird das Limit angehoben, nicht die Fotogrenze gesenkt.
+**Abnahme von Etappe 2:** Ein 48-Megapixel-JPEG und ein 20-MB-PNG werden im gebauten Image unter `mem_limit: 256m` verarbeitet, ohne dass der Kernel die App beendet; der Spitzenverbrauch steht im Bericht. Reicht der Speicher nicht, wird das Limit angehoben, nicht die Fotogrenze gesenkt.
 
 ### 2.5 Ausliefern
 
@@ -149,6 +149,8 @@ Verbrauch = Summe von `Datei.groesse` des Vereins (Abfrage, kein Zähler; verwor
 ### 2.7 Löschen und Aufräumen
 
 Das Löschen einer `Datei` (einzeln, mit ihrem Modul, Dokument oder Thread) entfernt in der Transaktion die Zeile und trägt ihre Schlüssel in `DateiLoeschung` ein. **Jeder Löschpfad ruft dafür `loescheDateien`**; die Datenbank löscht nie per Kaskade (2.1). Die Datei ist damit sofort unerreichbar (2.5).
+
+**Ausnahme Vereinslöschung:** Löscht der Plattform-Admin einen ganzen Verein, fallen dessen `Datei`-Zeilen per Kaskade (`Datei.verein`), ohne Eintrag in der Löschliste; die Bytes fallen über den Waisen-Schritt (2) des Aufräumers weg, sobald sie älter als 24 Stunden sind (beim nächsten Lauf). Verworfen: auch hier über die Löschliste -- ein Verein hat Tausende Zeilen, und die Kaskade der Datenbank ist hier der einzige Weg, der keine Zeile vergisst. Folge: Nach einer versehentlichen Vereinslöschung braucht die Wiederherstellung neben dem Dump auch das Volume aus restic, und zwar bald, denn der nächste Lauf des Aufräumers löscht die Bytes ohne Zeile.
 
 Der vorhandene Aufräumer (`threads/aufraeumen.ts`, beim Start und alle 24 h) bekommt zwei Schritte:
 
@@ -402,7 +404,7 @@ Ergänzt um: Fotos (verkleinert, ohne EXIF und GPS, im Volume gespeichert, Bytes
 - Volume `jufi-dateien` in `deploy/jufi-services.yml`, im Image ein Verzeichnis mit Besitzer `node`; `DATEIEN_PFAD` in der Umgebung.
 - `tools/backup.sh` sichert nach dem Dump das Volume mit restic (Tag `jufi-dateien`, ohne `tmp/`); `restore-test.sh --dateien` stellt eine Stichprobe von bis zu 20 Dateien wieder her und prüft sie gegen `sha256`. Das Volume heißt fest `jufi-dateien` (`name:` in der Compose-Datei), damit `backup.sh` es ohne den Projektnamen findet.
 - `tools/pruefe-betrieb.sh` bekommt einen Abschnitt „Dateien“ (`--slug`), **ohne Sitzung** (Entscheidung 7): `GET /<slug>/api/v1/dateien/x` und `GET /<slug>/api/v1/dokumente` ergeben je 401. Ein 404 für eine unbekannte ID gibt es erst mit Sitzung; das Skript hat bewusst keine Anmeldung.
-- CLAUDE.md: Stolpersteine zu Volume, Löschliste und Speicher-Abnahme.
+- CLAUDE.md: Stolpersteine zu Volume und Löschliste. Die Speicher-Abnahme unter `mem_limit` (2.4) gehört zu Etappe 2.
 
 ---
 

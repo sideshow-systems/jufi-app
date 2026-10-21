@@ -159,7 +159,12 @@ if [[ "$DATEIEN" -eq 1 ]]; then
 	step 'Dateien: Pruefsummen aus dem letzten Snapshot (jufi-dateien)'
 	# Der Pfad, unter dem das Volume gesichert wurde (backup.sh nimmt den
 	# Mountpoint); restic legt ihn im Ziel nach, deshalb muss er bekannt sein.
-	SNAP_PFAD="$(restic snapshots --tag jufi-dateien --latest 1 --json | grep -o '"paths":\["[^"]*"' | head -1 | cut -d'"' -f4 || true)"
+	# Erst abfragen, dann auswerten: In einer Pipeline mit `|| true` verschluckte ein restic-Fehler
+	# (falsches Passwort, Ablage nicht erreichbar) sich als "kein Snapshot". Ein leerer Treffer
+	# ist bei restic Exit 0 mit `[]`; nur der ist "kein Snapshot".
+	SNAPSHOTS="$(restic snapshots --tag jufi-dateien --latest 1 --json 2>"$WORKDIR/restic.err")" \
+		|| fail "restic snapshots scheitert: $(tail -3 "$WORKDIR/restic.err")"
+	SNAP_PFAD="$(grep -o '"paths":\["[^"]*"' <<<"$SNAPSHOTS" | head -1 | cut -d'"' -f4 || true)"
 	[[ -n "$SNAP_PFAD" ]] || fail 'Kein Snapshot mit Tag jufi-dateien in der Ablage (hat backup.sh mit restic schon gesichert?).'
 	ZEILEN="$(docker exec -i "$PROBE_NAME" psql -U "$PGUSER_" -d "$PGDB_" -tAF ' ' \
 		-c 'SELECT "vereinId", id, sha256 FROM "Datei" ORDER BY random() LIMIT 20')"

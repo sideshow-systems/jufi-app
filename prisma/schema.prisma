@@ -1020,6 +1020,9 @@ enum DateiArt {
 model Datei {
   id            String       @id @default(cuid())
   vereinId      String
+  /// Kaskade ist hier Absicht und die einzige Ausnahme von "Dateien nie per Kaskade loeschen": Wird ein
+  /// ganzer Verein geloescht, fallen die Zeilen mit; die Bytes ohne Zeile raeumt der Waisen-Schritt des
+  /// Aufraeumers weg, sobald sie aelter als 24 Stunden sind (TP4-Spec 2.7). Eine Wiederherstellung braucht dann auch das Volume.
   verein        Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
   art           DateiArt
   modulId       String?

@@ -26,7 +26,7 @@ export interface Umgebung {
 	 */
 	wsDevPort: number;
 	/**
-	 * Verzeichnis der hochgeladenen Dateien (Volume /daten/dateien im Betrieb). Pflicht und ohne
+	 * Verzeichnis der hochgeladenen Dateien (Volume jufi-dateien unter /daten im Betrieb). Pflicht und ohne
 	 * Vorgabe: Ein Pfad, der still ins Arbeitsverzeichnis des Containers fiele, liesse Uploads
 	 * mit dem Container verschwinden, ohne dass jemand es merkt. Verworfen: Vorgabe unter dem
 	 * Arbeitsverzeichnis wie bei JUFI_WS_DEV_PORT -- dort ist ein Fehlwert harmlos, hier nicht.

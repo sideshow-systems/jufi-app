@@ -138,4 +138,4 @@ fi
 # Nicht `--source remote`: das braucht SSH_TARGET aus .env.deploy, und die gibt es
 # auf dem Server nicht. Dort ist die Quelle der Dienst neben uns.
 note 'Restore-Probe aus dem neuesten Snapshot, auf dem Server:'
-note "  cd $REMOTE_DIR && set -a && . ./.env && set +a && $REMOTE_TOOLS/restore-test.sh"
+note "  cd $REMOTE_DIR && set -a && . ./.env && set +a && $REMOTE_TOOLS/restore-test.sh --dateien"

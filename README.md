@@ -269,6 +269,29 @@ Datenbank hält nur die Zeile (Name, am Inhalt erkannter Typ, Größe, SHA-256).
   wieder her und vergleicht ihre SHA-256-Summe mit der Tabelle `Datei` (siehe „Wiederherstellungsprobe“).
   `tools/pruefe-betrieb.sh --slug <slug>` prüft nebenbei, dass `GET /<slug>/api/v1/dateien/x` und `…/dokumente` ohne
   Sitzung 401 geben.
+- **Volume zurückholen** (Ernstfall: Volume weg oder leer, etwa nach Plattenausfall oder versehentlicher Vereinslöschung;
+  die Datenbank gehört dabei zum selben oder einem jüngeren Stand, sonst zeigen Zeilen auf fehlende Bytes). Auf dem
+  Server, möglichst bevor der Aufräumer das nächste Mal läuft (er löscht Bytes ohne Zeile nach 24 Stunden):
+
+  ```bash
+  cd /home/paperless/paperless-ngx && set -a && . ./.env && set +a
+  export RESTIC_REPOSITORY="$JUFI_RESTIC_REPOSITORY" RESTIC_PASSWORD="$JUFI_RESTIC_PASSWORD"
+  docker compose stop jufi
+  docker volume create jufi-dateien    # nur, wenn es das Volume nicht mehr gibt
+  MP="$(docker volume inspect jufi-dateien --format '{{ .Mountpoint }}')"
+  restic snapshots --tag jufi-dateien  # Pfad in der Spalte Paths muss $MP sein; Stand wählen (latest oder eine ID)
+  restic restore latest --tag jufi-dateien --target /
+  ls -ln "$MP" | head                  # Besitzer prüfen
+  docker compose run --rm --no-deps -T -l traefik.enable=false --entrypoint id jufi node
+  docker compose up -d jufi
+  ```
+
+  `backup.sh` sichert den Mountpoint mit seinem absoluten Pfad (ohne `tmp/`), deshalb schreibt `--target /` die Dateien
+  an genau diese Stelle zurück; weicht der Pfad im Snapshot von `$MP` ab (anderer Docker-Datenpfad), stattdessen mit
+  `--target "$MP"` wiederherstellen und die Ebenen des alten Pfads herauskopieren. restic stellt die Besitzer des
+  Snapshots wieder her; entspricht die Nummer in `ls -ln` nicht der Ausgabe von `id` (uid und gid von `node`):
+  `chown -R <uid>:<gid> "$MP"`. `tmp/` legt die App selbst neu an. Danach in der App ein Dokument öffnen und
+  `jufi-tools/restore-test.sh --dateien` laufen lassen.
 
 ## Sicherung
 
