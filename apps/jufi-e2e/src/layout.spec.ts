@@ -543,3 +543,28 @@ test.describe('Kopf der Thread-Seite', () => {
 		}
 	}
 });
+
+/**
+ * Die Antwortknoepfe von Bowling am Handy. Der Seitentest oben misst /t/:bowling nur dann auf ihnen, wenn die
+ * Umfrage offen ist; schliesst ein Schritt des Ablaufs ihre Frist und laesst sie so, misst er stumm eine Seite
+ * ohne Knoepfe. Hier steht darum, dass sie da sind (Mia und Mats sind beantwortet, also "ändern"), und dass sie gross genug sind.
+ */
+test.describe('Antwortknoepfe von Bowling am Handy', () => {
+	test.use({ storageState: sitzung('mutter'), viewport: { width: 375, height: 812 } });
+
+	for (const schema of SCHEMATA) {
+		test.describe(schema, () => {
+			test.use({ colorScheme: schema });
+
+			test('Mutter hat je Kind einen Knopf, alle mindestens 44 px', async ({ page }) => {
+				await oeffne(page, adresse(`${SLUG}/t/:bowling`));
+				const knoepfe = page.locator('jf-umfrage-modul .zeile').getByRole('button');
+				await expect(knoepfe).toHaveCount(2);
+				for (const name of ['Antwort für Mia ändern', 'Antwort für Mats ändern']) {
+					await expect(page.getByRole('button', { name })).toBeVisible();
+				}
+				expect(await tippflaechen(page), 'Tippflaechen unter 44 px').toEqual([]);
+			});
+		});
+	}
+});

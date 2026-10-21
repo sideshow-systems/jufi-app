@@ -4,7 +4,6 @@ import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router
 import { filter, map } from 'rxjs';
 import { NichtGefundenComponent } from '../seiten/nicht-gefunden';
 import { IconComponent, type IconName } from '../gestaltung/icon';
-import { MeldungComponent } from '../gestaltung/meldung';
 import { KarteComponent } from '../gestaltung/ui';
 import { Echtzeit, echtzeitDerHuelle } from './echtzeit';
 import { ThreadUebersicht } from './threads/thread-uebersicht';
@@ -45,15 +44,7 @@ const EINTRAEGE: Eintrag[] = [
  */
 @Component({
 	selector: 'jf-mitglieder-huelle',
-	imports: [
-		IconComponent,
-		KarteComponent,
-		MeldungComponent,
-		NichtGefundenComponent,
-		RouterLink,
-		RouterOutlet,
-		VereinsLogoComponent,
-	],
+	imports: [IconComponent, KarteComponent, NichtGefundenComponent, RouterLink, RouterOutlet, VereinsLogoComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	providers: [ThreadUebersicht, echtzeitDerHuelle],
 	template: `
@@ -84,8 +75,6 @@ const EINTRAEGE: Eintrag[] = [
 			<main>
 				<router-outlet />
 			</main>
-			<!-- Ohne die Meldung sah niemand "Kopiert" nach dem Teilen auf der Thread-Seite: Nur die Admin-Huelle trug sie bisher. -->
-			<jf-meldung />
 			<nav class="leiste" aria-label="Hauptnavigation">
 				@for (e of eintraege; track e.pfad) {
 					<a

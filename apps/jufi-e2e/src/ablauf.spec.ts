@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { berlinerTag, MONATSNAMEN, tagPlus, threadSegment } from '@jufi/domain';
 import { BASIS_URL, passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
 import { leisteHatVierEintraege, punktUeberdecktTextNicht } from './messen';
-import { beendeFrist, fuelleAustausch, legeKindAn, personIdMitMail } from './threads';
+import { beendeFrist, fuelleAustausch, legeKindAn, leseFrist, personIdMitMail, setzeFrist } from './threads';
 
 /**
  * Der Weg aus Spec 9 von Anfang bis Ende: Der Admin legt den Verein an, die Leitung
@@ -37,7 +37,6 @@ let kindLink = '';
 let bowling = '';
 let bowlingId = '';
 let austausch = '';
-let matsId = '';
 /** Der Tag des Bowling-Termins (der Editor legt ihn sieben Berliner Tage nach jetzt an); sein Monat ist der, in dem der Kalender Bowling zeigt. */
 let terminTag = '';
 
@@ -370,8 +369,7 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		// Direkt in der Datenbank: Mia entstand schon ueber das Formular, ein zweites Kind wiederholte nur
 		// diesen Weg. Geprueft wird, was mit zwei Kindern geschieht (Start, Antworten, Teilen, Fristende).
 		const maraId = await personIdMitMail(SLUG, MUTTER_MAIL);
-		matsId = await legeKindAn(SLUG, maraId, 'Mats', 'Muster');
-		expect(matsId).not.toBe('');
+		await legeKindAn(SLUG, maraId, 'Mats', 'Muster');
 	});
 
 	test('Mutter sieht Bowling auf Start, am Punkt der Leiste, in der Liste und im Kalender', async ({ browser }) => {
@@ -459,6 +457,15 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		// Beide Zeilen sind beantwortet, also steht auf dem Start nichts mehr unter "Braucht deine Antwort".
 		await mutter.seite.goto(`/${SLUG}/`);
 		await expect(mutter.seite.getByRole('heading', { name: 'Hallo Mara' })).toBeVisible();
+		// Erst der Beweis, dass die Bloecke geladen sind: Der Abschnitt "Braucht deine Antwort" fehlt auch,
+		// solange noch nichts da ist, und "keiner da" bestuende sonst auf einer Seite, die noch laedt.
+		// "Als Naechstes" kommt aus derselben Antwort wie die offenen Punkte.
+		await expect(
+			mutter.seite
+				.locator('jf-start-bloecke jf-abschnitt')
+				.filter({ has: mutter.seite.getByRole('heading', { name: 'Als Nächstes', exact: true }) })
+				.getByRole('link', { name: /Bowling/ }),
+		).toBeVisible();
 		await expect(mutter.seite.getByRole('link', { name: /Bowling noch offen/ })).toHaveCount(0);
 		await expect(
 			mutter.seite.locator('jf-abschnitt').filter({
@@ -729,38 +736,45 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 	});
 
 	test('Nach Fristende gibt es keinen Antwortknopf mehr, die Leitung traegt weiter nach', async ({ browser }) => {
+		// Die Frist von Bowling kommt danach zurueck: Das Projekt layout misst die Antwortknoepfe der Seite,
+		// und eine abgelaufene Frist nahm sie ihm. Gelesen wird sie vor dem Beenden, nicht neu erfunden.
+		const urspruenglich = await leseFrist(SLUG, bowlingId);
+		expect(urspruenglich, 'Bowling hat eine Frist').not.toBeNull();
 		await beendeFrist(SLUG, bowlingId, new Date());
+		try {
+			const mutter = await ausSitzung(browser, 'mutter');
+			await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+			await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+			const umfrage = mutter.seite.locator('jf-umfrage-modul');
+			// Erst die Zeilen: Ohne sie bestuende "kein Knopf" auch auf einer Seite, die noch laedt.
+			await expect(umfrage.locator('.zeile').filter({ hasText: 'Mia' })).toBeVisible();
+			await expect(umfrage.locator('.zeile').filter({ hasText: 'Mats' })).toBeVisible();
+			await expect(umfrage.locator('.frist')).toHaveText('Frist abgelaufen');
+			await expect(umfrage.locator('.zeile').getByRole('button')).toHaveCount(0);
+			await mutter.kontext.close();
 
-		const mutter = await ausSitzung(browser, 'mutter');
-		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
-		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
-		const umfrage = mutter.seite.locator('jf-umfrage-modul');
-		// Erst die Zeilen: Ohne sie bestuende "kein Knopf" auch auf einer Seite, die noch laedt.
-		await expect(umfrage.locator('.zeile').filter({ hasText: 'Mia' })).toBeVisible();
-		await expect(umfrage.locator('.zeile').filter({ hasText: 'Mats' })).toBeVisible();
-		await expect(umfrage.locator('.frist')).toHaveText('Frist abgelaufen');
-		await expect(umfrage.locator('.zeile').getByRole('button')).toHaveCount(0);
-		await mutter.kontext.close();
-
-		const leitung = await ausSitzung(browser, 'leitung');
-		await leitung.seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}/antworten`);
-		await expect(leitung.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
-		const gruppe = (titel: string) =>
-			leitung.seite
-				.locator('section[data-gruppe]')
-				.filter({ has: leitung.seite.getByRole('heading', { name: titel }) });
-		// Bearbeiter tragen auch nach der Frist nach: Mia bleibt eintragbar ...
-		await expect(gruppe('? Vielleicht').getByRole('button', { name: 'Eintragen für Mia M.' })).toBeVisible();
-		// ... und fuer Mats geht es von "Abgesagt" auf "Dabei".
-		await gruppe('✗ Abgesagt').getByRole('button', { name: 'Eintragen für Mats M.' }).click();
-		await leitung.seite
-			.getByRole('group', { name: 'Antwort für Mats M.' })
-			.getByRole('button', { name: '✓ Dabei' })
-			.click();
-		await expect(gruppe('✓ Dabei')).toContainText('Mats M.');
-		await expect(gruppe('✓ Dabei')).toContainText('eingetragen von Lea L.');
-		await expect(gruppe('✗ Abgesagt').getByRole('heading')).toHaveText('✗ Abgesagt (0)');
-		await leitung.kontext.close();
+			const leitung = await ausSitzung(browser, 'leitung');
+			await leitung.seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}/antworten`);
+			await expect(leitung.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+			const gruppe = (titel: string) =>
+				leitung.seite
+					.locator('section[data-gruppe]')
+					.filter({ has: leitung.seite.getByRole('heading', { name: titel }) });
+			// Bearbeiter tragen auch nach der Frist nach: Mia bleibt eintragbar ...
+			await expect(gruppe('? Vielleicht').getByRole('button', { name: 'Eintragen für Mia M.' })).toBeVisible();
+			// ... und fuer Mats geht es von "Abgesagt" auf "Dabei".
+			await gruppe('✗ Abgesagt').getByRole('button', { name: 'Eintragen für Mats M.' }).click();
+			await leitung.seite
+				.getByRole('group', { name: 'Antwort für Mats M.' })
+				.getByRole('button', { name: '✓ Dabei' })
+				.click();
+			await expect(gruppe('✓ Dabei')).toContainText('Mats M.');
+			await expect(gruppe('✓ Dabei')).toContainText('eingetragen von Lea L.');
+			await expect(gruppe('✗ Abgesagt').getByRole('heading')).toHaveText('✗ Abgesagt (0)');
+			await leitung.kontext.close();
+		} finally {
+			await setzeFrist(SLUG, bowlingId, urspruenglich);
+		}
 	});
 
 	test('Die Link-Vorschau nennt den Titel nur, wo die Familie ihn sehen darf', async () => {
@@ -769,12 +783,16 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		try {
 			const veroeffentlicht = await ohneSitzung.get(`/${SLUG}/t/${bowling}`);
 			expect(veroeffentlicht.status()).toBe(200);
+			// Die Antwort haengt am Stand des Threads; ein Cache zeigte den Titel eines zurueckgezogenen Threads weiter.
+			expect(veroeffentlicht.headers()['cache-control']).toBe('no-store');
 			expect(await veroeffentlicht.text()).toContain('property="og:title" content="🎳 Bowling"');
 
 			// Austausch (nur Jugendleiter) und eine unbekannte ID duerfen sich nicht unterscheiden, auch nicht um ein Byte.
 			const verborgen = await ohneSitzung.get(`/${SLUG}/t/${austausch}`);
 			const unbekannt = await ohneSitzung.get(`/${SLUG}/t/unbekannt`);
 			expect(verborgen.status()).toBe(unbekannt.status());
+			expect(verborgen.headers()['cache-control']).toBe('no-store');
+			expect(unbekannt.headers()['cache-control']).toBe('no-store');
 			const verborgenBytes = await verborgen.body();
 			expect(verborgenBytes.equals(await unbekannt.body()), 'Austausch und unbekannte ID unterscheiden sich').toBe(
 				true,

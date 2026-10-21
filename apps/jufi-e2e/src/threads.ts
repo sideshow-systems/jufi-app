@@ -125,18 +125,19 @@ export async function legeKindAn(
 }
 
 /**
- * Setzt die Frist aller Umfragen des Threads eine Minute vor `jetzt`, also auf "abgelaufen", ohne dass der
- * Ablauf auf eine echte Frist warten muss. Je Umfrage eine MODUL-Aenderung in einer Transaktion
- * (mitAenderung), wie es ein Speichern im Editor taete: So aendert sich der Stand des Vereins, und die
- * Ansicht der Familie rechnet fristAbgelaufen neu. Eine Minute zurueck statt genau jetzt, weil Server und
- * Test verschiedene Uhren lesen und "ab jetzt >= frist" sonst an einer Millisekunde haengt.
- * Verworfen: so lange warten, bis eine echte Frist verstreicht -- der Ablauf liefe dann minutenlang leer.
+ * Setzt die Frist aller Umfragen des Threads auf `frist` (null = ohne Frist). Je Umfrage eine
+ * MODUL-Aenderung in einer Transaktion (mitAenderung), wie es ein Speichern im Editor taete: So aendert
+ * sich der Stand des Vereins, und die Ansicht der Familie rechnet fristAbgelaufen neu.
  */
-export async function beendeFrist(slug: string, threadId: string, jetzt: Date): Promise<void> {
+export async function setzeFrist(
+	slug: string,
+	threadId: string,
+	frist: Date | null,
+	jetzt = new Date(),
+): Promise<void> {
 	await mitDatenbank(async (prisma) => {
 		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug }, select: { id: true } });
 		const db = vereinDb(prisma, verein.id);
-		const frist = new Date(jetzt.getTime() - 60_000);
 		await db.$transaction((tx) =>
 			mitAenderung(tx, verein.id, null, jetzt, async () => {
 				const umfragen = await tx.umfrageModul.findMany({ where: { threadId }, select: { id: true } });
@@ -149,4 +150,33 @@ export async function beendeFrist(slug: string, threadId: string, jetzt: Date): 
 			}),
 		);
 	});
+}
+
+/**
+ * Die gemeinsame Frist der Umfragen des Threads, zum Zurueckstellen nach einem Test. Haben die Umfragen
+ * verschiedene Fristen, wirft sie: Ein einzelner Wert stellte sie nicht wieder her (setzeFrist setzt alle gleich).
+ */
+export async function leseFrist(slug: string, threadId: string): Promise<Date | null> {
+	return mitDatenbank(async (prisma) => {
+		const verein = await prisma.verein.findUniqueOrThrow({ where: { slug }, select: { id: true } });
+		const umfragen = await vereinDb(prisma, verein.id).umfrageModul.findMany({
+			where: { threadId },
+			select: { frist: true },
+		});
+		if (umfragen.length === 0) throw new Error(`Thread ${threadId} hat keine Umfrage`);
+		const zeiten = new Set(umfragen.map((u) => u.frist?.getTime() ?? null));
+		if (zeiten.size > 1) throw new Error(`Umfragen von ${threadId} haben verschiedene Fristen`);
+		const zeit = [...zeiten][0];
+		return zeit === null ? null : new Date(zeit);
+	});
+}
+
+/**
+ * Setzt die Frist aller Umfragen eine Minute vor `jetzt`, also auf "abgelaufen", ohne dass der Ablauf auf
+ * eine echte Frist warten muss. Eine Minute zurueck statt genau jetzt, weil Server und Test verschiedene
+ * Uhren lesen und "ab jetzt >= frist" sonst an einer Millisekunde haengt. Verworfen: so lange warten, bis
+ * eine echte Frist verstreicht -- der Ablauf liefe dann minutenlang leer.
+ */
+export async function beendeFrist(slug: string, threadId: string, jetzt: Date): Promise<void> {
+	await setzeFrist(slug, threadId, new Date(jetzt.getTime() - 60_000), jetzt);
 }

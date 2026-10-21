@@ -1,14 +1,13 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { MeldungComponent } from '../gestaltung/meldung';
 import { AdminApi } from './admin-api';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 
 /** Kopfzeile und Platz fuer die Seiten der Verwaltung; Desktop-Breite (1280 x 800). */
 @Component({
 	selector: 'jf-admin-rahmen',
-	imports: [MeldungComponent, RouterLink, RouterLinkActive, RouterOutlet],
+	imports: [RouterLink, RouterLinkActive, RouterOutlet],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<header>
@@ -27,8 +26,6 @@ import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 		<main>
 			<router-outlet />
 		</main>
-		<!-- Fuer die Rueckmeldung Kopiert der Einladungstexte (MeldungService). -->
-		<jf-meldung />
 	`,
 	styles: `
 		:host {
