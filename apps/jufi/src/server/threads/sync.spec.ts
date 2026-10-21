@@ -192,6 +192,12 @@ describe('GET /sync', () => {
 		}
 	});
 
+	it('seit genau am Maximum der Datenbank ist gueltig', async () => {
+		const s = await szenario();
+		await s.bowling();
+		expect(await s.antwort(s.sandra.cookie, '?seit=2147483647')).toMatchObject({ vollstaendig: true });
+	});
+
 	it('ist ohne Anmeldung 401', async () => {
 		const s = await szenario();
 		expect((await s.sync(undefined, '?seit=0')).status).toBe(401);

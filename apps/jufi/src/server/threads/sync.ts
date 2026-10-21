@@ -9,17 +9,25 @@ import { NICHT_GEFUNDEN } from './fehler.js';
 import { ladeKoepfe, ladeThreadUmfeld, ladeVereinsstand } from './laden.js';
 
 /**
+ * Groesster Stand, den die Datenbank kennt: Aenderung.stand und Verein.aenderungsstand sind
+ * INT4, ein Vergleich mit mehr wirft in Prisma ("Value out of range") und wuerde 500.
+ */
+const STAND_MAX = 2_147_483_647;
+
+/**
  * Der Stand, ab dem der Client wissen will, was sich geaendert hat: null ohne Parameter,
- * undefined, wenn er ungueltig ist. Gueltig sind nur Ziffern, die eine sichere ganze Zahl
- * ergeben: parseInt und Number nahmen auch "1.5abc", "1e3" oder " 7" an, und ein Wert
- * ausserhalb des sicheren Bereichs wuerde beim Vergleich mit dem Stand falsch rechnen.
- * Ein wiederholter Parameter kommt als Array an und ist damit kein Text.
+ * undefined, wenn er ungueltig ist. Gueltig sind nur Ziffern, die eine Zahl bis STAND_MAX
+ * ergeben: parseInt und Number nahmen auch "1.5abc", "1e3" oder " 7" an. Die Grenze ist die
+ * Spalte der Datenbank, nicht die sichere ganze Zahl von JavaScript; kein echter Client kann
+ * einen groesseren Stand halten. Verworfen: auf STAND_MAX kappen -- Unsinn bekaeme dann die
+ * Antwort "vollstaendig" statt eines Fehlers. Ein wiederholter Parameter kommt als Array an
+ * und ist damit kein Text.
  */
 function liesSeit(wert: unknown): number | null | undefined {
 	if (wert === undefined) return null;
 	if (typeof wert !== 'string' || !/^\d+$/.test(wert)) return undefined;
 	const zahl = Number(wert);
-	return Number.isSafeInteger(zahl) ? zahl : undefined;
+	return zahl <= STAND_MAX ? zahl : undefined;
 }
 
 /**

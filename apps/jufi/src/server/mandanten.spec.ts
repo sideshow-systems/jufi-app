@@ -524,8 +524,10 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		expect(titel).toContain('Eigener Termin');
 	},
 	'GET /sync': async (k) => {
+		// Der Stand vor dem Schreiben: seit=0 koennte vor einem aufgeraeumten Verlauf liegen und "vollstaendig" ohne Listen liefern.
+		const vorher = (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.eigen.id } })).aenderungsstand;
 		const eigener = await eigenerThread(k);
-		const pfad = '/api/v1/sync?seit=0';
+		const pfad = `/api/v1/sync?seit=${vorher}`;
 		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
 		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
 		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
