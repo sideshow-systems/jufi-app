@@ -62,6 +62,17 @@ export const DOPPELTE_TEILNAHME: Antwortkoerper = {
 	fehler: 'Es gibt schon eine Teilnahme-Umfrage.',
 	code: 'DOPPELTE_TEILNAHME',
 };
+// Die Konflikte der Fahrgemeinschaft (Feldfehler.fahrt) mit eigenem Code: Eine zweite Fahrgemeinschaft
+// ist keine doppelte Teilnahme, eine Richtung mit Autos keine beantwortete Umfrage. Der Client
+// verzweigt auf keinen der Codes, wer die Antwort liest (Protokoll, Test), soll aber den Grund sehen.
+export const DOPPELTE_FAHRT: Antwortkoerper = {
+	fehler: 'Es gibt schon eine Fahrgemeinschaft.',
+	code: 'DOPPELTE_FAHRT',
+};
+export const FAHRT_BELEGT: Antwortkoerper = {
+	fehler: 'Die Fahrgemeinschaft hat schon Autos oder Mitfahrten.',
+	code: 'FAHRT_BELEGT',
+};
 export const NICHT_LOESCHBAR: Antwortkoerper = {
 	fehler: 'Der Thread hat Antworten oder Nachrichten und lässt sich nicht löschen. Archiviere ihn stattdessen.',
 	code: 'NICHT_LOESCHBAR',

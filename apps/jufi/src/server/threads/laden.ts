@@ -426,9 +426,13 @@ export async function ladeThreads(
 				};
 				return { typ: 'UMFRAGE', id: m.id, titel, umfrage };
 			}
+			// Erschoepfend ueber typ: Ein neuer Modultyp bricht hier den Bau. Kommt zur Laufzeit doch einer
+			// (Datenbank neuer als der Code), endet das Laden mit einem Fehler statt mit dem Typnamen als
+			// Moduldaten. Verworfen: unerreichbar zurueckzugeben wie an den Stellen, die das Modul selbst
+			// pruefen; hier waere der Rueckgabewert ein String, den jeder Aufrufer als Modul laese.
 			default: {
 				const unerreichbar: never = m.typ;
-				return unerreichbar;
+				throw new Error(`Unbekannter Modultyp: ${String(unerreichbar)}`);
 			}
 		}
 	};

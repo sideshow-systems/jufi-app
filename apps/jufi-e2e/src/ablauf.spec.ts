@@ -1266,7 +1266,8 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		const auto = autoDerMutter(mutter.seite);
 		await expect(auto).toContainText('15:30 · Vereinsheim');
 		await expect(auto.locator('.frei')).toHaveText('2 frei');
-		await auto.getByRole('button', { name: 'Mia einsteigen' }).click();
+		// Der zugaengliche Name nennt den Fahrer wie die Karte (Einsteigen steht an jedem Auto gleich).
+		await auto.getByRole('button', { name: 'Mia einsteigen bei Mara M.' }).click();
 		await expect(auto.locator('.kind').filter({ hasText: 'Mia M.' })).toBeVisible();
 		await expect(auto.locator('.frei')).toHaveText('1 frei');
 		await expect(brauchtMitfahrt(mutter.seite)).not.toContainText('Mia M.');

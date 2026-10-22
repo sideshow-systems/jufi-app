@@ -457,7 +457,7 @@ describe('Lesende Routen der Verwaltung', () => {
 			expect(h?.ohneEintrag).toBe(gefragte.length - 1);
 		});
 
-		it('liefert die Fahrgemeinschaft mit der Ansicht der Leitung: leitung true, Autos mit Mitfahrern', async () => {
+		it('liefert die Fahrgemeinschaft mit der Ansicht der Leitung: Umsetzen-Ziele, Autos mit Mitfahrern', async () => {
 			const s = await szenario();
 			const t = await legeThreadAn(prisma, s.verein, JETZT, {
 				titel: 'Bowling',
@@ -484,7 +484,7 @@ describe('Lesende Routen der Verwaltung', () => {
 			const r = await s.hole(`/threads/${t.threadId}/antworten`, s.thomas.cookie);
 			expect(r.status).toBe(200);
 			const u = (await r.json()) as AntwortenUebersicht;
-			expect(u.fahrt).toMatchObject({ typ: 'FAHRT', id: fahrtId, leitung: true });
+			expect(u.fahrt).toMatchObject({ typ: 'FAHRT', id: fahrtId });
 			const hin = u.fahrt?.richtungen.find((x) => x.richtung === 'HIN');
 			expect(hin?.autos).toHaveLength(1);
 			expect(hin?.autos[0]).toMatchObject({
@@ -493,12 +493,16 @@ describe('Lesende Routen der Verwaltung', () => {
 				ort: 'Vereinsheim',
 				frei: 2,
 			});
-			expect(hin?.autos[0]?.mitfahrer.map((m) => m.kindId)).toEqual([s.lena.personId]);
+			expect(hin?.autos[0]?.mitfahrer.map((m) => [m.kindId, m.umsetzen])).toEqual([
+				[s.lena.personId, { autoIds: [], selbst: true }],
+			]);
 			// Bernd (nur "Antworten im Detail") sieht die Fahrgemeinschaft, ist aber nicht die Leitung.
 			const bernd = (await (
 				await s.hole(`/threads/${t.threadId}/antworten`, s.bernd.cookie)
 			).json()) as AntwortenUebersicht;
-			expect(bernd.fahrt).toMatchObject({ id: fahrtId, leitung: false });
+			expect(bernd.fahrt).toMatchObject({ id: fahrtId });
+			const bernds = bernd.fahrt?.richtungen.find((x) => x.richtung === 'HIN')?.autos[0]?.mitfahrer;
+			expect(bernds?.map((m) => m.umsetzen)).toEqual([{ autoIds: [], selbst: false }]);
 		});
 
 		it('ohne Fahrgemeinschaft ist fahrt null', async () => {

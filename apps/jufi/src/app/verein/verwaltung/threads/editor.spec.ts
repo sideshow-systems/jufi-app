@@ -1239,7 +1239,7 @@ describe('Thread-Editor', () => {
 			await vi.waitFor(() =>
 				http
 					.expectOne({ method: 'PUT', url: `${API}/threads/t1` })
-					.flush({ fehler: text, code: 'BEANTWORTET', feld: 'module.3.hin' }, { status: 409, statusText: 'Conflict' }),
+					.flush({ fehler: text, code: 'FAHRT_BELEGT', feld: 'module.3.hin' }, { status: 409, statusText: 'Conflict' }),
 			);
 			await stabil(harness);
 

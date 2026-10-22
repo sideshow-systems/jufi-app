@@ -300,7 +300,7 @@ Eine Person kann sich für mehrere Positionen eintragen, je Position einmal. Ver
 ### 6.1 Datenmodell
 
 - `FahrtModul (id, threadId, hin, rueck)`: welche Richtungen es gibt (mindestens eine, Vorgabe beide).
-  - **Höchstens eine Fahrgemeinschaft je Thread über einen gewöhnlichen Unique-Index `(vereinId, threadId)`** (Plan zu Etappe 4, Entscheidung 9). Ein Partial-Unique-Index wie bei der Teilnahme-Umfrage braucht eine Bedingung; hier ist jede Zeile eine Fahrgemeinschaft. Der Editor meldet eine zweite mit „Es gibt schon eine Fahrgemeinschaft.“ (409, `konflikt: true`), und „Modul hinzufügen“ bietet keine zweite an.
+  - **Höchstens eine Fahrgemeinschaft je Thread über einen gewöhnlichen Unique-Index `(vereinId, threadId)`** (Plan zu Etappe 4, Entscheidung 9). Ein Partial-Unique-Index wie bei der Teilnahme-Umfrage braucht eine Bedingung; hier ist jede Zeile eine Fahrgemeinschaft. Der Editor meldet eine zweite mit „Es gibt schon eine Fahrgemeinschaft.“ (409 `DOPPELTE_FAHRT`, `konflikt: true`), und „Modul hinzufügen“ bietet keine zweite an.
 - `Auto (id, vereinId, modulId, fahrerId, richtung, plaetze, abfahrtTag?, abfahrtZeit?, ort?, notiz?, angelegtAm, clientId)`: `richtung` `HIN` oder `RUECK`; `plaetze` 1–8 („Plätze für Kinder“, eigene Kinder mitgezählt); Tag als `@db.Date`, Zeit als `HH:MM` (Wandzeit wie TP3 2.2); Ort und Notiz höchstens 200 Zeichen (Codepunkte nach `trim`, ohne Steuer- und Formatzeichen). Eindeutig je `(modulId, fahrerId, richtung)`; höchstens 30 Autos je Richtung. Die Grenzen stehen in `GRENZEN` (`plaetze: 8`, `autosJeRichtung: 30`, `autoText: 200`) und als CHECKs im Schema.
   - **Ein Auto trägt eine `clientId`** (je Verein eindeutig; Plan zu Etappe 4, Entscheidung 1), damit `POST /fahrten/:modulId/autos` eine Wiederholung erkennt (8). Ohne sie bekäme die wiederholte Anfrage 409 `AUTO_SCHON_DA`, weil das Auto aus der ersten schon steht.
 - `Mitfahrt (id, vereinId, modulId, richtung, kindId, autoId?, vonId, eingetragenAm, clientId)`, eindeutig je `(modulId, richtung, kindId)`. **`autoId = null` heißt „kommt selbst“.** Ein zusammengesetzter Fremdschlüssel sichert, dass Auto, Modul und Richtung zusammenpassen.
@@ -327,6 +327,7 @@ Ohne „kommt selbst“ stünde jedes Kind, das die Familie selbst bringt, für 
   - **`fahrtAnsicht.kinder` sind die betrachteten Kinder, für die die Person das Einsetzen selbst darf.** Für die Leitung sind das nur ihre eigenen; andere Kinder setzt sie über „Umsetzen“ (6.3). Verworfen: alle Kinder als Knöpfe der Leitung, dann stünde am Handy jedes Kind des Vereins neben ihrem.
 - **Kind herausnehmen**: die Leitung, der Fahrer aus seinem eigenen Auto und wer für das Kind handeln darf. **Herausnehmen geht immer**, auch für ein Kind, das nicht mehr betrachtet wird oder inzwischen aus der Zielgruppe gefallen ist; sonst bliebe ein Platz belegt, den niemand mehr freigeben dürfte.
 - **Leitung**: verschiebt jedes betrachtete Kind („Umsetzen“ in ein Auto mit freiem Platz oder auf „kommt selbst“), ändert Plätze und löscht Autos.
+  - **Die Umsetzen-Ziele rechnet die Ansicht je Kind mit den Regeln des Servers** (`umsetzenZiele`, Feld `umsetzen` an jedem Kind der Ansicht): ein Auto der Richtung, wenn `darfEinsetzen` erlaubt und Platz ist (ohne das, in dem das Kind sitzt), „kommt selbst“, wenn `darfEinsetzen` erlaubt und das Kind nicht schon dort steht; beides schickt der Client als `PUT`. Ohne Ziel kein Knopf. Ein Kind ohne Zusage, ein Thread im Entwurf und ein Kind außerhalb der Zielgruppe haben darum kein Umsetzen, Herausnehmen bleibt. Verworfen: Umsetzen an der Rolle allein — der Knopf stand dann an Kindern, für die der Server jedes Ziel ablehnte.
 - **Auto zurückziehen** (Fahrer oder Leitung): erlaubt, auch mit Kindern darin; deren Mitfahrten werden gelöscht, sie stehen wieder unter „Braucht noch Mitfahrt“. Der Verlauf bekommt den Systemeintrag `AUTO_ZURUECKGEZOGEN`: „Auto von Sandra M. (Hinfahrt) zurückgezogen – Lena M. und Max M. brauchen wieder eine Mitfahrt.“, bei einem Kind „braucht wieder eine Mitfahrt.“ Ab Teilprojekt 5 folgt ein Push.
   - **Der Systemeintrag entsteht nur, wenn Kinder im Auto saßen** (Plan zu Etappe 4, Entscheidung 4). Er speichert `{ fahrerId, richtung, kindIds }` (Kinder in der Reihenfolge des Einsteigens); die Namen entstehen beim Lesen wie bei allen Systemsätzen (`verlauf.ts`), `systemSatz` bekommt dafür das `Umfeld` als vierten Parameter. Unbekannte Personen heißen „ehemaliges Mitglied“. Verworfen: die Namen zu speichern, denn dann stünde ein später entferntes Kind weiter mit Namen im Verlauf.
   - **Der Fahrer steht mit Kurznamen** („Sandra M.“), nicht mit `absenderName`: Dessen Klammer („Mutter von …“) stünde neben der Klammer mit der Richtung.
@@ -335,8 +336,9 @@ Ohne „kommt selbst“ stünde jedes Kind, das die Familie selbst bringt, für 
 - Die Fahrgemeinschaft zählt **nicht** zu „Braucht deine Antwort“. Verworfen: jedes Kind ohne Mitfahrt als offene Aufgabe — Familien, die selbst fahren, müssten erst „kommt selbst“ tippen, damit die Meldung verschwindet.
 - **„Neu“** (Plan zu Etappe 4, Entscheidung 11): Alle Leser sehen die Fahrgemeinschaft. Deshalb ist `antwortenSichtbar` mit Fahrgemeinschaft für Nicht-Entfernte immer `true`, wie bei der Helferliste.
 - **Editor** (Plan zu Etappe 4, Entscheidung 10; `fahrtSperre`, `pruefeFahrtAenderung`): Ohne Richtung meldet er „Bitte mindestens eine Richtung.“
-  - Eine Richtung mit Autos oder Mitfahrten (auch „kommt selbst“) lässt sich nicht abschalten: 409 „Für die Hinfahrt gibt es schon Autos oder Mitfahrten.“ bzw. „Für die Rückfahrt …“. Der Editor sperrt das Kästchen vorher mit dem Satz „Hat schon Autos oder Mitfahrten.“ daneben. Verworfen: die Einträge dabei still zu löschen, denn dann stünde eine Familie ohne Nachricht nicht mehr in ihrem Auto.
-  - Eine Fahrgemeinschaft mit Autos oder Mitfahrten lässt sich nicht entfernen: 409 „Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.“
+  - Eine Richtung mit Autos oder Mitfahrten (auch „kommt selbst“) lässt sich nicht abschalten: 409 `FAHRT_BELEGT` „Für die Hinfahrt gibt es schon Autos oder Mitfahrten.“ bzw. „Für die Rückfahrt …“. Der Editor sperrt das Kästchen vorher mit dem Satz „Hat schon Autos oder Mitfahrten.“ daneben. Verworfen: die Einträge dabei still zu löschen, denn dann stünde eine Familie ohne Nachricht nicht mehr in ihrem Auto.
+  - Eine Fahrgemeinschaft mit Autos oder Mitfahrten lässt sich nicht entfernen: 409 `FAHRT_BELEGT` „Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.“
+  - Die Codes `DOPPELTE_FAHRT` und `FAHRT_BELEGT` sind eigene, nicht `DOPPELTE_TEILNAHME` und `BEANTWORTET` der Umfrage: Die Domain markiert diese Konflikte (`Feldfehler.fahrt`). Der Client verzweigt auf keinen davon.
 - **Antworten-Übersicht** (Plan zu Etappe 4, Entscheidung 17): Sie zeigt die Fahrgemeinschaft als `jf-fahrt-modul` mit der Ansicht der Leitung (`AntwortenUebersicht.fahrt`). Verworfen: eine eigene Tabelle; Umsetzen braucht dieselben Bedienelemente wie auf der Thread-Seite.
 
 ### 6.3 Anzeige
@@ -347,11 +349,11 @@ Kinder erscheinen als „Lena M.“ nach TP3 3.10, nicht nur mit Vornamen wie in
 
 **Reihenfolge** (Plan zu Etappe 4, Entscheidung 16): Autos nach `angelegtAm`, dann `id`; Mitfahrer nach `eingetragenAm`; „Braucht noch Mitfahrt“ und „Kommt selbst“ nach Kurzname (`localeCompare` mit `'de'`).
 
-- **Knöpfe**: „Auto anbieten“, „Auto ändern“, „Auto zurückziehen“, am Auto „Einsteigen“ (für Kinder „Lena einsteigen“), „Kommt selbst“ (für Kinder „Lena kommt selbst“), „Herausnehmen“, für die Leitung „Umsetzen“ (Auswahl der Autos mit freiem Platz und „Kommt selbst“).
+- **Knöpfe**: „Auto anbieten“, „Auto ändern“, „Auto zurückziehen“, am Auto „Einsteigen“ (für Kinder „Lena einsteigen“), „Kommt selbst“ (für Kinder „Lena kommt selbst“), „Herausnehmen“, für die Leitung „Umsetzen“ (Auswahl aus den Zielen der Ansicht, 6.2). „Einsteigen“ steht an jedem Auto gleich; der zugängliche Name nennt den Fahrer wie die Karte und beginnt mit dem sichtbaren Text („Lena einsteigen bei Sandra M. (Mutter von Lena)“, WCAG 2.5.3).
 - **Formular „Auto anbieten“**: „Plätze für Kinder“ (1–8), „Abfahrt am“, „Uhrzeit“, „Treffpunkt“ (Feld `ort`), „Notiz (optional)“, Knöpfe „Anbieten“ bzw. „Speichern“ und „Abbrechen“.
 - **Rückfrage beim Zurückziehen mit Kindern** (`jf-bestaetigung`): „Lena M. und Max M. brauchen dann wieder eine Mitfahrt.“ Ohne Kinder zieht der Knopf das Auto ohne Rückfrage zurück.
 
-Regeln in `libs/domain/src/module/fahrt/fahrt.ts`: `fahrtAnsicht(ich, modul, daten, umfeld, jetzt)` (`ich` die betrachtende Person, `daten` die `ThreadDaten` mit Kopf, Terminen und Umfragen), `brauchtMitfahrt(fahrt, richtung, betrachtete)`, `betrachteteKinder`, die Rechte `darfAnbieten`, `darfAutoAendern`, `darfEinsetzen`, `darfHerausnehmen`, dazu `pruefeAuto`, `fahrtSperre` und `pruefeFahrtAenderung`.
+Regeln in `libs/domain/src/module/fahrt/fahrt.ts`: `fahrtAnsicht(ich, modul, daten, umfeld, jetzt)` (`ich` die betrachtende Person, `daten` die `ThreadDaten` mit Kopf, Terminen und Umfragen), `brauchtMitfahrt(fahrt, richtung, betrachtete)`, `betrachteteKinder`, die Rechte `darfAnbieten`, `darfAutoAendern`, `darfEinsetzen`, `darfHerausnehmen`, `umsetzenZiele`, dazu `pruefeAuto`, `fahrtSperre` und `pruefeFahrtAenderung`.
 
 ---
 
@@ -478,7 +480,7 @@ Eine ungültige Eingabe ergibt 400 `{ fehler: 'Ungültige Anfrage', feld }` (`un
 - **Editor**: neue Modultypen in „Modul hinzufügen“; Felder je Typ; Upload in gespeicherten Datei- und Foto-Modulen (4.3); Vorschau zeigt die neuen Module. `editor.ts` und `modul-felder.ts` sind schon groß (TP3-Rückstand): Die Felder der neuen Typen entstehen in eigenen Komponenten statt in `modul-felder.ts`.
 - **Verwaltung › Dokumente**: Kategorien und Dokumente pflegen (3.1).
 - **Verwaltung › Einstellungen**: Speicherverbrauch (2.6).
-- **Antworten-Übersicht**: Helferliste, Fahrgemeinschaft (nur Ansicht und Umsetzen), Kosten.
+- **Antworten-Übersicht**: Helferliste, Fahrgemeinschaft (Ansicht der Leitung mit Einsetzen, Herausnehmen und Umsetzen wie auf der Thread-Seite, 6.2), Kosten.
 - **Meine Jungfischer**: Foto-Einwilligung (4.4).
 - Gemessen wie TP3 6.7: 375 × 812 und 1280 × 800, hell und dunkel.
 

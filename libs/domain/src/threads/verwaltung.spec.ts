@@ -393,11 +393,20 @@ describe('antwortenUebersicht: Helferliste', () => {
 describe('antwortenUebersicht: Fahrgemeinschaft', () => {
 	it('gibt der Leitung die Ansicht der Fahrgemeinschaft, mit ihren Rechten', () => {
 		const u = antwortenUebersicht(person('thomas'), daten(kopf(), [fahrtModul()]), umfeld, JETZT)!;
-		expect(u.fahrt).toMatchObject({ typ: 'FAHRT', id: 'f1', leitung: true });
+		expect(u.fahrt).toMatchObject({ typ: 'FAHRT', id: 'f1' });
 		expect(u.fahrt?.richtungen.map((r) => r.richtung)).toEqual(['HIN', 'RUECK']);
 		expect(u.fahrt?.richtungen[0].autos).toMatchObject([
 			{ id: 'a1', fahrer: 'Sandra M. (Mutter von Lena und Max)', darfAendern: true },
 		]);
+		expect(u.fahrt?.richtungen[0].brauchtMitfahrt[0]).toMatchObject({ umsetzen: { autoIds: ['a1'], selbst: true } });
+	});
+
+	it('bietet der Leitung im Entwurf kein Umsetzen an, denn der Server lehnte es mit ENTWURF ab', () => {
+		const entwurf = daten(kopf({ veroeffentlichtAm: null }), [fahrtModul()]);
+		const u = antwortenUebersicht(person('thomas'), entwurf, umfeld, JETZT)!;
+		const braucht = u.fahrt?.richtungen[0].brauchtMitfahrt ?? [];
+		expect(braucht.length).toBeGreaterThan(0);
+		expect(braucht.map((k) => k.umsetzen)).toEqual(braucht.map(() => ({ autoIds: [], selbst: false })));
 	});
 
 	it('ist ohne Fahrgemeinschaft null', () => {

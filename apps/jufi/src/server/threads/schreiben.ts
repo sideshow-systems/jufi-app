@@ -31,7 +31,9 @@ import {
 	antworteThreadFehler,
 	AUSTAUSCH,
 	BEANTWORTET,
+	DOPPELTE_FAHRT,
 	DOPPELTE_TEILNAHME,
+	FAHRT_BELEGT,
 	NICHT_GEFUNDEN,
 	ThreadAbbruch,
 	VERALTET,
@@ -91,8 +93,8 @@ export async function ichUnterSperre(tx: VereinTx, personId: string): Promise<Th
 
 /**
  * Prueft, was der Entwurf bedeutet, und bricht mit dem ersten Fehler ab. Ein Eingabefehler
- * geht der doppelten Teilnahme (dem einzigen Konflikt von entwurfFehler) vor, wie fehler vor
- * konflikt in vergleicheEntwurf: Ein Entwurf, der nicht lesbar ist, soll nicht erst am
+ * geht den Konflikten von entwurfFehler (doppelte Teilnahme, zweite Fahrgemeinschaft) vor, wie
+ * fehler vor konflikt in vergleicheEntwurf: Ein Entwurf, der nicht lesbar ist, soll nicht erst am
  * Konflikt scheitern und nach dessen Behebung an etwas anderem.
  */
 function pruefeEntwurf(e: ThreadEntwurf, untergruppenIds: ReadonlySet<string>): void {
@@ -100,14 +102,19 @@ function pruefeEntwurf(e: ThreadEntwurf, untergruppenIds: ReadonlySet<string>): 
 	const ungueltig = fehler.find((f) => !f.konflikt);
 	if (ungueltig) throw new ThreadAbbruch(400, { fehler: ungueltig.text, feld: ungueltig.feld });
 	const [konflikt] = fehler;
-	if (konflikt) throw new ThreadAbbruch(409, amFeld(DOPPELTE_TEILNAHME, konflikt));
+	if (konflikt) throw new ThreadAbbruch(409, amFeld(konflikt.fahrt ? DOPPELTE_FAHRT : DOPPELTE_TEILNAHME, konflikt));
 }
 
-/** Der Plan aus vergleicheEntwurf, oder der Abbruch mit seinem Fehler (400) oder Konflikt (409 BEANTWORTET). */
+/**
+ * Der Plan aus vergleicheEntwurf, oder der Abbruch mit seinem Fehler (400) oder Konflikt (409
+ * BEANTWORTET, an einer Fahrgemeinschaft FAHRT_BELEGT).
+ */
 function planeAenderung(alt: { kopf: ThreadKopf; module: GeladenerThread['module'] }, e: ThreadEntwurf) {
 	const plan = vergleicheEntwurf(alt, e);
 	if (plan.fehler) throw new ThreadAbbruch(400, { fehler: plan.fehler.text, feld: plan.fehler.feld });
-	if (plan.konflikt) throw new ThreadAbbruch(409, amFeld(BEANTWORTET, plan.konflikt));
+	if (plan.konflikt) {
+		throw new ThreadAbbruch(409, amFeld(plan.konflikt.fahrt ? FAHRT_BELEGT : BEANTWORTET, plan.konflikt));
+	}
 	return plan;
 }
 

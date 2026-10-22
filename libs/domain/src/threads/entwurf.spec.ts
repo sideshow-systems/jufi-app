@@ -963,9 +963,9 @@ describe('Fahrgemeinschaft im Entwurf', () => {
 		]);
 	});
 
-	it('meldet die zweite Fahrgemeinschaft als Konflikt am Feld typ', () => {
+	it('meldet die zweite Fahrgemeinschaft als Konflikt der Fahrt am Feld typ', () => {
 		expect(entwurfFehler(mitFahrt(fahrt(), fahrt()), GRUPPEN)).toEqual([
-			{ feld: 'module.4.typ', text: 'Es gibt schon eine Fahrgemeinschaft.', konflikt: true },
+			{ feld: 'module.4.typ', text: 'Es gibt schon eine Fahrgemeinschaft.', konflikt: true, fahrt: true },
 		]);
 	});
 

@@ -107,6 +107,13 @@ export interface Feldfehler {
 	feld: string;
 	text: string;
 	konflikt?: true;
+	/**
+	 * Ein Konflikt an einer Fahrgemeinschaft. Der Server meldet ihn mit eigenem Code (DOPPELTE_FAHRT,
+	 * FAHRT_BELEGT) statt mit dem der Umfrage, die vorher die einzigen Konflikte stellte. Verworfen: den
+	 * Code am Feldnamen oder am Satz zu erkennen, denn "module" (Entfernen) teilen sich Umfrage,
+	 * Helferliste und Fahrgemeinschaft.
+	 */
+	fahrt?: true;
 }
 
 const MODI: readonly ThreadModus[] = ['AUSHANG', 'KOMMENTARE', 'CHAT'];
@@ -422,7 +429,7 @@ function modulFehler(
 			const fehler: Feldfehler[] = [...titel];
 			if (!m.hin && !m.rueck) fehler.push({ feld: f('hin'), text: 'Bitte mindestens eine Richtung.' });
 			if (fahrtSchonDa) {
-				fehler.push({ feld: f('typ'), text: 'Es gibt schon eine Fahrgemeinschaft.', konflikt: true });
+				fehler.push({ feld: f('typ'), text: 'Es gibt schon eine Fahrgemeinschaft.', konflikt: true, fahrt: true });
 			}
 			return fehler;
 		}

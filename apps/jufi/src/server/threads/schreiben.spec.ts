@@ -372,7 +372,7 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(modul.richtungen[0]?.autos).toEqual([]);
 		});
 
-		it('meldet eine zweite Fahrgemeinschaft wie die zweite Teilnahme: 409 am Typ des Moduls, nichts geschrieben', async () => {
+		it('meldet eine zweite Fahrgemeinschaft wie die zweite Teilnahme, mit eigenem Code: 409 DOPPELTE_FAHRT am Typ, nichts geschrieben', async () => {
 			const s = await szenario();
 			const e = s.bowling();
 			e.module.push(
@@ -384,7 +384,7 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(r.status).toBe(409);
 			expect(await r.json()).toEqual({
 				fehler: 'Es gibt schon eine Fahrgemeinschaft.',
-				code: 'DOPPELTE_TEILNAHME',
+				code: 'DOPPELTE_FAHRT',
 				feld: 'module.4.typ',
 			});
 			expect(await s.stand()).toBe(vorher);
@@ -1404,7 +1404,7 @@ describe('Threads anlegen und ersetzen', () => {
 				expect(r.status).toBe(409);
 				expect(await r.json()).toEqual({
 					fehler: 'Für die Hinfahrt gibt es schon Autos oder Mitfahrten.',
-					code: 'BEANTWORTET',
+					code: 'FAHRT_BELEGT',
 					feld: 'module.0.hin',
 				});
 				expect(await fahrtZustand(s, t.threadId, modulId)).toEqual(vorher);
@@ -1438,7 +1438,7 @@ describe('Threads anlegen und ersetzen', () => {
 				expect(r.status).toBe(409);
 				expect(await r.json()).toEqual({
 					fehler: 'Für die Rückfahrt gibt es schon Autos oder Mitfahrten.',
-					code: 'BEANTWORTET',
+					code: 'FAHRT_BELEGT',
 					feld: 'module.0.rueck',
 				});
 			});
@@ -1449,7 +1449,7 @@ describe('Threads anlegen und ersetzen', () => {
 				expect(r.status).toBe(409);
 				expect(await r.json()).toEqual({
 					fehler: 'Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.',
-					code: 'BEANTWORTET',
+					code: 'FAHRT_BELEGT',
 					feld: 'module',
 				});
 				expect(await fahrtZustand(s, t.threadId, modulId)).toEqual(vorher);
@@ -1471,7 +1471,7 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(await prisma.fahrtModul.count({ where: { id: t.modulIds[1] } })).toBe(0);
 		});
 
-		it('PUT: eine zweite Fahrgemeinschaft neben der gespeicherten ist 409 am Typ, nichts geschrieben', async () => {
+		it('PUT: eine zweite Fahrgemeinschaft neben der gespeicherten ist 409 DOPPELTE_FAHRT am Typ, nichts geschrieben', async () => {
 			const s = await szenario();
 			const t = await s.bowlingThread({ module: [FAHRT] });
 			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
@@ -1483,7 +1483,7 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(r.status).toBe(409);
 			expect(await r.json()).toEqual({
 				fehler: 'Es gibt schon eine Fahrgemeinschaft.',
-				code: 'DOPPELTE_TEILNAHME',
+				code: 'DOPPELTE_FAHRT',
 				feld: 'module.1.typ',
 			});
 			expect(await fahrtZustand(s, t.threadId, t.modulIds[0] as string)).toEqual(vorher);

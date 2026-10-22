@@ -165,6 +165,53 @@ export function hatPlatzIn(auto: AutoDaten, fahrt: FahrtDaten, kindId: string): 
 	return imAuto.some((m) => m.kindId === kindId) || imAuto.length < auto.plaetze;
 }
 
+/**
+ * Wohin die Leitung ein Kind umsetzen kann (Spec 6.2: "Umsetzen in ein Auto mit freiem Platz oder auf
+ * kommt selbst"). Leer heisst: kein Knopf "Umsetzen".
+ */
+export interface UmsetzenZiele {
+	/** Autos der Richtung mit freiem Platz, ohne das, in dem das Kind sitzt; in der Reihenfolge der Daten. */
+	autoIds: string[];
+	/** "Kommt selbst", ausser das Kind steht schon dort. */
+	selbst: boolean;
+}
+
+/**
+ * Ruling R15: Die Ansicht bietet nur Ziele an, die der Server annimmt. Beide Arten von Ziel schickt der
+ * Client als PUT /fahrten/:modulId/:richtung/:kindId (ein Auto oder autoId null fuer "kommt selbst"),
+ * und die Route prueft dafuer darfEinsetzen, "sitzt schon dort" und hatPlatzIn; genau das steht hier.
+ * Darum fallen Entwurf (409 ENTWURF), fehlende Zusage (409 NICHT_DABEI) und ein Kind ausserhalb der
+ * Zielgruppe (404) heraus, auch wenn Herausnehmen dort erlaubt bleibt.
+ *
+ * Verworfen: "Kommt selbst" am Herausnehmen (DELETE) auszurichten. Das DELETE loescht die Mitfahrt,
+ * das Kind stuende danach unter "Braucht noch Mitfahrt" und nicht unter "Kommt selbst"; die Auswahl
+ * schickt aber ein PUT, das fuer ein Kind ohne Zusage mit NICHT_DABEI scheitert. Verworfen auch:
+ * Rolle allein (darfBearbeiten) und die Liste im Client, denn so entstand der Knopf, den der Server
+ * ablehnt.
+ *
+ * Nur die Leitung setzt um; Familie und Kind haben dafuer Einsteigen und "Kommt selbst" (kinder).
+ */
+export function umsetzenZiele(
+	person: ThreadPerson,
+	kindId: string,
+	richtung: Richtung,
+	fahrt: FahrtDaten,
+	daten: FahrtKontext,
+	umfeld: Umfeld,
+	jetzt: Date,
+): UmsetzenZiele {
+	if (!darfBearbeiten(person, daten.kopf) || darfEinsetzen(person, kindId, daten, umfeld, jetzt) !== 'ERLAUBT') {
+		return { autoIds: [], selbst: false };
+	}
+	const bisher = fahrt.mitfahrten.find((m) => m.richtung === richtung && m.kindId === kindId);
+	return {
+		autoIds: fahrt.autos
+			.filter((a) => a.richtung === richtung && a.id !== bisher?.autoId && hatPlatzIn(a, fahrt, kindId))
+			.map((a) => a.id),
+		selbst: bisher?.autoId !== null,
+	};
+}
+
 export type AutoEingabe = {
 	plaetze: number;
 	abfahrtTag: string | null;
@@ -257,6 +304,7 @@ export interface FahrtKind {
 	/** Das Kind gehoert nicht mehr zu den betrachteten (abgesagt, Vielleicht): es sitzt noch im Auto. */
 	nichtMehrDabei: boolean;
 	darfHerausnehmen: boolean;
+	umsetzen: UmsetzenZiele;
 }
 
 export interface FahrtAutoAnsicht {
@@ -281,7 +329,7 @@ export interface FahrtRichtungAnsicht {
 	vorschlagTag: string | null;
 	darfAnbieten: boolean;
 	autos: FahrtAutoAnsicht[];
-	brauchtMitfahrt: { kindId: string; name: string }[];
+	brauchtMitfahrt: { kindId: string; name: string; umsetzen: UmsetzenZiele }[];
 	kommtSelbst: FahrtKind[];
 }
 
@@ -289,7 +337,6 @@ export interface FahrtModulAnsicht {
 	typ: 'FAHRT';
 	id: string;
 	titel: string | null;
-	leitung: boolean;
 	richtungen: FahrtRichtungAnsicht[];
 	/** Die Kinder, die die Person selbst einsetzen darf; die Leitung setzt andere ueber "Umsetzen" um. */
 	kinder: { kindId: string; vorname: string; selbst: boolean }[];
@@ -327,6 +374,7 @@ export function fahrtAnsicht(
 		name: name(m.kindId),
 		nichtMehrDabei: !betrachtetIds.has(m.kindId),
 		darfHerausnehmen: darfHerausnehmen(ich, m, f, daten, umfeld, jetzt) === 'ERLAUBT',
+		umsetzen: umsetzenZiele(ich, m.kindId, m.richtung, f, daten, umfeld, jetzt),
 	});
 	// Der erste Termin in Modulreihenfolge (Plan-Entscheidung 15), nicht der fruehste: Der Ersteller
 	// ordnet die Module, und ein Thread hat in der Regel einen.
@@ -341,7 +389,6 @@ export function fahrtAnsicht(
 		typ: 'FAHRT',
 		id: modul.id,
 		titel: modul.titel,
-		leitung: darfBearbeiten(ich, daten.kopf),
 		richtungen: RICHTUNGEN.filter((richtung) => (richtung === 'HIN' ? f.hin : f.rueck)).map(
 			(richtung): FahrtRichtungAnsicht => ({
 				richtung,
@@ -370,6 +417,7 @@ export function fahrtAnsicht(
 				brauchtMitfahrt: brauchtMitfahrt(f, richtung, betrachtete).map((k) => ({
 					kindId: k.id,
 					name: kurzname(k),
+					umsetzen: umsetzenZiele(ich, k.id, richtung, f, daten, umfeld, jetzt),
 				})),
 				kommtSelbst: f.mitfahrten
 					.filter((m) => m.richtung === richtung && m.autoId === null)

@@ -76,12 +76,12 @@ const FISCHERFEST: HelferUebersicht = {
 };
 
 // Die Ansicht der Leitung: Sandras Auto mit Lena darin, Max braucht noch eine Mitfahrt. Die
-// Rechte kommen fertig vom Server; Lena darf herausgenommen, Max eingesetzt werden.
+// Rechte kommen fertig vom Server; Lena darf herausgenommen, Max eingesetzt werden, und beide
+// setzt die Leitung um (umsetzen).
 const FAHRT: FahrtModulAnsicht = {
 	typ: 'FAHRT',
 	id: 'm-fahrt',
 	titel: null,
-	leitung: true,
 	richtungen: [
 		{
 			richtung: 'HIN',
@@ -100,10 +100,18 @@ const FAHRT: FahrtModulAnsicht = {
 					abfahrtZeit: '15:30',
 					ort: 'Vereinsheim',
 					notiz: null,
-					mitfahrer: [{ kindId: 'k-lena', name: 'Lena M.', nichtMehrDabei: false, darfHerausnehmen: true }],
+					mitfahrer: [
+						{
+							kindId: 'k-lena',
+							name: 'Lena M.',
+							nichtMehrDabei: false,
+							darfHerausnehmen: true,
+							umsetzen: { autoIds: [], selbst: true },
+						},
+					],
 				},
 			],
-			brauchtMitfahrt: [{ kindId: 'k-max', name: 'Max M.' }],
+			brauchtMitfahrt: [{ kindId: 'k-max', name: 'Max M.', umsetzen: { autoIds: ['a1'], selbst: true } }],
 			kommtSelbst: [],
 		},
 	],
@@ -607,7 +615,7 @@ describe('Antworten-Uebersicht der Verwaltung', () => {
 					{
 						...FAHRT.richtungen[0]!,
 						autos: [{ ...FAHRT.richtungen[0]!.autos[0]!, frei: 3, mitfahrer: [] }],
-						brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.' }],
+						brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.', umsetzen: { autoIds: ['a1'], selbst: true } }],
 					},
 				],
 			};

@@ -868,6 +868,7 @@ describe('vergleicheEntwurf: Fahrgemeinschaft', () => {
 			feld: 'module.1.hin',
 			text: 'Für die Hinfahrt gibt es schon Autos oder Mitfahrten.',
 			konflikt: true,
+			fahrt: true,
 		});
 		expect(v.behalten).toEqual([]);
 	});
@@ -882,6 +883,7 @@ describe('vergleicheEntwurf: Fahrgemeinschaft', () => {
 			feld: 'module.1.rueck',
 			text: 'Für die Rückfahrt gibt es schon Autos oder Mitfahrten.',
 			konflikt: true,
+			fahrt: true,
 		});
 	});
 
@@ -906,6 +908,7 @@ describe('vergleicheEntwurf: Fahrgemeinschaft', () => {
 			feld: 'module',
 			text: 'Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.',
 			konflikt: true,
+			fahrt: true,
 		});
 		expect(v.loeschen).toEqual([]);
 	});

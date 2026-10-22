@@ -61,7 +61,6 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 				typ: 'FAHRT',
 				id,
 				titel: m.titel,
-				leitung: false,
 				richtungen: RICHTUNGEN.filter((richtung) => (richtung === 'HIN' ? m.hin : m.rueck)).map((richtung) => ({
 					richtung,
 					vorschlagTag: null,

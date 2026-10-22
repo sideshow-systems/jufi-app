@@ -19,6 +19,7 @@ import {
 	hatPlatzIn,
 	pruefeAuto,
 	pruefeFahrtAenderung,
+	umsetzenZiele,
 	type FahrtKontext,
 } from './fahrt.js';
 
@@ -352,6 +353,73 @@ describe('darfHerausnehmen', () => {
 			darfHerausnehmen(person(id), { kindId: 'max', autoId: 'a-sandra' }, f, k, umfeld, JETZT);
 		expect(von('sandra')).toBe('ARCHIVIERT');
 		expect(von('thomas')).toBe('ERLAUBT');
+	});
+});
+
+describe('umsetzenZiele', () => {
+	// Sandras Auto mit Lena (2 von 3 frei), Hans' Auto mit Platz, Peters Auto voll; die Rueckfahrt hat
+	// ein eigenes Auto, das hin nie Ziel ist.
+	const f = fahrt(
+		[
+			auto('a-sandra', 'sandra'),
+			auto('a-hans', 'hans'),
+			auto('a-peter', 'peter', { plaetze: 1 }),
+			auto('a-rueck', 'sandra', { richtung: 'RUECK' }),
+		],
+		[mitfahrt('lena', 'a-sandra'), mitfahrt('paul', 'a-peter'), mitfahrt('max', 'a-sandra')],
+	);
+	const ziele = (von: string, kindId: string, k: FahrtKontext = kontext(), daten: FahrtDaten = f) =>
+		umsetzenZiele(person(von), kindId, 'HIN', daten, k, umfeld, JETZT);
+	const heraus = (von: string, kindId: string, k: FahrtKontext) =>
+		darfHerausnehmen(person(von), { kindId, autoId: 'a-sandra' }, f, k, umfeld, JETZT);
+
+	it('nennt der Leitung die Autos der Richtung mit Platz ohne das eigene und Kommt selbst', () => {
+		expect(ziele('thomas', 'lena')).toEqual({ autoIds: ['a-hans'], selbst: true });
+	});
+
+	it('nennt fuer ein Kind ohne Eintrag jedes Auto mit Platz und Kommt selbst', () => {
+		const k = kontext({}, []);
+		expect(ziele('thomas', 'tim', k)).toEqual({ autoIds: ['a-sandra', 'a-hans'], selbst: true });
+	});
+
+	it('laesst Kommt selbst aus, wo das Kind schon steht', () => {
+		const selbst = fahrt([...f.autos], [mitfahrt('lena', null)]);
+		expect(ziele('thomas', 'lena', kontext(), selbst)).toEqual({
+			autoIds: ['a-sandra', 'a-hans', 'a-peter'],
+			selbst: false,
+		});
+	});
+
+	it('nennt niemandem ausser der Leitung ein Ziel, auch nicht der Mutter', () => {
+		expect(ziele('sandra', 'lena')).toEqual({ autoIds: [], selbst: false });
+		expect(ziele('peter', 'lena')).toEqual({ autoIds: [], selbst: false });
+	});
+
+	it('nennt fuer ein Kind ohne Zusage kein Ziel, obwohl die Leitung es herausnehmen darf (NICHT_DABEI)', () => {
+		expect(heraus('thomas', 'max', kontext())).toBe('ERLAUBT');
+		expect(darfEinsetzen(person('thomas'), 'max', kontext(), umfeld, JETZT)).toBe('NICHT_DABEI');
+		expect(ziele('thomas', 'max')).toEqual({ autoIds: [], selbst: false });
+	});
+
+	it('nennt im Entwurf kein Ziel (ENTWURF)', () => {
+		const entwurf = kontext({ veroeffentlichtAm: null });
+		expect(darfEinsetzen(person('thomas'), 'lena', entwurf, umfeld, JETZT)).toBe('ENTWURF');
+		expect(ziele('thomas', 'lena', entwurf)).toEqual({ autoIds: [], selbst: false });
+	});
+
+	it('nennt fuer ein Kind, das aus der Zielgruppe gefallen ist, kein Ziel; Herausnehmen bleibt', () => {
+		// Max ist in der Untergruppe "klein", der Thread gilt nur noch "gross".
+		const gross = kontext({ alleUntergruppen: false, untergruppenIds: ['gross'] }, []);
+		expect(heraus('thomas', 'max', gross)).toBe('ERLAUBT');
+		expect(darfEinsetzen(person('thomas'), 'max', gross, umfeld, JETZT)).toBe('NICHT_GEFUNDEN');
+		expect(ziele('thomas', 'max', gross)).toEqual({ autoIds: [], selbst: false });
+	});
+
+	it('nennt im Archiv der Leitung weiter ihre Ziele', () => {
+		expect(ziele('thomas', 'lena', kontext({ archivModus: 'ARCHIVIERT' }))).toEqual({
+			autoIds: ['a-hans'],
+			selbst: true,
+		});
 	});
 });
 

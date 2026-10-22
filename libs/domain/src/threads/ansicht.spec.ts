@@ -603,14 +603,14 @@ describe('threadAnsicht: Fahrgemeinschaft', () => {
 	const hin = (a: FahrtModulAnsicht) => a.richtungen.find((r) => r.richtung === 'HIN')!;
 	const rueck = (a: FahrtModulAnsicht) => a.richtungen.find((r) => r.richtung === 'RUECK')!;
 	const sandrasAuto = fahrtModul({ autos: [auto()], mitfahrten: [mitfahrt('lena', 'a1')] });
+	const KEIN_ZIEL = { autoIds: [], selbst: false };
 
 	it('zeigt Kopf und je eingeschalteter Richtung einen Eintrag, Hinfahrt zuerst', () => {
 		const a = fahrtVon('thomas', [fahrtModul({}, 'Fahrten')]);
-		expect(a).toMatchObject({ typ: 'FAHRT', id: 'f1', titel: 'Fahrten', leitung: true });
+		expect(a).toMatchObject({ typ: 'FAHRT', id: 'f1', titel: 'Fahrten' });
 		expect(a.richtungen.map((r) => r.richtung)).toEqual(['HIN', 'RUECK']);
 		expect(fahrtVon('sandra', [fahrtModul({ hin: false })]).richtungen.map((r) => r.richtung)).toEqual(['RUECK']);
 		expect(fahrtVon('sandra', [fahrtModul({ rueck: false })]).richtungen.map((r) => r.richtung)).toEqual(['HIN']);
-		expect(fahrtVon('sandra', [fahrtModul()]).leitung).toBe(false);
 	});
 
 	it('beschreibt Sandras Auto mit Fahrer, freien Plaetzen und dem Kurznamen des Mitfahrers', () => {
@@ -626,7 +626,9 @@ describe('threadAnsicht: Fahrgemeinschaft', () => {
 			ort: 'Vereinsheim',
 			notiz: 'Kindersitze vorhanden',
 		});
-		expect(a.mitfahrer).toEqual([{ kindId: 'lena', name: 'Lena M.', nichtMehrDabei: false, darfHerausnehmen: false }]);
+		expect(a.mitfahrer).toEqual([
+			{ kindId: 'lena', name: 'Lena M.', nichtMehrDabei: false, darfHerausnehmen: false, umsetzen: KEIN_ZIEL },
+		]);
 		expect(rueck(fahrtVon('peter', [sandrasAuto])).autos).toEqual([]);
 	});
 
@@ -677,7 +679,7 @@ describe('threadAnsicht: Fahrgemeinschaft', () => {
 		const [a] = hin(fahrtVon('thomas', [modul])).autos;
 		expect(a.fahrer).toBe('ehemaliges Mitglied');
 		expect(a.mitfahrer).toEqual([
-			{ kindId: 'mia', name: 'ehemaliges Mitglied', nichtMehrDabei: true, darfHerausnehmen: true },
+			{ kindId: 'mia', name: 'ehemaliges Mitglied', nichtMehrDabei: true, darfHerausnehmen: true, umsetzen: KEIN_ZIEL },
 		]);
 	});
 
@@ -688,12 +690,18 @@ describe('threadAnsicht: Fahrgemeinschaft', () => {
 		});
 		const a = fahrtVon('thomas', [modul]);
 		expect(hin(a).brauchtMitfahrt).toEqual([
-			{ kindId: 'jonas', name: 'Jonas K.' },
-			{ kindId: 'paul', name: 'Paul V.' },
-			{ kindId: 'tim', name: 'Tim S.' },
+			{ kindId: 'jonas', name: 'Jonas K.', umsetzen: { autoIds: ['a1'], selbst: true } },
+			{ kindId: 'paul', name: 'Paul V.', umsetzen: { autoIds: ['a1'], selbst: true } },
+			{ kindId: 'tim', name: 'Tim S.', umsetzen: { autoIds: ['a1'], selbst: true } },
 		]);
 		expect(hin(a).kommtSelbst).toEqual([
-			{ kindId: 'max', name: 'Max M.', nichtMehrDabei: false, darfHerausnehmen: true },
+			{
+				kindId: 'max',
+				name: 'Max M.',
+				nichtMehrDabei: false,
+				darfHerausnehmen: true,
+				umsetzen: { autoIds: ['a1'], selbst: false },
+			},
 		]);
 		expect(rueck(a).brauchtMitfahrt.map((k) => k.kindId)).toEqual(['jonas', 'lena', 'max', 'paul']);
 		expect(rueck(a).kommtSelbst.map((k) => k.kindId)).toEqual(['tim']);
@@ -701,7 +709,9 @@ describe('threadAnsicht: Fahrgemeinschaft', () => {
 
 	it('zaehlt in "Braucht noch Mitfahrt" nur, wer dabei ist', () => {
 		const a = fahrtVon('thomas', [teilnahme('o-vielleicht'), fahrtModul()]);
-		expect(hin(a).brauchtMitfahrt).toEqual([{ kindId: 'lena', name: 'Lena M.' }]);
+		expect(hin(a).brauchtMitfahrt).toEqual([
+			{ kindId: 'lena', name: 'Lena M.', umsetzen: { autoIds: [], selbst: true } },
+		]);
 	});
 
 	it('sagt dem Fahrer: eigenes Auto, aendern erlaubt, kein zweites Auto in dieser Richtung', () => {
@@ -732,6 +742,25 @@ describe('threadAnsicht: Fahrgemeinschaft', () => {
 		expect(kann('peter')).toEqual([true, true]);
 		expect(kann('thomas')).toEqual([true, true]);
 		expect(kann('hans')).toEqual([false, false]);
+	});
+
+	it('rechnet die Umsetzen-Ziele je Kind mit den Regeln des Servers, nicht nach der Rolle', () => {
+		// Max hat abgesagt und sitzt noch in Sandras Auto: Die Leitung nimmt ihn heraus, setzt ihn aber nicht um.
+		const modul = fahrtModul({
+			autos: [auto()],
+			mitfahrten: [mitfahrt('lena', 'a1'), mitfahrt('max', 'a1')],
+		});
+		const leitung = hin(fahrtVon('thomas', [teilnahme('o-abgesagt'), modul]));
+		expect(leitung.autos[0].mitfahrer.map((m) => [m.kindId, m.darfHerausnehmen, m.umsetzen])).toEqual([
+			['lena', true, { autoIds: [], selbst: true }],
+			['max', true, KEIN_ZIEL],
+		]);
+		// Im Entwurf (Antworten-Uebersicht) lehnte der Server jedes Ziel mit ENTWURF ab.
+		const entwurf = hin(fahrtVon('thomas', [teilnahme('o-dabei'), modul], kopf({ veroeffentlichtAm: null })));
+		expect(entwurf.autos[0].mitfahrer.map((m) => m.umsetzen)).toEqual([KEIN_ZIEL, KEIN_ZIEL]);
+		// Die Mutter setzt ueber Einsteigen ein, nicht ueber Umsetzen.
+		const mutter = hin(fahrtVon('sandra', [teilnahme('o-dabei'), modul]));
+		expect(mutter.autos[0].mitfahrer.map((m) => m.umsetzen)).toEqual([KEIN_ZIEL, KEIN_ZIEL]);
 	});
 
 	describe('kinder', () => {

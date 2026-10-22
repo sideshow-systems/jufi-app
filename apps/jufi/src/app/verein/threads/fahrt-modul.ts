@@ -9,6 +9,7 @@ import {
 	inject,
 	Injector,
 	input,
+	linkedSignal,
 	output,
 	signal,
 	viewChild,
@@ -24,6 +25,7 @@ import {
 	type Richtung,
 	tagKurz,
 	undListe,
+	type UmsetzenZiele,
 } from '@jufi/domain';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
@@ -86,16 +88,24 @@ function wann(a: FahrtAutoAnsicht): string | null {
 }
 
 /**
- * Die Auswahl beim Umsetzen: die Autos der Richtung mit freiem Platz und "Kommt selbst", ohne das,
- * wo das Kind schon steht. Ein Umsetzen dorthin aendert nichts, und ein volles Auto wuerde der
- * Server mit VOLL abweisen. Dieselbe Liste entscheidet, ob der Knopf Umsetzen ueberhaupt steht.
+ * Die Auswahl beim Umsetzen, aus den Zielen, die die Domain je Kind ausgerechnet hat (umsetzenZiele):
+ * nur Autos und "Kommt selbst", die der Server annimmt. Die Karte rechnet hier nur die Texte. Verworfen:
+ * die Ziele wie frueher aus Rolle und freien Plaetzen selbst zu bilden; dann stand Umsetzen an Kindern
+ * ohne Zusage, im Entwurf und ausserhalb der Zielgruppe, und der Server lehnte jedes Ziel ab (R15).
  */
-function zieleFuer(r: FahrtRichtungAnsicht, kindId: string): Ziel[] {
-	const selbst = r.kommtSelbst.some((k) => k.kindId === kindId);
-	const autos = r.autos
-		.filter((a) => a.frei > 0 && !a.mitfahrer.some((m) => m.kindId === kindId))
-		.map((a) => ({ wert: a.id, text: `${[a.fahrer, wann(a)].filter(Boolean).join(' – ')} (${frei(a)})` }));
-	return selbst ? autos : [...autos, { wert: SELBST, text: 'Kommt selbst' }];
+function zieleFuer(r: FahrtRichtungAnsicht, u: UmsetzenZiele | null): Ziel[] {
+	if (u === null) return [];
+	const autos = u.autoIds.flatMap((id) => {
+		const a = r.autos.find((x) => x.id === id);
+		return a ? [{ wert: a.id, text: `${[a.fahrer, wann(a)].filter(Boolean).join(' – ')} (${frei(a)})` }] : [];
+	});
+	return u.selbst ? [...autos, { wert: SELBST, text: 'Kommt selbst' }] : autos;
+}
+
+/** Die Ziele eines Kindes, wo immer es in der Richtung steht; null, wenn es dort nicht mehr steht. */
+function umsetzenVon(r: FahrtRichtungAnsicht, kindId: string): UmsetzenZiele | null {
+	const zeilen = [...r.autos.flatMap((a) => a.mitfahrer), ...r.brauchtMitfahrt, ...r.kommtSelbst];
+	return zeilen.find((k) => k.kindId === kindId)?.umsetzen ?? null;
 }
 
 /**
@@ -175,8 +185,18 @@ function zieleFuer(r: FahrtRichtungAnsicht, kindId: string): Ziel[] {
 						}
 						@if (k.einsteigen.length > 0 || k.aendern) {
 							<div class="aktionen">
+								<!-- Der sichtbare Text steht an jedem Auto gleich; der zugaengliche Name nennt den Fahrer,
+								     wie ihn die Karte zeigt. Er beginnt mit dem sichtbaren Text (WCAG 2.5.3, Label in
+								     Name), damit Sprachsteuerung mit dem gelesenen Wort trifft. Verworfen: "Lena bei
+								     Sandra M. einsteigen", denn darin steht der sichtbare Text nicht mehr am Stueck. -->
 								@for (e of k.einsteigen; track e.kindId) {
-									<button type="button" class="knopf klein" [disabled]="sendet()" (click)="setzeEin(e, k.auto.id)">
+									<button
+										type="button"
+										class="knopf klein"
+										[attr.aria-label]="(e.name ? e.name + ' einsteigen' : 'Einsteigen') + ' bei ' + k.auto.fahrer"
+										[disabled]="sendet()"
+										(click)="setzeEin(e, k.auto.id)"
+									>
 										{{ e.name ? e.name + ' einsteigen' : 'Einsteigen' }}
 									</button>
 								}
@@ -321,7 +341,7 @@ function zieleFuer(r: FahrtRichtungAnsicht, kindId: string): Ziel[] {
 					}
 				</div>
 				@if (formular(); as f) {
-					@if (f.art === 'umsetzen' && f.kindId === z.kindId) {
+					@if (f.art === 'umsetzen' && f.kindId === z.kindId && ziele().length > 0) {
 						<form class="formular" novalidate (submit)="sendeUmsetzen($event, f.kindId)">
 							<label class="feld">
 								<span>{{ f.name }} umsetzen in</span>
@@ -485,7 +505,6 @@ export class FahrtModul {
 	protected readonly fehler = signal<string | null>(null);
 	protected readonly formular = signal<Formular | null>(null);
 	protected readonly rueckfrage = signal<Rueckfrage | null>(null);
-	protected readonly ziel = signal('');
 	private readonly gewaehlt = signal<Richtung | null>(null);
 	/** Das Formular, aus dem die laufende Anfrage stammt. */
 	private gesendetAus: Formular | null = null;
@@ -514,18 +533,18 @@ export class FahrtModul {
 		const eigene: Eigenes[] = bedienbar
 			? m.kinder.map((k) => ({ kindId: k.kindId, name: k.selbst ? null : k.vorname }))
 			: [];
-		const umsetzen = (kindId: string) => bedienbar && m.leitung && zieleFuer(r, kindId).length > 0;
 		const zeile = (z: {
 			kindId: string;
 			name: string;
 			nichtMehrDabei?: boolean;
 			darfHerausnehmen?: boolean;
+			umsetzen: UmsetzenZiele;
 		}): KindZeile => ({
 			kindId: z.kindId,
 			name: z.name,
 			nichtMehrDabei: z.nichtMehrDabei ?? false,
 			herausnehmen: bedienbar && (z.darfHerausnehmen ?? false),
-			umsetzen: umsetzen(z.kindId),
+			umsetzen: bedienbar && zieleFuer(r, z.umsetzen).length > 0,
 		});
 		return {
 			richtung: r,
@@ -545,11 +564,36 @@ export class FahrtModul {
 		};
 	});
 
-	/** Die Auswahl des offenen Umsetzen-Formulars. */
-	protected readonly ziele = computed(() => {
+	/** Das Kind des offenen Umsetzen-Formulars, sonst null. */
+	private readonly umsetzenKind = computed(() => {
 		const f = this.formular();
+		return f !== null && f.art === 'umsetzen' ? f.kindId : null;
+	});
+
+	/** Die Auswahl des offenen Umsetzen-Formulars, nach jeder neuen Ansicht (auch live) neu gerechnet. */
+	protected readonly ziele = computed(() => {
+		const kindId = this.umsetzenKind();
 		const r = this.aktuell();
-		return f !== null && f.art === 'umsetzen' && r !== null ? zieleFuer(r, f.kindId) : [];
+		return kindId !== null && r !== null ? zieleFuer(r, umsetzenVon(r, kindId)) : [];
+	});
+
+	/**
+	 * Das gewaehlte Ziel folgt der Auswahl: Bringt ein Live-Update eine Ansicht, in der es fehlt (Auto
+	 * voll oder zurueckgezogen), gilt das erste sichtbare Ziel. Das select zeigt dann ohnehin die erste
+	 * Option; gesendet wird, was zu sehen ist. Eine Wahl, die noch angeboten wird, bleibt. Ein neues
+	 * Formular (anderes Kind) beginnt beim ersten Ziel. Ohne Ziel ist der Wert leer, das Formular steht
+	 * nicht mehr da (Vorlage), und sendeUmsetzen schickt nichts.
+	 * Verworfen: ein signal, das nur beim Oeffnen gesetzt wird (so schickte Speichern ein Auto, das die
+	 * Auswahl nicht mehr zeigte), und ein effect, der es nachzieht (ein Takt mit altem Wert, und ein
+	 * Effekt, der Zustand schreibt, statt ihn abzuleiten).
+	 */
+	protected readonly ziel = linkedSignal<{ kindId: string | null; ziele: Ziel[] }, string>({
+		source: () => ({ kindId: this.umsetzenKind(), ziele: this.ziele() }),
+		computation: (neu, vorher) => {
+			const bleibt =
+				vorher !== undefined && vorher.source.kindId === neu.kindId && neu.ziele.some((z) => z.wert === vorher.value);
+			return bleibt ? vorher.value : (neu.ziele[0]?.wert ?? '');
+		},
 	});
 
 	protected reiterId(richtung: Richtung): string {
@@ -612,7 +656,6 @@ export class FahrtModul {
 		const r = this.aktuell();
 		if (this.sendet() || r === null) return;
 		this.fehler.set(null);
-		this.ziel.set(zieleFuer(r, z.kindId)[0]?.wert ?? '');
 		this.formular.set({ art: 'umsetzen', kindId: z.kindId, name: z.name, zurueck: `umsetzen-${z.kindId}` });
 		this.fokussiere(() => this.suche('form [data-erstes]'));
 	}
@@ -664,6 +707,8 @@ export class FahrtModul {
 		const r = this.aktuell();
 		if (r === null || this.sendet()) return;
 		const wert = this.ziel();
+		// Nur ein Ziel, das die Auswahl gerade zeigt (linkedSignal oben); ohne Ziel geht nichts hinaus.
+		if (!this.ziele().some((z) => z.wert === wert)) return;
 		await this.fuehreAus(() =>
 			this.api.setzeEin(this.slug(), this.modul().id, r.richtung, kindId, this.koerper(wert === SELBST ? null : wert)),
 		);

@@ -50,7 +50,7 @@ export interface ModulPlan {
 export interface EntwurfVergleich {
 	/** 400: unbekannte oder doppelte Modul-ID, Typwechsel, fremder Options- oder Positionsschluessel. */
 	fehler: Feldfehler | null;
-	/** 409 BEANTWORTET (Antworten einer Umfrage oder Eintraege einer Helferliste). */
+	/** 409 BEANTWORTET (Antworten einer Umfrage oder Eintraege einer Helferliste), an einer Fahrgemeinschaft (fahrt) FAHRT_BELEGT. */
 	konflikt: Feldfehler | null;
 	/** Modul-IDs. */
 	loeschen: string[];
@@ -270,6 +270,7 @@ function fahrt(e: Bestehendes, alt: ModulDaten & { typ: 'FAHRT' }, neu: FahrtEnt
 		feld: `module.${i}.${k.richtung === 'HIN' ? 'hin' : 'rueck'}`,
 		text: `Für die ${RICHTUNG_TEXT[k.richtung]} gibt es schon Autos oder Mitfahrten.`,
 		konflikt: true,
+		fahrt: true,
 	};
 }
 
@@ -396,6 +397,7 @@ export function vergleicheEntwurf(
 					feld: 'module',
 					text: 'Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.',
 					konflikt: true,
+					fahrt: true,
 				},
 			});
 		}

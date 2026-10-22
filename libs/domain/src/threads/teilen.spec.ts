@@ -272,7 +272,6 @@ describe('teilenText: Datei- und Foto-Module', () => {
 			typ: 'FAHRT',
 			id: 'f1',
 			titel: null,
-			leitung: false,
 			richtungen: [
 				{ richtung: 'HIN', vorschlagTag: null, darfAnbieten: true, autos: [], brauchtMitfahrt: [], kommtSelbst: [] },
 			],

@@ -9,9 +9,17 @@ import { FahrtModul } from './fahrt-modul';
 type Richtung = FahrtModulAnsicht['richtungen'][number];
 type Auto = Richtung['autos'][number];
 type Kind = Auto['mitfahrer'][number];
+type Ziele = Kind['umsetzen'];
+type Braucht = Richtung['brauchtMitfahrt'][number];
+
+const KEIN_ZIEL: Ziele = { autoIds: [], selbst: false };
 
 function kind(kindId: string, name: string, zusatz: Partial<Kind> = {}): Kind {
-	return { kindId, name, nichtMehrDabei: false, darfHerausnehmen: false, ...zusatz };
+	return { kindId, name, nichtMehrDabei: false, darfHerausnehmen: false, umsetzen: KEIN_ZIEL, ...zusatz };
+}
+
+function braucht(kindId: string, name: string, umsetzen: Ziele = KEIN_ZIEL): Braucht {
+	return { kindId, name, umsetzen };
 }
 
 function auto(id: string, zusatz: Partial<Auto> = {}): Auto {
@@ -49,10 +57,7 @@ function hin(zusatz: Partial<Richtung> = {}): Richtung {
 		vorschlagTag: '2026-10-23',
 		darfAnbieten: true,
 		autos: [SANDRAS_AUTO, auto('a2')],
-		brauchtMitfahrt: [
-			{ kindId: 'k-lena', name: 'Lena M.' },
-			{ kindId: 'k-mia', name: 'Mia S.' },
-		],
+		brauchtMitfahrt: [braucht('k-lena', 'Lena M.'), braucht('k-mia', 'Mia S.')],
 		kommtSelbst: [],
 		...zusatz,
 	};
@@ -75,7 +80,6 @@ function fahrt(zusatz: Partial<FahrtModulAnsicht> = {}): FahrtModulAnsicht {
 		typ: 'FAHRT',
 		id: 'm7',
 		titel: null,
-		leitung: false,
 		richtungen: [hin()],
 		kinder: [{ kindId: 'k-lena', vorname: 'Lena', selbst: false }],
 		...zusatz,
@@ -331,7 +335,7 @@ describe('Fahrgemeinschaft-Modul', () => {
 		});
 
 		it('nach einer Antwort bleibt die gewaehlte Richtung stehen', async () => {
-			zeige(fahrt({ richtungen: [hin(), rueck({ brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.' }] })] }));
+			zeige(fahrt({ richtungen: [hin(), rueck({ brauchtMitfahrt: [braucht('k-lena', 'Lena M.')] })] }));
 			el.querySelectorAll<HTMLElement>('[role="tab"]')[1]?.click();
 			aktualisiere();
 			knopf(el.querySelector('[data-abschnitt="selbst"]') as HTMLElement, 'Lena kommt selbst').click();
@@ -356,7 +360,7 @@ describe('Fahrgemeinschaft-Modul', () => {
 				richtungen: [
 					hin({
 						autos: [SANDRAS_AUTO, auto('a2', { frei: 1, mitfahrer: [kind('k-lena', 'Lena M.')] })],
-						brauchtMitfahrt: [{ kindId: 'k-mia', name: 'Mia S.' }],
+						brauchtMitfahrt: [braucht('k-mia', 'Mia S.')],
 					}),
 				],
 			});
@@ -398,7 +402,17 @@ describe('Fahrgemeinschaft-Modul', () => {
 			);
 
 			expect(knopfText(karte('a2'))).toEqual(['Einsteigen']);
+			expect(knopf(karte('a2'), 'Einsteigen').getAttribute('aria-label')).toBe('Einsteigen bei Thomas K.');
 			expect(knopfText(el.querySelector('[data-abschnitt="selbst"]') as HTMLElement)).toEqual(['Kommt selbst']);
+		});
+
+		it('der zugaengliche Name von Einsteigen nennt den Fahrer wie die Karte und beginnt mit dem sichtbaren Text', () => {
+			zeige();
+
+			expect(knopf(karte('a1'), 'Lena einsteigen').getAttribute('aria-label')).toBe(
+				'Lena einsteigen bei Sandra M. (Mutter von Lena)',
+			);
+			expect(knopf(karte('a2'), 'Lena einsteigen').getAttribute('aria-label')).toBe('Lena einsteigen bei Thomas K.');
 		});
 
 		it('Lena kommt selbst schickt autoId null; wer dort steht, bekommt den Knopf nicht mehr', async () => {
@@ -452,7 +466,7 @@ describe('Fahrgemeinschaft-Modul', () => {
 		});
 
 		it('die Rueckrichtung geht klein in die Adresse', async () => {
-			zeige(fahrt({ richtungen: [rueck({ brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.' }] })] }));
+			zeige(fahrt({ richtungen: [rueck({ brauchtMitfahrt: [braucht('k-lena', 'Lena M.')] })] }));
 			knopf(karte('a9'), 'Lena einsteigen').click();
 
 			mitfahrt('PUT', 'rueck', 'k-lena').flush({ modul: fahrt(), stand: 50 });
@@ -697,26 +711,37 @@ describe('Fahrgemeinschaft-Modul', () => {
 	});
 
 	describe('Umsetzen durch die Leitung', () => {
-		function leitung(): FahrtModulAnsicht {
+		// Die Ziele je Kind rechnet die Domain (umsetzenZiele): Sandras Auto hat Platz, Gerds ist voll.
+		function leitung(mia: Ziele = { autoIds: ['a1'], selbst: true }): FahrtModulAnsicht {
 			return fahrt({
-				leitung: true,
 				kinder: [],
 				richtungen: [
 					hin({
 						autos: [
-							SANDRAS_AUTO,
+							{
+								...SANDRAS_AUTO,
+								mitfahrer: [kind('k-jonas', 'Jonas B.', { umsetzen: { autoIds: [], selbst: true } })],
+							},
 							auto('a3', {
 								fahrer: 'Gerd H.',
 								plaetze: 1,
 								frei: 0,
-								mitfahrer: [kind('k-tom', 'Tom K.', { darfHerausnehmen: true })],
+								mitfahrer: [
+									kind('k-tom', 'Tom K.', { darfHerausnehmen: true, umsetzen: { autoIds: ['a1'], selbst: true } }),
+								],
 							}),
 						],
-						brauchtMitfahrt: [{ kindId: 'k-mia', name: 'Mia S.' }],
-						kommtSelbst: [kind('k-max', 'Max M.', { darfHerausnehmen: true })],
+						brauchtMitfahrt: [braucht('k-mia', 'Mia S.', mia)],
+						kommtSelbst: [
+							kind('k-max', 'Max M.', { darfHerausnehmen: true, umsetzen: { autoIds: ['a1'], selbst: false } }),
+						],
 					}),
 				],
 			});
+		}
+
+		function optionen(): string[] {
+			return Array.from(formular().querySelectorAll('option')).map((o) => text(o));
 		}
 
 		it('bietet Umsetzen an jedem Kind in Autos, unter Braucht noch Mitfahrt und unter Kommt selbst', () => {
@@ -811,6 +836,95 @@ describe('Fahrgemeinschaft-Modul', () => {
 			zeige();
 
 			expect(knopfText()).not.toContain('Umsetzen');
+		});
+
+		it('ohne Ziele in der Ansicht gibt es kein Umsetzen, auch nicht fuer die Leitung (R15)', () => {
+			// Tom hat abgesagt: Herausnehmen erlaubt der Server, jedes Umsetzen lehnte er mit NICHT_DABEI ab.
+			const modul = leitung();
+			const [sandra, gerd] = modul.richtungen[0].autos;
+			zeige(
+				fahrt({
+					...modul,
+					richtungen: [
+						hin({
+							autos: [
+								sandra,
+								{ ...gerd, mitfahrer: [kind('k-tom', 'Tom K.', { nichtMehrDabei: true, darfHerausnehmen: true })] },
+							],
+							brauchtMitfahrt: [],
+						}),
+					],
+				}),
+			);
+
+			expect(knopfText(zeileVon('k-tom'))).toEqual(['Herausnehmen']);
+		});
+
+		it('ein Live-Update, in dem das gewaehlte Auto fehlt, waehlt das sichtbare Ziel und schickt es', async () => {
+			zeige(leitung());
+			knopf(zeileVon('k-mia'), 'Umsetzen').click();
+			aktualisiere();
+			expect((formular().querySelector('select') as HTMLSelectElement).value).toBe('a1');
+
+			// Sandras Auto ist inzwischen voll: Die neue Ansicht bietet Mia nur noch Kommt selbst an.
+			const voll = leitung({ autoIds: [], selbst: true });
+			voll.richtungen[0].autos[0] = { ...voll.richtungen[0].autos[0], frei: 0 };
+			fixture.componentInstance.modul.set(voll);
+			aktualisiere();
+			expect(optionen()).toEqual(['Kommt selbst']);
+			knopf(formular(), 'Speichern').click();
+
+			const a = mitfahrt('PUT', 'hin', 'k-mia');
+			expect(a.request.body).toEqual({ autoId: null, clientId: expect.stringMatching(UUID) });
+			a.flush({ modul: fahrt(), stand: 50 });
+			await fertig();
+		});
+
+		it('ein Live-Update behaelt die Wahl, solange sie noch angeboten wird', async () => {
+			zeige(leitung());
+			knopf(zeileVon('k-mia'), 'Umsetzen').click();
+			aktualisiere();
+			const auswahl = formular().querySelector('select') as HTMLSelectElement;
+			auswahl.value = 'selbst';
+			auswahl.dispatchEvent(new Event('change'));
+			aktualisiere();
+
+			fixture.componentInstance.modul.set(leitung({ autoIds: ['a1'], selbst: true }));
+			aktualisiere();
+			knopf(formular(), 'Speichern').click();
+
+			const a = mitfahrt('PUT', 'hin', 'k-mia');
+			expect(a.request.body.autoId).toBeNull();
+			a.flush({ modul: fahrt(), stand: 50 });
+			await fertig();
+		});
+
+		it('ein Live-Update ohne Ziele schliesst das Formular und schickt nichts', () => {
+			zeige(leitung());
+			knopf(zeileVon('k-mia'), 'Umsetzen').click();
+			aktualisiere();
+
+			fixture.componentInstance.modul.set(leitung(KEIN_ZIEL));
+			aktualisiere();
+
+			expect(el.querySelector('form')).toBeNull();
+			expect(knopfText(zeileVon('k-mia'))).toEqual([]);
+		});
+
+		it('ein neues Formular beginnt mit dem ersten Ziel, nicht mit der Wahl des vorigen Kindes', () => {
+			zeige(leitung());
+			knopf(zeileVon('k-tom'), 'Umsetzen').click();
+			aktualisiere();
+			const auswahl = formular().querySelector('select') as HTMLSelectElement;
+			auswahl.value = 'selbst';
+			auswahl.dispatchEvent(new Event('change'));
+			aktualisiere();
+			knopf(formular(), 'Abbrechen').click();
+			aktualisiere();
+
+			knopf(zeileVon('k-mia'), 'Umsetzen').click();
+			aktualisiere();
+			expect((formular().querySelector('select') as HTMLSelectElement).value).toBe('a1');
 		});
 	});
 
@@ -1042,7 +1156,8 @@ describe('Fahrgemeinschaft-Modul', () => {
 
 	describe('Vorschau', () => {
 		it('zeigt keine Knoepfe, auch wenn die Ansicht Rechte mitbraechte', () => {
-			zeige(fahrt({ leitung: true, richtungen: [hin({ kommtSelbst: [kind('k-max', 'Max M.')] })] }), true);
+			const max = kind('k-max', 'Max M.', { darfHerausnehmen: true, umsetzen: { autoIds: ['a2'], selbst: false } });
+			zeige(fahrt({ richtungen: [hin({ kommtSelbst: [max] })] }), true);
 
 			expect(knoepfe()).toHaveLength(0);
 			expect(text()).toContain('Sandra M. (Mutter von Lena)');

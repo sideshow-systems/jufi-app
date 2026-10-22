@@ -712,7 +712,6 @@ describe('Thread-Seite', () => {
 			typ: 'FAHRT',
 			id: 'm8',
 			titel: null,
-			leitung: false,
 			richtungen: [
 				{
 					richtung: 'HIN',
@@ -734,7 +733,7 @@ describe('Thread-Seite', () => {
 							mitfahrer: [],
 						},
 					],
-					brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.' }],
+					brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.', umsetzen: { autoIds: [], selbst: false } }],
 					kommtSelbst: [],
 				},
 			],
@@ -769,7 +768,15 @@ describe('Thread-Seite', () => {
 								{
 									...richtung.autos[0]!,
 									frei: 2,
-									mitfahrer: [{ kindId: 'k-lena', name: 'Lena M.', nichtMehrDabei: false, darfHerausnehmen: true }],
+									mitfahrer: [
+										{
+											kindId: 'k-lena',
+											name: 'Lena M.',
+											nichtMehrDabei: false,
+											darfHerausnehmen: true,
+											umsetzen: { autoIds: [], selbst: false },
+										},
+									],
 								},
 							],
 							brauchtMitfahrt: [],
