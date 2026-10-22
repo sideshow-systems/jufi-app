@@ -731,8 +731,8 @@ export class FahrtModul {
 	/**
 	 * Der Satz zu einem Feld gehoert an das Formular, das die Anfrage geschickt hat. Ist es nicht mehr
 	 * offen (die Reiter sind waehrend des Sendens nicht gesperrt, ein Richtungswechsel schliesst es),
-	 * steht der Satz oben am Modul: Verworfen: ihn zu verwerfen, denn dann bliebe das Auto unveraendert
-	 * und niemand sagte es. Ein inzwischen geoeffnetes anderes Formular bekommt ihn nicht.
+	 * steht der Satz oben am Modul. Verworfen: den Satz fallen zu lassen, denn dann bliebe das Auto
+	 * unveraendert und niemand sagte es. Ein inzwischen geoeffnetes anderes Formular bekommt ihn nicht.
 	 */
 	private zeigeFeldfehler(feld: AutoFeld, text: string): void {
 		const formular = this.formular();
