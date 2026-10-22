@@ -11,12 +11,19 @@ import {
 } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
-import { fristText, type HelferUebersicht, type UebersichtZeile, type UmfrageUebersicht } from '@jufi/domain';
+import {
+	type FahrtModulAnsicht,
+	fristText,
+	type HelferUebersicht,
+	type UebersichtZeile,
+	type UmfrageUebersicht,
+} from '@jufi/domain';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { alsApiFehler, fehlertextNichtGefunden, fehlerVon } from '../../../gemeinsam/api-fehler';
 import { KarteComponent } from '../../../gestaltung/ui';
 import { beiAbgelaufenerSitzung, istNichtAngemeldet } from '../../sitzung-abgelaufen';
 import { ThreadApi } from '../../threads/thread-api';
+import { FahrtModul } from '../../threads/fahrt-modul';
 import { teilnahmeText } from '../../threads/umfrage-modul';
 import { VerwaltungThreadsApi } from './threads-api';
 
@@ -112,10 +119,16 @@ interface UmfrageSicht {
  * der Frist und im Archiv. Fehler stehen am Block, nicht oben: Der Satz gehoert zu der Liste, in
  * der die Handlung scheiterte. Ein 409 (voll) laedt die Uebersicht zusaetzlich neu, denn dann
  * stimmen Fuellstand und Auswahl nicht mehr.
+ *
+ * Unter den Helferlisten steht die Fahrgemeinschaft als jf-fahrt-modul mit der Ansicht der Leitung
+ * (TP4 Etappe 4, Plan-Entscheidung 17): Umsetzen und alle anderen Bedienelemente sind dieselben wie
+ * auf der Thread-Seite, die Karte bringt ihre Ueberschrift selbst mit. Verworfen: eine eigene Tabelle,
+ * die jede Regel ein zweites Mal rechnete. Gemeldete Ansichten ersetzen die der Uebersicht; veraltet
+ * laedt neu, und der Satz zum Grund bleibt an der Karte stehen, weil sie dieselbe bleibt.
  */
 @Component({
 	selector: 'jf-antworten-uebersicht',
-	imports: [KarteComponent, RouterLink],
+	imports: [FahrtModul, KarteComponent, RouterLink],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<a class="zurueck" [routerLink]="['/', slug(), 'verwaltung', 'threads']">Zurück zu den Threads</a>
@@ -279,7 +292,17 @@ interface UmfrageSicht {
 					}
 				</jf-karte>
 			}
-			@if (umfragen().length === 0 && helfer().length === 0) {
+			@if (fahrt(); as f) {
+				<jf-karte [attr.data-fahrt]="f.id">
+					<jf-fahrt-modul
+						[modul]="f"
+						[slug]="slug()"
+						(geaendert)="setzeFahrt($event)"
+						(veraltet)="uebersicht.reload()"
+					/>
+				</jf-karte>
+			}
+			@if (umfragen().length === 0 && helfer().length === 0 && fahrt() === null) {
 				<jf-karte>
 					<p class="gedaempft">
 						Dieser Thread hat keine Umfrage oder Helferliste, deshalb gibt es hier keine Antworten.
@@ -442,12 +465,26 @@ export class ThreadAntwortenComponent {
 			: [],
 	);
 
+	protected readonly fahrt = computed<FahrtModulAnsicht | null>(() =>
+		this.uebersicht.hasValue() ? this.uebersicht.value().fahrt : null,
+	);
+
 	constructor() {
 		inject(DestroyRef).onDestroy(() => (this.weg = true));
 		effect(() => {
 			const fehler = this.fehlerRoh();
 			if (fehler) untracked(() => void beiAbgelaufenerSitzung(this.router, this.slug(), fehler));
 		});
+	}
+
+	/**
+	 * Die Karte meldet die Ansicht nach einer Handlung; sie ersetzt die der Uebersicht, ohne neu zu
+	 * laden, wie die Thread-Seite es mit ersetzeModul tut. Verworfen: jedes Mal neu laden, denn die
+	 * Antwort des Servers enthaelt die Ansicht schon, und das Neuladen risse die Karte kurz weg.
+	 */
+	protected setzeFahrt(neu: FahrtModulAnsicht): void {
+		if (!this.uebersicht.hasValue()) return;
+		this.uebersicht.value.update((u) => ({ ...u, fahrt: neu }));
 	}
 
 	protected klappe(schluessel: string): void {

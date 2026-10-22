@@ -12,7 +12,7 @@ import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { legeThreadAn, ordneZu, trageEinTest } from './test-threads.js';
+import { bieteAutoTest, legeThreadAn, ordneZu, setzeEinTest, trageEinTest } from './test-threads.js';
 
 // Feste Uhr der App: "bevorstehend" und "archiviert" sollen nicht von der Wanduhr abhaengen.
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
@@ -455,6 +455,62 @@ describe('Lesende Routen der Verwaltung', () => {
 			expect(gefragte).toContain(s.thomas.personId);
 			expect(gefragte).not.toContain(s.lena.personId);
 			expect(h?.ohneEintrag).toBe(gefragte.length - 1);
+		});
+
+		it('liefert die Fahrgemeinschaft mit der Ansicht der Leitung: leitung true, Autos mit Mitfahrern', async () => {
+			const s = await szenario();
+			const t = await legeThreadAn(prisma, s.verein, JETZT, {
+				titel: 'Bowling',
+				erstelltVonId: s.thomas.personId,
+				module: [
+					{ typ: 'UMFRAGE', teilnahme: true },
+					{ typ: 'FAHRT', hin: true, rueck: false },
+				],
+			});
+			const [umfrageId, fahrtId] = t.modulIds as [string, string];
+			await s.db.umfrageAntwort.create({
+				data: {
+					umfrageId,
+					fuerId: s.lena.personId,
+					vonId: s.sandra.personId,
+					abgegebenAm: JETZT,
+					clientId: randomUUID(),
+					optionen: { create: [{ optionId: t.optionIds['dabei'] as string }] },
+				},
+			});
+			const autoId = await bieteAutoTest(s.db, fahrtId, s.sandra.personId, 'HIN', 3, { ort: 'Vereinsheim' });
+			await setzeEinTest(s.db, fahrtId, 'HIN', s.lena.personId, autoId, s.sandra.personId);
+
+			const r = await s.hole(`/threads/${t.threadId}/antworten`, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const u = (await r.json()) as AntwortenUebersicht;
+			expect(u.fahrt).toMatchObject({ typ: 'FAHRT', id: fahrtId, leitung: true });
+			const hin = u.fahrt?.richtungen.find((x) => x.richtung === 'HIN');
+			expect(hin?.autos).toHaveLength(1);
+			expect(hin?.autos[0]).toMatchObject({
+				id: autoId,
+				fahrer: 'Sandra M. (Mutter von Lena)',
+				ort: 'Vereinsheim',
+				frei: 2,
+			});
+			expect(hin?.autos[0]?.mitfahrer.map((m) => m.kindId)).toEqual([s.lena.personId]);
+			// Bernd (nur "Antworten im Detail") sieht die Fahrgemeinschaft, ist aber nicht die Leitung.
+			const bernd = (await (
+				await s.hole(`/threads/${t.threadId}/antworten`, s.bernd.cookie)
+			).json()) as AntwortenUebersicht;
+			expect(bernd.fahrt).toMatchObject({ id: fahrtId, leitung: false });
+		});
+
+		it('ohne Fahrgemeinschaft ist fahrt null', async () => {
+			const s = await szenario();
+			const t = await legeThreadAn(prisma, s.verein, JETZT, {
+				erstelltVonId: s.thomas.personId,
+				module: [{ typ: 'UMFRAGE', teilnahme: true }],
+			});
+			const u = (await (
+				await s.hole(`/threads/${t.threadId}/antworten`, s.thomas.cookie)
+			).json()) as AntwortenUebersicht;
+			expect(u.fahrt).toBeNull();
 		});
 
 		it('Sandra, Tina ohne Recht am Thread und eine unbekannte ID bekommen dieselben 404-Bytes', async () => {
