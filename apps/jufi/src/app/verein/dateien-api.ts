@@ -1,9 +1,9 @@
 import { HttpBackend, HttpClient } from '@angular/common/http';
 import { inject, Injectable, InjectionToken } from '@angular/core';
-import type { DokumentAnsicht, DokumenteAntwort, SpeicherAntwort } from '@jufi/domain';
+import type { DateiZeile, DokumentAnsicht, DokumenteAntwort, SpeicherAntwort } from '@jufi/domain';
 import { catchError, type Observable, throwError } from 'rxjs';
 import { alsApiFehler } from '../gemeinsam/api-fehler';
-import { type HochladenStand, ladeHoch } from './hochladen';
+import { vereinsApi } from './dateien-anzeige';
 
 /**
  * Das Backend, ueber das Uploads laufen. Vorgabe ist das der App (Fetch); app.config.ts setzt hier
@@ -25,16 +25,16 @@ export interface DokumentAenderung {
 /**
  * Die Aufrufe der Dateien- und Dokumente-Routen des Servers (apps/jufi/src/server/dateien), der
  * Slug stets als erster Parameter. Eigener Dienst neben ThreadApi und MitgliederApi: Dateien
- * gehoeren zu keinem von beiden und wachsen mit Etappe 2 (Fotos) weiter.
+ * gehoeren zu keinem von beiden; mit Etappe 2 kamen Fotos und die Dateien der Module dazu.
  */
 @Injectable({ providedIn: 'root' })
 export class DateienApi {
 	private readonly http = inject(HttpClient);
 	private readonly hochladeBackend = inject(HOCHLADE_BACKEND);
-	private hochlader: HttpClient | undefined;
+	private uploadClient: HttpClient | undefined;
 
 	private basis(slug: string): string {
-		return `/${encodeURIComponent(slug)}/api/v1`;
+		return vereinsApi(slug);
 	}
 
 	dokumente(slug: string): Observable<DokumenteAntwort> {
@@ -43,13 +43,28 @@ export class DateienApi {
 			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 
-	/**
-	 * Adresse einer Datei fuer einen Link, kein Aufruf: Der Browser holt sie selbst (neuer Tab oder
-	 * Speichern), die Sitzung haengt am Cookie. Verworfen: ein Blob ueber HttpClient, das hielte die
-	 * ganze Datei im Speicher des Handys, nur um sie gleich wieder abzulegen.
-	 */
-	dateiAdresse(slug: string, dateiId: string, herunterladen = false): string {
-		return `${this.basis(slug)}/dateien/${encodeURIComponent(dateiId)}${herunterladen ? '?herunterladen=1' : ''}`;
+	/** Das Vorschaubild eines Fotos (480 px), wie dateiAdresse ein Link fuer img und nie ein Aufruf. */
+	vorschauAdresse(slug: string, dateiId: string): string {
+		return `${this.basis(slug)}/dateien/${encodeURIComponent(dateiId)}/vorschau`;
+	}
+
+	/** Ziel einer neuen Datei im Datei-Modul (POST, roher Koerper). */
+	modulDateienAdresse(slug: string, modulId: string): string {
+		return `${this.basis(slug)}/module/${encodeURIComponent(modulId)}/dateien`;
+	}
+
+	/** Ziel eines neuen Fotos im Foto-Modul (POST, roher Koerper). */
+	modulFotosAdresse(slug: string, modulId: string): string {
+		return `${this.basis(slug)}/module/${encodeURIComponent(modulId)}/fotos`;
+	}
+
+	/** Nur fuer Dateien eines Datei-Moduls; Dokumente benennt die Verwaltung ueber ihren Titel um. */
+	benenneDatei(slug: string, id: string, name: string): Observable<DateiZeile> {
+		return this.senden('PUT', slug, `/dateien/${encodeURIComponent(id)}`, { name });
+	}
+
+	loescheDatei(slug: string, id: string): Observable<void> {
+		return this.senden('DELETE', slug, `/dateien/${encodeURIComponent(id)}`);
 	}
 
 	speicher(slug: string): Observable<SpeicherAntwort> {
@@ -93,11 +108,15 @@ export class DateienApi {
 		return `${this.basis(slug)}/dokumente/${encodeURIComponent(id)}/datei`;
 	}
 
-	ladeHoch(url: string, datei: File, methode: 'POST' | 'PUT'): Observable<HochladenStand> {
-		// Erst beim ersten Upload gebaut: Die Medien-Seite wird auch auf dem Server gerendert und soll dort
-		// das XHR-Backend nicht einmal anfassen. Ohne Interceptoren, die keine Dateikoerper kennen muessen.
-		this.hochlader ??= new HttpClient(this.hochladeBackend);
-		return ladeHoch(url, datei, methode, this.hochlader);
+	/**
+	 * Der Client der Uploads, ohne Interceptoren und mit dem XHR-Backend (HOCHLADE_BACKEND). Erst beim
+	 * ersten Upload gebaut: Die Medien-Seite wird auch auf dem Server gerendert und soll dort das
+	 * XHR-Backend nicht einmal anfassen. Die Warteschlange (Hochladeschlange) nimmt ihn als Parameter,
+	 * denn sie ist eine freie Klasse ohne Injektionskontext.
+	 */
+	hochlader(): HttpClient {
+		this.uploadClient ??= new HttpClient(this.hochladeBackend);
+		return this.uploadClient;
 	}
 
 	private senden<T>(methode: 'POST' | 'PUT' | 'DELETE', slug: string, pfad: string, koerper?: object): Observable<T> {

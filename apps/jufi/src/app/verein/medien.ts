@@ -1,29 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { type DokumentAnsicht, speicherText } from '@jufi/domain';
+import { speicherText } from '@jufi/domain';
 import { fehlertext, fehlertextNichtGefunden, fehlerVon } from '../gemeinsam/api-fehler';
 import { IconComponent } from '../gestaltung/icon';
 import { KarteComponent } from '../gestaltung/ui';
 import { DateienApi } from './dateien-api';
+import { dateiLink, typKuerzel } from './dateien-anzeige';
 import { beiAbgelaufenerSitzung, istNichtAngemeldet } from './sitzung-abgelaufen';
-
-const KUERZEL = new Map<string, string>([
-	['application/pdf', 'PDF'],
-	['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'Word'],
-	['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Excel'],
-	['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'PowerPoint'],
-	['application/vnd.oasis.opendocument.text', 'OpenDocument'],
-	['application/vnd.oasis.opendocument.spreadsheet', 'OpenDocument'],
-	['image/jpeg', 'Bild'],
-	['image/png', 'Bild'],
-]);
-
-/**
- * Nur das, was der Server inline ausliefert (PDF, JPEG, PNG): Alles andere zeigt der Browser nicht an,
- * und ein neuer Tab, der gleich wieder herunterlaedt, bliebe leer zurueck.
- */
-const IM_BROWSER = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 
 /**
  * Die Seite Medien (TP4 Spec 3.1): in Etappe 1 die globalen Dokumente nach Kategorien. Der Reiter
@@ -55,15 +39,16 @@ const IM_BROWSER = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 					<ul>
 						@for (d of k.dokumente; track d.id) {
 							<li>
+								@let link = dateiLink(slug(), { id: d.dateiId, typ: d.typ });
 								<a
 									class="reihe"
-									[href]="adresse(d)"
-									[attr.target]="imBrowser(d) ? '_blank' : null"
-									[attr.rel]="imBrowser(d) ? 'noopener' : null"
+									[href]="link.href"
+									[attr.target]="link.neuerTab ? '_blank' : null"
+									[attr.rel]="link.neuerTab ? 'noopener' : null"
 								>
 									<jf-icon name="dokument" />
 									<span class="titel">{{ d.titel }}</span>
-									<span class="zusatz">{{ kuerzel(d.typ) }} · {{ groesse(d.groesse) }}</span>
+									<span class="zusatz">{{ typKuerzel(d.typ) }} · {{ groesse(d.groesse) }}</span>
 								</a>
 							</li>
 						}
@@ -148,6 +133,8 @@ export class MedienComponent {
 	private readonly api = inject(DateienApi);
 	private readonly router = inject(Router);
 
+	protected readonly dateiLink = dateiLink;
+	protected readonly typKuerzel = typKuerzel;
 	protected readonly fehlertext = fehlertext;
 	protected readonly nichtGefunden = fehlertextNichtGefunden;
 
@@ -183,20 +170,8 @@ export class MedienComponent {
 		});
 	}
 
-	protected kuerzel(typ: string): string {
-		return KUERZEL.get(typ) ?? 'Datei';
-	}
-
 	protected groesse(bytes: number): string {
 		return speicherText(bytes);
-	}
-
-	protected imBrowser(d: DokumentAnsicht): boolean {
-		return IM_BROWSER.has(d.typ);
-	}
-
-	protected adresse(d: DokumentAnsicht): string {
-		return this.api.dateiAdresse(this.slug(), d.dateiId, !this.imBrowser(d));
 	}
 
 	protected neuVersuchen(): void {

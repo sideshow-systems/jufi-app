@@ -21,9 +21,9 @@ describe('ladeHoch', () => {
 
 	afterEach(() => http.verify());
 
-	function starte(d: File, methode: 'POST' | 'PUT' = 'POST'): HochladenStand[] {
+	function starte(d: File, methode: 'POST' | 'PUT' = 'POST', art?: 'DATEI' | 'FOTO'): HochladenStand[] {
 		const staende: HochladenStand[] = [];
-		ladeHoch('/demo/api/v1/dokumente?kategorie=k1', d, methode, client).subscribe((s) => staende.push(s));
+		ladeHoch('/demo/api/v1/dokumente?kategorie=k1', d, methode, client, art).subscribe((s) => staende.push(s));
 		return staende;
 	}
 
@@ -112,5 +112,46 @@ describe('ladeHoch', () => {
 
 		http.expectOne('/demo/api/v1/dokumente?kategorie=k1').flush({});
 		expect(staende).toEqual([{ art: 'fertig', antwort: {} }]);
+	});
+
+	it('prueft ein Foto gegen die Grenze fuer Fotos und nennt den Text fuer Fotos', () => {
+		const staende = starte(datei(GRENZE_BYTES.FOTO + 1, 'a.jpg'), 'POST', 'FOTO');
+
+		http.expectNone(() => true);
+		expect(staende).toEqual([{ art: 'fehler', text: FEHLER_TEXT.GROESSE.FOTO, code: 'GROESSE' }]);
+	});
+
+	it('laesst ein Foto zwischen den Grenzen fuer Fotos und Dateien nicht durch', () => {
+		const staende = starte(datei(GRENZE_BYTES.FOTO + 1, 'a.jpg'), 'POST', 'DATEI');
+
+		http.expectOne('/demo/api/v1/dokumente?kategorie=k1').flush({});
+		expect(staende).toEqual([{ art: 'fertig', antwort: {} }]);
+	});
+
+	it('meldet Retry-After eines 503 als wiederholenNach', () => {
+		const staende = starte(datei(10));
+
+		http
+			.expectOne('/demo/api/v1/dokumente?kategorie=k1')
+			.flush(
+				{ fehler: FEHLER_TEXT.BESCHAEFTIGT, code: 'BESCHAEFTIGT' },
+				{ status: 503, statusText: 'Service Unavailable', headers: { 'Retry-After': '5' } },
+			);
+
+		expect(staende).toEqual([
+			{ art: 'fehler', text: FEHLER_TEXT.BESCHAEFTIGT, code: 'BESCHAEFTIGT', wiederholenNach: 5 },
+		]);
+	});
+
+	it('meldet eine abgelaufene Sitzung als Code NICHT_ANGEMELDET, nicht als Text des Servers', () => {
+		const staende = starte(datei(10));
+
+		http
+			.expectOne('/demo/api/v1/dokumente?kategorie=k1')
+			.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+
+		expect(staende).toEqual([
+			{ art: 'fehler', text: 'Deine Sitzung ist abgelaufen. Bitte melde dich neu an.', code: 'NICHT_ANGEMELDET' },
+		]);
 	});
 });

@@ -25,6 +25,14 @@ export function istNichtAngemeldet(fehler: ApiFehler): boolean {
  */
 export async function beiAbgelaufenerSitzung(router: Router, slug: string, fehler: ApiFehler): Promise<boolean> {
 	if (!istNichtAngemeldet(fehler)) return false;
-	await router.navigateByUrl(`/${encodeURIComponent(slug)}/anmelden?weiter=${encodeURIComponent(router.url)}`);
+	await zurAnmeldung(router, slug);
 	return true;
+}
+
+/**
+ * Der Weg selbst, fuer Aufrufer, die das 401 nicht als ApiFehler sehen (der Upload meldet es als
+ * Code, siehe hochladen.ts). Ein Weg fuer alle, damit "weiter" ueberall dieselbe Seite meint.
+ */
+export async function zurAnmeldung(router: Router, slug: string): Promise<void> {
+	await router.navigateByUrl(`/${encodeURIComponent(slug)}/anmelden?weiter=${encodeURIComponent(router.url)}`);
 }

@@ -267,6 +267,33 @@ describe('Verwaltung Dokumente', () => {
 			await neuGeladen();
 		});
 
+		it('fuehrt bei 401 waehrend des Uploads zur Anmeldung, wie jede andere Anfrage', async () => {
+			await oeffne();
+			waehleDateien(feld('Ordnungen'), [datei('Bild.pdf')]);
+			await stabil(harness);
+
+			http
+				.expectOne(`${API}/dokumente?kategorie=k1`)
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+
+			await vi.waitFor(() =>
+				expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo%2Fverwaltung%2Fdokumente'),
+			);
+			http.match(() => true);
+		});
+
+		it('zeigt eine wartende Datei ohne Balken', async () => {
+			await oeffne();
+			waehleDateien(feld('Formulare'), [datei('eins.pdf'), datei('zwei.pdf')]);
+			await stabil(harness);
+
+			const zeilen = [...abschnitt('Formulare').querySelectorAll('li[data-hochladung]')];
+			expect(zeilen[0]?.querySelector('progress')).not.toBeNull();
+			expect(zeilen[1]?.querySelector('progress')).toBeNull();
+			expect(text(zeilen[1])).toContain('Wartet');
+			http.expectOne(`${API}/dokumente?kategorie=k3`);
+		});
+
 		it('weist eine zu grosse Datei ohne Anfrage ab und laesst sich verwerfen', async () => {
 			await oeffne();
 			waehleDateien(feld('Ordnungen'), [datei('riesig.pdf', 25 * MB + 1)]);

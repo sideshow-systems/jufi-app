@@ -1,6 +1,7 @@
 import {
 	ChangeDetectionStrategy,
 	Component,
+	computed,
 	DestroyRef,
 	effect,
 	ElementRef,
@@ -10,7 +11,6 @@ import {
 	signal,
 	viewChild,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
 	type DokumentAnsicht,
@@ -19,33 +19,26 @@ import {
 	type SpeicherAntwort,
 	speicherText,
 } from '@jufi/domain';
-import { finalize, firstValueFrom } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { BestaetigungComponent } from '../../admin/bestaetigung';
 import { alsApiFehler, type ApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { wertVon } from '../../gemeinsam/formular';
 import { IconComponent } from '../../gestaltung/icon';
 import { KarteComponent } from '../../gestaltung/ui';
 import { DateienApi } from '../dateien-api';
-import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
+import { ENDUNGEN_DATEI } from '../dateien-anzeige';
+import { type Hochladung, Hochladeschlange } from '../hochladeschlange';
+import { beiAbgelaufenerSitzung, zurAnmeldung } from '../sitzung-abgelaufen';
 import { SpeicherstandComponent } from './speicherstand';
 
-/** Wie das accept-Attribut des Servers erlaubt: nur Endungen, der Typ zaehlt dort am Inhalt. */
-const ENDUNGEN = '.pdf,.docx,.xlsx,.pptx,.odt,.ods,.jpg,.jpeg,.png';
-
-/** Eine Datei auf dem Weg zum Server, bis sie angenommen ist oder die Person sie verwirft. */
-interface Hochladung {
-	nr: number;
+/** Wohin eine Hochladung gehoert: ihre Kategorie, und beim Ersetzen der Titel des Dokuments, dessen Datei sie ersetzt. */
+interface Ort {
 	kategorieId: string;
-	/** Neues Dokument oder die Datei eines vorhandenen ersetzen. */
-	ziel: { art: 'neu' } | { art: 'ersetzen'; dokumentId: string; titel: string };
-	datei: File;
-	zustand: 'wartet' | 'laeuft' | 'fehler';
-	anteil: number;
-	text: string | null;
+	titel: string | null;
 }
 
 /** Wo ein Fehler steht: kategorie-<id>, dokument-<id>, anlegen oder seite (oben, wenn das Ziel weg ist). */
-type Ort = string;
+type FehlerOrt = string;
 
 type Bearbeitung = { art: 'kategorie' | 'dokument'; id: string; wert: string };
 
@@ -60,10 +53,10 @@ type Bearbeitung = { art: 'kategorie' | 'dokument'; id: string; wert: string };
  * Untergruppen: Die Reihenfolge, die Titelsortierung und der Verbrauch sind Sache des Servers, und
  * ein lokal nachgefuehrter Stand stimmte nach der ersten fremden Aenderung nicht mehr.
  *
- * Uploads laufen einzeln nacheinander, ueber alle Kategorien hinweg. Verworfen: alle Dateien
- * gleichzeitig, denn der Server begrenzt die Uploads je Person (60 je zehn Minuten) und das
- * Kontingent entscheidet unter einer Sperre; zehn parallele Dateien an der Grenze meldeten dann
- * zehnmal "voll" statt einmal, und der Fortschritt jeder Datei lief langsamer.
+ * Uploads laufen einzeln nacheinander, ueber alle Kategorien hinweg, in der Hochladeschlange (dort
+ * steht, warum nicht gleichzeitig). Die Seite ordnet ihre Zeilen den Kategorien zu: Die Schlange
+ * kennt nur die Zieladresse, und eine Zeile bleibt auch dann sichtbar, wenn ihr Dokument inzwischen
+ * geloescht ist; sie liefe sonst unsichtbar in einen 404.
  */
 @Component({
 	selector: 'jf-verwaltung-dokumente',
@@ -249,23 +242,25 @@ type Bearbeitung = { art: 'kategorie' | 'dokument'; id: string; wert: string };
 								} @empty {
 									<li class="gedaempft">Noch keine Dokumente in dieser Kategorie.</li>
 								}
-								@for (h of hochladungenIn(k.id); track h.nr) {
-									<li class="hochladung" [attr.data-hochladung]="h.nr">
+								@for (h of hochladungenIn(k.id); track h.schluessel) {
+									<li class="hochladung" [attr.data-hochladung]="h.schluessel">
 										<span class="titel">{{ hochladungText(h) }}</span>
 										@if (h.zustand === 'fehler') {
-											<p class="fehler" role="alert">{{ h.text }}</p>
+											<p class="fehler" role="alert">{{ h.fehler }}</p>
 											<div class="reihe">
 												<button type="button" class="knopf klein" (click)="nochmal(h)">Nochmal</button>
 												<button type="button" class="knopf klein" (click)="verwirf(h)">Verwerfen</button>
 											</div>
 										} @else {
-											<progress
-												max="1"
-												[attr.value]="h.zustand === 'laeuft' && h.anteil > 0 ? h.anteil : null"
-												[attr.aria-label]="'Fortschritt von ' + h.datei.name"
-											></progress>
+											@if (h.zustand === 'laeuft') {
+												<progress
+													max="1"
+													[value]="h.anteil"
+													[attr.aria-label]="'Fortschritt von ' + h.datei.name"
+												></progress>
+											}
 											<span class="gedaempft klein">{{
-												h.zustand === 'wartet' ? 'Wartet …' : 'Wird hochgeladen …'
+												h.zustand === 'wartet' ? 'Wartet' : 'Wird hochgeladen …'
 											}}</span>
 										}
 									</li>
@@ -450,7 +445,7 @@ export class DokumenteVerwaltungComponent implements OnInit {
 	private readonly zerstoert = inject(DestroyRef);
 	private readonly bearbeiteFeld = viewChild<ElementRef<HTMLInputElement>>('bearbeiteFeld');
 
-	protected readonly endungen = ENDUNGEN;
+	protected readonly endungen = ENDUNGEN_DATEI;
 	protected readonly wert = wertVon;
 	protected readonly liste = signal<DokumenteAntwort | null>(null);
 	protected readonly speicher = signal<SpeicherAntwort | null>(null);
@@ -459,25 +454,28 @@ export class DokumenteVerwaltungComponent implements OnInit {
 	protected readonly ladefehler = signal<string | null>(null);
 	/** Eine Handlung zur Zeit: Zwei schnelle Klicks schickten sonst zwei Anfragen, deren Antworten sich ueberholen koennten. */
 	protected readonly laeuft = signal(false);
-	protected readonly fehler = signal<{ ort: Ort; text: string } | null>(null);
+	protected readonly fehler = signal<{ ort: FehlerOrt; text: string } | null>(null);
 	protected readonly frage = signal<DokumentAnsicht | null>(null);
 	protected readonly bearbeitung = signal<Bearbeitung | null>(null);
 	protected readonly neueKategorie = signal('');
-	protected readonly hochladungen = signal<Hochladung[]>([]);
+	/**
+	 * Die Schlange entsteht beim ersten Upload: Die Seite wird auch auf dem Server gerendert, und der
+	 * Upload-Client (XHR) soll dort nicht gebaut werden.
+	 */
+	private readonly schlange = signal<Hochladeschlange | null>(null);
+	protected readonly hochladungen = computed(() => this.schlange()?.reihe() ?? []);
+	/** Je Zieladresse, wohin die Zeilen gehoeren; die Adresse einer Kategorie teilen sich alle ihre Dateien. */
+	private readonly orte = new Map<string, Ort>();
 
 	/** Zaehlt die Ladevorgaenge: Die Antwort eines veralteten darf die neuere Liste nicht ueberschreiben. */
 	private ladeNr = 0;
-	private hochladungNr = 0;
-	private uploadLaeuft = false;
-	/** Nach dem Abbau startet kein weiterer Upload: Das Abmelden des laufenden loest finalize aus, und das riefe starteNaechste. */
-	private abgebaut = false;
 	/** Mehrere Anfragen koennen zugleich "nicht angemeldet" melden; zur Anmeldung geht es nur einmal. */
 	private abgelaufen = false;
 
 	constructor() {
 		// Das Feld einer Umbenennung bekommt den Fokus: Wer "Umbenennen" drueckt, will gleich tippen.
 		effect(() => this.bearbeiteFeld()?.nativeElement.focus());
-		this.zerstoert.onDestroy(() => (this.abgebaut = true));
+		this.zerstoert.onDestroy(() => this.schlange()?.beende());
 	}
 
 	ngOnInit(): void {
@@ -526,7 +524,7 @@ export class DokumenteVerwaltungComponent implements OnInit {
 		return speicherText(bytes);
 	}
 
-	protected fehlerBei(ort: Ort): string | null {
+	protected fehlerBei(ort: FehlerOrt): string | null {
 		const f = this.fehler();
 		return f?.ort === ort ? f.text : null;
 	}
@@ -580,7 +578,7 @@ export class DokumenteVerwaltungComponent implements OnInit {
 		const b = this.bearbeitung();
 		if (!b) return;
 		const wert = b.wert.trim();
-		const ort: Ort = b.art === 'kategorie' ? `kategorie-${b.id}` : `dokument-${b.id}`;
+		const ort: FehlerOrt = b.art === 'kategorie' ? `kategorie-${b.id}` : `dokument-${b.id}`;
 		if (!wert) {
 			this.fehler.set({
 				ort,
@@ -610,7 +608,7 @@ export class DokumenteVerwaltungComponent implements OnInit {
 	 * Aktion, danach Liste und Speicherstand neu. Die Rueckfrage schliesst in jedem Fall. Ein 404 laedt
 	 * ebenfalls neu: Das Ziel ist dann schon weg, und die Zeile, die es zeigt, taeuscht nur noch.
 	 */
-	private async fuehreAus(ort: Ort, aktion: () => Promise<unknown>): Promise<boolean> {
+	private async fuehreAus(ort: FehlerOrt, aktion: () => Promise<unknown>): Promise<boolean> {
 		if (this.laeuft()) return false;
 		this.laeuft.set(true);
 		this.fehler.set(null);
@@ -637,24 +635,27 @@ export class DokumenteVerwaltungComponent implements OnInit {
 
 	// --- Hochladen ------------------------------------------------------------
 
-	protected hochladungenIn(kategorieId: string): Hochladung[] {
-		return this.hochladungen().filter((h) => h.kategorieId === kategorieId);
+	protected hochladungenIn(kategorieId: string): readonly Hochladung[] {
+		return this.hochladungen().filter((h) => this.orte.get(h.ziel)?.kategorieId === kategorieId);
 	}
 
 	protected hochladungText(h: Hochladung): string {
-		return h.ziel.art === 'ersetzen' ? `${h.ziel.titel} ersetzen: ${h.datei.name}` : h.datei.name;
+		const titel = this.orte.get(h.ziel)?.titel;
+		return titel ? `${titel} ersetzen: ${h.datei.name}` : h.datei.name;
 	}
 
 	protected waehleDateien(ereignis: Event, k: KategorieAnsicht): void {
-		for (const datei of this.dateienAus(ereignis)) this.reihe({ art: 'neu' }, k.id, datei);
-		this.starteNaechste();
+		const ziel = this.api.dokumentAdresse(this.slug(), k.id);
+		this.orte.set(ziel, { kategorieId: k.id, titel: null });
+		this.schlangeHolen().fuegeHinzu(this.dateienAus(ereignis), ziel, 'POST');
 	}
 
 	protected waehleErsatz(ereignis: Event, k: KategorieAnsicht, d: DokumentAnsicht): void {
 		const datei = this.dateienAus(ereignis)[0];
 		if (!datei) return;
-		this.reihe({ art: 'ersetzen', dokumentId: d.id, titel: d.titel }, k.id, datei);
-		this.starteNaechste();
+		const ziel = this.api.dokumentDateiAdresse(this.slug(), d.id);
+		this.orte.set(ziel, { kategorieId: k.id, titel: d.titel });
+		this.schlangeHolen().fuegeHinzu([datei], ziel, 'PUT');
 	}
 
 	/** Leert das Feld, damit dieselbe Datei nach einer Korrektur noch einmal gewaehlt werden kann (sonst feuert change nicht). */
@@ -665,59 +666,31 @@ export class DokumenteVerwaltungComponent implements OnInit {
 		return dateien;
 	}
 
-	private reihe(ziel: Hochladung['ziel'], kategorieId: string, datei: File): void {
-		const h: Hochladung = {
-			nr: ++this.hochladungNr,
-			kategorieId,
-			ziel,
-			datei,
-			zustand: 'wartet',
-			anteil: 0,
-			text: null,
-		};
-		this.hochladungen.update((alle) => [...alle, h]);
-	}
-
 	protected nochmal(h: Hochladung): void {
-		this.aendere(h.nr, { zustand: 'wartet', anteil: 0, text: null });
-		this.starteNaechste();
+		this.schlange()?.nochmal(h.schluessel);
 	}
 
 	protected verwirf(h: Hochladung): void {
-		this.hochladungen.update((alle) => alle.filter((x) => x.nr !== h.nr));
+		this.schlange()?.verwirf(h.schluessel);
 	}
 
-	private aendere(nr: number, teil: Partial<Hochladung>): void {
-		this.hochladungen.update((alle) => alle.map((h) => (h.nr === nr ? { ...h, ...teil } : h)));
-	}
-
-	private starteNaechste(): void {
-		if (this.uploadLaeuft) return;
-		const h = this.hochladungen().find((x) => x.zustand === 'wartet');
-		if (!h) return;
-		this.uploadLaeuft = true;
-		this.aendere(h.nr, { zustand: 'laeuft', anteil: 0 });
-		const [url, methode] =
-			h.ziel.art === 'ersetzen'
-				? ([this.api.dokumentDateiAdresse(this.slug(), h.ziel.dokumentId), 'PUT'] as const)
-				: ([this.api.dokumentAdresse(this.slug(), h.kategorieId), 'POST'] as const);
-		this.api
-			.ladeHoch(url, h.datei, methode)
-			.pipe(
-				takeUntilDestroyed(this.zerstoert),
-				finalize(() => {
-					this.uploadLaeuft = false;
-					if (!this.abgebaut) this.starteNaechste();
-				}),
-			)
-			.subscribe((stand) => {
-				if (stand.art === 'fortschritt') this.aendere(h.nr, { anteil: stand.anteil });
-				else if (stand.art === 'fehler') this.aendere(h.nr, { zustand: 'fehler', text: stand.text });
-				else {
-					this.verwirf(h);
-					void this.ladeAlles();
-				}
+	private schlangeHolen(): Hochladeschlange {
+		let s = this.schlange();
+		if (s === null) {
+			s = new Hochladeschlange({
+				http: this.api.hochlader(),
+				art: 'DATEI',
+				nachErfolg: () => void this.ladeAlles(),
+				// Mehrere Anfragen koennen zugleich "nicht angemeldet" melden; zur Anmeldung geht es nur einmal.
+				beiNichtAngemeldet: () => {
+					if (this.abgelaufen) return;
+					this.abgelaufen = true;
+					void zurAnmeldung(this.router, this.slug());
+				},
 			});
+			this.schlange.set(s);
+		}
+		return s;
 	}
 }
 
