@@ -12,9 +12,10 @@ import {
 	type ThreadEntwurf,
 } from './entwurf.js';
 import { JETZT, kopf } from './testhilfe.js';
-import type { UmfrageDaten } from './typen.js';
+import type { HelferDaten, UmfrageDaten } from './typen.js';
 
 type Umfrage = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
+type Helfer = Extract<ModulEntwurf, { typ: 'HELFER' }>;
 
 const GRUPPEN = new Set(['gross', 'klein']);
 const zeichen = (n: number) => 'a'.repeat(n);
@@ -500,12 +501,12 @@ describe('entwurfAus', () => {
 
 describe('neuesModul', () => {
 	it('legt als erste Umfrage die Teilnahme-Vorlage an', () => {
-		const m = neuesModul('UMFRAGE', [], JETZT);
+		const m = neuesModul('UMFRAGE', [], JETZT, 'JUNGFISCHER_FAMILIE');
 		expect(m).toEqual({ typ: 'UMFRAGE', id: null, titel: null, ...neueUmfrageVorlage() });
 	});
 
 	it('legt als weitere Umfrage eine leere Ja-Nein-Umfrage ohne Teilnahme an', () => {
-		const m = neuesModul('UMFRAGE', [umfrage()], JETZT) as Umfrage;
+		const m = neuesModul('UMFRAGE', [umfrage()], JETZT, 'JUNGFISCHER_FAMILIE') as Umfrage;
 		expect(m).toMatchObject({
 			typ: 'UMFRAGE',
 			id: null,
@@ -519,12 +520,12 @@ describe('neuesModul', () => {
 	});
 
 	it('zaehlt nur Teilnahme-Umfragen: eine andere Umfrage laesst die Vorlage stehen', () => {
-		const m = neuesModul('UMFRAGE', [umfrage({ teilnahme: false })], JETZT) as Umfrage;
+		const m = neuesModul('UMFRAGE', [umfrage({ teilnahme: false })], JETZT, 'JUNGFISCHER_FAMILIE') as Umfrage;
 		expect(m.teilnahme).toBe(true);
 	});
 
 	it('legt einen Termin sieben Berliner Tage nach jetzt an, 18:00 bis 20:00 ohne Ort', () => {
-		expect(neuesModul('TERMIN', [], JETZT)).toEqual({
+		expect(neuesModul('TERMIN', [], JETZT, 'JUNGFISCHER_FAMILIE')).toEqual({
 			typ: 'TERMIN',
 			id: null,
 			titel: null,
@@ -540,18 +541,26 @@ describe('neuesModul', () => {
 	});
 
 	it('rechnet den Berliner Tag, nicht den UTC-Tag: kurz nach Mitternacht Berlin ist schon der naechste', () => {
-		const m = neuesModul('TERMIN', [], new Date('2026-10-22T22:30:00Z')) as Extract<ModulEntwurf, { typ: 'TERMIN' }>;
+		const m = neuesModul('TERMIN', [], new Date('2026-10-22T22:30:00Z'), 'JUNGFISCHER_FAMILIE') as Extract<
+			ModulEntwurf,
+			{ typ: 'TERMIN' }
+		>;
 		expect(m.termin.startDatum).toBe('2026-10-30');
 	});
 
 	it('legt Info mit leerem Text an', () => {
-		expect(neuesModul('INFO', [], JETZT)).toEqual({ typ: 'INFO', id: null, titel: null, text: '' });
+		expect(neuesModul('INFO', [], JETZT, 'JUNGFISCHER_FAMILIE')).toEqual({
+			typ: 'INFO',
+			id: null,
+			titel: null,
+			text: '',
+		});
 	});
 
 	it('gibt jedes Mal frische Objekte', () => {
-		const a = neuesModul('UMFRAGE', [], JETZT) as Umfrage;
+		const a = neuesModul('UMFRAGE', [], JETZT, 'JUNGFISCHER_FAMILIE') as Umfrage;
 		a.optionen[0].text = 'Ja';
-		expect((neuesModul('UMFRAGE', [], JETZT) as Umfrage).optionen[0].text).toBe('Dabei');
+		expect((neuesModul('UMFRAGE', [], JETZT, 'JUNGFISCHER_FAMILIE') as Umfrage).optionen[0].text).toBe('Dabei');
 	});
 });
 
@@ -686,8 +695,8 @@ describe('Datei- und Foto-Module im Entwurf', () => {
 	});
 
 	it('legt ein neues Datei-Modul leer und ein neues Foto-Modul fuer Jugendleiter an', () => {
-		expect(neuesModul('DATEIEN', [], JETZT)).toEqual({ typ: 'DATEIEN', id: null, titel: null });
-		expect(neuesModul('FOTOS', [], JETZT)).toEqual({
+		expect(neuesModul('DATEIEN', [], JETZT, 'JUNGFISCHER_FAMILIE')).toEqual({ typ: 'DATEIEN', id: null, titel: null });
+		expect(neuesModul('FOTOS', [], JETZT, 'JUNGFISCHER_FAMILIE')).toEqual({
 			typ: 'FOTOS',
 			id: null,
 			titel: null,
@@ -718,5 +727,187 @@ describe('Datei- und Foto-Module im Entwurf', () => {
 			{ typ: 'FOTOS', id: 'f1', titel: null, hochladen: 'ALLE' },
 		]);
 		expect(entwurfAus(JSON.parse(JSON.stringify(e)))).toEqual({ entwurf: e });
+	});
+});
+
+describe('Helferliste im Entwurf', () => {
+	function helfer(aenderung: Partial<Helfer> = {}): Helfer {
+		return {
+			typ: 'HELFER',
+			id: null,
+			titel: 'Mitbringen',
+			einheit: 'ERWACHSENER',
+			frist: null,
+			positionen: [
+				{ schluessel: null, text: 'Kuchen', anzahl: 4 },
+				{ schluessel: null, text: 'Grill', anzahl: 2 },
+			],
+			...aenderung,
+		};
+	}
+	// Bowling mit der Helferliste an Index 3.
+	const mitHelfer = (aenderung: Partial<Helfer> = {}): ThreadEntwurf => {
+		const e = bowling();
+		e.module.push(helfer(aenderung));
+		return e;
+	};
+	const mitPositionen = (positionen: Helfer['positionen']) => entwurfFehler(mitHelfer({ positionen }), GRUPPEN);
+	const position = (text: string, anzahl = 1) => ({ schluessel: null, text, anzahl });
+	const nummeriert = (n: number) => Array.from({ length: n }, (_, i) => position(`Position ${i}`));
+	const fehler = (text: string) => [{ feld: 'module.3.positionen', text }];
+	const body = (aenderung: Partial<Helfer> = {}) =>
+		JSON.parse(JSON.stringify(mitHelfer(aenderung))) as Record<string, unknown>;
+	const helferIn = (k: Record<string, unknown>) => (k['module'] as Record<string, unknown>[])[3];
+	const ungueltig = (feld: string) => ({ fehler: { feld, text: 'Ungültige Anfrage' } });
+
+	it('liest eine Helferliste mit zwei Positionen und findet keinen Fehler', () => {
+		expect(entwurfAus(body())).toEqual({ entwurf: mitHelfer() });
+		expect(entwurfFehler(mitHelfer(), GRUPPEN)).toEqual([]);
+	});
+
+	it('schneidet Positionstexte, behaelt Schluessel und macht aus fehlenden null', () => {
+		const k = body();
+		helferIn(k)['positionen'] = [
+			{ schluessel: 'pkuchen01', text: ' Kuchen ', anzahl: 4 },
+			{ text: 'Grill', anzahl: 2 },
+		];
+		const r = entwurfAus(k);
+		if (!('entwurf' in r)) throw new Error('Fehler erwartet nicht');
+		expect((r.entwurf.module[3] as Helfer).positionen).toEqual([
+			{ schluessel: 'pkuchen01', text: 'Kuchen', anzahl: 4 },
+			{ schluessel: null, text: 'Grill', anzahl: 2 },
+		]);
+	});
+
+	it('weist Positionen ohne Liste, ohne Text oder ohne Zahl als Anzahl am Feld positionen ab', () => {
+		for (const positionen of ['Kuchen', [{ anzahl: 1 }], [{ text: 'Kuchen', anzahl: '4' }], [{ text: 'Kuchen' }]]) {
+			const k = body();
+			helferIn(k)['positionen'] = positionen;
+			expect(entwurfAus(k)).toEqual(ungueltig('module.3.positionen'));
+		}
+	});
+
+	it('weist eine unbekannte Einheit und eine unlesbare Frist ab und schreibt die Frist als UTC-ISO', () => {
+		const einheit = body();
+		helferIn(einheit)['einheit'] = 'FAMILIE';
+		expect(entwurfAus(einheit)).toEqual(ungueltig('module.3.einheit'));
+		const unlesbar = body();
+		helferIn(unlesbar)['frist'] = 'morgen';
+		expect(entwurfAus(unlesbar)).toEqual(ungueltig('module.3.frist'));
+		const frist = body();
+		helferIn(frist)['frist'] = '2026-10-27T18:00:00+01:00';
+		const r = entwurfAus(frist);
+		expect('entwurf' in r && (r.entwurf.module[3] as Helfer).frist).toBe('2026-10-27T17:00:00.000Z');
+	});
+
+	it('verlangt mindestens eine Position', () => {
+		expect(mitPositionen([])).toEqual(fehler('Bitte mindestens eine Position.'));
+	});
+
+	it('erlaubt 30 und verweigert 31 Positionen', () => {
+		expect(mitPositionen(nummeriert(GRENZEN.positionen))).toEqual([]);
+		expect(mitPositionen(nummeriert(GRENZEN.positionen + 1))).toEqual(fehler('Höchstens 30 Positionen.'));
+	});
+
+	it('verlangt jede Position ausgefuellt', () => {
+		expect(mitPositionen([position('Kuchen'), position('  ')])).toEqual(fehler('Bitte jede Position ausfüllen.'));
+	});
+
+	it('erlaubt 80 und verweigert 81 Zeichen, gemessen ohne Leerraum an den Enden', () => {
+		expect(mitPositionen([position(` ${zeichen(80)} `)])).toEqual([]);
+		expect(mitPositionen([position(zeichen(81))])).toEqual(fehler('Höchstens 80 Zeichen.'));
+	});
+
+	it('verweigert dieselbe Position zweimal, ohne Gross-/Kleinschreibung', () => {
+		expect(mitPositionen([position('Kuchen'), position(' kuchen')])).toEqual(fehler('Jede Position nur einmal.'));
+	});
+
+	it('verlangt eine ganze Anzahl zwischen 1 und 99', () => {
+		for (const anzahl of [0, 100, 1.5, -1]) {
+			expect(mitPositionen([position('Kuchen', anzahl)])).toEqual(fehler('Die Anzahl muss zwischen 1 und 99 liegen.'));
+		}
+		expect(mitPositionen([position('Kuchen', 1), position('Grill', 99)])).toEqual([]);
+	});
+
+	it('meldet je Liste nur den ersten Fehler der Positionen: leer vor doppelt vor Anzahl', () => {
+		expect(mitPositionen([position('Kuchen', 0), position('kuchen'), position('')])).toEqual(
+			fehler('Bitte jede Position ausfüllen.'),
+		);
+		expect(mitPositionen([position('Kuchen', 0), position('kuchen')])).toEqual(fehler('Jede Position nur einmal.'));
+	});
+
+	it('verweigert pro Jungfischer bei Nur Familie am Feld einheit', () => {
+		const e: ThreadEntwurf = { ...mitHelfer({ einheit: 'JUNGFISCHER' }), rollenfilter: 'NUR_FAMILIE' };
+		e.module = [e.module[3]];
+		expect(entwurfFehler(e, GRUPPEN)).toEqual([
+			{ feld: 'module.0.einheit', text: 'Diese Einheit fragt bei dieser Zielgruppe niemanden.' },
+		]);
+	});
+
+	it('prueft den Modultitel wie bei jedem Modul', () => {
+		expect(entwurfFehler(mitHelfer({ titel: zeichen(81) }), GRUPPEN)).toEqual([
+			{ feld: 'module.3.titel', text: 'Höchstens 80 Zeichen.' },
+		]);
+	});
+
+	it('legt eine neue Helferliste pro Erwachsenem ohne Frist mit einer leeren Position an', () => {
+		const erwartet = {
+			typ: 'HELFER',
+			id: null,
+			titel: null,
+			einheit: 'ERWACHSENER',
+			frist: null,
+			positionen: [{ schluessel: null, text: '', anzahl: 1 }],
+		};
+		expect(neuesModul('HELFER', [], JETZT, 'NUR_JUGENDLEITER')).toEqual(erwartet);
+		expect(neuesModul('HELFER', [], JETZT, 'JUNGFISCHER_FAMILIE')).toEqual(erwartet);
+	});
+
+	it('gibt jedes Mal frische Positionen', () => {
+		const a = neuesModul('HELFER', [], JETZT, 'NUR_FAMILIE') as Helfer;
+		a.positionen[0].text = 'Kuchen';
+		expect((neuesModul('HELFER', [], JETZT, 'NUR_FAMILIE') as Helfer).positionen[0].text).toBe('');
+	});
+
+	describe('entwurfAusThread', () => {
+		const daten: HelferDaten = {
+			modulId: 'h1',
+			titel: 'Mitbringen',
+			einheit: 'PERSON',
+			frist: new Date('2026-10-27T17:00:00Z'),
+			positionen: [
+				{
+					id: 'p-grill',
+					schluessel: 'pgrill001',
+					text: 'Grill',
+					anzahl: 2,
+					eintraege: [{ fuerId: 'sandra', vonId: 'sandra', notiz: null, eingetragenAm: JETZT }],
+				},
+				{ id: 'p-kuchen', schluessel: 'pkuchen01', text: 'Kuchen', anzahl: 4, eintraege: [] },
+			],
+		};
+		const module: ModulDaten[] = [{ typ: 'HELFER', id: 'h1', titel: 'Mitbringen', helfer: daten }];
+
+		it('uebernimmt Einheit, Frist als ISO und Positionen in ihrer Reihenfolge mit Schluessel, ohne Eintraege', () => {
+			expect(entwurfAusThread(kopf(), module).module).toEqual([
+				{
+					typ: 'HELFER',
+					id: 'h1',
+					titel: 'Mitbringen',
+					einheit: 'PERSON',
+					frist: '2026-10-27T17:00:00.000Z',
+					positionen: [
+						{ schluessel: 'pgrill001', text: 'Grill', anzahl: 2 },
+						{ schluessel: 'pkuchen01', text: 'Kuchen', anzahl: 4 },
+					],
+				},
+			]);
+		});
+
+		it('bleibt eine Rundreise und gibt die Liste an die Threaddaten', () => {
+			const e = entwurfAusThread(kopf(), module);
+			expect(entwurfAus(JSON.parse(JSON.stringify(e)))).toEqual({ entwurf: e });
+			expect(threadDatenAus(kopf(), module).helfer).toEqual([daten]);
+		});
 	});
 });

@@ -59,7 +59,7 @@ import { VerwaltungThreadsApi } from './threads-api';
 									} @else {
 										<a class="titel" [routerLink]="['/', slug(), 't', t.segment]">{{ t.titel }}</a>
 									}
-									@if (t.hatUmfrage && t.darfAntwortenSehen) {
+									@if (t.hatAntwortModul && t.darfAntwortenSehen) {
 										<a class="antworten" [routerLink]="['/', slug(), 'verwaltung', 'threads', t.id, 'antworten']"
 											>Antworten</a
 										>

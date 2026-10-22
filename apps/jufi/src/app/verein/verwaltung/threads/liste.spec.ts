@@ -17,7 +17,7 @@ function thread(rest: Partial<VerwaltungThread> & { id: string; titel: string })
 		naechsterTermin: null,
 		darfBearbeiten: true,
 		darfAntwortenSehen: true,
-		hatUmfrage: false,
+		hatAntwortModul: false,
 		...rest,
 	};
 }
@@ -33,12 +33,12 @@ const LISTE: VerwaltungListe = {
 			keineZielgruppe: true,
 		}),
 		thread({ id: 't-normal', titel: 'Hallo', darfBearbeiten: false }),
-		thread({ id: 't-fremd', titel: 'Fremd', darfBearbeiten: false, darfAntwortenSehen: false, hatUmfrage: true }),
+		thread({ id: 't-fremd', titel: 'Fremd', darfBearbeiten: false, darfAntwortenSehen: false, hatAntwortModul: true }),
 		thread({
 			id: 't-pin',
 			titel: 'Zeltlager',
 			angepinnt: true,
-			hatUmfrage: true,
+			hatAntwortModul: true,
 			naechsterTermin: 'Sa., 12.09. · 10:00',
 			zielgruppe: 'Gruppe A · Nur Familie',
 		}),

@@ -1,6 +1,20 @@
-import type { AntwortEinheit, AntwortRegel, HelferPositionDaten, ThreadKopf } from '../../threads/typen.js';
+import type { PositionEntwurf } from '../../threads/entwurf.js';
+import type {
+	AntwortEinheit,
+	AntwortRegel,
+	HelferDaten,
+	HelferPositionDaten,
+	ThreadKopf,
+} from '../../threads/typen.js';
 import { bowlingUmfeld, JETZT, kopf, MIA } from '../../threads/testhilfe.js';
-import { darfAustragen, darfEintragen, hatPlatzFuer, pruefeNotiz } from './helfer.js';
+import {
+	darfAustragen,
+	darfEintragen,
+	hatPlatzFuer,
+	helferSperre,
+	pruefeHelferAenderung,
+	pruefeNotiz,
+} from './helfer.js';
 
 const umfeld = bowlingUmfeld();
 const person = (id: string) => umfeld.personen.get(id)!;
@@ -129,5 +143,89 @@ describe('darfAustragen', () => {
 
 	it('meldet der Leitung einen Entwurf', () => {
 		expect(austragen('thomas', 'sandra', { veroeffentlichtAm: null })).toBe('ENTWURF');
+	});
+});
+
+// Kuchen mit zwei Eintraegen (Platz fuer vier), Grill leer (Platz fuer zwei).
+function mitbringen(daten: Partial<HelferDaten> = {}): HelferDaten {
+	const eintrag = (fuerId: string) => ({ fuerId, vonId: fuerId, notiz: null, eingetragenAm: JETZT });
+	return {
+		modulId: 'h1',
+		titel: 'Mitbringen',
+		einheit: 'ERWACHSENER',
+		frist: null,
+		positionen: [
+			{
+				id: 'p-kuchen',
+				schluessel: 'pkuchen01',
+				text: 'Kuchen',
+				anzahl: 4,
+				eintraege: [eintrag('sandra'), eintrag('peter')],
+			},
+			{ id: 'p-grill', schluessel: 'pgrill001', text: 'Grill', anzahl: 2, eintraege: [] },
+		],
+		...daten,
+	};
+}
+
+// Die Positionen der gespeicherten Liste, wie der Editor sie zurueckschickt.
+const wieGespeichert = (): PositionEntwurf[] =>
+	mitbringen().positionen.map((p) => ({ schluessel: p.schluessel, text: p.text, anzahl: p.anzahl }));
+
+describe('helferSperre', () => {
+	it('nennt Eingetragenes und die Belegung nur belegter Positionen', () => {
+		expect(helferSperre(mitbringen())).toEqual({ eingetragen: true, belegt: { pkuchen01: 2 } });
+	});
+
+	it('ist ohne Eintraege frei', () => {
+		const leer = mitbringen({ positionen: mitbringen().positionen.map((p) => ({ ...p, eintraege: [] })) });
+		expect(helferSperre(leer)).toEqual({ eingetragen: false, belegt: {} });
+	});
+});
+
+describe('pruefeHelferAenderung', () => {
+	const neu = (positionen: PositionEntwurf[] = wieGespeichert(), einheit: AntwortEinheit = 'ERWACHSENER') => ({
+		einheit,
+		positionen,
+	});
+
+	it('laesst eine unveraenderte Liste durch', () => {
+		expect(pruefeHelferAenderung(mitbringen(), neu())).toEqual([]);
+	});
+
+	it('erlaubt das Entfernen einer leeren Position', () => {
+		expect(pruefeHelferAenderung(mitbringen(), neu(wieGespeichert().slice(0, 1)))).toEqual([]);
+	});
+
+	it('sperrt das Entfernen einer belegten Position', () => {
+		expect(pruefeHelferAenderung(mitbringen(), neu(wieGespeichert().slice(1)))).toEqual([
+			{ feld: 'positionen', schluessel: 'pkuchen01', art: 'ENTFERNT', belegt: 2 },
+		]);
+	});
+
+	it('sperrt eine Anzahl unter den Eingetragenen, nicht aber gleich viele', () => {
+		const auf = (anzahl: number) => wieGespeichert().map((p) => (p.schluessel === 'pkuchen01' ? { ...p, anzahl } : p));
+		expect(pruefeHelferAenderung(mitbringen(), neu(auf(1)))).toEqual([
+			{ feld: 'positionen', schluessel: 'pkuchen01', art: 'ANZAHL', belegt: 2 },
+		]);
+		expect(pruefeHelferAenderung(mitbringen(), neu(auf(2)))).toEqual([]);
+	});
+
+	it('erlaubt Umbenennen und Umsortieren', () => {
+		const [kuchen, grill] = wieGespeichert();
+		expect(pruefeHelferAenderung(mitbringen(), neu([grill, { ...kuchen, text: 'Torte' }]))).toEqual([]);
+	});
+
+	it('sperrt die Einheit erst nach dem ersten Eintrag', () => {
+		expect(pruefeHelferAenderung(mitbringen(), neu(wieGespeichert(), 'PERSON'))).toEqual([{ feld: 'einheit' }]);
+		const leer = mitbringen({ positionen: mitbringen().positionen.map((p) => ({ ...p, eintraege: [] })) });
+		expect(pruefeHelferAenderung(leer, neu(wieGespeichert(), 'PERSON'))).toEqual([]);
+	});
+
+	it('zaehlt eine neue Position ohne Schluessel nicht als die alte', () => {
+		const [kuchen, grill] = wieGespeichert();
+		expect(pruefeHelferAenderung(mitbringen(), neu([{ ...kuchen, schluessel: null }, grill]))).toEqual([
+			{ feld: 'positionen', schluessel: 'pkuchen01', art: 'ENTFERNT', belegt: 2 },
+		]);
 	});
 });

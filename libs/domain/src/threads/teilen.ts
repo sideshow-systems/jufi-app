@@ -77,14 +77,32 @@ export function teilenText(e: { ansicht: ThreadAnsicht; basisUrl: string; slug: 
 	const { ansicht, jetzt } = e;
 	const zeilen = [`${titelteil(ansicht.titel)} – Stand ${wochentagKurz(berlinerTag(jetzt))} ${berlinerUhrzeit(jetzt)}`];
 	for (const m of ansicht.module) {
-		if (m.typ === 'TERMIN') {
-			const ort = m.termin.ort ? ` · ${ohneFormat(m.termin.ort)}` : '';
-			zeilen.push(`📅 ${terminZeit(m.termin)}${ort}`);
-		} else if (m.typ === 'UMFRAGE') {
-			zeilen.push(...umfrageZeilen(m));
+		switch (m.typ) {
+			case 'TERMIN': {
+				const ort = m.termin.ort ? ` · ${ohneFormat(m.termin.ort)}` : '';
+				zeilen.push(`📅 ${terminZeit(m.termin)}${ort}`);
+				break;
+			}
+			case 'UMFRAGE':
+				zeilen.push(...umfrageZeilen(m));
+				break;
+			// Der Infotext ist keine Zeile (TP3-Spec 7.1 nennt nur Termin und Umfrage); wer ihn lesen
+			// will, folgt dem Link.
+			case 'INFO':
+				break;
+			// Dateien und Fotos bekommen keine Zeile (Spec 11): Der Text geht an eine Gruppe ausserhalb
+			// der App, und ein Name, eine Zahl oder ein Hinweis auf Einwilligungen gehoert nicht dorthin.
+			case 'DATEIEN':
+			case 'FOTOS':
+				break;
+			// Die Zeile der Helferliste kommt mit Etappe 6 (Spec 11); bis dahin lieber keine als eine halbe.
+			case 'HELFER':
+				break;
+			default: {
+				const unerreichbar: never = m;
+				return unerreichbar;
+			}
 		}
-		// Dateien und Fotos bekommen keine Zeile (Spec 11): Der Text geht an eine Gruppe ausserhalb
-		// der App, und ein Name, eine Zahl oder ein Hinweis auf Einwilligungen gehoert nicht dorthin.
 	}
 	zeilen.push(`👉 Antworten: ${e.basisUrl}/${e.slug}/t/${threadSegment(ansicht.id, ansicht.titel)}`);
 	return zeilen.join('\n');

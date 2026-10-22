@@ -32,6 +32,26 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 				hinweis: null,
 			};
 		}
+		// Ohne Eintraege und ohne Zeilen wie die Umfrage: So bietet die Karte keinen Knopf an, der
+		// die API riefe. Positionen ohne Schluessel tragen Ersatz-IDs wie die Optionen.
+		if (m.typ === 'HELFER') {
+			return {
+				typ: 'HELFER',
+				id,
+				titel: m.titel,
+				einheit: m.einheit,
+				frist: m.frist,
+				fristAbgelaufen: m.frist !== null && jetzt.getTime() >= Date.parse(m.frist),
+				positionen: m.positionen.map((p, j) => ({
+					id: `${id}-${j}`,
+					text: p.text,
+					anzahl: p.anzahl,
+					belegt: 0,
+					eintraege: [],
+				})),
+				zeilen: [],
+			};
+		}
 		return {
 			typ: 'UMFRAGE',
 			id,

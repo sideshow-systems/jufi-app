@@ -4,6 +4,7 @@ import {
 	darfBearbeiten,
 	darfLoeschen,
 	entwurfAusThread,
+	helferSperre,
 	istArchiviert,
 	medienZahlen,
 	siehtThread,
@@ -98,6 +99,7 @@ export async function ladeBearbeitung(
 		darfArchivieren: darfArchivieren(ich, kopf),
 		entwurf: entwurfAusThread(kopf, module),
 		sperren: Object.fromEntries(daten.umfragen.map((u) => [u.modulId, umfrageSperre(u)])),
+		helferSperren: Object.fromEntries(daten.helfer.map((h) => [h.modulId, helferSperre(h)])),
 		medien: medienZahlen(module),
 		untergruppen,
 	};

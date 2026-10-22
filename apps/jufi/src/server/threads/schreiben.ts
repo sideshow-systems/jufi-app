@@ -218,6 +218,11 @@ async function schreibeModul(
 	neu: ModulEntwurf,
 	id: string | null,
 ): Promise<string> {
+	// Die Helferliste hat in dieser Datenbank noch keine Tabellen (sie kommen mit dem Datenmodell
+	// der Etappe). Bis dahin ist sie fuer den Server ein Typ, den er nicht speichern kann: 400 am
+	// Typ wie bei einem unbekannten, unter der Transaktion, also ohne halb geschriebenen Thread.
+	// Verworfen: sie still zu uebergehen, denn dann meldete der Editor "gespeichert" ohne Liste.
+	if (neu.typ === 'HELFER') throw new ThreadAbbruch(400, ungueltigesFeld(`module.${position}.typ`));
 	const kopf = { position, titel: neu.titel };
 	let modulId: string;
 	if (id === null) {
@@ -256,7 +261,8 @@ async function schreibeModul(
 			update: { hochladen: neu.hochladen },
 		});
 	} else {
-		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN und FOTOS sind oben behandelt).
+		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN und FOTOS sind oben behandelt,
+		// HELFER am Anfang).
 		const daten = {
 			frage: neu.frage,
 			einheit: neu.einheit,

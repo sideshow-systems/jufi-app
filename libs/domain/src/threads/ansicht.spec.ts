@@ -11,7 +11,8 @@ import {
 import type { DateienModulAnsicht, FotosModulAnsicht } from '../dateien/module.js';
 import { absenderName } from './namen.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
-import type { ThreadKopf, UmfrageDaten } from './typen.js';
+import type { HelferModulAnsicht } from '../module/helfer/helfer.js';
+import type { HelferDaten, HelferEintragDaten, HelferPositionDaten, ThreadKopf, UmfrageDaten } from './typen.js';
 
 const umfeld = bowlingUmfeld();
 const person = (id: string) => umfeld.personen.get(id)!;
@@ -424,5 +425,126 @@ describe('threadAnsicht: Datei- und Foto-Module', () => {
 		});
 		const a = ansichtVon('thomas', kopf(), [dabei, fotoModul()], { fotoEinwilligungen: new Map() });
 		expect((a.module[1] as FotosModulAnsicht).hinweis).toBe('Von Lena M. dürfen keine Fotos gezeigt werden');
+	});
+});
+
+describe('threadAnsicht: Helferliste', () => {
+	const FRIST = new Date('2026-10-23T10:00:00Z');
+	const eintrag = (fuerId: string, vonId = fuerId, notiz: string | null = null): HelferEintragDaten => ({
+		fuerId,
+		vonId,
+		notiz,
+		eingetragenAm: JETZT,
+	});
+	const kuchen = (...eintraege: HelferEintragDaten[]): HelferPositionDaten => ({
+		id: 'p-kuchen',
+		schluessel: 'pkuchen01',
+		text: 'Kuchen',
+		anzahl: 4,
+		eintraege,
+	});
+	const grill = (...eintraege: HelferEintragDaten[]): HelferPositionDaten => ({
+		id: 'p-grill',
+		schluessel: 'pgrill001',
+		text: 'Grill',
+		anzahl: 2,
+		eintraege,
+	});
+	const helferModul = (
+		positionen: HelferPositionDaten[],
+		h: Partial<HelferDaten> = {},
+	): Extract<ModulDaten, { typ: 'HELFER' }> => ({
+		typ: 'HELFER',
+		id: 'h1',
+		titel: 'Mitbringen',
+		helfer: { modulId: 'h1', titel: 'Mitbringen', einheit: 'ERWACHSENER', frist: FRIST, positionen, ...h },
+	});
+	const helferVon = (ich: string, modul: ModulDaten, k: ThreadKopf = kopf(), jetzt: Date = JETZT): HelferModulAnsicht =>
+		ansichtVon(ich, k, [modul], { jetzt }).module[0] as HelferModulAnsicht;
+	const eintraegeVon = (h: HelferModulAnsicht, positionId: string) =>
+		h.positionen.find((p) => p.id === positionId)!.eintraege;
+
+	it('zeigt Kopf, Frist und je Position den Fuellstand', () => {
+		const h = helferVon('peter', helferModul([kuchen(eintrag('sandra')), grill()]));
+		expect(h).toMatchObject({
+			typ: 'HELFER',
+			id: 'h1',
+			titel: 'Mitbringen',
+			einheit: 'ERWACHSENER',
+			frist: '2026-10-23T10:00:00.000Z',
+			fristAbgelaufen: false,
+		});
+		expect(h.positionen.map((p) => [p.id, p.text, p.anzahl, p.belegt])).toEqual([
+			['p-kuchen', 'Kuchen', 4, 1],
+			['p-grill', 'Grill', 2, 0],
+		]);
+		expect(eintraegeVon(h, 'p-grill')).toEqual([]);
+	});
+
+	it('nennt Eingetragene mit Absendername und Notiz', () => {
+		const h = helferVon('peter', helferModul([kuchen(eintrag('sandra', 'sandra', 'Marmorkuchen'))]));
+		expect(eintraegeVon(h, 'p-kuchen')).toEqual([
+			{ fuerId: 'sandra', name: absenderName('sandra', umfeld), notiz: 'Marmorkuchen', eingetragenVon: null },
+		]);
+		expect(eintraegeVon(h, 'p-kuchen')[0].name).toBe('Sandra M. (Mutter von Lena und Max)');
+	});
+
+	it('zeigt den Eintrag einer Entfernten als ehemaliges Mitglied, der Platz bleibt belegt', () => {
+		const h = helferVon('thomas', helferModul([kuchen(eintrag('sandra'), eintrag('mia'))]));
+		expect(eintraegeVon(h, 'p-kuchen').map((e) => e.name)).toEqual([
+			'Sandra M. (Mutter von Lena und Max)',
+			'ehemaliges Mitglied',
+		]);
+		expect(h.positionen[0].belegt).toBe(2);
+	});
+
+	it('sagt nur Betroffenen und der Leitung, wer eingetragen hat', () => {
+		const modul = helferModul([kuchen(eintrag('sandra', 'thomas'))]);
+		expect(eintraegeVon(helferVon('sandra', modul), 'p-kuchen')[0].eingetragenVon).toBe('eingetragen von Thomas K.');
+		expect(eintraegeVon(helferVon('thomas', modul), 'p-kuchen')[0].eingetragenVon).toBe('von dir eingetragen');
+		expect(eintraegeVon(helferVon('peter', modul), 'p-kuchen')[0].eingetragenVon).toBeNull();
+		expect(eintraegeVon(helferVon('bea', modul), 'p-kuchen')[0].eingetragenVon).toBeNull();
+	});
+
+	it('sagt es der Familie auch fuer das eigene Kind', () => {
+		const modul = helferModul([kuchen(eintrag('lena', 'thomas'))], { einheit: 'JUNGFISCHER' });
+		expect(eintraegeVon(helferVon('sandra', modul), 'p-kuchen')[0].eingetragenVon).toBe('eingetragen von Thomas K.');
+		expect(eintraegeVon(helferVon('peter', modul), 'p-kuchen')[0].eingetragenVon).toBeNull();
+	});
+
+	it('gibt die eigenen Zeilen wie bei der Umfrage, bei pro Jungfischer je Kind', () => {
+		expect(helferVon('sandra', helferModul([kuchen()])).zeilen).toEqual([
+			{ fuerId: 'sandra', vorname: 'Sandra', selbst: true, darfEintragen: true },
+		]);
+		const kinder = helferModul([kuchen()], { einheit: 'JUNGFISCHER' });
+		expect(helferVon('sandra', kinder).zeilen).toEqual([
+			{ fuerId: 'lena', vorname: 'Lena', selbst: false, darfEintragen: true },
+			{ fuerId: 'max', vorname: 'Max', selbst: false, darfEintragen: true },
+		]);
+	});
+
+	it('sperrt nach der Frist die Mutter, nicht aber die Leitung', () => {
+		const modul = helferModul([kuchen()]);
+		const sandra = helferVon('sandra', modul, kopf(), FRIST);
+		expect(sandra.fristAbgelaufen).toBe(true);
+		expect(sandra.zeilen).toMatchObject([{ fuerId: 'sandra', darfEintragen: false }]);
+		expect(helferVon('thomas', modul, kopf(), FRIST).zeilen).toMatchObject([{ fuerId: 'thomas', darfEintragen: true }]);
+	});
+
+	it('sperrt im Archiv die Mutter, nicht aber die Leitung', () => {
+		const archiv = kopf({ archivModus: 'ARCHIVIERT' });
+		const modul = helferModul([kuchen()]);
+		expect(helferVon('sandra', modul, archiv).zeilen).toMatchObject([{ darfEintragen: false }]);
+		expect(helferVon('thomas', modul, archiv).zeilen).toMatchObject([{ darfEintragen: true }]);
+	});
+
+	it('hat ohne Frist weder Frist noch Ablauf', () => {
+		const h = helferVon('sandra', helferModul([kuchen()], { frist: null }));
+		expect(h).toMatchObject({ frist: null, fristAbgelaufen: false });
+	});
+
+	it('gibt die Liste an die Threaddaten', () => {
+		const modul = helferModul([kuchen()]);
+		expect(threadDatenAus(kopf(), [infoModul, modul]).helfer).toEqual([modul.helfer]);
 	});
 });

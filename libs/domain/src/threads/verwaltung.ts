@@ -1,4 +1,5 @@
 import { KEINE_MEDIEN, type MedienZahl } from '../dateien/medien.js';
+import type { HelferSperre } from '../module/helfer/helfer.js';
 import type { TerminDaten } from '../module/termin/termin.js';
 import { naechsteTermine, terminZeit } from '../module/termin/termin.js';
 import { hatRecht } from '../rechte.js';
@@ -11,7 +12,7 @@ import { EHEMALIGES_MITGLIED, kurzname } from './namen.js';
 import { threadSegment } from './pfad.js';
 import { darfBearbeiten } from './rechte.js';
 import { siehtThread } from './sichtbarkeit.js';
-import type { ThreadArt, ThreadDaten, ThreadKopf, ThreadPerson, Umfeld } from './typen.js';
+import type { HelferDaten, ThreadArt, ThreadDaten, ThreadKopf, ThreadPerson, Umfeld } from './typen.js';
 import type { UmfrageSperre } from './vergleich.js';
 
 // Die Namen der gewaehlten Untergruppen, die es noch gibt. Eine geloeschte Untergruppe
@@ -58,7 +59,12 @@ export interface VerwaltungThread {
 	darfBearbeiten: boolean;
 	/** Ob die Person die Antworten-Uebersicht sehen darf (siehtAntworten); sonst waere der Link dorthin eine 404-Seite. */
 	darfAntwortenSehen: boolean;
-	hatUmfrage: boolean;
+	/**
+	 * Ob der Thread etwas hat, das die Antworten-Uebersicht zeigt: eine Umfrage oder eine
+	 * Helferliste (Plan-Entscheidung 13). Verworfen: hatUmfrage zu behalten und die Helferliste
+	 * mitzumeinen, denn der Name luege dann bei jedem Thread mit Liste und ohne Umfrage.
+	 */
+	hatAntwortModul: boolean;
 }
 
 export interface VerwaltungListe {
@@ -81,6 +87,8 @@ export interface ThreadBearbeitung {
 	entwurf: ThreadEntwurf;
 	/** Je Umfrage-Modul-ID, was Antworten festlegen (umfrageSperre). */
 	sperren: Record<string, UmfrageSperre>;
+	/** Je Helfer-Modul-ID, was Eintraege festlegen (helferSperre). */
+	helferSperren: Record<string, HelferSperre>;
 	/**
 	 * Was am Thread an Fotos und Dateien haengt, gesamt und je Modul-ID: Der Editor fragt damit
 	 * vor dem Entfernen eines Moduls oder dem Loeschen des Threads zurück (Plan-Entscheidung 11).
@@ -137,7 +145,7 @@ export function verwaltungThread(
 	namen: ReadonlyMap<string, string>,
 	jetzt: Date,
 ): VerwaltungThread {
-	const { kopf, termine, umfragen } = daten;
+	const { kopf, termine, umfragen, helfer } = daten;
 	return {
 		id: kopf.id,
 		segment: threadSegment(kopf.id, kopf.titel),
@@ -151,7 +159,7 @@ export function verwaltungThread(
 		naechsterTermin: naechsterTerminText(kopf, termine, jetzt),
 		darfBearbeiten: darfBearbeiten(ich, kopf),
 		darfAntwortenSehen: siehtAntworten(ich, kopf),
-		hatUmfrage: umfragen.length > 0,
+		hatAntwortModul: umfragen.length > 0 || helfer.length > 0,
 	};
 }
 
@@ -175,12 +183,67 @@ export interface UmfrageUebersicht {
 	offen: number;
 }
 
+export interface HelferUebersicht {
+	modulId: string;
+	titel: string | null;
+	frist: string | null;
+	fristAbgelaufen: boolean;
+	positionen: {
+		id: string;
+		text: string;
+		anzahl: number;
+		belegt: number;
+		/** Namen wie in UebersichtZeile: Kurznamen, eingetragenVon nur, wenn jemand anderes eingetragen hat. */
+		eintraege: { fuerId: string; name: string; notiz: string | null; eingetragenVon: string | null }[];
+	}[];
+	/** Wer jetzt gefragt ist, nach Vorname: die Liste, aus der die Leitung nachtraegt. */
+	gefragte: { fuerId: string; name: string }[];
+	/** Gefragte ohne einen einzigen Eintrag in diesem Modul. */
+	ohneEintrag: number;
+}
+
 export interface AntwortenUebersicht {
 	threadId: string;
 	segment: string;
 	titel: string;
 	darfNachtragen: boolean;
 	umfragen: UmfrageUebersicht[];
+	helfer: HelferUebersicht[];
+}
+
+// Anders als bei den Umfragen stehen hier auch Eintraege von Personen, die nicht mehr gefragt
+// sind (ehemaliges Mitglied, aus der Zielgruppe gefallen): Sie belegen ihren Platz, und die
+// Leitung muss sehen, wer ihn belegt (Plan-Entscheidung 1). "Ohne Eintrag" zaehlt dagegen nur
+// Gefragte, denn nur ihnen fehlt etwas.
+function helferUebersicht(
+	h: HelferDaten,
+	kopf: ThreadKopf,
+	umfeld: Umfeld,
+	name: (id: string) => string,
+	jetzt: Date,
+): HelferUebersicht {
+	const gefragt = gefragte(h, kopf, umfeld);
+	const eingetragen = new Set(h.positionen.flatMap((p) => p.eintraege.map((e) => e.fuerId)));
+	return {
+		modulId: h.modulId,
+		titel: h.titel,
+		frist: h.frist ? h.frist.toISOString() : null,
+		fristAbgelaufen: h.frist !== null && jetzt.getTime() >= h.frist.getTime(),
+		positionen: h.positionen.map((p) => ({
+			id: p.id,
+			text: p.text,
+			anzahl: p.anzahl,
+			belegt: p.eintraege.length,
+			eintraege: p.eintraege.map((e) => ({
+				fuerId: e.fuerId,
+				name: name(e.fuerId),
+				notiz: e.notiz,
+				eingetragenVon: e.vonId !== e.fuerId ? name(e.vonId) : null,
+			})),
+		})),
+		gefragte: gefragt.map((p) => ({ fuerId: p.id, name: kurzname(p) })),
+		ohneEintrag: gefragt.filter((p) => !eingetragen.has(p.id)).length,
+	};
 }
 
 // Spec 7.1: wer wie geantwortet hat, mit Namen. Nur wer "Antworten im Detail" hat oder den
@@ -199,7 +262,7 @@ export function antwortenUebersicht(
 	umfeld: Umfeld,
 	jetzt: Date,
 ): AntwortenUebersicht | null {
-	const { kopf, umfragen } = daten;
+	const { kopf, umfragen, helfer } = daten;
 	if (!siehtThread(ich, kopf, umfeld)) return null;
 	if (!siehtAntworten(ich, kopf)) return null;
 	// Nachtragen nur im veroeffentlichten Thread: Im Entwurf verweigert der Server jede Antwort
@@ -239,5 +302,6 @@ export function antwortenUebersicht(
 				offen: zeilen.filter((z) => z.optionIds.length === 0).length,
 			};
 		}),
+		helfer: helfer.map((h) => helferUebersicht(h, kopf, umfeld, name, jetzt)),
 	};
 }

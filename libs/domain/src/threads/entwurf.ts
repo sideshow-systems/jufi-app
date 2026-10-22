@@ -48,6 +48,14 @@ export interface OptionEntwurf {
 	text: string;
 }
 
+// Wie bei Optionen: schluessel null heisst neue Position, den Schluessel vergibt der Server.
+// Er bleibt beim Umbenennen und Umsortieren, daran haengen die Eintraege (Spec 5.2).
+export interface PositionEntwurf {
+	schluessel: string | null;
+	text: string;
+	anzahl: number;
+}
+
 export type TerminEntwurf = Omit<TerminDaten, 'modulId'>;
 
 // id null heisst: neues Modul. Datei- und Foto-Module tragen keine Dateien im Entwurf: Die
@@ -72,7 +80,15 @@ export type ModulEntwurf =
 			optionen: OptionEntwurf[];
 	  }
 	| { typ: 'DATEIEN'; id: string | null; titel: string | null }
-	| { typ: 'FOTOS'; id: string | null; titel: string | null; hochladen: FotoHochladen };
+	| { typ: 'FOTOS'; id: string | null; titel: string | null; hochladen: FotoHochladen }
+	| {
+			typ: 'HELFER';
+			id: string | null;
+			titel: string | null;
+			einheit: AntwortEinheit;
+			frist: string | null;
+			positionen: PositionEntwurf[];
+	  };
 
 export interface ThreadEntwurf {
 	titel: string;
@@ -99,7 +115,7 @@ const ROLLENFILTER: readonly Rollenfilter[] = [
 const EINHEITEN: readonly AntwortEinheit[] = ['JUNGFISCHER', 'ERWACHSENER', 'PERSON'];
 const ERGEBNISSE: readonly ErgebnisSicht[] = ['ALLE', 'SUMME', 'JUGENDLEITER'];
 const FOTO_HOCHLADEN: readonly FotoHochladen[] = ['JUGENDLEITER', 'ALLE'];
-const MODULTYPEN = ['INFO', 'TERMIN', 'UMFRAGE', 'DATEIEN', 'FOTOS'] as const;
+const MODULTYPEN = ['INFO', 'TERMIN', 'UMFRAGE', 'DATEIEN', 'FOTOS', 'HELFER'] as const;
 
 // ---------------------------------------------------------------------------------
 // Form: entwurfAus
@@ -178,6 +194,19 @@ function optionen(w: unknown, feld: string): OptionEntwurf[] {
 	});
 }
 
+// Die Anzahl wird hier nur als Zahl gelesen; ob sie ganz und im Bereich ist, sagt entwurfFehler
+// mit einem eigenen Satz. Verworfen: 1.5 schon hier als "Ungültige Anfrage" abzuweisen, denn
+// der Editor zeigt dieselbe Pruefung am Feld, und dort waere der knappe Satz keine Hilfe.
+function positionen(w: unknown, feld: string): PositionEntwurf[] {
+	if (!Array.isArray(w)) throw new Ungueltig(feld);
+	return w.map((p: unknown) => {
+		if (!istObjekt(p)) throw new Ungueltig(feld);
+		const anzahl = p['anzahl'];
+		if (typeof anzahl !== 'number' || !Number.isFinite(anzahl)) throw new Ungueltig(feld);
+		return { schluessel: textOderNull(p['schluessel'], feld), text: text(p['text'], feld), anzahl };
+	});
+}
+
 function modul(w: unknown, i: number): ModulEntwurf {
 	const f = (name: string) => `module.${i}.${name}`;
 	if (!istObjekt(w)) throw new Ungueltig(f('typ'));
@@ -187,6 +216,15 @@ function modul(w: unknown, i: number): ModulEntwurf {
 	if (typ === 'TERMIN') return { typ, ...kopf, termin: termin(w['termin'], i) };
 	if (typ === 'DATEIEN') return { typ, ...kopf };
 	if (typ === 'FOTOS') return { typ, ...kopf, hochladen: wahl(w['hochladen'], FOTO_HOCHLADEN, f('hochladen')) };
+	if (typ === 'HELFER') {
+		return {
+			typ,
+			...kopf,
+			einheit: wahl(w['einheit'], EINHEITEN, f('einheit')),
+			frist: frist(w['frist'], f('frist')),
+			positionen: positionen(w['positionen'], f('positionen')),
+		};
+	}
 
 	const teilnahme = wahrheit(w['teilnahme'], f('teilnahme'));
 	const vielleicht = wahrheit(w['vielleicht'], f('vielleicht'));
@@ -277,43 +315,98 @@ function optionenFehler(feld: string, optionen: readonly OptionEntwurf[]): Feldf
 	return [];
 }
 
-function modulFehler(m: ModulEntwurf, i: number, rollenfilter: Rollenfilter, teilnahmeSchonDa: boolean): Feldfehler[] {
-	const f = (name: string) => `module.${i}.${name}`;
-	const fehler = laengeFehler(f('titel'), m.titel, GRENZEN.modulTitel);
-	if (m.typ === 'INFO') {
-		return [...fehler, ...pflichtFehler(f('text'), m.text, GRENZEN.infoText, 'Bitte einen Text eingeben.')];
+// Ein Satz je Liste wie bei den Optionen, in fester Reihenfolge: Zahl, leer, Laenge, doppelt,
+// Anzahl. Verworfen: einen Fehler je Position, weil der Editor die Meldung am Feld der ganzen
+// Liste zeigt und zehn gleiche Saetze dort nichts sagen, was der erste nicht sagt.
+function positionenFehler(feld: string, positionen: readonly PositionEntwurf[]): Feldfehler[] {
+	const fehler = (text: string): Feldfehler[] => [{ feld, text }];
+	if (positionen.length === 0) return fehler('Bitte mindestens eine Position.');
+	if (positionen.length > GRENZEN.positionen) return fehler(`Höchstens ${GRENZEN.positionen} Positionen.`);
+	if (positionen.some((p) => p.text.trim() === '')) return fehler('Bitte jede Position ausfüllen.');
+	if (positionen.some((p) => laenge(p.text.trim()) > GRENZEN.positionText)) {
+		return fehler(hoechstens(GRENZEN.positionText));
 	}
-	if (m.typ === 'TERMIN') {
-		// Wie entwurfAus getrimmt, sonst ist " 2026-10-24" im Editor ein Fehler und am Server keiner.
-		const roh = m.termin;
-		const t = terminFehler({
-			modulId: '',
-			startDatum: roh.startDatum.trim(),
-			endDatum: roh.endDatum?.trim() || null,
-			beginn: roh.beginn?.trim() || null,
-			ende: roh.ende?.trim() || null,
-			ort: null,
-			treffpunkt: null,
-		});
-		return [
-			...fehler,
-			...(t === null ? [] : [{ feld: f('termin'), text: t }]),
-			...laengeFehler(f('ort'), m.termin.ort, GRENZEN.ort),
-			...laengeFehler(f('treffpunkt'), m.termin.treffpunkt, GRENZEN.treffpunkt),
-		];
+	// Ohne Gross-/Kleinschreibung wie bei den Optionen: "Kuchen" und "kuchen" waeren dieselbe Bitte.
+	const gesehen = new Set(positionen.map((p) => p.text.trim().toLowerCase()));
+	if (gesehen.size < positionen.length) return fehler('Jede Position nur einmal.');
+	if (positionen.some((p) => !Number.isInteger(p.anzahl) || p.anzahl < 1 || p.anzahl > GRENZEN.anzahl)) {
+		return fehler(`Die Anzahl muss zwischen 1 und ${GRENZEN.anzahl} liegen.`);
 	}
-	// Datei- und Foto-Module haben ausser dem Titel nichts zu pruefen; ab hier ist m eine Umfrage.
-	if (m.typ === 'DATEIEN' || m.typ === 'FOTOS') return fehler;
-	fehler.push(...pflichtFehler(f('frage'), m.frage, GRENZEN.frage, 'Bitte eine Frage eingeben.'));
-	if (!einheitenFuer(rollenfilter).includes(m.einheit)) {
-		fehler.push({ feld: f('einheit'), text: 'Diese Einheit fragt bei dieser Zielgruppe niemanden.' });
-	}
+	return [];
+}
+
+// Umfrage und Helferliste fragen dieselben Personen (gefragte in antworten.ts), also gilt fuer
+// beide dieselbe Einheitenregel mit demselben Satz.
+function einheitFehler(feld: string, einheit: AntwortEinheit, rollenfilter: Rollenfilter): Feldfehler[] {
+	if (einheitenFuer(rollenfilter).includes(einheit)) return [];
+	return [{ feld, text: 'Diese Einheit fragt bei dieser Zielgruppe niemanden.' }];
+}
+
+function terminModulFehler(m: Extract<ModulEntwurf, { typ: 'TERMIN' }>, f: (name: string) => string): Feldfehler[] {
+	// Wie entwurfAus getrimmt, sonst ist " 2026-10-24" im Editor ein Fehler und am Server keiner.
+	const roh = m.termin;
+	const t = terminFehler({
+		modulId: '',
+		startDatum: roh.startDatum.trim(),
+		endDatum: roh.endDatum?.trim() || null,
+		beginn: roh.beginn?.trim() || null,
+		ende: roh.ende?.trim() || null,
+		ort: null,
+		treffpunkt: null,
+	});
+	return [
+		...(t === null ? [] : [{ feld: f('termin'), text: t }]),
+		...laengeFehler(f('ort'), m.termin.ort, GRENZEN.ort),
+		...laengeFehler(f('treffpunkt'), m.termin.treffpunkt, GRENZEN.treffpunkt),
+	];
+}
+
+function umfrageFehler(
+	m: Extract<ModulEntwurf, { typ: 'UMFRAGE' }>,
+	f: (name: string) => string,
+	rollenfilter: Rollenfilter,
+	teilnahmeSchonDa: boolean,
+): Feldfehler[] {
+	const fehler = [
+		...pflichtFehler(f('frage'), m.frage, GRENZEN.frage, 'Bitte eine Frage eingeben.'),
+		...einheitFehler(f('einheit'), m.einheit, rollenfilter),
+	];
 	// Die Optionen einer Teilnahme sind fest (entwurfAus setzt sie), eine Pruefung liefe leer.
 	if (!m.teilnahme) fehler.push(...optionenFehler(f('optionen'), m.optionen));
 	if (m.teilnahme && teilnahmeSchonDa) {
 		fehler.push({ feld: f('teilnahme'), text: 'Es gibt schon eine Teilnahme-Umfrage.', konflikt: true });
 	}
 	return fehler;
+}
+
+// Erschoepfend ueber typ: Ein neuer Modultyp bricht hier den Bau, statt ungeprueft durchzugehen.
+function modulFehler(m: ModulEntwurf, i: number, rollenfilter: Rollenfilter, teilnahmeSchonDa: boolean): Feldfehler[] {
+	const f = (name: string) => `module.${i}.${name}`;
+	const titel = laengeFehler(f('titel'), m.titel, GRENZEN.modulTitel);
+	switch (m.typ) {
+		case 'INFO':
+			return [...titel, ...pflichtFehler(f('text'), m.text, GRENZEN.infoText, 'Bitte einen Text eingeben.')];
+		case 'TERMIN':
+			return [...titel, ...terminModulFehler(m, f)];
+		case 'UMFRAGE':
+			return [...titel, ...umfrageFehler(m, f, rollenfilter, teilnahmeSchonDa)];
+		// Datei- und Foto-Module haben ausser dem Titel nichts zu pruefen.
+		case 'DATEIEN':
+		case 'FOTOS':
+			return titel;
+		// Die Frist prueft schon entwurfAus (lesbarer Zeitpunkt), wie bei der Umfrage; eine Frist in
+		// der Vergangenheit ist erlaubt, sie schliesst die Liste.
+		case 'HELFER':
+			return [
+				...titel,
+				...einheitFehler(f('einheit'), m.einheit, rollenfilter),
+				...positionenFehler(f('positionen'), m.positionen),
+			];
+		default: {
+			const unerreichbar: never = m;
+			return unerreichbar;
+		}
+	}
 }
 
 /**
@@ -352,7 +445,12 @@ export function entwurfFehler(e: ThreadEntwurf, untergruppenIds: ReadonlySet<str
  * Berliner Tage nach jetzt: Der Tag ist in der Regel zu aendern, aber nie in der
  * Vergangenheit. jetzt kommt vom Aufrufer, die Regel kennt keine Uhr.
  */
-export function neuesModul(typ: ModulEntwurf['typ'], vorhandene: readonly ModulEntwurf[], jetzt: Date): ModulEntwurf {
+export function neuesModul(
+	typ: ModulEntwurf['typ'],
+	vorhandene: readonly ModulEntwurf[],
+	jetzt: Date,
+	rollenfilter: Rollenfilter,
+): ModulEntwurf {
 	const neu = { id: null, titel: null };
 	if (typ === 'INFO') return { typ, ...neu, text: '' };
 	if (typ === 'DATEIEN') return { typ, ...neu };
@@ -370,6 +468,15 @@ export function neuesModul(typ: ModulEntwurf['typ'], vorhandene: readonly ModulE
 			treffpunkt: null,
 		};
 		return { typ, ...neu, termin };
+	}
+	// Spec 5.1: Mitbringen und Helfen ist Sache der Erwachsenen, also ist das die Vorgabe, solange
+	// der Rollenfilter sie zulaesst. Die leere Position zeigt dem Ersteller gleich, was er ausfuellen
+	// soll. Die Umfrage bekommt den Rollenfilter nicht: Ihre Vorlage ist fest, der Editor passt ihre
+	// Einheit danach an (mitPassenderEinheit).
+	if (typ === 'HELFER') {
+		const erlaubt = einheitenFuer(rollenfilter);
+		const einheit = erlaubt.includes('ERWACHSENER') ? 'ERWACHSENER' : (erlaubt[0] ?? 'ERWACHSENER');
+		return { typ, ...neu, einheit, frist: null, positionen: [{ schluessel: null, text: '', anzahl: 1 }] };
 	}
 	const vorlage = neueUmfrageVorlage();
 	if (vorhandene.some((m) => m.typ === 'UMFRAGE' && m.teilnahme)) {
@@ -409,6 +516,18 @@ export function entwurfAusThread(k: ThreadKopf, module: readonly ModulDaten[]): 
 					return { typ: m.typ, id: m.id, titel: m.titel };
 				case 'FOTOS':
 					return { typ: m.typ, id: m.id, titel: m.titel, hochladen: m.hochladen };
+				case 'HELFER': {
+					const h = m.helfer;
+					return {
+						typ: m.typ,
+						id: m.id,
+						titel: m.titel,
+						einheit: h.einheit,
+						frist: h.frist ? h.frist.toISOString() : null,
+						// Ohne Eintraege: Die haben eigene Routen, der Entwurf beschreibt nur die Liste.
+						positionen: h.positionen.map((p) => ({ schluessel: p.schluessel, text: p.text, anzahl: p.anzahl })),
+					};
+				}
 				case 'UMFRAGE': {
 					const u = m.umfrage;
 					return {

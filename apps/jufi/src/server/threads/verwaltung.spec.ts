@@ -95,14 +95,14 @@ describe('Lesende Routen der Verwaltung', () => {
 				entwurf: false,
 				darfBearbeiten: true,
 				darfAntwortenSehen: true,
-				hatUmfrage: false,
+				hatAntwortModul: false,
 			});
 			expect(zeile(fremderEntwurf.threadId)).toMatchObject({
 				titel: 'Tinas Entwurf',
 				entwurf: true,
 				darfBearbeiten: false,
 				darfAntwortenSehen: false,
-				hatUmfrage: true,
+				hatAntwortModul: true,
 			});
 			expect(zeile(austausch.id)).toMatchObject({ art: 'JUGENDSPRECHER_AUSTAUSCH', darfBearbeiten: false });
 		});
@@ -196,6 +196,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				'darfArchivieren',
 				'darfLoeschen',
 				'entwurf',
+				'helferSperren',
 				'id',
 				'medien',
 				'segment',
@@ -215,6 +216,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				darfLoeschen: false,
 			});
 			expect(b.medien).toEqual({ gesamt: KEINE_MEDIEN, module: {} });
+			expect(b.helferSperren).toEqual({});
 			expect(b.segment).toMatch(new RegExp(`^${t.threadId}-zeltlager$`));
 			expect(b.entwurf).toMatchObject({
 				titel: 'Zeltlager',

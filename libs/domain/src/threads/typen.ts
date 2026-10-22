@@ -104,6 +104,12 @@ export interface HelferPositionDaten {
 
 export interface HelferDaten extends AntwortRegel {
 	modulId: string;
+	/**
+	 * Der Modultitel, wie bei der Umfrage die Frage: Die Antworten-Uebersicht bekommt nur
+	 * ThreadDaten und muss die Liste trotzdem benennen. Verworfen: ihr zusaetzlich die Module
+	 * zu geben, denn dann suchte sie den Titel ueber die Modul-ID in einer zweiten Liste.
+	 */
+	titel: string | null;
 	/** In der Reihenfolge, die der Ersteller gewaehlt hat. */
 	positionen: readonly HelferPositionDaten[];
 }

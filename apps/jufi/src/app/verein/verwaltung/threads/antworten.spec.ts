@@ -35,6 +35,7 @@ function uebersicht(rest: Partial<AntwortenUebersicht> = {}): AntwortenUebersich
 		titel: '🎳 Bowling',
 		darfNachtragen: true,
 		umfragen: [BOWLING],
+		helfer: [],
 		...rest,
 	};
 }

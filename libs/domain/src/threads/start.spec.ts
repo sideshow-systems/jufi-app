@@ -81,6 +81,7 @@ function helferPosition(id: string, anzahl: number, belegtVon: string[] = []): H
 function helferliste(daten: Partial<HelferDaten> = {}): HelferDaten {
 	return {
 		modulId: 'm-helfer',
+		titel: null,
 		einheit: 'ERWACHSENER',
 		frist: FRIST,
 		positionen: [helferPosition('fahrer', 2), helferPosition('snacks', 3)],

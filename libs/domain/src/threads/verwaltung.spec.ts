@@ -1,7 +1,7 @@
 import type { TerminDaten } from '../module/termin/termin.js';
 import { threadDatenAus, type ModulDaten } from './ansicht.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
-import type { AntwortDaten, ThreadKopf, UmfrageDaten } from './typen.js';
+import type { AntwortDaten, HelferDaten, HelferEintragDaten, ThreadKopf, UmfrageDaten } from './typen.js';
 import { antwortenUebersicht, medienZahlen, siehtAntworten, verwaltungThread, zielgruppeText } from './verwaltung.js';
 
 const umfeld = bowlingUmfeld();
@@ -85,6 +85,43 @@ const umfrageModul = (u: Partial<UmfrageDaten> = {}): ModulDaten => ({
 	umfrage: umfrage(u),
 });
 
+const helferEintrag = (fuerId: string, vonId = fuerId, notiz: string | null = null): HelferEintragDaten => ({
+	fuerId,
+	vonId,
+	notiz,
+	eingetragenAm: JETZT,
+});
+// Kuchen: Sandra mit Notiz und die entfernte Mia. Grill: Hans, von Thomas eingetragen.
+function helferDaten(h: Partial<HelferDaten> = {}): HelferDaten {
+	return {
+		modulId: 'h1',
+		titel: 'Mitbringen',
+		einheit: 'ERWACHSENER',
+		frist: new Date('2026-10-23T10:00:00Z'),
+		positionen: [
+			{
+				id: 'p-kuchen',
+				schluessel: 'pkuchen01',
+				text: 'Kuchen',
+				anzahl: 4,
+				eintraege: [helferEintrag('sandra', 'sandra', 'Marmorkuchen'), helferEintrag('mia')],
+			},
+			{
+				id: 'p-grill',
+				schluessel: 'pgrill001',
+				text: 'Grill',
+				anzahl: 2,
+				eintraege: [helferEintrag('hans', 'thomas')],
+			},
+		],
+		...h,
+	};
+}
+const helferModul = (h: Partial<HelferDaten> = {}): ModulDaten => {
+	const helfer = helferDaten(h);
+	return { typ: 'HELFER', id: helfer.modulId, titel: helfer.titel, helfer };
+};
+
 describe('verwaltungThread', () => {
 	it('beschreibt einen veroeffentlichten Thread fuer den Ersteller', () => {
 		const t = verwaltungThread(
@@ -110,13 +147,13 @@ describe('verwaltungThread', () => {
 			naechsterTermin: 'Sa 24.10. · 18:00',
 			darfBearbeiten: true,
 			darfAntwortenSehen: true,
-			hatUmfrage: true,
+			hatAntwortModul: true,
 		});
 	});
 
 	it('kennzeichnet einen Entwurf ohne Termin und ohne Umfrage', () => {
 		const t = verwaltungThread(person('thomas'), daten(kopf({ veroeffentlichtAm: null })), UNTERGRUPPEN, JETZT);
-		expect(t).toMatchObject({ entwurf: true, naechsterTermin: null, hatUmfrage: false, archiviert: false });
+		expect(t).toMatchObject({ entwurf: true, naechsterTermin: null, hatAntwortModul: false, archiviert: false });
 	});
 
 	it('meldet archiviert nach dem letzten Termin und schweigt dort ueber den naechsten', () => {
@@ -133,6 +170,18 @@ describe('verwaltungThread', () => {
 	});
 });
 
+describe('verwaltungThread: Antwort-Module', () => {
+	it('meldet eine Helferliste allein als Antwort-Modul', () => {
+		const t = verwaltungThread(person('thomas'), daten(kopf(), [helferModul()]), UNTERGRUPPEN, JETZT);
+		expect(t.hatAntwortModul).toBe(true);
+	});
+
+	it('meldet Info und Termin nicht als Antwort-Modul', () => {
+		const module: ModulDaten[] = [{ typ: 'INFO', id: 'i1', titel: null, text: 'x' }, terminModul('2026-10-24')];
+		expect(verwaltungThread(person('thomas'), daten(kopf(), module), UNTERGRUPPEN, JETZT).hatAntwortModul).toBe(false);
+	});
+});
+
 describe('siehtAntworten', () => {
 	it('gilt fuer Bearbeiter und fuer Antworten im Detail, nicht fuer Ersteller fremder Threads', () => {
 		expect(siehtAntworten(person('thomas'), kopf())).toBe(true);
@@ -145,7 +194,7 @@ describe('siehtAntworten', () => {
 
 	it('verwaltungThread meldet es je Zeile', () => {
 		const fremd = verwaltungThread(person('petra'), daten(kopf(), [umfrageModul()]), UNTERGRUPPEN, JETZT);
-		expect(fremd).toMatchObject({ hatUmfrage: true, darfBearbeiten: false, darfAntwortenSehen: false });
+		expect(fremd).toMatchObject({ hatAntwortModul: true, darfBearbeiten: false, darfAntwortenSehen: false });
 		const betreuer = verwaltungThread(person('bea'), daten(kopf(), [umfrageModul()]), UNTERGRUPPEN, JETZT);
 		expect(betreuer).toMatchObject({ darfBearbeiten: false, darfAntwortenSehen: true });
 	});
@@ -244,6 +293,70 @@ describe('antwortenUebersicht', () => {
 			JETZT,
 		)!;
 		expect(u.umfragen[0].zeilen.find((z) => z.fuerId === 'lena')?.eingetragenVon).toBe('ehemaliges Mitglied');
+	});
+});
+
+describe('antwortenUebersicht: Helferliste', () => {
+	const thread = (h: Partial<HelferDaten> = {}, k: ThreadKopf = kopf()) => daten(k, [helferModul(h)]);
+
+	it('nennt die Gefragten pro Erwachsenem mit Kurznamen und zaehlt die ohne Eintrag', () => {
+		const [h] = antwortenUebersicht(person('thomas'), thread(), umfeld, JETZT)!.helfer;
+		expect(h.gefragte).toEqual([
+			{ fuerId: 'bea', name: 'Bea R.' },
+			{ fuerId: 'hans', name: 'Hans M.' },
+			{ fuerId: 'peter', name: 'Peter V.' },
+			{ fuerId: 'petra', name: 'Petra L.' },
+			{ fuerId: 'sandra', name: 'Sandra M.' },
+			{ fuerId: 'thomas', name: 'Thomas K.' },
+		]);
+		// Sandra und Hans stehen in einer Position; die Eintragung der entfernten Mia zaehlt nicht.
+		expect(h.ohneEintrag).toBe(4);
+	});
+
+	it('zeigt Positionen mit Fuellstand und Eintraegen in Kurznamen', () => {
+		const [h] = antwortenUebersicht(person('thomas'), thread(), umfeld, JETZT)!.helfer;
+		expect(h).toMatchObject({
+			modulId: 'h1',
+			titel: 'Mitbringen',
+			frist: '2026-10-23T10:00:00.000Z',
+			fristAbgelaufen: false,
+		});
+		expect(h.positionen).toEqual([
+			{
+				id: 'p-kuchen',
+				text: 'Kuchen',
+				anzahl: 4,
+				belegt: 2,
+				eintraege: [
+					{ fuerId: 'sandra', name: 'Sandra M.', notiz: 'Marmorkuchen', eingetragenVon: null },
+					{ fuerId: 'mia', name: 'ehemaliges Mitglied', notiz: null, eingetragenVon: null },
+				],
+			},
+			{
+				id: 'p-grill',
+				text: 'Grill',
+				anzahl: 2,
+				belegt: 1,
+				eintraege: [{ fuerId: 'hans', name: 'Hans M.', notiz: null, eingetragenVon: 'Thomas K.' }],
+			},
+		]);
+	});
+
+	it('meldet den Fristablauf in der Fristsekunde und hat ohne Titel null', () => {
+		const frist = new Date('2026-10-22T10:00:00Z');
+		const [h] = antwortenUebersicht(person('thomas'), thread({ frist, titel: null }), umfeld, JETZT)!.helfer;
+		expect(h).toMatchObject({ titel: null, fristAbgelaufen: true });
+	});
+
+	it('gibt Lesern ohne Recht null und laesst Bea ohne Nachtragen sehen', () => {
+		expect(antwortenUebersicht(person('sandra'), thread(), umfeld, JETZT)).toBeNull();
+		const bea = antwortenUebersicht(person('bea'), thread(), umfeld, JETZT)!;
+		expect(bea.darfNachtragen).toBe(false);
+		expect(bea.helfer).toHaveLength(1);
+	});
+
+	it('hat ohne Helferliste eine leere Liste', () => {
+		expect(antwortenUebersicht(person('thomas'), daten(kopf()), umfeld, JETZT)?.helfer).toEqual([]);
 	});
 });
 

@@ -976,9 +976,11 @@ export class ThreadEditorComponent {
 		return { ...m, einheit: erlaubt[0] ?? m.einheit };
 	}
 
-	// neuesModul kennt den Rollenfilter nicht (Pro Jungfischer bei "Nur Familie" waere sofort ein Fehler).
+	// neuesModul waehlt die Einheit nur fuer die Helferliste nach dem Rollenfilter; die Vorlage der
+	// Umfrage bleibt fest (Pro Jungfischer bei "Nur Familie" waere sofort ein Fehler), daher danach
+	// mitPassenderEinheit.
 	protected hinzufuegen(typ: ModulTyp): void {
-		const roh = neuesModul(typ, this.entwurf().module, new Date());
+		const roh = neuesModul(typ, this.entwurf().module, new Date(), this.kopf().rollenfilter);
 		const eintrag: Eintrag = {
 			schluessel: lokalerSchluessel(),
 			modul: this.mitPassenderEinheit(roh, this.kopf().rollenfilter),
@@ -1071,6 +1073,7 @@ export class ThreadEditorComponent {
 		}
 		if (m.typ === 'DATEIEN') return 'Dateien';
 		if (m.typ === 'FOTOS') return 'Fotos';
+		if (m.typ === 'HELFER') return 'Helferliste';
 		return m.frage.trim() || 'Noch ohne Frage';
 	}
 

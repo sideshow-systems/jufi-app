@@ -62,6 +62,9 @@ const FEHLERFELDER = {
 	// jeder Wert erlaubt ist.
 	DATEIEN: ['titel'],
 	FOTOS: ['titel'],
+	// Die Felder der Helferliste zeigt dieses Bauteil noch nicht; bis dahin nennt der Editor jeden
+	// Fehler daran als Satz unter den Knoepfen, statt ihn an einem Feld abzulegen, das es nicht gibt.
+	HELFER: [],
 	UMFRAGE: ['titel', 'frage', 'teilnahme', 'optionen', 'mehrfach', 'einheit', 'frist'],
 } as const satisfies Record<string, readonly string[]>;
 
