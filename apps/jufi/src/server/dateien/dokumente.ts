@@ -202,13 +202,15 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 		if (!upload.ok) {
 			return upload.status === 411
 				? fruehAntwort(res, 411, { fehler: 'Die Größe der Datei fehlt' })
-				: fruehAntwort(res, 413, { fehler: FEHLER_TEXT.GROESSE, code: 'GROESSE' });
+				: fruehAntwort(res, 413, { fehler: FEHLER_TEXT.GROESSE.DATEI, code: 'GROESSE' });
 		}
 
 		const typ = erkenneTyp(upload.kopf, name, 'DATEI');
 		if (!typ.ok) {
 			await rm(upload.tempPfad, { force: true });
-			return void res.status(415).json({ fehler: FEHLER_TEXT[typ.grund], code: typ.grund });
+			return void res
+				.status(415)
+				.json({ fehler: typ.grund === 'HEIC' ? FEHLER_TEXT.HEIC : FEHLER_TEXT.TYP.DATEI, code: typ.grund });
 		}
 
 		// Die ID steht vor der Zeile fest, weil die Bytes vorher abgelegt werden: Eine Zeile ohne

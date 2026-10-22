@@ -3,6 +3,8 @@ import type { ThreadKopf } from './typen.js';
 import {
 	darfArchivieren,
 	darfBearbeiten,
+	darfFotoLoeschen,
+	darfFotosHochladen,
 	darfLoeschen,
 	darfLoeschenNachricht,
 	darfSchreiben,
@@ -190,5 +192,57 @@ describe('darfLoeschenNachricht', () => {
 	it('verweigert dem eigenen Autor, wenn er entfernt wurde', () => {
 		const entfernt = { ...person('sandra'), entferntAm: new Date('2026-09-01T00:00:00Z') };
 		expect(darfLoeschenNachricht(entfernt, nachricht('sandra'), kopf())).toBe(false);
+	});
+});
+
+describe('darfFotosHochladen', () => {
+	const e = { umfeld, termine: [] as TerminDaten[], jetzt: JETZT };
+	const entwurf = () => kopf({ veroeffentlichtAm: null });
+
+	it('erlaubt Bearbeitern immer, auch im Entwurf und im Archiv', () => {
+		expect(darfFotosHochladen(person('thomas'), kopf(), 'JUGENDLEITER', e)).toBe(true);
+		expect(darfFotosHochladen(person('thomas'), entwurf(), 'JUGENDLEITER', e)).toBe(true);
+		expect(darfFotosHochladen(person('thomas'), kopf(), 'JUGENDLEITER', { ...e, termine: [alterTermin] })).toBe(true);
+		expect(darfFotosHochladen(person('petra'), vonPetra(), 'JUGENDLEITER', { ...e, termine: [alterTermin] })).toBe(
+			true,
+		);
+	});
+
+	it('verweigert Lesern bei Nur Jugendleiter', () => {
+		expect(darfFotosHochladen(person('sandra'), kopf(), 'JUGENDLEITER', e)).toBe(false);
+	});
+
+	it('erlaubt Lesern bei Alle, ausser im Archiv und im Entwurf', () => {
+		expect(darfFotosHochladen(person('sandra'), kopf(), 'ALLE', e)).toBe(true);
+		expect(darfFotosHochladen(person('sandra'), kopf(), 'ALLE', { ...e, termine: [alterTermin] })).toBe(false);
+		expect(darfFotosHochladen(person('sandra'), entwurf(), 'ALLE', e)).toBe(false);
+	});
+
+	it('verweigert dem, der den Thread nicht sieht, auch bei Alle', () => {
+		const nurKlein = kopf({ alleUntergruppen: false, untergruppenIds: ['klein'], rollenfilter: 'NUR_FAMILIE' });
+		expect(darfFotosHochladen(person('sandra'), nurKlein, 'ALLE', e)).toBe(true);
+		expect(darfFotosHochladen(person('peter'), nurKlein, 'ALLE', e)).toBe(false);
+	});
+
+	it('verweigert Entfernten', () => {
+		expect(
+			darfFotosHochladen({ ...person('sandra'), entferntAm: new Date('2026-09-01T00:00:00Z') }, kopf(), 'ALLE', e),
+		).toBe(false);
+	});
+});
+
+describe('darfFotoLoeschen', () => {
+	it('erlaubt das eigene Foto', () => {
+		expect(darfFotoLoeschen(person('sandra'), kopf(), 'sandra')).toBe(true);
+	});
+
+	it('verweigert dem Leser ein fremdes Foto', () => {
+		expect(darfFotoLoeschen(person('sandra'), kopf(), 'hans')).toBe(false);
+	});
+
+	it('erlaubt dem Bearbeiter ein fremdes Foto', () => {
+		expect(darfFotoLoeschen(person('thomas'), kopf(), 'sandra')).toBe(true);
+		expect(darfFotoLoeschen(person('petra'), vonPetra(), 'sandra')).toBe(true);
+		expect(darfFotoLoeschen(person('petra'), kopf(), 'sandra')).toBe(false);
 	});
 });

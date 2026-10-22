@@ -1,7 +1,8 @@
-import type { Bezug, Umfeld } from './typen.js';
-import { absenderName, eingetragenVon, kurzname } from './namen.js';
+import type { EinwilligungZeile } from '../einwilligung.js';
+import type { Bezug, ThreadDaten, Umfeld, UmfrageDaten } from './typen.js';
+import { absenderName, dabeiKinder, eingetragenVon, fotoHinweis, kurzname, ohneFotoEinwilligung } from './namen.js';
 import { baueUmfeld } from './umfeld.js';
-import { bowlingUmfeld } from './testhilfe.js';
+import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
 
 const umfeld = bowlingUmfeld();
 
@@ -138,5 +139,108 @@ describe('eingetragenVon', () => {
 	it('nimmt bei Andere den Freitext', () => {
 		const andere = umfeldMitKindern([{ beziehung: 'ANDERE', beziehungFreitext: 'Nachbarin' }], ['Max']);
 		expect(eingetragenVon('sandra', 'max', 'x', andere)).toBe('eingetragen von Nachbarin Sandra');
+	});
+});
+
+describe('Foto-Einwilligung im Thread', () => {
+	const eltern = (erteiltVon: string): EinwilligungZeile[] => [{ erteiltVon, widerrufenAm: null }];
+	// Alle bis auf Tim (ohne Zuordnung, ohne Zeile); Paul ist volljaehrig und willigt selbst ein.
+	const fast = () =>
+		new Map<string, readonly EinwilligungZeile[]>([
+			['lena', eltern('sandra')],
+			['max', eltern('sandra')],
+			['jonas', eltern('thomas')],
+			['paul', eltern('paul')],
+		]);
+	const teilnahme = (dabei: string[], schluesselDabei = 'dabei'): UmfrageDaten => ({
+		modulId: 'u1',
+		frage: 'Kommst du?',
+		einheit: 'JUNGFISCHER',
+		mehrfach: false,
+		teilnahme: true,
+		vielleicht: false,
+		frist: null,
+		ergebnisse: 'ALLE',
+		optionen: [
+			{ id: 'o-dabei', schluessel: schluesselDabei, text: 'Dabei' },
+			{ id: 'o-nein', schluessel: 'abgesagt', text: 'Abgesagt' },
+		],
+		antworten: [
+			...dabei.map((id) => ({ fuerId: id, vonId: id, optionIds: ['o-dabei'], abgegebenAm: JETZT })),
+			{ fuerId: 'tim', vonId: 'tim', optionIds: ['o-nein'], abgegebenAm: JETZT },
+		],
+	});
+	const daten = (umfragen: UmfrageDaten[]): ThreadDaten => ({ kopf: kopf(), termine: [], umfragen });
+
+	describe('ohneFotoEinwilligung', () => {
+		it('nennt nur Tim, wenn Lena eine Einwilligung hat', () => {
+			const r = ohneFotoEinwilligung(kopf(), umfeld, { fotoEinwilligungen: fast(), dabei: null }, JETZT);
+			expect(r.map((p) => p.id)).toEqual(['tim']);
+		});
+
+		it('sortiert nach Kurzname', () => {
+			const e = fast();
+			e.delete('max');
+			const r = ohneFotoEinwilligung(kopf(), umfeld, { fotoEinwilligungen: e, dabei: null }, JETZT);
+			expect(r.map((p) => p.id)).toEqual(['max', 'tim']);
+		});
+
+		it('zaehlt die Eltern eines Volljaehrigen nicht mehr', () => {
+			const e = fast();
+			e.set('paul', eltern('peter'));
+			const r = ohneFotoEinwilligung(kopf(), umfeld, { fotoEinwilligungen: e, dabei: null }, JETZT);
+			expect(r.map((p) => p.id)).toEqual(['paul', 'tim']);
+		});
+
+		it('beschraenkt sich auf die, die dabei sind', () => {
+			const r = ohneFotoEinwilligung(
+				kopf(),
+				umfeld,
+				{ fotoEinwilligungen: fast(), dabei: new Set(['lena', 'tim']) },
+				JETZT,
+			);
+			expect(r.map((p) => p.id)).toEqual(['tim']);
+			expect(
+				ohneFotoEinwilligung(kopf(), umfeld, { fotoEinwilligungen: fast(), dabei: new Set(['lena']) }, JETZT),
+			).toEqual([]);
+			expect(ohneFotoEinwilligung(kopf(), umfeld, { fotoEinwilligungen: fast(), dabei: new Set() }, JETZT)).toEqual([]);
+		});
+
+		it('ist bei Nur Jugendleiter leer', () => {
+			const k = kopf({ rollenfilter: 'NUR_JUGENDLEITER' });
+			expect(ohneFotoEinwilligung(k, umfeld, { fotoEinwilligungen: new Map(), dabei: null }, JETZT)).toEqual([]);
+		});
+	});
+
+	describe('dabeiKinder', () => {
+		it('liefert die, die in der Teilnahme-Umfrage zusagen', () => {
+			expect(dabeiKinder(daten([teilnahme(['lena', 'max'])]))).toEqual(new Set(['lena', 'max']));
+		});
+
+		it('ist null ohne Teilnahme-Umfrage', () => {
+			expect(dabeiKinder(daten([]))).toBeNull();
+			expect(dabeiKinder(daten([{ ...teilnahme(['lena']), teilnahme: false }]))).toBeNull();
+		});
+
+		it('ist leer, wenn niemand zusagt, und null, wenn die Option fehlt', () => {
+			expect(dabeiKinder(daten([teilnahme([])]))).toEqual(new Set());
+			expect(dabeiKinder(daten([teilnahme(['lena'], 'komme')]))).toBeNull();
+		});
+	});
+
+	describe('fotoHinweis', () => {
+		const p = (id: string) => umfeld.personen.get(id)!;
+
+		it('ist null ohne Namen', () => {
+			expect(fotoHinweis([])).toBeNull();
+		});
+
+		it('nennt die Namen, sortiert und verbunden', () => {
+			expect(fotoHinweis([p('tim'), p('max')])).toBe('Von Max M. und Tim S. dürfen keine Fotos gezeigt werden');
+			expect(fotoHinweis([p('tim')])).toBe('Von Tim S. dürfen keine Fotos gezeigt werden');
+			expect(fotoHinweis([p('tim'), p('max'), p('jonas')])).toBe(
+				'Von Jonas K., Max M. und Tim S. dürfen keine Fotos gezeigt werden',
+			);
+		});
 	});
 });

@@ -36,7 +36,7 @@ export function ladeHoch(
 	http: HttpClient,
 ): Observable<HochladenStand> {
 	if (datei.size > GRENZE_BYTES.DATEI) {
-		return of({ art: 'fehler', text: FEHLER_TEXT.GROESSE, code: 'GROESSE' });
+		return of({ art: 'fehler', text: FEHLER_TEXT.GROESSE.DATEI, code: 'GROESSE' });
 	}
 	return http
 		.request(methode, url, {

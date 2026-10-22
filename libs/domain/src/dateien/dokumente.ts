@@ -7,6 +7,10 @@ const TITEL_MAX = 120;
 function pruefeText(roh: string, was: string, max: number): { ok: true; wert: string } | { ok: false; fehler: string } {
 	const wert = roh.trim();
 	if (wert === '') return { ok: false, fehler: `${was} darf nicht leer sein` };
+	// Dieselbe Meldung wie der Server fuer Steuerzeichen (apps/jufi, server/dateien/dokumente.ts): \p{Cf} ist fuer die
+	// Person genauso unsichtbar, und ein Titel mit U+202E dreht in jeder Liste die Schrift.
+	// Verworfen: sie still zu entfernen, weil der Titel dann anders waere als eingegeben.
+	if (/\p{Cf}/u.test(wert)) return { ok: false, fehler: 'Der Text darf keine Steuerzeichen enthalten' };
 	// Codepoints, damit ein Emoji als ein Zeichen zaehlt, wie die Person es sieht.
 	if (Array.from(wert).length > max) return { ok: false, fehler: `${was} darf höchstens ${max} Zeichen haben` };
 	return { ok: true, wert };

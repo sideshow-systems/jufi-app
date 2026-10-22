@@ -77,9 +77,9 @@ describe('ladeHoch', () => {
 
 		http
 			.expectOne('/demo/api/v1/dokumente?kategorie=k1')
-			.flush({ fehler: FEHLER_TEXT.TYP, code: 'TYP' }, { status: 415, statusText: 'Unsupported Media Type' });
+			.flush({ fehler: FEHLER_TEXT.TYP.DATEI, code: 'TYP' }, { status: 415, statusText: 'Unsupported Media Type' });
 
-		expect(staende).toEqual([{ art: 'fehler', text: FEHLER_TEXT.TYP, code: 'TYP' }]);
+		expect(staende).toEqual([{ art: 'fehler', text: FEHLER_TEXT.TYP.DATEI, code: 'TYP' }]);
 	});
 
 	it('zeigt bei 429 die Wartezeit', () => {
@@ -104,7 +104,7 @@ describe('ladeHoch', () => {
 		const staende = starte(datei(GRENZE_BYTES.DATEI + 1));
 
 		http.expectNone(() => true);
-		expect(staende).toEqual([{ art: 'fehler', text: FEHLER_TEXT.GROESSE, code: 'GROESSE' }]);
+		expect(staende).toEqual([{ art: 'fehler', text: FEHLER_TEXT.GROESSE.DATEI, code: 'GROESSE' }]);
 	});
 
 	it('laesst eine Datei genau an der Grenze durch', () => {

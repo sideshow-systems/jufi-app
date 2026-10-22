@@ -1,6 +1,9 @@
+import { undListe } from '../dateien/medien.js';
+import { type EinwilligungZeile, fotoEinwilligungGilt } from '../einwilligung.js';
 import type { Beziehung } from '../personen.js';
 import { istJugendleiter } from '../rechte.js';
-import type { Bezug, ThreadPerson, Umfeld } from './typen.js';
+import { kinderImThread } from './sichtbarkeit.js';
+import type { Bezug, ThreadDaten, ThreadKopf, ThreadPerson, Umfeld } from './typen.js';
 import { bezuegeVon } from './umfeld.js';
 
 // Exportiert, damit die Ergebnisliste der Umfragen dasselbe Wort fuer Entfernte nimmt.
@@ -69,4 +72,52 @@ export function eingetragenVon(vonId: string, fuerId: string, betrachterId: stri
 	const bezug = umfeld.zuordnungen.find((z) => z.erwachsenerId === vonId && z.jungfischerId === fuerId);
 	if (bezug) return `eingetragen von ${beziehungWort(bezug)} ${von.vorname}`;
 	return `eingetragen von ${kurzname(von)}`;
+}
+
+// Wer in einem Thread nicht auf Fotos gezeigt werden darf: die Kinder seiner Zielgruppe ohne
+// gueltige Foto-Einwilligung (bei Volljaehrigen die eigene, siehe fotoEinwilligungGilt). Mit
+// einer Teilnahme-Umfrage zaehlen nur die, die dabei sind -- wer absagt, steht auf keinem
+// Foto der Veranstaltung, und ein Hinweis auf ihn waere Laerm. Verworfen: alle Kinder des
+// Vereins, weil der Hinweis dann auch Kinder nennte, die den Thread gar nicht sehen.
+// Die Einwilligungen kommen als Wert vom Aufrufer, damit die Regel ohne Datenbank laeuft.
+export function ohneFotoEinwilligung(
+	kopf: ThreadKopf,
+	umfeld: Umfeld,
+	e: { fotoEinwilligungen: ReadonlyMap<string, readonly EinwilligungZeile[]>; dabei: ReadonlySet<string> | null },
+	jetzt: Date,
+): ThreadPerson[] {
+	return kinderImThread(kopf, umfeld)
+		.filter((kind) => e.dabei === null || e.dabei.has(kind.id))
+		.filter(
+			(kind) =>
+				!fotoEinwilligungGilt(
+					kind,
+					e.fotoEinwilligungen.get(kind.id) ?? [],
+					umfeld.personen,
+					umfeld.zuordnungen,
+					jetzt,
+				),
+		)
+		.sort((a, b) => kurzname(a).localeCompare(kurzname(b), 'de'));
+}
+
+// Die Kinder, die laut Teilnahme-Umfrage dabei sind. Die Option wird am Schluessel erkannt,
+// nicht am Text: der Ersteller darf "Dabei" umbenennen (wie bei den Emojis in teilen.ts).
+// null heisst "keine Auskunft" und ist etwas anderes als eine leere Menge: ohne Umfrage sind
+// alle gemeint, mit Umfrage ohne Zusagen niemand. Fehlt der Schluessel (der Ersteller hat die
+// Option geloescht), gibt es ebenfalls keine Auskunft statt "niemand", damit der Hinweis nicht
+// leise verschwindet.
+export function dabeiKinder(daten: ThreadDaten): ReadonlySet<string> | null {
+	const umfrage = daten.umfragen.find((u) => u.teilnahme);
+	const option = umfrage?.optionen.find((o) => o.schluessel === 'dabei');
+	if (!umfrage || !option) return null;
+	return new Set(umfrage.antworten.filter((a) => a.optionIds.includes(option.id)).map((a) => a.fuerId));
+}
+
+// Der Satz ueber dem Foto-Modul. Sortiert wird hier noch einmal, damit die Reihenfolge
+// nicht davon abhaengt, wer die Liste bildet. null bei leerer Liste: dann gibt es nichts zu sagen.
+export function fotoHinweis(personen: readonly ThreadPerson[]): string | null {
+	if (personen.length === 0) return null;
+	const namen = personen.map(kurzname).sort((a, b) => a.localeCompare(b, 'de'));
+	return `Von ${undListe(namen)} dürfen keine Fotos gezeigt werden`;
 }

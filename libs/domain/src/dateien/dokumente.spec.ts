@@ -17,6 +17,20 @@ describe('pruefeKategorieName', () => {
 	});
 });
 
+describe('unsichtbare Formatzeichen', () => {
+	it('lehnt Kategorienamen und Titel damit ab, wie bei Steuerzeichen', () => {
+		expect(pruefeKategorieName('a\u202Eb')).toEqual({
+			ok: false,
+			fehler: 'Der Text darf keine Steuerzeichen enthalten',
+		});
+		expect(pruefeDokumentTitel('a\u200Bb')).toEqual({
+			ok: false,
+			fehler: 'Der Text darf keine Steuerzeichen enthalten',
+		});
+		expect(pruefeDokumentTitel('a‮b')).toMatchObject({ ok: false });
+	});
+});
+
 describe('pruefeDokumentTitel', () => {
 	it('trimmt den Titel', () => {
 		expect(pruefeDokumentTitel(' Satzung ')).toEqual({ ok: true, titel: 'Satzung' });

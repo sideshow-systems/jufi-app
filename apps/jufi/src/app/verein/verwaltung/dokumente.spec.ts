@@ -253,11 +253,11 @@ describe('Verwaltung Dokumente', () => {
 			await stabil(harness);
 			http
 				.expectOne(`${API}/dokumente?kategorie=k1`)
-				.flush({ fehler: FEHLER_TEXT.TYP, code: 'TYP' }, { status: 415, statusText: 'Unsupported Media Type' });
+				.flush({ fehler: FEHLER_TEXT.TYP.DATEI, code: 'TYP' }, { status: 415, statusText: 'Unsupported Media Type' });
 			await stabil(harness);
 
 			const z = abschnitt('Ordnungen').querySelector('li[data-hochladung]');
-			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.TYP);
+			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.TYP.DATEI);
 			knopf(z as HTMLElement, 'Nochmal').click();
 			await stabil(harness);
 
@@ -274,7 +274,7 @@ describe('Verwaltung Dokumente', () => {
 
 			http.expectNone(`${API}/dokumente?kategorie=k1`);
 			const z = abschnitt('Ordnungen').querySelector<HTMLElement>('li[data-hochladung]');
-			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.GROESSE);
+			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.GROESSE.DATEI);
 			knopf(z as HTMLElement, 'Verwerfen').click();
 			await stabil(harness);
 			expect(abschnitt('Ordnungen').querySelector('li[data-hochladung]')).toBeNull();
