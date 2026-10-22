@@ -1,4 +1,4 @@
-import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
+import { createPrismaClientFromEnv, ModulTyp, vereinDb } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
@@ -13,7 +13,15 @@ import {
 	modulOrt,
 	positionOrt,
 } from './laden.js';
-import { legeThreadAn, ordneZu, steckeInUntergruppe, trageEinTest } from './test-threads.js';
+import {
+	bieteAutoTest,
+	legeThreadAn,
+	ordneZu,
+	setzeEinTest,
+	steckeInUntergruppe,
+	trageEinTest,
+	type TestModul,
+} from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00Z');
 
@@ -384,6 +392,123 @@ describe('Threads laden', () => {
 			['salat', []],
 			['kuchen', []],
 		]);
+	});
+
+	it('laedt eine Fahrgemeinschaft: Richtungen immer, Autos nach angelegtAm und Mitfahrten nach eingetragenAm nur mit Antworten; modulOrt kennt FAHRT', async () => {
+		const { verein, db } = await neuerVerein();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const tina = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Tina' });
+		const lena = await legeMitgliedAn(prisma, verein, { art: 'JUNGFISCHER', vorname: 'Lena' });
+		const max = await legeMitgliedAn(prisma, verein, { art: 'JUNGFISCHER', vorname: 'Max' });
+		const { threadId, modulIds } = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [{ typ: 'FAHRT', rueck: false }],
+		});
+		const modulId = modulIds[0] as string;
+		await db.threadModul.update({ where: { id: modulId }, data: { titel: 'Wer fährt?' } });
+		// Sandras Auto wird zuerst angelegt, steht aber mit dem spaeteren Zeitpunkt hinten.
+		const spaet = await bieteAutoTest(db, modulId, sandra.personId, 'HIN', 3, {
+			abfahrtTag: '2026-10-24',
+			abfahrtZeit: '15:30',
+			ort: 'Vereinsheim',
+			notiz: 'Mit Kindersitz',
+			angelegtAm: new Date('2026-10-20T10:00:00Z'),
+		});
+		const frueh = await bieteAutoTest(db, modulId, tina.personId, 'HIN', 2, {
+			angelegtAm: new Date('2026-10-19T10:00:00Z'),
+		});
+		const imAuto = await setzeEinTest(db, modulId, 'HIN', lena.personId, frueh, tina.personId);
+		await setzeEinTest(db, modulId, 'HIN', max.personId, null, sandra.personId);
+		// Der zuerst eingetragene Eintrag bekommt einen Zeitpunkt nach der Wanduhr und steht damit hinten.
+		await db.mitfahrt.update({ where: { id: imAuto }, data: { eingetragenAm: new Date('2099-01-01T10:00:00Z') } });
+
+		const geladen = await ladeThread(db, threadId);
+		const [modul] = geladen?.module ?? [];
+		expect(modul).toMatchObject({ typ: 'FAHRT', id: modulId, titel: 'Wer fährt?' });
+		if (modul?.typ !== 'FAHRT') throw new Error('Fahrgemeinschaft fehlt');
+		expect(modul.fahrt).toMatchObject({ modulId, titel: 'Wer fährt?', hin: true, rueck: false });
+		expect(modul.fahrt.autos.map((a) => a.id)).toEqual([frueh, spaet]);
+		// Der Tag als "JJJJ-MM-TT" wie bei Terminen, ohne Zeitzonenversatz.
+		expect(modul.fahrt.autos[1]).toEqual({
+			id: spaet,
+			fahrerId: sandra.personId,
+			richtung: 'HIN',
+			plaetze: 3,
+			abfahrtTag: '2026-10-24',
+			abfahrtZeit: '15:30',
+			ort: 'Vereinsheim',
+			notiz: 'Mit Kindersitz',
+			angelegtAm: new Date('2026-10-20T10:00:00Z'),
+		});
+		expect(modul.fahrt.autos[0]).toMatchObject({ abfahrtTag: null, abfahrtZeit: null, ort: null, notiz: null });
+		expect(modul.fahrt.mitfahrten.map((m) => [m.kindId, m.autoId, m.vonId, m.richtung])).toEqual([
+			[max.personId, null, sandra.personId, 'HIN'],
+			[lena.personId, frueh, tina.personId, 'HIN'],
+		]);
+		expect(await modulOrt(db, modulId)).toEqual({ threadId, typ: 'FAHRT' });
+
+		// Ohne Antworten bleiben die Richtungen, Autos und Mitfahrten fehlen, wie bei Helfer-Eintraegen.
+		const [ohne] = await ladeThreads(db, { threadIds: [threadId], mitAntworten: false });
+		const ohneModul = ohne?.module[0];
+		if (ohneModul?.typ !== 'FAHRT') throw new Error('Fahrgemeinschaft fehlt');
+		expect(ohneModul.fahrt).toEqual({
+			modulId,
+			titel: 'Wer fährt?',
+			hin: true,
+			rueck: false,
+			autos: [],
+			mitfahrten: [],
+		});
+	});
+
+	it('ordnet die Fahrgemeinschaften mehrerer Threads je dem richtigen Thread zu', async () => {
+		const { verein, db } = await neuerVerein();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const eins = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [{ typ: 'FAHRT' }],
+		});
+		const zwei = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [{ typ: 'FAHRT', hin: false }],
+		});
+		const auto = await bieteAutoTest(db, eins.modulIds[0] as string, sandra.personId, 'RUECK', 4);
+
+		const alle = await ladeThreads(db);
+		const fahrt = (id: string) => {
+			const m = alle.find((t) => t.kopf.id === id)?.module[0];
+			if (m?.typ !== 'FAHRT') throw new Error('Fahrgemeinschaft fehlt');
+			return m.fahrt;
+		};
+		expect(fahrt(eins.threadId).autos.map((a) => a.id)).toEqual([auto]);
+		expect(fahrt(zwei.threadId)).toMatchObject({ hin: false, rueck: true, autos: [] });
+	});
+
+	it('modulVon liefert fuer jeden Wert von ModulTyp das Modul zurueck, ein neuer Typ ohne Zweig faellt hier auf', async () => {
+		const { verein, db } = await neuerVerein();
+		// Record statt Liste: Ein neuer Wert in ModulTyp laesst diese Tabelle nicht mehr uebersetzen,
+		// und die Werte selbst kommen aus dem generierten Enum.
+		const jeTyp: Record<ModulTyp, TestModul> = {
+			INFO: { typ: 'INFO', text: 'Text' },
+			TERMIN: {
+				typ: 'TERMIN',
+				termin: { startDatum: '2026-11-07', endDatum: null, beginn: null, ende: null, ort: null, treffpunkt: null },
+			},
+			UMFRAGE: { typ: 'UMFRAGE' },
+			DATEIEN: { typ: 'DATEIEN' },
+			FOTOS: { typ: 'FOTOS' },
+			HELFER: { typ: 'HELFER', positionen: [{ text: 'Kuchen', anzahl: 1 }] },
+			FAHRT: { typ: 'FAHRT' },
+		};
+		for (const typ of Object.values(ModulTyp)) {
+			expect(jeTyp[typ].typ).toBe(typ);
+			const { threadId, modulIds } = await legeThreadAn(prisma, verein, JETZT, { module: [jeTyp[typ]] });
+			const geladen = await ladeThread(db, threadId);
+			expect(
+				geladen?.module.map((m) => [m.typ, m.id]),
+				typ,
+			).toEqual([[typ, modulIds[0]]]);
+		}
 	});
 
 	it('positionOrt liefert Modul und Thread einer Position, null fuer eine unbekannte und eine aus einem fremden Verein', async () => {

@@ -113,6 +113,43 @@ describe('Verlauf lesen, schreiben und loeschen', () => {
 	}
 
 	describe('GET /threads/:id/verlauf', () => {
+		it('zeigt einen AUTO_ZURUECKGEZOGEN-Eintrag als Satz mit den Namen aus dem Umfeld', async () => {
+			const s = await szenario();
+			const t = await s.thread();
+			const max = await legeMitgliedAn(prisma, s.verein, {
+				jetzt: JETZT,
+				art: 'JUNGFISCHER',
+				vorname: 'Max',
+				nachname: 'Mutter',
+			});
+			await ordneZu(prisma, s.verein, s.sandra.personId, max.personId);
+			const schreibeSatz = (daten: object, stand: number) =>
+				prisma.verlaufEintrag.create({
+					data: {
+						vereinId: s.verein.id,
+						threadId: t.threadId,
+						art: 'SYSTEM',
+						autorId: s.hans.personId,
+						systemArt: 'AUTO_ZURUECKGEZOGEN',
+						systemDaten: daten,
+						stand,
+						angelegtAm: JETZT,
+					},
+				});
+			await schreibeSatz({ fahrerId: s.hans.personId, richtung: 'HIN', kindIds: [s.lena.personId, max.personId] }, 1);
+			await schreibeSatz({ fahrerId: s.hans.personId, richtung: 'RUECK', kindIds: [s.lena.personId] }, 2);
+			// Eine Person, die es nicht (mehr) gibt, heisst ehemaliges Mitglied: der Verlauf liest nicht den Namen aus der Zeile.
+			await schreibeSatz({ fahrerId: s.hans.personId, richtung: 'HIN', kindIds: [randomUUID()] }, 3);
+
+			const { eintraege } = await s.seite(t.threadId, s.sandra.cookie);
+			expect(eintraege.map((e) => e.text)).toEqual([
+				'Auto von Hans O. (Hinfahrt) zurückgezogen – ehemaliges Mitglied braucht wieder eine Mitfahrt.',
+				'Auto von Hans O. (Rückfahrt) zurückgezogen – Lena M. braucht wieder eine Mitfahrt.',
+				'Auto von Hans O. (Hinfahrt) zurückgezogen – Lena M. und Max M. brauchen wieder eine Mitfahrt.',
+			]);
+			expect(eintraege.map((e) => e.art)).toEqual(['SYSTEM', 'SYSTEM', 'SYSTEM']);
+		});
+
 		it('120 Eintraege ergeben Seiten zu 50, 50 und 20, lueckenlos und ohne Doppelte, auch bei gleichem Stand', async () => {
 			const s = await szenario();
 			const t = await s.thread();

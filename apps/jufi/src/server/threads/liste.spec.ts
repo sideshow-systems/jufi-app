@@ -6,7 +6,7 @@ import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { legeThreadAn, ordneZu, trageEinTest } from './test-threads.js';
+import { bieteAutoTest, legeThreadAn, ordneZu, setzeEinTest, trageEinTest } from './test-threads.js';
 
 // Feste Uhr der App und fester Zugangszeitpunkt: "neu" und "archiviert" sollen nicht von der Wanduhr abhaengen.
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
@@ -99,6 +99,19 @@ describe('GET /threads', () => {
 		expect(JSON.stringify(sandra)).not.toContain('Marmorkuchen');
 	});
 
+	it('zeigt einen Thread mit Fahrgemeinschaft, ohne dass Autos oder Orte in die Liste geraten', async () => {
+		const s = await szenario();
+		const t = await s.bowling('Zeltlager', { module: [{ typ: 'FAHRT' }] });
+		const db = vereinDb(prisma, s.verein.id);
+		const auto = await bieteAutoTest(db, t.modulIds[0] as string, s.thomas.personId, 'HIN', 3, { ort: 'Vereinsheim' });
+		await setzeEinTest(db, t.modulIds[0] as string, 'HIN', s.lena.personId, auto, s.sandra.personId);
+
+		const sandra = await s.liste(s.sandra.cookie);
+		expect(sandra.threads.map((z) => z.id)).toEqual([t.threadId]);
+		expect(JSON.stringify(sandra)).not.toContain('Vereinsheim');
+		expect(JSON.stringify(sandra)).not.toContain(auto);
+	});
+
 	describe('neu', () => {
 		it('Antwort von Thomas macht Bowling neu, Gelesen macht es alt, Anpinnen aendert nichts, eine Aenderung ohne Urheber macht es wieder neu', async () => {
 			const s = await szenario();
@@ -187,6 +200,42 @@ describe('GET /threads', () => {
 
 			expect(await nachAntwort('JUGENDLEITER')).toEqual({ sandra: false, thomas: true });
 			expect(await nachAntwort('ALLE')).toEqual({ sandra: true, thomas: true });
+		});
+
+		it('eine Mitfahrt macht den Thread fuer Sandra neu, auch wenn eine Umfrage darin die Ergebnisse nur den Jugendleitern zeigt (Entscheidung 11)', async () => {
+			const s = await szenario();
+			const t = await s.bowling('Zeltlager', {
+				module: [{ typ: 'FAHRT' }, { typ: 'UMFRAGE', teilnahme: true, ergebnisse: 'JUGENDLEITER' }],
+			});
+			const ansicht = (await (
+				await sende(server.url, s.api(`/threads/${t.threadId}`), { cookie: s.sandra.cookie })
+			).json()) as ThreadAnsicht;
+			const gelesen = await sende(server.url, s.api(`/threads/${t.threadId}/gelesen`), {
+				methode: 'PUT',
+				body: { bereich: 'uebersicht', bis: ansicht.stand },
+				cookie: s.sandra.cookie,
+			});
+			expect(gelesen.status).toBe(204);
+			expect((await s.zeile(s.sandra.cookie, t.threadId))?.neu).toBe(false);
+
+			// Thomas setzt Lena in sein Auto: eine fremde ANTWORT mit der Modul-ID (Entscheidung 12).
+			const { aenderungsstand } = await prisma.verein.update({
+				where: { id: s.verein.id },
+				data: { aenderungsstand: { increment: 1 } },
+				select: { aenderungsstand: true },
+			});
+			await prisma.aenderung.create({
+				data: {
+					vereinId: s.verein.id,
+					stand: aenderungsstand,
+					threadId: t.threadId,
+					art: 'ANTWORT',
+					objektId: t.modulIds[0] as string,
+					urheberId: s.thomas.personId,
+					angelegtAm: JETZT,
+				},
+			});
+			expect((await s.zeile(s.sandra.cookie, t.threadId))?.neu).toBe(true);
 		});
 
 		it('ein Thread vor dem Zugang ist ohne Gelesen-Zeile nicht neu', async () => {

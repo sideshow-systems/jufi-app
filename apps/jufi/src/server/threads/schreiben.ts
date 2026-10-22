@@ -68,10 +68,6 @@ function liesEntwurf(wert: unknown): { entwurf: ThreadEntwurf } | { feld: string
 	const gelesen = entwurfAus(wert);
 	if ('fehler' in gelesen) return { feld: gelesen.fehler.feld };
 	const e = gelesen.entwurf;
-	// Der Speicher kennt die Fahrgemeinschaft noch nicht: 400 am Typ des Moduls, wie fuer jeden Typ,
-	// den entwurfAus nicht liest.
-	const fahrt = e.module.findIndex((m) => m.typ === 'FAHRT');
-	if (fahrt >= 0) return { feld: `module.${fahrt}.typ` };
 	return { entwurf: { ...e, untergruppenIds: [...new Set(e.untergruppenIds)] } };
 }
 
@@ -163,6 +159,8 @@ async function schreibeUntergruppen(tx: VereinTx, threadId: string, e: ThreadEnt
  * geantwortet hat, die Fremdschluessel ohne Kaskade (UmfrageAntwort.umfrage,
  * UmfrageAntwortOption.option) halten also nicht. Info, Termin, Umfrage, die Koepfe von Datei-
  * und Foto-Modul und die Optionen gehen per Kaskade mit dem ThreadModul; die Dateien selbst nie.
+ * Die Fahrgemeinschaft geht ebenso mit, ihre Autos und Mitfahrten nie (NoAction): Eine mit
+ * Eintraegen laesst vergleicheEntwurf nicht loeschen, unter der Sperre geprueft.
  * Eine Helferliste geht samt Positionen per Kaskade mit, ihre Eintraege nie (NoAction): Eine
  * Liste mit Eintraegen laesst vergleicheEntwurf nicht loeschen, unter der Sperre geprueft, also
  * kommt hier keine an. Wegfallende Positionen behaltener Listen loescht schreibePositionen.
@@ -267,10 +265,6 @@ async function schreibeModul(
 	id: string | null,
 	positionenLoeschen: readonly string[] = [],
 ): Promise<string> {
-	// liesEntwurf lehnt die Fahrgemeinschaft ab, solange der Speicher sie nicht kennt; der Wurf
-	// schliesst die Luecke, falls ein Pfad daran vorbei kaeme, statt eine Zeile mit unbekanntem Typ
-	// zu schreiben.
-	if (neu.typ === 'FAHRT') throw new Error('Die Fahrgemeinschaft wird noch nicht gespeichert');
 	const kopf = { position, titel: neu.titel };
 	let modulId: string;
 	if (id === null) {
@@ -313,8 +307,18 @@ async function schreibeModul(
 		const daten = { einheit: neu.einheit, frist: neu.frist ? new Date(neu.frist) : null };
 		await tx.helferModul.upsert({ where: { id: modulId }, create: { id: modulId, ...daten }, update: daten });
 		await schreibePositionen(tx, modulId, neu.positionen, positionenLoeschen);
+	} else if (neu.typ === 'FAHRT') {
+		// Nur die Richtungen; Autos und Mitfahrten haben eigene Routen und sind nie Teil des Entwurfs.
+		// Der Thread steht in der Zeile, damit (vereinId, threadId) hoechstens eine Fahrgemeinschaft
+		// je Thread zulaesst, wie bei der Teilnahme-Umfrage.
+		const daten = { hin: neu.hin, rueck: neu.rueck };
+		await tx.fahrtModul.upsert({
+			where: { id: modulId },
+			create: { id: modulId, threadId, ...daten },
+			update: daten,
+		});
 	} else {
-		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN, FOTOS und HELFER sind oben behandelt).
+		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN, FOTOS, HELFER und FAHRT sind oben behandelt).
 		const daten = {
 			frage: neu.frage,
 			einheit: neu.einheit,

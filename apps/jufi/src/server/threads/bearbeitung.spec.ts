@@ -6,7 +6,7 @@ import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { ladeBearbeitung, loeschZaehler } from './bearbeitung.js';
 import { ladeThread, ladeThreadUmfeld } from './laden.js';
-import { legeThreadAn, trageEinTest } from './test-threads.js';
+import { bieteAutoTest, legeThreadAn, setzeEinTest, trageEinTest } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00Z');
 
@@ -142,5 +142,68 @@ describe('ladeBearbeitung', () => {
 			antworten: 1,
 			nachrichten: 0,
 		});
+	});
+
+	it('zaehlt Autos und Mitfahrten wie Antworten: darfLoeschen false, fahrtSperre nennt die belegte Richtung', async () => {
+		const { verein, db, ersteller } = await szenario();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const lena = await legeMitgliedAn(prisma, verein, { art: 'JUNGFISCHER', vorname: 'Lena' });
+		const max = await legeMitgliedAn(prisma, verein, { art: 'JUNGFISCHER', vorname: 'Max' });
+		const t = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: ersteller.personId,
+			module: [{ typ: 'FAHRT' }],
+		});
+		const umfeld = await ladeThreadUmfeld(db);
+		const ich = umfeld.personen.get(ersteller.personId);
+		if (!ich) throw new Error('Person fehlt im Umfeld');
+		const modulId = t.modulIds[0] as string;
+		const zaehle = async () => {
+			const geladen = await ladeThread(db, t.threadId);
+			if (!geladen) throw new Error('Thread fehlt');
+			return loeschZaehler(db, threadDatenAus(geladen.kopf, geladen.module));
+		};
+
+		const leer = await ladeBearbeitung(db, ich, t.threadId, umfeld, JETZT);
+		expect(leer).toMatchObject({ darfLoeschen: true, fahrtSperre: { eingetragen: false, HIN: false, RUECK: false } });
+		expect(await zaehle()).toEqual({ antworten: 0, nachrichten: 0 });
+
+		const auto = await bieteAutoTest(db, modulId, sandra.personId, 'HIN', 3);
+		const mitAuto = await ladeBearbeitung(db, ich, t.threadId, umfeld, JETZT);
+		expect(mitAuto?.darfLoeschen).toBe(false);
+		expect(mitAuto?.fahrtSperre).toEqual({ eingetragen: true, HIN: true, RUECK: false });
+		expect(await zaehle()).toEqual({ antworten: 1, nachrichten: 0 });
+
+		// Ein Kind im Auto und eines, das selbst kommt: beides sind Eintraege, ohne Auto-Zaehlung doppelt.
+		await setzeEinTest(db, modulId, 'HIN', lena.personId, auto, sandra.personId);
+		await setzeEinTest(db, modulId, 'RUECK', max.personId, null, sandra.personId);
+		const voll = await ladeBearbeitung(db, ich, t.threadId, umfeld, JETZT);
+		expect(voll?.fahrtSperre).toEqual({ eingetragen: true, HIN: true, RUECK: true });
+		expect(await zaehle()).toEqual({ antworten: 3, nachrichten: 0 });
+	});
+
+	it('zaehlt auch eine Mitfahrt "kommt selbst" allein als Antwort', async () => {
+		const { verein, db, ersteller } = await szenario();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const lena = await legeMitgliedAn(prisma, verein, { art: 'JUNGFISCHER', vorname: 'Lena' });
+		const t = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: ersteller.personId,
+			module: [{ typ: 'FAHRT' }],
+		});
+		await setzeEinTest(db, t.modulIds[0] as string, 'HIN', lena.personId, null, sandra.personId);
+		const umfeld = await ladeThreadUmfeld(db);
+		const ich = umfeld.personen.get(ersteller.personId);
+		if (!ich) throw new Error('Person fehlt im Umfeld');
+
+		const b = await ladeBearbeitung(db, ich, t.threadId, umfeld, JETZT);
+		expect(b?.darfLoeschen).toBe(false);
+		expect(b?.fahrtSperre).toEqual({ eingetragen: true, HIN: true, RUECK: false });
+	});
+
+	it('hat ohne Fahrgemeinschaft keine fahrtSperre', async () => {
+		const { db, ersteller, t } = await szenario();
+		const umfeld = await ladeThreadUmfeld(db);
+		const ich = umfeld.personen.get(ersteller.personId);
+		if (!ich) throw new Error('Person fehlt im Umfeld');
+		expect((await ladeBearbeitung(db, ich, t.threadId, umfeld, JETZT))?.fahrtSperre).toBeNull();
 	});
 });
