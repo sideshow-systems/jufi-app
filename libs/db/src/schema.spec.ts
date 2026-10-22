@@ -546,7 +546,7 @@ describe('Threads (TP3)', () => {
 		});
 	}
 
-	async function modul(vereinId: string, threadId: string, typ: 'INFO' | 'TERMIN' | 'UMFRAGE' = 'INFO') {
+	async function modul(vereinId: string, threadId: string, typ: 'INFO' | 'TERMIN' | 'UMFRAGE' | 'HELFER' = 'INFO') {
 		return prisma.threadModul.create({ data: { vereinId, threadId, typ, position: 0 } });
 	}
 
@@ -577,6 +577,46 @@ describe('Threads (TP3)', () => {
 				vonId,
 				abgegebenAm: new Date('2026-10-21T10:00:00Z'),
 				clientId: eindeutig(),
+			},
+		});
+	}
+
+	/** Helferliste samt Kopfzeile; Modul und Helferliste teilen sich die ID. */
+	async function helferliste(
+		vereinId: string,
+		threadId: string,
+		daten: Partial<Prisma.HelferModulUncheckedCreateInput> = {},
+	) {
+		const m = await modul(vereinId, threadId, 'HELFER');
+		return prisma.helferModul.create({ data: { id: m.id, vereinId, ...daten } });
+	}
+
+	function helferPosition(
+		vereinId: string,
+		modulId: string,
+		daten: Partial<Prisma.HelferPositionUncheckedCreateInput> = {},
+	) {
+		return prisma.helferPosition.create({
+			data: { vereinId, modulId, text: 'Kuchen', anzahl: 4, position: 0, schluessel: 'kuchen', ...daten },
+		});
+	}
+
+	function helferEintrag(
+		vereinId: string,
+		positionId: string,
+		fuerId: string,
+		vonId: string,
+		daten: Partial<Prisma.HelferEintragUncheckedCreateInput> = {},
+	) {
+		return prisma.helferEintrag.create({
+			data: {
+				vereinId,
+				positionId,
+				fuerId,
+				vonId,
+				eingetragenAm: new Date('2026-10-22T10:00:00Z'),
+				clientId: eindeutig(),
+				...daten,
 			},
 		});
 	}
@@ -975,6 +1015,189 @@ describe('Threads (TP3)', () => {
 			verlaufEintrag: await prisma.verlaufEintrag.count({ where: { vereinId } }),
 			gelesenStand: await prisma.gelesenStand.count({ where: { vereinId } }),
 			aenderung: await prisma.aenderung.count({ where: { vereinId } }),
+		};
+		expect(uebrig).toEqual(Object.fromEntries(Object.keys(uebrig).map((k) => [k, 0])));
+	});
+	it('Helferliste hat die Einheit ERWACHSENER und keine Frist als Vorgabe', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const h = await helferliste(a.id, t.id);
+
+		expect(h.einheit).toBe('ERWACHSENER');
+		expect(h.frist).toBeNull();
+	});
+
+	it('Helferliste und Position brauchen Modul und Verein, die zusammenpassen', async () => {
+		const a = await verein();
+		const b = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const m = await modul(a.id, t.id, 'HELFER');
+
+		expect(await fehlercode(prisma.helferModul.create({ data: { id: 'gibt-es-nicht', vereinId: a.id } }))).toBe(
+			'P2003',
+		);
+		expect(await fehlercode(prisma.helferModul.create({ data: { id: m.id, vereinId: b.id } }))).toBe('P2003');
+		await prisma.helferModul.create({ data: { id: m.id, vereinId: a.id } });
+		expect(await fehlercode(helferPosition(b.id, m.id))).toBe('P2003');
+		expect(await fehlercode(helferPosition(a.id, 'gibt-es-nicht'))).toBe('P2003');
+	});
+
+	it('Positionen: Anzahl 1 bis 99, Text 1 bis 80, Position nicht negativ, Schluessel klein und kurz', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const h = await helferliste(a.id, t.id);
+		let n = 0;
+		const neu = (daten: Partial<Prisma.HelferPositionUncheckedCreateInput>) =>
+			helferPosition(a.id, h.id, { schluessel: `p${n++}`, ...daten });
+
+		expect(await fehlertext(neu({ anzahl: 0 }))).toContain('helfer_position_anzahl');
+		expect(await fehlertext(neu({ anzahl: 100 }))).toContain('helfer_position_anzahl');
+		expect(await fehlertext(neu({ text: '' }))).toContain('helfer_position_text');
+		expect(await fehlertext(neu({ text: 'x'.repeat(81) }))).toContain('helfer_position_text');
+		expect(await fehlertext(neu({ position: -1 }))).toContain('helfer_position_position');
+		expect(await fehlertext(neu({ schluessel: 'A' }))).toContain('helfer_position_schluessel');
+		expect(await fehlertext(neu({ schluessel: '' }))).toContain('helfer_position_schluessel');
+		expect(await fehlertext(neu({ schluessel: 'x'.repeat(41) }))).toContain('helfer_position_schluessel');
+
+		await neu({ anzahl: 1 });
+		await neu({ anzahl: 99, text: 'x'.repeat(80), schluessel: 'x'.repeat(40) });
+	});
+
+	it('Schluessel einer Position ist je Helferliste eindeutig, in einer anderen frei', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const h1 = await helferliste(a.id, t.id);
+		const h2 = await helferliste(a.id, t.id);
+		await helferPosition(a.id, h1.id);
+
+		expect(await fehlercode(helferPosition(a.id, h1.id))).toBe('P2002');
+		await helferPosition(a.id, h2.id);
+	});
+
+	it('Eintraege: Notiz 1 bis 80 Zeichen oder leer, hoechstens einer je Person und Position', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const claudia = await erwachsener(a.id, 'Claudia');
+		const t = await thread(a.id, leiter.id);
+		const p = await helferPosition(a.id, (await helferliste(a.id, t.id)).id);
+
+		expect(await fehlertext(helferEintrag(a.id, p.id, claudia.id, claudia.id, { notiz: '' }))).toContain(
+			'helfer_eintrag_notiz',
+		);
+		expect(await fehlertext(helferEintrag(a.id, p.id, claudia.id, claudia.id, { notiz: 'x'.repeat(81) }))).toContain(
+			'helfer_eintrag_notiz',
+		);
+		const ohne = await helferEintrag(a.id, p.id, claudia.id, leiter.id);
+		expect(ohne.notiz).toBeNull();
+		await prisma.helferEintrag.update({ where: { id: ohne.id }, data: { notiz: 'x'.repeat(80) } });
+
+		// Dieselbe Person in derselben Position ein zweites Mal; eine andere Person geht.
+		expect(await fehlercode(helferEintrag(a.id, p.id, claudia.id, claudia.id))).toBe('P2002');
+		await helferEintrag(a.id, p.id, leiter.id, leiter.id);
+	});
+
+	it('dieselbe Person darf sich in einer zweiten Position eintragen', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const t = await thread(a.id, leiter.id);
+		const h = await helferliste(a.id, t.id);
+		const p1 = await helferPosition(a.id, h.id);
+		const p2 = await helferPosition(a.id, h.id, { text: 'Fahrer', schluessel: 'fahrer', position: 1 });
+
+		await helferEintrag(a.id, p1.id, leiter.id, leiter.id);
+		await helferEintrag(a.id, p2.id, leiter.id, leiter.id);
+	});
+
+	it('gleiche clientId im Verein abgelehnt, in einem anderen Verein erlaubt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const la = await erwachsener(a.id);
+		const lb = await erwachsener(b.id);
+		const ta = await thread(a.id, la.id);
+		const tb = await thread(b.id, lb.id);
+		const pa = await helferPosition(a.id, (await helferliste(a.id, ta.id)).id);
+		const pb = await helferPosition(b.id, (await helferliste(b.id, tb.id)).id);
+		const pa2 = await helferPosition(a.id, pa.modulId, { text: 'Fahrer', schluessel: 'fahrer', position: 1 });
+
+		await helferEintrag(a.id, pa.id, la.id, la.id, { clientId: 'gleich' });
+		expect(await fehlercode(helferEintrag(a.id, pa2.id, la.id, la.id, { clientId: 'gleich' }))).toBe('P2002');
+		await helferEintrag(b.id, pb.id, lb.id, lb.id, { clientId: 'gleich' });
+	});
+
+	it('Eintrag fuer oder von einer Person aus fremdem Verein und auf Position eines fremden Vereins abgelehnt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const la = await erwachsener(a.id);
+		const lb = await erwachsener(b.id);
+		const t = await thread(a.id, la.id);
+		const p = await helferPosition(a.id, (await helferliste(a.id, t.id)).id);
+
+		expect(await fehlercode(helferEintrag(a.id, p.id, lb.id, la.id))).toBe('P2003');
+		expect(await fehlercode(helferEintrag(a.id, p.id, la.id, lb.id))).toBe('P2003');
+		expect(await fehlercode(helferEintrag(b.id, p.id, lb.id, lb.id))).toBe('P2003');
+	});
+
+	it('Helferliste ohne Eintraege loeschen nimmt Positionen und Kopfzeile mit', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const h = await helferliste(a.id, t.id);
+		await helferPosition(a.id, h.id);
+		await helferPosition(a.id, h.id, { text: 'Fahrer', schluessel: 'fahrer', position: 1 });
+
+		await prisma.threadModul.delete({ where: { id: h.id } });
+
+		expect(await prisma.helferPosition.count({ where: { modulId: h.id } })).toBe(0);
+		expect(await prisma.helferModul.count({ where: { id: h.id } })).toBe(0);
+	});
+
+	it('Helferliste mit Eintrag laesst sich weder als Modul, Kopfzeile, Position noch als Thread loeschen', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const t = await thread(a.id, leiter.id);
+		const h = await helferliste(a.id, t.id);
+		const p = await helferPosition(a.id, h.id);
+		const e = await helferEintrag(a.id, p.id, leiter.id, leiter.id);
+
+		expect(await fehlercode(prisma.threadModul.delete({ where: { id: h.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.helferModul.delete({ where: { id: h.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.helferPosition.delete({ where: { id: p.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
+		expect(await prisma.helferEintrag.count({ where: { id: e.id } })).toBe(1);
+		expect(await prisma.helferPosition.count({ where: { id: p.id } })).toBe(1);
+
+		// Ist der Eintrag weg, geht alles in einem Zug.
+		await prisma.helferEintrag.delete({ where: { id: e.id } });
+		await prisma.thread.delete({ where: { id: t.id } });
+		expect(await prisma.helferModul.count({ where: { id: h.id } })).toBe(0);
+	});
+
+	it('Person mit Helfer-Eintrag laesst sich nicht hart loeschen', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const claudia = await erwachsener(a.id, 'Claudia');
+		const t = await thread(a.id, leiter.id);
+		const p = await helferPosition(a.id, (await helferliste(a.id, t.id)).id);
+		await helferEintrag(a.id, p.id, claudia.id, leiter.id);
+
+		expect(await fehlercode(prisma.person.delete({ where: { id: claudia.id } }))).toBe('P2003');
+	});
+
+	it('Verein loeschen mit Helferliste, Positionen und Eintraegen geht durch', async () => {
+		const a = await verein('weg-helfer');
+		const vereinId = a.id;
+		const leiter = await erwachsener(vereinId);
+		const t = await thread(vereinId, leiter.id);
+		const h = await helferliste(vereinId, t.id, { frist: new Date('2026-11-01T10:00:00Z') });
+		const p = await helferPosition(vereinId, h.id);
+		await helferEintrag(vereinId, p.id, leiter.id, leiter.id, { notiz: 'Marmorkuchen' });
+
+		await prisma.verein.delete({ where: { id: vereinId } });
+
+		const uebrig = {
+			threadModul: await prisma.threadModul.count({ where: { vereinId } }),
+			helferModul: await prisma.helferModul.count({ where: { vereinId } }),
+			helferPosition: await prisma.helferPosition.count({ where: { vereinId } }),
+			helferEintrag: await prisma.helferEintrag.count({ where: { vereinId } }),
 		};
 		expect(uebrig).toEqual(Object.fromEntries(Object.keys(uebrig).map((k) => [k, 0])));
 	});

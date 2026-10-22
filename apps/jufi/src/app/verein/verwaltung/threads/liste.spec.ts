@@ -17,7 +17,7 @@ function thread(rest: Partial<VerwaltungThread> & { id: string; titel: string })
 		naechsterTermin: null,
 		darfBearbeiten: true,
 		darfAntwortenSehen: true,
-		hatUmfrage: false,
+		hatAntwortModul: false,
 		...rest,
 	};
 }
@@ -33,12 +33,12 @@ const LISTE: VerwaltungListe = {
 			keineZielgruppe: true,
 		}),
 		thread({ id: 't-normal', titel: 'Hallo', darfBearbeiten: false }),
-		thread({ id: 't-fremd', titel: 'Fremd', darfBearbeiten: false, darfAntwortenSehen: false, hatUmfrage: true }),
+		thread({ id: 't-fremd', titel: 'Fremd', darfBearbeiten: false, darfAntwortenSehen: false, hatAntwortModul: true }),
 		thread({
 			id: 't-pin',
 			titel: 'Zeltlager',
 			angepinnt: true,
-			hatUmfrage: true,
+			hatAntwortModul: true,
 			naechsterTermin: 'Sa., 12.09. · 10:00',
 			zielgruppe: 'Gruppe A · Nur Familie',
 		}),
@@ -111,6 +111,15 @@ describe('Thread-Liste der Verwaltung', () => {
 		expect(antworten('t-normal')).toBeNull();
 		// Der Server antwortete der Person mit 404; ein Link dorthin waere tot.
 		expect(antworten('t-fremd')).toBeNull();
+	});
+
+	it('hat den Antworten-Link auch bei einem Thread nur mit Helferliste', async () => {
+		// hatAntwortModul rechnet die Domaene (verwaltungThread): Umfrage oder Helferliste.
+		const helfer = thread({ id: 't-helfer', titel: 'Fischerfest', hatAntwortModul: true });
+		const { seite } = await oeffne({ ...LISTE, threads: [helfer] });
+		expect(seite.querySelector('[data-thread="t-helfer"] a.antworten')?.getAttribute('href')).toBe(
+			'/demo/verwaltung/threads/t-helfer/antworten',
+		);
 	});
 
 	it('zeigt Neuer Thread mit darfErstellen und verlinkt in den Editor', async () => {

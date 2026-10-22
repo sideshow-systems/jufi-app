@@ -106,14 +106,14 @@ const INFO_TEXT_FISCHERFEST = [
 const ZEICHEN = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 /**
- * Schluessel einer freien Option, wie der Server sie beim Speichern aus dem Editor vergibt
- * (neuerSchluessel in apps/jufi, Plan-Entscheidung 11): "o" und acht Zeichen aus a-z0-9. Das "o"
- * haelt sie von den festen Schluesseln der Teilnahme fern. Verworfen: die Funktion aus apps/jufi
- * zu importieren -- die CLI haengt nicht an der App, und ein Paket nur dafuer waere mehr als
- * diese vier Zeilen. Verworfen: Schluessel aus dem Text ("margherita"): so vergibt sie der
+ * Schluessel einer freien Option oder einer Helfer-Position, wie der Server sie beim Speichern aus
+ * dem Editor vergibt (neuerSchluessel in apps/jufi, Plan-Entscheidung 11): "o" und acht Zeichen aus
+ * a-z0-9. Das "o" haelt sie von den festen Schluesseln der Teilnahme fern. Verworfen: die Funktion
+ * aus apps/jufi zu importieren -- die CLI haengt nicht an der App, und ein Paket nur dafuer waere
+ * mehr als diese vier Zeilen. Verworfen: Schluessel aus dem Text ("margherita"): so vergibt sie der
  * Editor nie, und die Demo soll dieselben Daten zeigen wie ein echter Verein.
  */
-function neuerOptionsschluessel(): string {
+function neuerSchluessel(): string {
 	let schluessel = 'o';
 	for (let i = 0; i < 8; i++) schluessel += ZEICHEN[randomInt(ZEICHEN.length)];
 	return schluessel;
@@ -379,6 +379,10 @@ export async function demoEinspielen(
 		// Der uebernaechste Samstag, damit zwischen Einspielen und Frist immer Tage liegen; die Frist
 		// ist der Donnerstag davor, 18:00 Berliner Wandzeit (berlinZeitpunkt kennt die Zeitumstellung).
 		const bowlingTag = tagPlus(naechsterWochentag(jetzt, SAMSTAG), 7);
+		// Die Helferliste von Bowling, damit die Etappe lokal etwas zum Abnehmen hat (Plan zu TP4 Etappe 3,
+		// Entscheidung 14); das Zeltlager mit allen Modulen folgt in Etappe 6.
+		let helferModulId = '';
+		const helferPositionen = new Map<string, string>();
 		const bowling = await thread({ titel: '🎳 Bowling', modus: 'KOMMENTARE', angepinnt: false }, async (threadId) => {
 			await infoModul(threadId, 0, INFO_TEXT_BOWLING);
 			await terminModul(threadId, 1, 'Bowling', {
@@ -406,6 +410,34 @@ export async function demoEinspielen(
 			await tx.umfrageOption.createMany({
 				data: teilnahmeOptionen(true).map((o, position) => ({ vereinId, umfrageId: modul.id, position, ...o })),
 			});
+
+			// Als letztes Modul, pro Erwachsener wie die Vorgabe des Editors. Die Frist fuenf Berliner Tage nach
+			// dem Einspielen um 18:00, wie der Editor sie vorbelegt; der Termin liegt mindestens acht Tage voraus,
+			// die Frist also immer davor. Verworfen: jetzt plus fuenf mal 24 Stunden -- die Frist truege dann die
+			// Uhrzeit des Einspielens (etwa 03:17), die kein Ersteller waehlte.
+			const helfer = await tx.threadModul.create({
+				data: { vereinId, threadId, typ: 'HELFER', position: 3, titel: 'Mitbringen und fahren' },
+			});
+			helferModulId = helfer.id;
+			await tx.helferModul.create({
+				data: {
+					vereinId,
+					id: helfer.id,
+					einheit: 'ERWACHSENER',
+					frist: berlinZeitpunkt(tagPlus(berlinerTag(jetzt), 5), '18:00'),
+				},
+			});
+			for (const [position, [text, anzahl]] of (
+				[
+					['Fahrer', 2],
+					['Snacks', 3],
+				] as const
+			).entries()) {
+				const zeile = await tx.helferPosition.create({
+					data: { vereinId, modulId: helfer.id, position, text, anzahl, schluessel: neuerSchluessel() },
+				});
+				helferPositionen.set(text, zeile.id);
+			}
 		});
 
 		// Das Zeltlager des Folgejahres, nur fuer die Aelteren, als Chat mit Umfrage. Der Titel traegt das Jahr
@@ -442,7 +474,7 @@ export async function demoEinspielen(
 				});
 				for (const [position, text] of ['Margherita', 'Salami', 'Funghi'].entries()) {
 					const option = await tx.umfrageOption.create({
-						data: { vereinId, umfrageId: modul.id, position, text, schluessel: neuerOptionsschluessel() },
+						data: { vereinId, umfrageId: modul.id, position, text, schluessel: neuerSchluessel() },
 					});
 					pizzaOptionen.set(text, option.id);
 				}
@@ -491,6 +523,29 @@ export async function demoEinspielen(
 			await tx.umfrageAntwortOption.create({ data: { vereinId, umfrageId, antwortId: zeile.id, optionId } });
 			aenderungen.push({ stand, threadId, art: 'ANTWORT', objektId: zeile.id, urheberId: person.id });
 		};
+		// Ein Helfer-Eintrag hat das Modul als Objekt seiner Aenderung, nicht die Eintragszeile (TP4-Spec 8,
+		// wie schreibeEintrag): Die Ansicht der Liste haengt an allen Eintraegen zugleich.
+		const helferEintrag = async (
+			threadId: string,
+			modulId: string,
+			positionId: string,
+			person: { id: string },
+			notiz: string | null,
+		) => {
+			stand += 1;
+			await tx.helferEintrag.create({
+				data: {
+					vereinId,
+					positionId,
+					fuerId: person.id,
+					vonId: person.id,
+					notiz,
+					eingetragenAm: jetzt,
+					clientId: `demo-helfer-${stand}`,
+				},
+			});
+			aenderungen.push({ stand, threadId, art: 'ANTWORT', objektId: modulId, urheberId: person.id });
+		};
 		const nachricht = async (threadId: string, autor: { id: string }, text: string) => {
 			stand += 1;
 			const eintrag = await tx.verlaufEintrag.create({
@@ -500,6 +555,11 @@ export async function demoEinspielen(
 		};
 		const aktivitaet = (threadId: string) =>
 			tx.thread.update({ where: { id: threadId }, data: { letzteAktivitaetAm: jetzt, letzteAktivitaetStand: stand } });
+
+		// Ein einziger Eintrag, damit Fuellstand, Name und Notiz zu sehen sind und die Liste fuer die uebrigen
+		// Erwachsenen (Hans, Gerda, Petra, die Leitung) weiter unter "Braucht deine Antwort" steht.
+		await helferEintrag(bowling.id, helferModulId, helferPositionen.get('Snacks')!, sandra, 'Gemüsesticks');
+		await aktivitaet(bowling.id);
 
 		await antwort(zeltlager.id, pizzaUmfrageId, lena, pizzaOptionen.get('Salami')!);
 		await antwort(zeltlager.id, pizzaUmfrageId, thomas, pizzaOptionen.get('Margherita')!);

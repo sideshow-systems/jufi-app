@@ -83,6 +83,7 @@ function bearbeitung(rest: Partial<ThreadBearbeitung> = {}): ThreadBearbeitung {
 		darfArchivieren: true,
 		entwurf: bowling(),
 		sperren: {},
+		helferSperren: {},
 		medien: { gesamt: KEINE_MEDIEN, module: {} },
 		untergruppen: UNTERGRUPPEN,
 		...rest,
@@ -942,6 +943,159 @@ describe('Thread-Editor', () => {
 			await stabil(harness);
 
 			expect(seite.querySelector('jf-fotos-felder [role="alert"]')?.textContent).toContain('Der Titel ist zu lang.');
+		});
+	});
+
+	describe('Helferliste', () => {
+		type Helfer = Extract<ModulEntwurf, { typ: 'HELFER' }>;
+		const MITBRINGEN: Helfer = {
+			typ: 'HELFER',
+			id: 'm-helfer',
+			titel: 'Mitbringen',
+			einheit: 'JUNGFISCHER',
+			frist: null,
+			positionen: [
+				{ schluessel: 'k1', text: 'Kuchen', anzahl: 4 },
+				{ schluessel: 'k2', text: 'Fahrer', anzahl: 2 },
+			],
+		};
+		const BELEGT_K1 = { 'm-helfer': { eingetragen: true, belegt: { k1: 2 } } };
+
+		// Der Bowling-Thread mit der Helferliste als viertem Modul.
+		function mitHelfer(rest: Partial<ThreadBearbeitung> = {}) {
+			return bearbeitung({ entwurf: { ...bowling(), module: [...bowling().module, MITBRINGEN] }, ...rest });
+		}
+
+		const helferFelder = (seite: HTMLElement) => seite.querySelector<HTMLElement>('jf-helfer-felder');
+		const waehleViertes = async (harness: RouterTestingHarness, seite: HTMLElement) => {
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[3]?.click();
+			await stabil(harness);
+		};
+
+		it('Modul hinzufügen: Helferliste mit einer leeren Position und Pro Erwachsenem, in eigenen Feldern und der Vorschau', async () => {
+			const { harness, hinzufuegen, seite, listenTexte, karten, modulFelder } = await oeffneNeu();
+			hinzufuegen('Helferliste');
+			await stabil(harness);
+
+			expect(listenTexte()).toEqual(['Helferliste']);
+			const felder = helferFelder(seite)!;
+			expect(felder).toBeTruthy();
+			expect(modulFelder()).toBeNull();
+			expect(felder.querySelector<HTMLSelectElement>('select[name="einheit"]')?.value).toBe('ERWACHSENER');
+			expect(felder.querySelectorAll('li[data-position]')).toHaveLength(1);
+			expect(felder.querySelector<HTMLInputElement>('input[name="position-0"]')?.value).toBe('');
+			expect(felder.querySelector<HTMLInputElement>('input[name="anzahl-0"]')?.value).toBe('1');
+			expect(karten()[0]?.querySelector('jf-helfer-modul')?.textContent).toContain('0/1');
+		});
+
+		it('Eingaben in den Feldern gehen in den Entwurf, der an den Server geht', async () => {
+			const { harness, hinzufuegen, seite, http } = await oeffneNeu();
+			tippe(seite, '#thread-titel', 'Fischerfest');
+			hinzufuegen('Helferliste');
+			await stabil(harness);
+			tippe(seite, 'jf-helfer-felder input[name="position-0"]', 'Kuchen');
+			await stabil(harness);
+			tippe(seite, 'jf-helfer-felder input[name="anzahl-0"]', '4');
+			await stabil(harness);
+			knopf(seite, 'Entwurf speichern').click();
+
+			await vi.waitFor(() => {
+				const anfrage = http.expectOne({ method: 'POST', url: `${API}/threads` });
+				expect((anfrage.request.body as { entwurf: ThreadEntwurf }).entwurf.module).toEqual([
+					{
+						typ: 'HELFER',
+						id: null,
+						titel: null,
+						einheit: 'ERWACHSENER',
+						frist: null,
+						positionen: [{ schluessel: null, text: 'Kuchen', anzahl: 4 }],
+					},
+				]);
+				anfrage.flush(bearbeitung({ entwurf: { ...bowling(), module: [] } }));
+			});
+		});
+
+		it('die Vorschau zeigt die Positionen mit 0/<anzahl>', async () => {
+			const { karten } = await oeffneBestehend(mitHelfer());
+			const text = karten()[3]?.querySelector('jf-helfer-modul')?.textContent ?? '';
+			expect(text).toContain('Kuchen');
+			expect(text).toContain('0/4');
+			expect(text).toContain('Fahrer');
+			expect(text).toContain('0/2');
+		});
+
+		it('ein Rollenfilterwechsel stellt die Einheit einer Helferliste ohne Eintraege um', async () => {
+			const { harness, seite } = await oeffneBestehend(mitHelfer());
+			waehle(seite, 'select[name="rollenfilter"]', 'NUR_FAMILIE');
+			await stabil(harness);
+			await waehleViertes(harness, seite);
+
+			expect(helferFelder(seite)?.querySelector<HTMLSelectElement>('select[name="einheit"]')?.value).toBe(
+				'ERWACHSENER',
+			);
+		});
+
+		it('mit Eintraegen bleibt die Einheit beim Rollenfilterwechsel stehen', async () => {
+			const { harness, seite } = await oeffneBestehend(mitHelfer({ helferSperren: BELEGT_K1 }));
+			waehle(seite, 'select[name="rollenfilter"]', 'NUR_FAMILIE');
+			await stabil(harness);
+			await waehleViertes(harness, seite);
+
+			const auswahl = helferFelder(seite)?.querySelector<HTMLSelectElement>('select[name="einheit"]');
+			expect(auswahl?.value).toBe('JUNGFISCHER');
+			expect(auswahl?.disabled).toBe(true);
+		});
+
+		it('mit Eintraegen: Modul nicht entfernbar, Einheit und belegte Position gesperrt', async () => {
+			const { harness, seite, nachLabel } = await oeffneBestehend(mitHelfer({ helferSperren: BELEGT_K1 }));
+			expect(nachLabel('Entfernen: Modul 4').disabled).toBe(true);
+			expect(seite.querySelectorAll('ol.module > li')[3]?.textContent).toContain(
+				'Gesperrt, weil schon Einträge da sind',
+			);
+			await waehleViertes(harness, seite);
+
+			const felder = helferFelder(seite)!;
+			expect(felder.querySelector<HTMLSelectElement>('select[name="einheit"]')?.disabled).toBe(true);
+			expect(felder.querySelector<HTMLButtonElement>('button[aria-label="Entfernen: Position 1"]')?.disabled).toBe(
+				true,
+			);
+			expect(felder.querySelector<HTMLButtonElement>('button[aria-label="Entfernen: Position 2"]')?.disabled).toBe(
+				false,
+			);
+			expect(felder.querySelector<HTMLInputElement>('input[name="anzahl-0"]')?.min).toBe('2');
+		});
+
+		it('ohne Eintraege laesst sich die Helferliste entfernen', async () => {
+			const { harness, nachLabel, listenTexte } = await oeffneBestehend(mitHelfer());
+			expect(nachLabel('Entfernen: Modul 4').disabled).toBe(false);
+			nachLabel('Entfernen: Modul 4').click();
+			await stabil(harness);
+			expect(listenTexte()).toEqual(['Info-Text', 'Termin', 'Umfrage']);
+		});
+
+		it('409 an module.3.positionen waehlt die Helferliste und steht an ihren Positionen', async () => {
+			const text = 'Für „Kuchen“ sind schon 2 eingetragen.';
+			const { harness, seite, http } = await oeffneBestehend(mitHelfer());
+			knopf(seite, 'Entwurf speichern').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne({ method: 'PUT', url: `${API}/threads/t1` })
+					.flush(
+						{ fehler: text, code: 'BEANTWORTET', feld: 'module.3.positionen' },
+						{ status: 409, statusText: 'Conflict' },
+					),
+			);
+			await stabil(harness);
+
+			expect(helferFelder(seite)?.querySelector('p.fehler[role="alert"]')?.textContent).toContain(text);
+			expect(seite.querySelector('.meldung')).toBeNull();
+		});
+
+		it('zeigt den Link zur Antworten-Übersicht auch bei einem Thread nur mit Helferliste', async () => {
+			const { seite } = await oeffneBestehend(bearbeitung({ entwurf: { ...bowling(), module: [MITBRINGEN] } }));
+			expect(seite.querySelector('a[href="/demo/verwaltung/threads/t1/antworten"]')?.textContent).toContain(
+				'Antworten',
+			);
 		});
 	});
 

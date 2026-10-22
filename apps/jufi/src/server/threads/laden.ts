@@ -6,6 +6,8 @@ import {
 	type DateiDaten,
 	type EinwilligungZeile,
 	type FotoDaten,
+	type HelferDaten,
+	type HelferEintragDaten,
 	type ModulDaten,
 	type NachrichtenEingabe,
 	type NeuAenderung,
@@ -137,7 +139,8 @@ function tag(datum: Date): string {
  * Abfragen fuer eine Seite.
  *
  * `mitAntworten: false` laesst die Antworten weg (`UmfrageDaten.antworten` ist dann leer, Optionen
- * und `ergebnisse` bleiben). Liste und Kalender zeigen keine Antworten, und deren Zahl waechst mit
+ * und `ergebnisse` bleiben), ebenso die Eintraege der Helferlisten (Positionen bleiben, ihre
+ * `eintraege` sind leer). Liste und Kalender zeigen keine Antworten, und deren Zahl waechst mit
  * jeder Abgabe; die Startseite laedt sie nur fuer die Threads nach, die sie nach dem Filter wirklich
  * braucht. Verworfen: eigene schmale Abfragen je Route -- die Abbildung der Module stuende dreimal.
  *
@@ -163,10 +166,11 @@ export async function ladeThreads(
 		orderBy: [{ position: 'asc' }, { id: 'asc' }],
 	});
 	const ids = moduleZeilen.map((m) => m.id);
-	const [infos, termine, umfragen, dateienModule, fotosModule, dateiZeilen] = await Promise.all([
+	const [infos, termine, umfragen, helferModule, dateienModule, fotosModule, dateiZeilen] = await Promise.all([
 		db.infoModul.findMany({ where: { id: { in: ids } } }),
 		db.terminModul.findMany({ where: { id: { in: ids } } }),
 		db.umfrageModul.findMany({ where: { id: { in: ids } } }),
+		db.helferModul.findMany({ where: { id: { in: ids } } }),
 		db.dateienModul.findMany({ where: { id: { in: ids } }, select: { id: true } }),
 		db.fotosModul.findMany({ where: { id: { in: ids } }, select: { id: true, hochladen: true } }),
 		// Eine Abfrage fuer alle Module, nicht je Modul. Ohne sha256: die Hash-Spalte braucht kein
@@ -188,7 +192,7 @@ export async function ladeThreads(
 		}),
 	]);
 	const umfrageIds = umfragen.map((u) => u.id);
-	const [optionen, antworten] = await Promise.all([
+	const [optionen, antworten, positionen] = await Promise.all([
 		db.umfrageOption.findMany({
 			where: { umfrageId: { in: umfrageIds } },
 			orderBy: [{ position: 'asc' }, { id: 'asc' }],
@@ -200,11 +204,28 @@ export async function ladeThreads(
 					orderBy: [{ abgegebenAm: 'asc' }, { id: 'asc' }],
 				})
 			: Promise.resolve([]),
+		db.helferPosition.findMany({
+			where: { modulId: { in: helferModule.map((h) => h.id) } },
+			orderBy: [{ position: 'asc' }, { id: 'asc' }],
+		}),
 	]);
+	// Nach den Positionen, weil die Eintraege an deren IDs haengen: Ohne Helferliste faellt die Abfrage
+	// ganz weg, und mit einer filtert sie ueber den Index (positionId, fuerId) statt ueber einen Join.
+	// Verworfen: der Filter ueber die Relation (position: { modulId: { in } }) neben den Optionen --
+	// eine Wartezeit weniger, aber eine Abfrage samt Join auch fuer jeden Thread ohne Helferliste.
+	const eintraege =
+		mitAntworten && positionen.length > 0
+			? await db.helferEintrag.findMany({
+					where: { positionId: { in: positionen.map((p) => p.id) } },
+					select: { positionId: true, fuerId: true, vonId: true, notiz: true, eingetragenAm: true },
+					orderBy: [{ eingetragenAm: 'asc' }, { id: 'asc' }],
+				})
+			: [];
 
 	const infoVon = new Map(infos.map((i) => [i.id, i]));
 	const terminVon = new Map(termine.map((t) => [t.id, t]));
 	const umfrageVon = new Map(umfragen.map((u) => [u.id, u]));
+	const helferVon = new Map(helferModule.map((h) => [h.id, h]));
 	const dateienModulIds = new Set(dateienModule.map((d) => d.id));
 	const fotosVon = new Map(fotosModule.map((f) => [f.id, f]));
 	const dateiVon = new Map<string, typeof dateiZeilen>();
@@ -228,6 +249,25 @@ export async function ladeThreads(
 			abgegebenAm: a.abgegebenAm,
 		});
 		antwortenVon.set(a.umfrageId, liste);
+	}
+	// Ebenso gruppiert: Eintraege je Position, Positionen je Modul, die Reihenfolge der Abfragen bleibt.
+	const eintraegeVon = new Map<string, HelferEintragDaten[]>();
+	for (const { positionId, ...eintrag } of eintraege) {
+		const liste = eintraegeVon.get(positionId) ?? [];
+		liste.push(eintrag);
+		eintraegeVon.set(positionId, liste);
+	}
+	const positionenVon = new Map<string, HelferDaten['positionen'][number][]>();
+	for (const p of positionen) {
+		const liste = positionenVon.get(p.modulId) ?? [];
+		liste.push({
+			id: p.id,
+			schluessel: p.schluessel,
+			text: p.text,
+			anzahl: p.anzahl,
+			eintraege: eintraegeVon.get(p.id) ?? [],
+		});
+		positionenVon.set(p.modulId, liste);
 	}
 
 	const modulVon = (m: (typeof moduleZeilen)[number]): ModulDaten | null => {
@@ -284,6 +324,19 @@ export async function ladeThreads(
 					hochgeladenAm: d.hochgeladenAm,
 				})),
 			};
+		}
+		if (m.typ === 'HELFER') {
+			const h = helferVon.get(m.id);
+			if (!h) return null;
+			const helfer: HelferDaten = {
+				modulId: m.id,
+				// Der Titel des Moduls, damit Regeln, die nur ThreadDaten bekommen, die Liste benennen koennen.
+				titel,
+				einheit: h.einheit,
+				frist: h.frist,
+				positionen: positionenVon.get(m.id) ?? [],
+			};
+			return { typ: 'HELFER', id: m.id, titel, helfer };
 		}
 		const u = umfrageVon.get(m.id);
 		if (!u) return null;
@@ -342,10 +395,32 @@ export async function ladeKoepfe(db: VereinDb, threadIds: readonly string[]): Pr
 	return new Map(threads.map((thread) => [thread.id, kopfAus(thread)]));
 }
 
-/** Zu welchem Thread ein Modul gehoert und welcher Art es ist; null, wenn es im Verein kein solches Modul gibt. */
+/**
+ * Zu welchem Thread ein Modul gehoert und welcher Art es ist (jeder ModulTyp, auch HELFER); null,
+ * wenn es im Verein kein solches Modul gibt.
+ */
 export async function modulOrt(db: VereinDb, modulId: string): Promise<{ threadId: string; typ: ModulTyp } | null> {
 	const modul = await db.threadModul.findUnique({ where: { id: modulId }, select: { threadId: true, typ: true } });
 	return modul ?? null;
+}
+
+/**
+ * Zu welcher Helferliste und welchem Thread eine Position gehoert; null, wenn es sie im Verein
+ * nicht gibt. Die Routen der Eintraege kennen nur die Position und brauchen den Thread fuer
+ * Sichtbarkeit und Laden. Eine Abfrage ueber die Relationen statt zweier: vereinDb setzt den
+ * Verein in die oberste Ebene, und die zusammengesetzten Fremdschluessel halten Position, Liste
+ * und Modul im selben Verein, also kann der Weg nicht in einen fremden fuehren. Nimmt auch die
+ * Transaktion einer Schreibroute, die den Ort unter der Sperre neu bestimmt.
+ */
+export async function positionOrt(
+	db: VereinDb | VereinTx,
+	positionId: string,
+): Promise<{ modulId: string; threadId: string } | null> {
+	const position = await db.helferPosition.findUnique({
+		where: { id: positionId },
+		select: { modulId: true, modul: { select: { modul: { select: { threadId: true } } } } },
+	});
+	return position ? { modulId: position.modulId, threadId: position.modul.modul.threadId } : null;
 }
 
 export interface NeuKandidaten {

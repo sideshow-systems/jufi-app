@@ -184,6 +184,31 @@ describe('Thread-Vorschau', () => {
 		expect(knoepfe.every((b) => b.disabled)).toBe(true);
 	});
 
+	it('zeigt die Helferliste mit ihren Positionen, ohne Knoepfe', async () => {
+		const fixture = TestBed.createComponent(ThreadVorschauComponent);
+		const e = bowling();
+		e.module = [
+			{
+				typ: 'HELFER',
+				id: null,
+				titel: null,
+				einheit: 'JUNGFISCHER',
+				frist: null,
+				positionen: [{ schluessel: null, text: 'Kuchen', anzahl: 4 }],
+			},
+		];
+		fixture.componentRef.setInput('entwurf', e);
+		fixture.componentRef.setInput('zielgruppe', 'Alle');
+		fixture.componentRef.setInput('markiert', null);
+		fixture.detectChanges();
+		await fixture.whenStable();
+		const el = fixture.nativeElement as HTMLElement;
+
+		expect(el.querySelector('.karte jf-helfer-modul')?.textContent).toContain('Kuchen');
+		expect(el.querySelector('.karte jf-helfer-modul')?.textContent).toContain('0/4');
+		expect(el.querySelector('jf-helfer-modul button')).toBeNull();
+	});
+
 	it('macht den Inhalt der Karten inert, damit Tippen nur waehlt', async () => {
 		const { karten } = await zeige();
 		expect(karten().every((k) => k.querySelector(':scope > .inhalt')?.hasAttribute('inert'))).toBe(true);

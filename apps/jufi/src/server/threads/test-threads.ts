@@ -1,4 +1,4 @@
-import { mitAenderung, vereinDb, type PrismaClient } from '@jufi/db';
+import { mitAenderung, vereinDb, type PrismaClient, type VereinDb } from '@jufi/db';
 import {
 	teilnahmeOptionen,
 	type AntwortEinheit,
@@ -35,9 +35,19 @@ export type TestModul =
 	/** Dateien als Zeilen ohne Bytes; `vonId` ungesetzt heisst der Ersteller des Threads. */
 	| { typ: 'DATEIEN'; dateien?: { name?: string; vonId?: string }[] }
 	/** Fotos als Zeilen ohne Bytes (Fassung und Vorschau gibt es nur im Speicher). */
-	| { typ: 'FOTOS'; hochladen?: FotoHochladen; fotos?: { vonId?: string }[] };
+	| { typ: 'FOTOS'; hochladen?: FotoHochladen; fotos?: { vonId?: string }[] }
+	/** Positionen mit dem Text als Schluessel (wie freie Optionen); Eintraege schreibt trageEinTest. */
+	| {
+			typ: 'HELFER';
+			einheit?: AntwortEinheit;
+			frist?: Date | null;
+			positionen: { text: string; anzahl: number }[];
+	  };
 
-/** Schluessel einer freien Option aus ihrem Text: "Pizza essen" wird "pizza-essen" (CHECK option_schluessel). */
+/**
+ * Schluessel einer freien Option oder Position aus ihrem Text: "Pizza essen" wird "pizza-essen"
+ * (CHECK option_schluessel und helfer_position_schluessel).
+ */
 function schluesselAus(text: string, nummer: number): string {
 	const schluessel = text
 		.toLowerCase()
@@ -54,7 +64,8 @@ function schluesselAus(text: string, nummer: number): string {
  * ueber vereinDb und mitAenderung (Art THREAD, dazu je Modul MODUL), damit Vereinsstand und
  * letzte Aktivitaet in Tests stimmen. `optionIds` ist nach dem Schluessel der Option
  * geordnet (dabei, vielleicht, abgesagt oder der Text als Schluessel); haben zwei Umfragen
- * eines Threads denselben Schluessel, gilt die spaetere.
+ * eines Threads denselben Schluessel, gilt die spaetere. `positionIds` ebenso nach dem
+ * Schluessel einer Position (der Text als Schluessel).
  *
  * Ohne `erstelltVonId` bekommt ein normaler Thread eine eigene Person als Ersteller, weil
  * die Datenbank einen verlangt (CHECK thread_ersteller); `null` ist nur fuer den Austausch
@@ -77,7 +88,13 @@ export async function legeThreadAn(
 		archivModus?: ArchivModus;
 		module?: TestModul[];
 	} = {},
-): Promise<{ threadId: string; modulIds: string[]; optionIds: Record<string, string>; dateiIds: string[] }> {
+): Promise<{
+	threadId: string;
+	modulIds: string[];
+	optionIds: Record<string, string>;
+	positionIds: Record<string, string>;
+	dateiIds: string[];
+}> {
 	const db = vereinDb(prisma, verein.id);
 	const art = daten.art ?? 'NORMAL';
 	let erstelltVonId = daten.erstelltVonId;
@@ -117,6 +134,7 @@ export async function legeThreadAn(
 
 			const modulIds: string[] = [];
 			const optionIds: Record<string, string> = {};
+			const positionIds: Record<string, string> = {};
 			const dateiIds: string[] = [];
 			for (const [position, modul] of (daten.module ?? []).entries()) {
 				const zeile = await tx.threadModul.create({ data: { threadId: thread.id, typ: modul.typ, position } });
@@ -149,6 +167,18 @@ export async function legeThreadAn(
 							select: { id: true },
 						});
 						dateiIds.push(datei.id);
+					}
+				} else if (modul.typ === 'HELFER') {
+					await tx.helferModul.create({
+						data: { id: zeile.id, einheit: modul.einheit ?? 'ERWACHSENER', frist: modul.frist ?? null },
+					});
+					for (const [stelle, p] of modul.positionen.entries()) {
+						const schluessel = schluesselAus(p.text, stelle + 1);
+						const position = await tx.helferPosition.create({
+							data: { modulId: zeile.id, text: p.text, anzahl: p.anzahl, position: stelle, schluessel },
+							select: { id: true },
+						});
+						positionIds[schluessel] = position.id;
 					}
 				} else if (modul.typ === 'TERMIN') {
 					const t = modul.termin;
@@ -191,7 +221,7 @@ export async function legeThreadAn(
 				}
 			}
 			return {
-				ergebnis: { threadId: thread.id, modulIds, optionIds, dateiIds },
+				ergebnis: { threadId: thread.id, modulIds, optionIds, positionIds, dateiIds },
 				aenderungen: [
 					{ threadId: thread.id, art: 'THREAD' as const, objektId: thread.id },
 					...modulIds.map((id) => ({ threadId: thread.id, art: 'MODUL' as const, objektId: id })),
@@ -200,6 +230,31 @@ export async function legeThreadAn(
 		}),
 	);
 	return ergebnis;
+}
+
+let letzterEintrag = 0;
+
+/**
+ * Traegt eine Person in eine Position ein, direkt in der Datenbank, ohne Route und ohne
+ * Aenderung: Tests, die Speichern, Laden oder Loeschen pruefen, brauchen nur die Zeile.
+ * Jeder Aufruf bekommt einen spaeteren Zeitpunkt als der vorige (Wanduhr, mindestens eine
+ * Millisekunde weiter), damit mehrere Eintraege in der Reihenfolge der Aufrufe stehen.
+ * Verworfen: ein fester Zeitpunkt oder die blosse Wanduhr -- bei gleicher Zeit ordnete die
+ * ID, und die ist zufaellig.
+ */
+export async function trageEinTest(
+	db: VereinDb,
+	positionId: string,
+	fuerId: string,
+	vonId: string,
+	notiz: string | null = null,
+): Promise<string> {
+	letzterEintrag = Math.max(Date.now(), letzterEintrag + 1);
+	const eintrag = await db.helferEintrag.create({
+		data: { positionId, fuerId, vonId, notiz, eingetragenAm: new Date(letzterEintrag), clientId: randomUUID() },
+		select: { id: true },
+	});
+	return eintrag.id;
 }
 
 /** Ordnet einem Erwachsenen ein Kind zu (erziehungsberechtigt, wie es der haeufigste Fall ist). */

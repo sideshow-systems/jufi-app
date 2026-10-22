@@ -252,6 +252,20 @@ describe('teilenText: Datei- und Foto-Module', () => {
 		};
 		expect(zeilen(ansicht([terminModul(), dateien, fotos]))).toEqual(zeilen(ansicht([terminModul()])));
 	});
+
+	it('gibt fuer eine Helferliste vorerst keine Zeile (Etappe 6)', () => {
+		const helfer: ModulAnsicht = {
+			typ: 'HELFER',
+			id: 'h1',
+			titel: 'Mitbringen',
+			einheit: 'ERWACHSENER',
+			frist: null,
+			fristAbgelaufen: false,
+			positionen: [{ id: 'p1', text: 'Kuchen', anzahl: 4, belegt: 0, eintraege: [] }],
+			zeilen: [],
+		};
+		expect(zeilen(ansicht([terminModul(), helfer]))).toEqual(zeilen(ansicht([terminModul()])));
+	});
 });
 
 describe('ohneFormat', () => {

@@ -5,15 +5,7 @@ import { istArchiviert } from './archiv.js';
 import type { ListenThread } from './liste.js';
 import { threadSegment } from './pfad.js';
 import { siehtThread } from './sichtbarkeit.js';
-import type {
-	AenderungArt,
-	ThreadDaten,
-	ThreadKopf,
-	ThreadModus,
-	ThreadPerson,
-	Umfeld,
-	UmfrageDaten,
-} from './typen.js';
+import type { AenderungArt, HelferDaten, ThreadDaten, ThreadKopf, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
 
 export interface OffenerPunkt {
 	threadId: string;
@@ -43,6 +35,7 @@ function nachFrist(a: Date | null, b: Date | null): number {
 // offen. Verworfen: jede vorhandene Antwortzeile als erledigt zu lesen, weil eine
 // verirrte leere Zeile die Person sonst still aus der Liste nähme.
 // Eine Antwort gilt je Antwortzeile (fuerId): die von Tim ändert für Sandra nichts.
+// Helferlisten nach Plan-Entscheidung 8 in helferOffen.
 export function brauchtAntwort(
 	person: ThreadPerson,
 	threads: readonly ThreadDaten[],
@@ -50,8 +43,20 @@ export function brauchtAntwort(
 	jetzt: Date,
 ): OffenerPunkt[] {
 	const punkte: OffenerPunkt[] = [];
-	for (const { kopf, termine, umfragen } of threads) {
+	for (const { kopf, termine, umfragen, helfer } of threads) {
 		if (!kopf.veroeffentlichtAm || istArchiviert(kopf, termine, jetzt)) continue;
+		for (const liste of helfer) {
+			for (const zeile of helferOffen(person, liste, kopf, umfeld, jetzt)) {
+				punkte.push({
+					threadId: kopf.id,
+					titel: kopf.titel,
+					modulId: liste.modulId,
+					fuerId: zeile.fuerId,
+					vorname: zeile.selbst ? null : zeile.vorname,
+					frist: liste.frist,
+				});
+			}
+		}
 		for (const umfrage of umfragen) {
 			if (umfrage.frist && jetzt.getTime() >= umfrage.frist.getTime()) continue;
 			const beantwortet = new Set(umfrage.antworten.filter((a) => a.optionIds.length > 0).map((a) => a.fuerId));
@@ -81,6 +86,17 @@ export function brauchtAntwort(
 	);
 }
 
+// Plan-Entscheidung 8: Eine Helferliste fragt nur, solange ihre Frist läuft und noch ein
+// Platz frei ist; offen ist eine Zeile ohne einen einzigen Eintrag im ganzen Modul (wer
+// Kuchen bringt, muss nicht auch noch fahren). Verworfen: auch ohne Frist zu mahnen, weil
+// Familien, die nicht helfen können, sonst ohne Ende auf der Startseite stünden.
+function helferOffen(person: ThreadPerson, liste: HelferDaten, kopf: ThreadKopf, umfeld: Umfeld, jetzt: Date) {
+	if (!liste.frist || jetzt.getTime() >= liste.frist.getTime()) return [];
+	if (!liste.positionen.some((p) => p.eintraege.length < p.anzahl)) return [];
+	const eingetragen = new Set(liste.positionen.flatMap((p) => p.eintraege.map((e) => e.fuerId)));
+	return antwortZeilen(person, liste, kopf, umfeld).filter((z) => !eingetragen.has(z.fuerId));
+}
+
 export interface NeuAenderung {
 	stand: number;
 	art: AenderungArt;
@@ -95,7 +111,7 @@ export interface NeuEingabe {
 	erstelltVonId: string | null;
 	veroeffentlichtAm: Date | null;
 	aenderungen: readonly NeuAenderung[];
-	/** Ob die Person in mindestens einer Umfrage des Threads Ergebnisse sieht (siehtErgebnisse). */
+	/** Ob die Person im Thread Antworten anderer sieht (siehtErgebnisse). */
 	antwortenSichtbar: boolean;
 }
 
@@ -109,12 +125,17 @@ export interface NeuEingabe {
 // Antwort des anderen Elternteils für das eigene Kind in einer Nur-Jugendleiter-Umfrage
 // macht den Thread nicht neu, und sieht die Person Ergebnisse in einer anderen Umfrage
 // des Threads, zählt auch eine Antwort in der verborgenen.
+// Plan-Entscheidung 7: Einträge einer Helferliste sieht jeder Leser (Spec 5.2 kennt keine
+// Ergebnis-Einstellung), also ist ein Thread mit Helferliste für alle außer Entfernten
+// sichtbar beantwortet. Die Kosten wie oben: Auch eine Umfrage-Antwort mit
+// "nur Jugendleiter" macht ihn dann für die Familie neu.
 export function siehtErgebnisse(
 	ich: ThreadPerson,
 	kopf: ThreadKopf,
-	umfragen: readonly Pick<UmfrageDaten, 'ergebnisse'>[],
+	daten: Pick<ThreadDaten, 'umfragen' | 'helfer'>,
 ): boolean {
-	return umfragen.some((u) => ergebnisAnsicht(ich, u, kopf) !== 'NICHTS');
+	if (daten.helfer.length > 0 && !ich.entferntAm) return true;
+	return daten.umfragen.some((u) => ergebnisAnsicht(ich, u, kopf) !== 'NICHTS');
 }
 
 // Die Eingabe für istNeu aus einem geladenen Thread. Liste und Startseite bauen sie hier,
@@ -122,7 +143,7 @@ export function siehtErgebnisse(
 export function neuEingabeFuer(
 	ich: ThreadPerson,
 	t: Pick<ListenThread, 'kopf' | 'gelesenBis' | 'aenderungen'>,
-	umfragen: readonly Pick<UmfrageDaten, 'ergebnisse'>[],
+	daten: Pick<ThreadDaten, 'umfragen' | 'helfer'>,
 	zugangSeit: Date,
 ): NeuEingabe {
 	return {
@@ -132,7 +153,7 @@ export function neuEingabeFuer(
 		erstelltVonId: t.kopf.erstelltVonId,
 		veroeffentlichtAm: t.kopf.veroeffentlichtAm,
 		aenderungen: t.aenderungen,
-		antwortenSichtbar: siehtErgebnisse(ich, t.kopf, umfragen),
+		antwortenSichtbar: siehtErgebnisse(ich, t.kopf, daten),
 	};
 }
 
@@ -327,7 +348,7 @@ export function startAnsicht(e: {
 
 	const neu: NeuEintrag[] = [];
 	for (const { t, daten } of aktiv.sort((a, b) => nachAktivitaet(a.t, b.t))) {
-		const eingabe = neuEingabeFuer(e.ich, t, daten.umfragen, e.zugangSeit);
+		const eingabe = neuEingabeFuer(e.ich, t, daten, e.zugangSeit);
 		if (!istNeu(eingabe)) continue;
 		neu.push({
 			threadId: t.kopf.id,

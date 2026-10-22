@@ -15,6 +15,7 @@ import {
 	entwurfFehler,
 	type Feldfehler,
 	GRENZEN,
+	type HelferSperre,
 	KEINE_MEDIEN,
 	type MedienZahl,
 	medienZahlText,
@@ -39,6 +40,7 @@ import { KarteComponent, PilleComponent } from '../../../gestaltung/ui';
 import { beiAbgelaufenerSitzung } from '../../sitzung-abgelaufen';
 import { DateienFelderComponent } from './dateien-felder';
 import { FotosFelderComponent } from './fotos-felder';
+import { HelferFelderComponent } from './helfer-felder';
 import { ModulFelderComponent, zeigtModulFeld } from './modul-felder';
 import { VerwaltungThreadsApi } from './threads-api';
 import { ThreadVorschauComponent } from './vorschau';
@@ -53,6 +55,7 @@ const TYPEN: readonly { typ: ModulTyp; text: string }[] = [
 	{ typ: 'UMFRAGE', text: 'Umfrage' },
 	{ typ: 'DATEIEN', text: 'Dateien' },
 	{ typ: 'FOTOS', text: 'Fotos' },
+	{ typ: 'HELFER', text: 'Helferliste' },
 ];
 
 /** Gleiche Grenze wie die Media Query in den Stilen: darunter Umschalter statt zwei Spalten (Spec 6.6). */
@@ -167,6 +170,7 @@ interface ServerFehler {
 		BestaetigungComponent,
 		DateienFelderComponent,
 		FotosFelderComponent,
+		HelferFelderComponent,
 		IconComponent,
 		KarteComponent,
 		ModulFelderComponent,
@@ -344,7 +348,7 @@ interface ServerFehler {
 												<span class="fehlermarke"><jf-icon name="warnung" /> Fehler in diesem Modul</span>
 											}
 											@if (entfernenGesperrt(e.modul)) {
-												<span class="gedaempft klein">Gesperrt, weil schon Antworten da sind</span>
+												<span class="gedaempft klein">{{ gesperrtText(e.modul) }}</span>
 											}
 										</li>
 									} @empty {
@@ -392,6 +396,16 @@ interface ServerFehler {
 												[fehler]="modulFehler(a.index)"
 												(aendern)="modulGeaendert(a.eintrag.schluessel, $event)"
 												(hochgeladen)="ladeMedien()"
+											/>
+										}
+										@case ('HELFER') {
+											<jf-helfer-felder
+												[modul]="m"
+												[index]="a.index"
+												[rollenfilter]="kopf().rollenfilter"
+												[sperre]="helferSperreFuer(m)"
+												[fehler]="modulFehler(a.index)"
+												(aendern)="modulGeaendert(a.eintrag.schluessel, $event)"
 											/>
 										}
 										@default {
@@ -443,7 +457,7 @@ interface ServerFehler {
 							</button>
 						}
 						<a class="knopf leise" [routerLink]="['/', slug(), 't', b.segment]">Thread ansehen</a>
-						@if (hatUmfrage()) {
+						@if (hatAntwortModul()) {
 							<a class="knopf leise" [routerLink]="['/', slug(), 'verwaltung', 'threads', b.id, 'antworten']"
 								>Antworten</a
 							>
@@ -748,9 +762,12 @@ export class ThreadEditorComponent {
 	protected readonly neu = computed(() => this.id() === undefined);
 	protected readonly veroeffentlicht = computed(() => this.bearbeitung()?.veroeffentlicht ?? false);
 	protected readonly austausch = computed(() => this.bearbeitung()?.art === 'JUGENDSPRECHER_AUSTAUSCH');
-	/** Der Link "Antworten" fuehrt in die Uebersicht gespeicherter Umfragen, nicht ungespeicherter. */
-	protected readonly hatUmfrage = computed(
-		() => this.bearbeitung()?.entwurf.module.some((m) => m.typ === 'UMFRAGE') ?? false,
+	/**
+	 * Der Link "Antworten" fuehrt in die Uebersicht gespeicherter Umfragen und Helferlisten, nicht
+	 * ungespeicherter; dieselbe Regel wie hatAntwortModul der Verwaltungsliste (Plan-Entscheidung 13).
+	 */
+	protected readonly hatAntwortModul = computed(
+		() => this.bearbeitung()?.entwurf.module.some((m) => m.typ === 'UMFRAGE' || m.typ === 'HELFER') ?? false,
 	);
 	protected readonly listeLink = computed(() => ['/', this.slug(), 'verwaltung', 'threads']);
 
@@ -958,9 +975,10 @@ export class ThreadEditorComponent {
 
 	/**
 	 * Eine Einheit, die beim neuen Rollenfilter niemanden fragt, stellt die Seite auf die erste
-	 * passende (Spec 3.2), damit der Wechsel nicht sofort einen Fehler erzeugt. Nicht bei Umfragen,
-	 * deren Einheit Antworten festlegen: Dort zeigt entwurfFehler den Fehler an der Einheit, und die
-	 * Person entscheidet, ob sie den Rollenfilter zuruecknimmt.
+	 * passende (Spec 3.2), damit der Wechsel nicht sofort einen Fehler erzeugt; das gilt fuer
+	 * Umfragen und Helferlisten. Nicht, wenn Antworten oder Eintraege die Einheit festlegen: Dort
+	 * zeigt entwurfFehler den Fehler an der Einheit, und die Person entscheidet, ob sie den
+	 * Rollenfilter zuruecknimmt.
 	 */
 	protected rollenfilterSetzen(rollenfilter: Rollenfilter): void {
 		this.arbeit.update((a) => ({
@@ -970,15 +988,25 @@ export class ThreadEditorComponent {
 	}
 
 	private mitPassenderEinheit(m: ModulEntwurf, rollenfilter: Rollenfilter): ModulEntwurf {
-		if (m.typ !== 'UMFRAGE') return m;
+		if (m.typ !== 'UMFRAGE' && m.typ !== 'HELFER') return m;
 		const erlaubt = einheitenFuer(rollenfilter);
-		if (erlaubt.includes(m.einheit) || (this.sperreFuer(m)?.schluessel.length ?? 0) > 0) return m;
+		if (erlaubt.includes(m.einheit) || this.einheitFest(m)) return m;
 		return { ...m, einheit: erlaubt[0] ?? m.einheit };
 	}
 
-	// neuesModul kennt den Rollenfilter nicht (Pro Jungfischer bei "Nur Familie" waere sofort ein Fehler).
+	// Dieselben Grenzen wie die Felder: Bei der Umfrage legt eine Antwort mit Option die Einheit
+	// fest, bei der Helferliste der erste Eintrag (pruefeHelferAenderung).
+	private einheitFest(m: ModulEntwurf): boolean {
+		if (m.typ === 'UMFRAGE') return (this.sperreFuer(m)?.schluessel.length ?? 0) > 0;
+		if (m.typ === 'HELFER') return this.helferSperreFuer(m)?.eingetragen ?? false;
+		return false;
+	}
+
+	// neuesModul waehlt die Einheit nur fuer die Helferliste nach dem Rollenfilter; die Vorlage der
+	// Umfrage bleibt fest (Pro Jungfischer bei "Nur Familie" waere sofort ein Fehler), daher danach
+	// mitPassenderEinheit.
 	protected hinzufuegen(typ: ModulTyp): void {
-		const roh = neuesModul(typ, this.entwurf().module, new Date());
+		const roh = neuesModul(typ, this.entwurf().module, new Date(), this.kopf().rollenfilter);
 		const eintrag: Eintrag = {
 			schluessel: lokalerSchluessel(),
 			modul: this.mitPassenderEinheit(roh, this.kopf().rollenfilter),
@@ -1071,6 +1099,7 @@ export class ThreadEditorComponent {
 		}
 		if (m.typ === 'DATEIEN') return 'Dateien';
 		if (m.typ === 'FOTOS') return 'Fotos';
+		if (m.typ === 'HELFER') return 'Helferliste';
 		return m.frage.trim() || 'Noch ohne Frage';
 	}
 
@@ -1104,9 +1133,23 @@ export class ThreadEditorComponent {
 		return this.bearbeitung()?.sperren[m.id] ?? null;
 	}
 
-	// Jede Antwortzeile zaehlt, auch eine ohne Option: Die Datenbank verweigerte das Loeschen sonst (UmfrageSperre).
+	/** Nur gespeicherte Helferlisten haben Eintraege und damit eine Sperre. */
+	protected helferSperreFuer(m: ModulEntwurf): HelferSperre | null {
+		if (m.typ !== 'HELFER' || m.id === null) return null;
+		return this.bearbeitung()?.helferSperren[m.id] ?? null;
+	}
+
+	// Jede Antwortzeile zaehlt, auch eine ohne Option: Die Datenbank verweigerte das Loeschen sonst
+	// (UmfrageSperre). Bei der Helferliste jeder Eintrag, auch der einer nicht mehr gefragten Person
+	// (Plan-Entscheidung 1); der Server antwortete sonst mit 409.
 	protected entfernenGesperrt(m: ModulEntwurf): boolean {
+		if (m.typ === 'HELFER') return this.helferSperreFuer(m)?.eingetragen ?? false;
 		return this.sperreFuer(m)?.beantwortet ?? false;
+	}
+
+	// Eine Helferliste hat Eintraege, keine Antworten (wie HELFER_EINHEIT_GESPERRT in vergleich.ts).
+	protected gesperrtText(m: ModulEntwurf): string {
+		return m.typ === 'HELFER' ? 'Gesperrt, weil schon Einträge da sind' : 'Gesperrt, weil schon Antworten da sind';
 	}
 
 	// ---- Speichern ---------------------------------------------------------------------

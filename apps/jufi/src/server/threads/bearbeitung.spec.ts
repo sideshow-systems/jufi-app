@@ -1,11 +1,12 @@
 import { createPrismaClientFromEnv, mitAenderung, vereinDb } from '@jufi/db';
+import { threadDatenAus } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { ladeBearbeitung } from './bearbeitung.js';
+import { ladeBearbeitung, loeschZaehler } from './bearbeitung.js';
 import { ladeThread, ladeThreadUmfeld } from './laden.js';
-import { legeThreadAn } from './test-threads.js';
+import { legeThreadAn, trageEinTest } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00Z');
 
@@ -100,5 +101,46 @@ describe('ladeBearbeitung', () => {
 		// Neuer Inhalt mit alter Version: der naechste PUT scheitert an VERALTET, statt still zu ueberschreiben.
 		expect(b?.version).toBe(0);
 		expect(b?.entwurf.titel).toBe('Von einem anderen Geraet');
+	});
+
+	it('ein Helfer-Eintrag sperrt das Loeschen und steht in helferSperren unter dem Schluessel seiner Position', async () => {
+		const { verein, db, ersteller } = await szenario();
+		const t = await legeThreadAn(prisma, verein, JETZT, {
+			titel: 'Sommerfest',
+			erstelltVonId: ersteller.personId,
+			module: [
+				{
+					typ: 'HELFER',
+					positionen: [
+						{ text: 'Kuchen', anzahl: 4 },
+						{ text: 'Salat', anzahl: 2 },
+					],
+				},
+			],
+		});
+		const umfeld = await ladeThreadUmfeld(db);
+		const ich = umfeld.personen.get(ersteller.personId);
+		if (!ich) throw new Error('Person fehlt im Umfeld');
+		const modulId = t.modulIds[0] as string;
+
+		const leer = await ladeBearbeitung(db, ich, t.threadId, umfeld, JETZT);
+		expect(leer).toMatchObject({
+			darfLoeschen: true,
+			helferSperren: { [modulId]: { eingetragen: false, belegt: {} } },
+		});
+
+		await trageEinTest(db, t.positionIds['kuchen'] as string, ersteller.personId, ersteller.personId);
+		const b = await ladeBearbeitung(db, ich, t.threadId, umfeld, JETZT);
+		expect(b?.darfLoeschen).toBe(false);
+		expect(b?.helferSperren).toEqual({ [modulId]: { eingetragen: true, belegt: { kuchen: 1 } } });
+		// Die Umfrage-Sperren kennen die Helferliste nicht: Sie stehen nur unter helferSperren.
+		expect(b?.sperren).toEqual({});
+
+		const geladen = await ladeThread(db, t.threadId);
+		if (!geladen) throw new Error('Thread fehlt');
+		expect(await loeschZaehler(db, threadDatenAus(geladen.kopf, geladen.module))).toEqual({
+			antworten: 1,
+			nachrichten: 0,
+		});
 	});
 });

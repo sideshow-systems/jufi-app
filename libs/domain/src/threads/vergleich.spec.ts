@@ -2,7 +2,7 @@ import type { ModulDaten } from './ansicht.js';
 import { teilnahmeOptionen } from '../module/umfrage/umfrage.js';
 import { entwurfAusThread, type ModulEntwurf, type ThreadEntwurf } from './entwurf.js';
 import { kopf } from './testhilfe.js';
-import type { UmfrageDaten } from './typen.js';
+import type { HelferDaten, UmfrageDaten } from './typen.js';
 import { umfrageSperre, vergleicheEntwurf, zielgruppeGeaendert } from './vergleich.js';
 import { systemSatz } from './verlauf.js';
 
@@ -89,10 +89,10 @@ describe('vergleicheEntwurf', () => {
 			sichtbarkeitGeaendert: false,
 			system: [],
 		});
-		expect(v.behalten.map((b) => [b.id, b.position, b.geaendert, b.optionenLoeschen])).toEqual([
-			['i1', 0, false, []],
-			['t1', 1, false, []],
-			['u1', 2, false, []],
+		expect(v.behalten.map((b) => [b.id, b.position, b.geaendert, b.optionenLoeschen, b.positionenLoeschen])).toEqual([
+			['i1', 0, false, [], []],
+			['t1', 1, false, [], []],
+			['u1', 2, false, [], []],
 		]);
 	});
 
@@ -564,5 +564,214 @@ describe('vergleicheEntwurf: Datei- und Foto-Module', () => {
 	it('lehnt einen Typwechsel unter derselben ID ab', () => {
 		const e = neuerEntwurf((e) => (e.module[0] = { typ: 'FOTOS', id: 'd1', titel: null, hochladen: 'ALLE' }));
 		expect(vergleicheEntwurf(gespeichert, e).fehler).toEqual({ feld: 'module.0', text: 'Ungültige Anfrage' });
+	});
+});
+
+describe('vergleicheEntwurf: Helferliste', () => {
+	type HelferEntwurf = Extract<ModulEntwurf, { typ: 'HELFER' }>;
+	const eintrag = (fuerId: string) => ({
+		fuerId,
+		vonId: fuerId,
+		notiz: null,
+		eingetragenAm: new Date('2026-10-21T12:00:00Z'),
+	});
+	// Kuchen: Platz fuer vier, zwei eingetragen. Grill: Platz fuer zwei, leer.
+	const helfer = (h: Partial<HelferDaten> = {}): HelferDaten => ({
+		modulId: 'h1',
+		titel: 'Mitbringen',
+		einheit: 'ERWACHSENER',
+		frist: null,
+		positionen: [
+			{
+				id: 'p-kuchen',
+				schluessel: 'pkuchen01',
+				text: 'Kuchen',
+				anzahl: 4,
+				eintraege: [eintrag('sandra'), eintrag('peter')],
+			},
+			{ id: 'p-grill', schluessel: 'pgrill001', text: 'Grill', anzahl: 2, eintraege: [] },
+		],
+		...h,
+	});
+	const ohneEintraege = (): Partial<HelferDaten> => ({
+		positionen: helfer().positionen.map((p) => ({ ...p, eintraege: [] })),
+	});
+	// Info an Index 0, die Helferliste an Index 1.
+	const module = (h: Partial<HelferDaten> = {}, titel: string | null = 'Mitbringen'): ModulDaten[] => [
+		{ typ: 'INFO', id: 'i1', titel: null, text: 'Bitte mithelfen' },
+		{ typ: 'HELFER', id: 'h1', titel, helfer: { ...helfer(h), titel } },
+	];
+	const gespeichert = (h: Partial<HelferDaten> = {}, titel: string | null = 'Mitbringen') => ({
+		kopf: kopf(),
+		module: module(h, titel),
+	});
+	const neuerEntwurf = (
+		aendern: (m: HelferEntwurf, e: ThreadEntwurf) => void = () => {},
+		h: Partial<HelferDaten> = {},
+		titel: string | null = 'Mitbringen',
+	): ThreadEntwurf => {
+		const e = entwurfAusThread(kopf(), module(h, titel));
+		aendern(e.module[1] as HelferEntwurf, e);
+		return e;
+	};
+	const kuchen = (m: HelferEntwurf) => m.positionen.find((p) => p.schluessel === 'pkuchen01')!;
+
+	it('findet an einer unveraenderten Liste nichts', () => {
+		const v = vergleicheEntwurf(gespeichert(), neuerEntwurf());
+		expect(v).toMatchObject({ fehler: null, konflikt: null, loeschen: [], anlegen: [], system: [] });
+		expect(v.behalten.map((b) => [b.id, b.geaendert, b.positionenLoeschen])).toEqual([
+			['i1', false, []],
+			['h1', false, []],
+		]);
+	});
+
+	it('loescht eine entfernte leere Position', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((m) => m.positionen.pop()),
+		);
+		expect(v.konflikt).toBeNull();
+		expect(v.behalten[1]).toMatchObject({ geaendert: true, positionenLoeschen: ['pgrill001'] });
+	});
+
+	it('sperrt das Entfernen einer belegten Position', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((m) => m.positionen.shift()),
+		);
+		expect(v.konflikt).toEqual({
+			feld: 'module.1.positionen',
+			text: 'Für „Kuchen“ hat sich schon jemand eingetragen.',
+			konflikt: true,
+		});
+		expect(v.behalten).toEqual([]);
+	});
+
+	it('sperrt eine Anzahl unter den Eingetragenen', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((m) => (kuchen(m).anzahl = 1)),
+		);
+		expect(v.konflikt).toEqual({
+			feld: 'module.1.positionen',
+			text: 'Für „Kuchen“ sind schon 2 eingetragen.',
+			konflikt: true,
+		});
+	});
+
+	it('erlaubt Umbenennen und Umsortieren: der Schluessel bleibt, die Liste ist geaendert', () => {
+		const e = neuerEntwurf((m) => {
+			kuchen(m).text = 'Torte';
+			m.positionen.reverse();
+		});
+		const v = vergleicheEntwurf(gespeichert(), e);
+		expect(v.konflikt).toBeNull();
+		expect(v.behalten[1]).toMatchObject({ geaendert: true, positionenLoeschen: [] });
+		expect((v.behalten[1].neu as HelferEntwurf).positionen).toEqual([
+			{ schluessel: 'pgrill001', text: 'Grill', anzahl: 2 },
+			{ schluessel: 'pkuchen01', text: 'Torte', anzahl: 4 },
+		]);
+	});
+
+	it('zaehlt eine geaenderte Anzahl als Aenderung ohne Systemeintrag', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((m) => (kuchen(m).anzahl = 5)),
+		);
+		expect(v.behalten[1].geaendert).toBe(true);
+		expect(v.system).toEqual([]);
+	});
+
+	it('nimmt eine neue Position ohne Schluessel an', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((m) => m.positionen.push({ schluessel: null, text: 'Salat', anzahl: 3 })),
+		);
+		expect(v).toMatchObject({ fehler: null, konflikt: null });
+		expect(v.behalten[1]).toMatchObject({ geaendert: true, positionenLoeschen: [] });
+	});
+
+	it('sperrt die Einheit nach den ersten Eintraegen, vorher nicht', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((m) => (m.einheit = 'PERSON')),
+		);
+		expect(v.konflikt).toEqual({
+			feld: 'module.1.einheit',
+			text: 'Die Einheit lässt sich nach den ersten Einträgen nicht mehr ändern.',
+			konflikt: true,
+		});
+		const leer = vergleicheEntwurf(
+			gespeichert(ohneEintraege()),
+			neuerEntwurf((m) => (m.einheit = 'PERSON'), ohneEintraege()),
+		);
+		expect(leer.konflikt).toBeNull();
+		expect(leer.behalten[1].geaendert).toBe(true);
+	});
+
+	it('sperrt das Entfernen einer Liste mit Eintraegen, ohne Titel unter ihrem Ersatztitel', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((_, e) => e.module.pop()),
+		);
+		expect(v.konflikt).toEqual({
+			feld: 'module',
+			text: 'Die Helferliste „Mitbringen“ hat schon Einträge und lässt sich nicht entfernen.',
+			konflikt: true,
+		});
+		expect(v.loeschen).toEqual([]);
+		const ohneTitel = vergleicheEntwurf(
+			gespeichert({}, null),
+			neuerEntwurf((_, e) => e.module.pop(), {}, null),
+		);
+		expect(ohneTitel.konflikt?.text).toBe(
+			'Die Helferliste „Helferliste“ hat schon Einträge und lässt sich nicht entfernen.',
+		);
+	});
+
+	it('loescht eine Liste ohne Eintraege', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(ohneEintraege()),
+			neuerEntwurf((_, e) => e.module.pop(), ohneEintraege()),
+		);
+		expect(v).toMatchObject({ konflikt: null, loeschen: ['h1'] });
+	});
+
+	it('meldet eine geaenderte Frist mit dem Modultitel, ohne Titel mit Helferliste', () => {
+		const frist = '2026-10-27T17:00:00.000Z';
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((m) => (m.frist = frist)),
+		);
+		expect(v.system).toEqual([{ art: 'FRIST_GEAENDERT', daten: { frage: 'Mitbringen', frist } }]);
+		expect(v.behalten[1].geaendert).toBe(true);
+		const ohneTitel = vergleicheEntwurf(
+			gespeichert({}, null),
+			neuerEntwurf((m) => (m.frist = frist), {}, null),
+		);
+		expect(ohneTitel.system).toEqual([{ art: 'FRIST_GEAENDERT', daten: { frage: 'Helferliste', frist } }]);
+		expect(systemSatz('FRIST_GEAENDERT', v.system[0].daten, 'Thomas')).not.toBe('Thomas hat den Thread geändert');
+	});
+
+	it('lehnt einen fremden oder doppelten Schluessel ab', () => {
+		const fremd = neuerEntwurf((m) => (m.positionen[1].schluessel = 'pfremd001'));
+		expect(vergleicheEntwurf(gespeichert(), fremd).fehler).toEqual({
+			feld: 'module.1.positionen',
+			text: 'Ungültige Anfrage',
+		});
+		const doppelt = neuerEntwurf((m) => (m.positionen[1].schluessel = 'pkuchen01'));
+		expect(vergleicheEntwurf(gespeichert(), doppelt).fehler?.feld).toBe('module.1.positionen');
+	});
+
+	it('lehnt einen Schluessel an einer neuen Liste ab', () => {
+		const e = neuerEntwurf((m, e) => e.module.push({ ...m, id: null }));
+		expect(vergleicheEntwurf(gespeichert(), e).fehler).toEqual({
+			feld: 'module.2.positionen',
+			text: 'Ungültige Anfrage',
+		});
+		const f = neuerEntwurf((m, e) =>
+			e.module.push({ ...m, id: null, positionen: m.positionen.map((p) => ({ ...p, schluessel: null })) }),
+		);
+		expect(vergleicheEntwurf(gespeichert(), f)).toMatchObject({ fehler: null, konflikt: null });
 	});
 });

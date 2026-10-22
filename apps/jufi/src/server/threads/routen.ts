@@ -1,6 +1,7 @@
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { antwortenRouten } from './antworten.js';
+import { helferRouten } from './helfer.js';
 import { lesenRouten } from './lesen.js';
 import { listeRouten } from './liste.js';
 import { schreibenRouten } from './schreiben.js';
@@ -18,6 +19,7 @@ export function threadRouten(router: Router, deps: VolleAppDeps): void {
 	listeRouten(router, deps);
 	verlaufRouten(router, deps);
 	antwortenRouten(router, deps);
+	helferRouten(router, deps);
 	verwaltungRouten(router, deps);
 	schreibenRouten(router, deps);
 	verwaltenRouten(router, deps);

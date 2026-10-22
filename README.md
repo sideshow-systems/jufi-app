@@ -50,7 +50,7 @@ belegt, meldet der Start „JuFi-Hub (Entwicklung) nicht gestartet“ und die Ap
 `JUFI_WS_DEV_PORT` in der `.env` **und** das Ziel in `proxy.conf.json` ändern, die Datei ist statisch. Im Betrieb hängt
 der Hub am Server der App selbst, dort gibt es keinen zweiten Port.
 
-Der Demo-Verein enthält zwei Untergruppen, vier Jungfischer (zwei ohne Einwilligung, davon Tim ohne Familie, und einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Dazu kommen fünf Threads: „Wichtige Infos“, „Bowling“, „Zeltlager <Jahr>“ (das Folgejahr, nur für die Älteren), „🎣 Fischerfest“ (von selbst archiviert) und der Jugendsprecher-Austausch; `pnpm run demo` gibt ihre Adressen aus. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
+Der Demo-Verein enthält zwei Untergruppen, vier Jungfischer (zwei ohne Einwilligung, davon Tim ohne Familie, und einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Dazu kommen fünf Threads: „Wichtige Infos“, „Bowling“ (mit Helferliste, in die sich Sandra eingetragen hat), „Zeltlager <Jahr>“ (das Folgejahr, nur für die Älteren), „🎣 Fischerfest“ (von selbst archiviert) und der Jugendsprecher-Austausch; `pnpm run demo` gibt ihre Adressen aus. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
 
 **Link-Vorschau lokal prüfen:** Wer einen Thread-Link in einen Messenger einfügt, lässt die Seite ohne Cookie abrufen und liest nur den Kopf. Die Tags setzt der Server in die Seite, die Angular sonst ausliefert (`apps/jufi/src/server/verein/vorschau.ts`); ob sie ankommen, zeigt `curl`: Ein Messenger führt kein JavaScript aus, der Browser zeigt also mehr, als er sieht.
 
@@ -351,6 +351,24 @@ aber nie im Original:
   (`bunt-1.jpg` … `bunt-12.jpg`, 1600 × 1200, mit Nummer, damit man beim Blättern sieht, welches gerade da ist). Dazu
   entstehen immer die acht Bilder der Fotoprobe (`gross.jpg`, `gross.png`, `gross-progressiv.jpg`,
   `gross-progressiv-444.jpg`, `gross-cmyk.jpg`, `gross-adam7.png`, `gross-adam7-16bit.png`, `gross.webp`). Demo-Fotos kommen mit Etappe 6.
+
+## Helferliste
+
+Das Modul „Helferliste“ (TP4 Etappe 3) fragt, wer was mitbringt oder übernimmt: Positionen mit Anzahl („Kuchen 1/4“),
+in die sich Gefragte mit einer Notiz („Marmorkuchen“) eintragen. Die Regeln stehen in `libs/domain/src/module/helfer/`,
+die Routen unter `PUT`/`DELETE /<slug>/api/v1/helfer/:positionId/eintraege/:fuerId`.
+
+- **Einheit:** wie bei Umfragen pro Erwachsener (Vorgabe), pro Person oder pro Jungfischer; gefragt ist, wen
+  `gefragte` nennt, und bei Kindern tragen die Eltern ein. Nach dem ersten Eintrag liegt die Einheit fest.
+- **Plätze:** 1–30 Positionen, je 1–99 Plätze. Ist eine Position voll, antwortet der Server mit 409 `VOLL` („Hier sind
+  schon alle Plätze vergeben.“); eine Notiz ändern belegt keinen zweiten Platz. Jeder Eintrag belegt seinen Platz, auch
+  wenn die Person nicht mehr gefragt ist. Im Editor lässt sich eine belegte Position nicht entfernen und ihre Anzahl
+  nicht unter die Zahl der Eingetragenen setzen; Einträge sperren auch das Löschen von Modul und Thread.
+- **Frist und Archiv:** Nach der Frist und im Archiv trägt nur noch ein und aus, wer den Thread bearbeiten darf. Unter „Braucht
+  deine Antwort“ steht eine Helferliste nur mit laufender Frist und freiem Platz, und nur so lange, bis die Zeile einen
+  Eintrag im Modul hat.
+- **Nachtragen:** In der Antworten-Übersicht der Verwaltung trägt Gefragte ein und aus, wer den Thread bearbeiten darf,
+  auch nach der Frist. Wer die Zeile angeht, sieht darunter „eingetragen von …“.
 
 ## Sicherung
 

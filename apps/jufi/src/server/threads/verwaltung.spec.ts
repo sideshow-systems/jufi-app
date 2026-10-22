@@ -12,7 +12,7 @@ import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { legeThreadAn, ordneZu } from './test-threads.js';
+import { legeThreadAn, ordneZu, trageEinTest } from './test-threads.js';
 
 // Feste Uhr der App: "bevorstehend" und "archiviert" sollen nicht von der Wanduhr abhaengen.
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
@@ -95,14 +95,14 @@ describe('Lesende Routen der Verwaltung', () => {
 				entwurf: false,
 				darfBearbeiten: true,
 				darfAntwortenSehen: true,
-				hatUmfrage: false,
+				hatAntwortModul: false,
 			});
 			expect(zeile(fremderEntwurf.threadId)).toMatchObject({
 				titel: 'Tinas Entwurf',
 				entwurf: true,
 				darfBearbeiten: false,
 				darfAntwortenSehen: false,
-				hatUmfrage: true,
+				hatAntwortModul: true,
 			});
 			expect(zeile(austausch.id)).toMatchObject({ art: 'JUGENDSPRECHER_AUSTAUSCH', darfBearbeiten: false });
 		});
@@ -196,6 +196,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				'darfArchivieren',
 				'darfLoeschen',
 				'entwurf',
+				'helferSperren',
 				'id',
 				'medien',
 				'segment',
@@ -215,6 +216,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				darfLoeschen: false,
 			});
 			expect(b.medien).toEqual({ gesamt: KEINE_MEDIEN, module: {} });
+			expect(b.helferSperren).toEqual({});
 			expect(b.segment).toMatch(new RegExp(`^${t.threadId}-zeltlager$`));
 			expect(b.entwurf).toMatchObject({
 				titel: 'Zeltlager',
@@ -413,6 +415,45 @@ describe('Lesende Routen der Verwaltung', () => {
 			// Thomas hat nur "Threads erstellen", aber der Thread gehoert ihm.
 			expect(ersteller.status).toBe(200);
 			expect(((await ersteller.json()) as AntwortenUebersicht).darfNachtragen).toBe(true);
+		});
+
+		it('liefert je Helferliste Positionen mit Eintraegen, die Gefragten und wer noch ohne Eintrag ist', async () => {
+			const s = await szenario();
+			const t = await legeThreadAn(prisma, s.verein, JETZT, {
+				titel: 'Fischerfest',
+				erstelltVonId: s.thomas.personId,
+				module: [
+					{
+						typ: 'HELFER',
+						positionen: [
+							{ text: 'Kuchen', anzahl: 4 },
+							{ text: 'Fahrer', anzahl: 2 },
+						],
+					},
+				],
+			});
+			// Thomas traegt Sandra ein: Name und Notiz kommen mit, dazu wer eingetragen hat.
+			await trageEinTest(s.db, t.positionIds['kuchen'] as string, s.sandra.personId, s.thomas.personId, 'Marmorkuchen');
+
+			const r = await s.hole(`/threads/${t.threadId}/antworten`, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const u = (await r.json()) as AntwortenUebersicht;
+			expect(u.umfragen).toEqual([]);
+			expect(u.helfer).toHaveLength(1);
+			const h = u.helfer[0];
+			expect(h).toMatchObject({ modulId: t.modulIds[0], frist: null, fristAbgelaufen: false });
+			const kuchen = h?.positionen.find((p) => p.id === t.positionIds['kuchen']);
+			expect(kuchen).toMatchObject({ text: 'Kuchen', anzahl: 4, belegt: 1 });
+			expect(kuchen?.eintraege).toEqual([
+				{ fuerId: s.sandra.personId, name: 'Sandra M.', notiz: 'Marmorkuchen', eingetragenVon: 'Thomas M.' },
+			]);
+			expect(h?.positionen.find((p) => p.id === t.positionIds['fahrer'])).toMatchObject({ belegt: 0, eintraege: [] });
+			// Gefragt sind die Erwachsenen (Einheit ERWACHSENER); Kinder stehen nicht darunter.
+			const gefragte = h?.gefragte.map((g) => g.fuerId) ?? [];
+			expect(gefragte).toContain(s.sandra.personId);
+			expect(gefragte).toContain(s.thomas.personId);
+			expect(gefragte).not.toContain(s.lena.personId);
+			expect(h?.ohneEintrag).toBe(gefragte.length - 1);
 		});
 
 		it('Sandra, Tina ohne Recht am Thread und eine unbekannte ID bekommen dieselben 404-Bytes', async () => {

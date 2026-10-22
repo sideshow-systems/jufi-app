@@ -1,8 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, input, linkedSignal, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import {
-	berlinerTag,
-	berlinerUhrzeit,
-	berlinZeitpunkt,
 	EINHEIT_TEXT,
 	einheitenFuer,
 	ERGEBNIS_TEXT,
@@ -18,6 +15,7 @@ import {
 } from '@jufi/domain';
 import { wertVon } from '../../../gemeinsam/formular';
 import { IconComponent } from '../../../gestaltung/icon';
+import { FristFelderComponent } from './frist-felder';
 import { KnopfleisteComponent } from './knopfleiste';
 
 type InfoModul = Extract<ModulEntwurf, { typ: 'INFO' }>;
@@ -27,18 +25,6 @@ type UmfrageModul = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
 // Ab hier zeigt das Textfeld, wie viel noch frei ist: Wer lange Aushaenge schreibt, soll die
 // Grenze kommen sehen, statt erst beim Speichern auf den Fehler zu stossen.
 const ZAEHLER_AB = 9000;
-
-// Vorgabe, wenn nur ein Datum fuer die Frist da ist: eine Uhrzeit, die man sieht, statt einer,
-// die still als Mitternacht gilt. Verworfen: 23:59, die Jugendleiter nennen Fristen meist als
-// Abend vor dem Termin, und ein Wert, den das Feld zeigt, laesst sich ohnehin aendern.
-const FRIST_UHRZEIT = '18:00';
-
-// Ein Datum ist erst dann eine Frist, wenn es vollstaendig ist und ein sinnvolles Jahr hat:
-// Auf dem Weg zu 2026 meldet der Browser 0002, 0020 und 0202, und berlinZeitpunkt machte aus
-// 0002 das Jahr 1902.
-const TAG = /^\d{4}-\d{2}-\d{2}$/;
-const UHRZEIT = /^([01]\d|2[0-3]):[0-5]\d$/;
-const istPlausiblerTag = (tag: string): boolean => TAG.test(tag) && Number(tag.slice(0, 4)) >= 1000;
 
 const ZAHL = new Intl.NumberFormat('de-DE');
 
@@ -62,11 +48,15 @@ const FEHLERFELDER = {
 	// jeder Wert erlaubt ist.
 	DATEIEN: ['titel'],
 	FOTOS: ['titel'],
+	// Die Helferliste zeigt jf-helfer-felder (TP4-Spec 10). Die Konflikte des Servers an belegten
+	// Positionen stehen an "positionen", der an der Einheit an "einheit" (vergleich.ts).
+	HELFER: ['titel', 'einheit', 'frist', 'positionen'],
 	UMFRAGE: ['titel', 'frage', 'teilnahme', 'optionen', 'mehrfach', 'einheit', 'frist'],
 } as const satisfies Record<string, readonly string[]>;
 
 /**
- * Ob jf-modul-felder einen Fehler an diesem Feld (Pfad nach "module.N.") fuer dieses Modul zeigt.
+ * Ob die Felder dieses Moduls (jf-modul-felder oder das eigene Bauteil des Typs, etwa
+ * jf-helfer-felder) einen Fehler an diesem Feld (Pfad nach "module.N.") zeigen.
  * Der Editor fragt das, bevor er einen Feldfehler des Servers an ein Modul haengt; was hier fehlt,
  * nennt er als Satz unter den Knoepfen, statt ihn an einer Stelle abzulegen, die niemand sieht.
  * Eine Liste fuer beide: Die Vorlage zeigt nur, was hier steht (fehlerNachFeld), und der Test
@@ -94,7 +84,7 @@ const hakenVon = (e: Event): boolean => (e.target as HTMLInputElement).checked;
  */
 @Component({
 	selector: 'jf-modul-felder',
-	imports: [IconComponent, KnopfleisteComponent],
+	imports: [FristFelderComponent, IconComponent, KnopfleisteComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@if (info(); as m) {
@@ -435,49 +425,12 @@ const hakenVon = (e: Event): boolean => (e.target as HTMLInputElement).checked;
 					</select>
 				</label>
 
-				<fieldset class="frist">
-					<legend>Frist (Berliner Zeit)</legend>
-					<div class="reihe">
-						<label class="feld">
-							Datum
-							<input
-								type="date"
-								name="fristTag"
-								[value]="fristTag()"
-								[disabled]="ohneFrist()"
-								[attr.aria-invalid]="fehlerAn('frist') ? 'true' : null"
-								[attr.aria-describedby]="fehlerAn('frist') ? fehlerId('frist') : null"
-								(input)="fristTagSetzen(m, wert($event))"
-								(blur)="gleicheAb($event, fristTag())"
-							/>
-						</label>
-						<label class="feld">
-							Uhrzeit
-							<input
-								type="time"
-								name="fristZeit"
-								[value]="fristZeit()"
-								[disabled]="ohneFrist()"
-								[attr.aria-invalid]="fehlerAn('frist') ? 'true' : null"
-								[attr.aria-describedby]="fehlerAn('frist') ? fehlerId('frist') : null"
-								(input)="fristZeitSetzen(m, wert($event))"
-								(blur)="gleicheAb($event, fristZeit())"
-							/>
-						</label>
-					</div>
-					<label class="haken">
-						<input
-							type="checkbox"
-							name="ohneFrist"
-							[checked]="ohneFrist()"
-							(change)="ohneFristSetzen(m, haken($event))"
-						/>
-						ohne Frist
-					</label>
-					@if (fehlerAn('frist'); as text) {
-						<p class="fehler" role="alert" [id]="fehlerId('frist')">{{ text }}</p>
-					}
-				</fieldset>
+				<jf-frist-felder
+					[frist]="m.frist"
+					[fehler]="fehlerAn('frist')"
+					[fehlerId]="fehlerId('frist')"
+					(aendern)="umfrageSetzen(m, { frist: $event })"
+				/>
 			</div>
 		}
 	`,
@@ -624,23 +577,6 @@ export class ModulFelderComponent {
 	// ohne Option (beantwortet, aber keine Schluessel) haelt der Server nicht davon ab.
 	protected readonly antwortenSperren = computed(() => (this.sperre()?.schluessel.length ?? 0) > 0);
 
-	// Die Frist steht im Modul als UTC-ISO, im Formular als Berliner Tag und Uhrzeit. Lokal
-	// gehalten und aus dem Modul nachgefuehrt: Ein Datum ohne Uhrzeit oder umgekehrt ist noch
-	// kein Zeitpunkt und kaeme sonst nie ins Modul. linkedSignal statt effect, damit die
-	// Eingabe nicht eine Runde zu spaet zurueckspringt. Die Quelle ist der Frist-Wert, nicht
-	// das Modul: Jede andere Eingabe meldet ein neues Modulobjekt, und an dessen Identitaet
-	// gekoppelt wuerde sie den lokalen Stand (halbe Eingabe, abgewaehltes "ohne Frist") verwerfen.
-	private readonly frist = computed(() => this.umfrage()?.frist ?? null);
-	protected readonly ohneFrist = linkedSignal(() => this.frist() === null);
-	protected readonly fristTag = linkedSignal(() => {
-		const f = this.frist();
-		return f ? berlinerTag(new Date(f)) : '';
-	});
-	protected readonly fristZeit = linkedSignal(() => {
-		const f = this.frist();
-		return f ? berlinerUhrzeit(new Date(f)) : '';
-	});
-
 	protected fehlerAn(feld: string): string | undefined {
 		return this.fehlerNachFeld().get(feld);
 	}
@@ -746,43 +682,5 @@ export class ModulFelderComponent {
 		const optionen = [...m.optionen];
 		[optionen[i], optionen[ziel]] = [optionen[ziel], optionen[i]];
 		this.umfrageSetzen(m, { optionen });
-	}
-
-	// Waehrend des Tippens meldet der Browser auch Zwischenstaende: '' bei einem geleerten
-	// Segment, "0002-10-22" auf dem Weg zu "2026-10-22". Beides ist keine Frist. Weder melden
-	// noch ins Feld zurueckschreiben (das binding nimmt dem Tippenden sonst das Segment unter
-	// den Fingern weg); abgeschaltet wird nur ueber "ohne Frist". Verworfen: (change) statt
-	// (input): Chrome meldet change auch fuer jedes gueltige Zwischenjahr und fuer ein
-	// geleertes Feld, es loeste also nichts. Beim Verlassen springt das Feld auf den Stand des
-	// Moduls zurueck (gleicheAb).
-	protected fristTagSetzen(m: UmfrageModul, tag: string): void {
-		if (!istPlausiblerTag(tag)) return;
-		this.fristTag.set(tag);
-		const zeit = this.fristZeit() || FRIST_UHRZEIT;
-		this.fristZeit.set(zeit);
-		this.ohneFrist.set(false);
-		this.umfrageSetzen(m, { frist: berlinZeitpunkt(tag, zeit).toISOString() });
-	}
-
-	protected fristZeitSetzen(m: UmfrageModul, wert: string): void {
-		if (!UHRZEIT.test(wert)) return;
-		this.fristZeit.set(wert);
-		const tag = this.fristTag();
-		// Ohne Datum merkt sich das Feld die Uhrzeit nur; das Datum macht sie zum Zeitpunkt.
-		if (tag === '') return;
-		this.umfrageSetzen(m, { frist: berlinZeitpunkt(tag, wert).toISOString() });
-	}
-
-	protected gleicheAb(e: Event, stand: string): void {
-		const feld = e.target as HTMLInputElement;
-		if (feld.value !== stand) feld.value = stand;
-	}
-
-	protected ohneFristSetzen(m: UmfrageModul, ohne: boolean): void {
-		this.ohneFrist.set(ohne);
-		if (!ohne) return;
-		this.fristTag.set('');
-		this.fristZeit.set('');
-		this.umfrageSetzen(m, { frist: null });
 	}
 }

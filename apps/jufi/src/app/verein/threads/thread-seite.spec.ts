@@ -620,6 +620,94 @@ describe('Thread-Seite', () => {
 			expect(text(seite.querySelector('#modul-m4') as HTMLElement)).toContain('Noch keine Dateien.');
 		});
 
+		const HELFER: ModulAnsicht = {
+			typ: 'HELFER',
+			id: 'm6',
+			titel: null,
+			einheit: 'JUNGFISCHER',
+			frist: null,
+			fristAbgelaufen: false,
+			positionen: [
+				{
+					id: 'pos-kuchen',
+					text: 'Kuchen',
+					anzahl: 4,
+					belegt: 1,
+					eintraege: [
+						{ fuerId: 'p-sandra', name: 'Sandra M. (Mutter von Lena)', notiz: 'Marmorkuchen', eingetragenVon: null },
+					],
+				},
+			],
+			zeilen: [{ fuerId: 'k-lena', vorname: 'Lena', selbst: false, darfEintragen: true }],
+		};
+
+		it('legt eine Helferliste in ihre Karte', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ module: [HELFER] }) });
+
+			expect(text(seite.querySelector('jf-karte#modul-m6 jf-helfer-modul') as HTMLElement)).toContain(
+				'Sandra M. (Mutter von Lena) – Marmorkuchen',
+			);
+		});
+
+		it('setzt nach dem Eintragen die neue Helferliste ein, ohne den Thread neu zu laden', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ module: [HELFER] }),
+			});
+			const knopf = (wurzel: Element, t: string) =>
+				Array.from(wurzel.querySelectorAll('button')).find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+			knopf(seite.querySelector('#modul-m6') as HTMLElement, 'Lena eintragen').click();
+			harness.detectChanges();
+			knopf(seite.querySelector('#modul-m6 form') as HTMLElement, 'Eintragen').click();
+
+			const eintrag = await vi.waitFor(() => http.expectOne('/demo/api/v1/helfer/pos-kuchen/eintraege/k-lena'));
+			expect(eintrag.request.method).toBe('PUT');
+			const alt = HELFER as Extract<ModulAnsicht, { typ: 'HELFER' }>;
+			eintrag.flush({
+				modul: { ...alt, positionen: [{ ...alt.positionen[0]!, belegt: 2 }] },
+				stand: 43,
+			});
+			await beendeSeite(harness);
+			await new Promise((r) => setTimeout(r));
+			harness.detectChanges();
+
+			expect(text(seite.querySelector('#modul-m6') as HTMLElement)).toContain('2/4');
+			// Eine zweite Anfrage (GET oder PUT gelesen) waere offen, und afterEach wuerde scheitern.
+		});
+
+		it('laedt nach 409 VOLL still neu und zeigt den Satz an der Position', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ module: [HELFER] }),
+			});
+			const knopf = (wurzel: Element, t: string) =>
+				Array.from(wurzel.querySelectorAll('button')).find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+			knopf(seite.querySelector('#modul-m6') as HTMLElement, 'Lena eintragen').click();
+			harness.detectChanges();
+			knopf(seite.querySelector('#modul-m6 form') as HTMLElement, 'Eintragen').click();
+
+			(await vi.waitFor(() => http.expectOne('/demo/api/v1/helfer/pos-kuchen/eintraege/k-lena'))).flush(
+				{ fehler: 'Hier sind schon alle Plätze vergeben.', code: 'VOLL' },
+				{ status: 409, statusText: 'Conflict' },
+			);
+			const still = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1'));
+			expect(text(seite)).not.toContain('Wird geladen');
+			const alt = HELFER as Extract<ModulAnsicht, { typ: 'HELFER' }>;
+			still.flush(
+				thread({
+					stand: 43,
+					module: [{ ...alt, positionen: [{ ...alt.positionen[0]!, belegt: 4 }], zeilen: [] } as ModulAnsicht],
+				}),
+			);
+			expect(await quittiereGelesen()).toEqual({ bereich: 'uebersicht', bis: 43 });
+			await beendeSeite(harness);
+
+			const karte = text(seite.querySelector('#modul-m6') as HTMLElement);
+			expect(karte).toContain('4/4');
+			expect(karte).toContain('voll');
+			expect(karte).toContain('Hier sind schon alle Plätze vergeben.');
+		});
+
 		it('legt ein Foto-Modul in seine Karte statt des Platzhalters', async () => {
 			const fotos: ModulAnsicht = {
 				typ: 'FOTOS',

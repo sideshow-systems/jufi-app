@@ -11,8 +11,8 @@ import {
 } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
-import { fristText, type UebersichtZeile, type UmfrageUebersicht } from '@jufi/domain';
-import { firstValueFrom } from 'rxjs';
+import { fristText, type HelferUebersicht, type UebersichtZeile, type UmfrageUebersicht } from '@jufi/domain';
+import { firstValueFrom, type Observable } from 'rxjs';
 import { alsApiFehler, fehlertextNichtGefunden, fehlerVon } from '../../../gemeinsam/api-fehler';
 import { KarteComponent } from '../../../gestaltung/ui';
 import { beiAbgelaufenerSitzung, istNichtAngemeldet } from '../../sitzung-abgelaufen';
@@ -40,6 +40,35 @@ interface Gruppe {
 	id: string;
 	titel: string;
 	personen: Person[];
+}
+
+interface EintragSicht {
+	fuerId: string;
+	name: string;
+	notiz: string | null;
+	eingetragenVon: string | null;
+}
+
+interface HelferPositionSicht {
+	id: string;
+	text: string;
+	anzahl: number;
+	belegt: number;
+	voll: boolean;
+	eintraege: EintragSicht[];
+	/** Die Gefragten ohne Eintrag in genau dieser Position; wer woanders eingetragen ist, bleibt waehlbar. */
+	auswahl: { fuerId: string; name: string }[];
+	/** Die gewaehlte Person oder leer; nur, was die Auswahl noch anbietet (siehe helferSicht). */
+	gewaehlt: string;
+	notiz: string;
+}
+
+interface HelferSicht {
+	modulId: string;
+	titel: string;
+	frist: string | null;
+	ohneEintrag: number;
+	positionen: HelferPositionSicht[];
 }
 
 interface UmfrageSicht {
@@ -71,6 +100,18 @@ interface UmfrageSicht {
  * Die letzte gewaehlte Option ist gesperrt (disabled): Eine leere Auswahl lehnt der Server mit 400
  * ab, und ein Knopf, der nur einen Fehlertext erzeugt, ist schlechter als einer, der es gar nicht
  * erst anbietet. aria-pressed bleibt true, damit der Zustand auch gesperrt lesbar ist.
+ *
+ * Unter den Umfragen steht je Helferliste ein Block (Task 8, TP4 Etappe 3): Positionen mit
+ * Fuellstand und Eingetragenen, und fuer Bearbeiter Austragen je Eintrag sowie je nicht voller
+ * Position ein kleines Formular. Es steht immer da, statt hinter einem Knopf aufzuklappen wie bei
+ * der Umfrage: Dort waehlt man unter wenigen Optionen, hier braucht jeder Eintrag eine Person und
+ * eine Notiz, und die Leitung traegt meist mehrere hintereinander nach. Die Person ist eine Auswahl
+ * mit leerem Anfang, kein vorgewaehlter Erster; sonst traegt ein hastiges Eintragen jemanden ein,
+ * den niemand gemeint hat. Ausgetragen und eingetragen wird ueber dieselben Routen wie in der Sicht
+ * der Familie (ThreadApi.trageEin und trageAus); der Server erlaubt der Leitung beides auch nach
+ * der Frist und im Archiv. Fehler stehen am Block, nicht oben: Der Satz gehoert zu der Liste, in
+ * der die Handlung scheiterte. Ein 409 (voll) laedt die Uebersicht zusaetzlich neu, denn dann
+ * stimmen Fuellstand und Auswahl nicht mehr.
  */
 @Component({
 	selector: 'jf-antworten-uebersicht',
@@ -143,9 +184,106 @@ interface UmfrageSicht {
 						</section>
 					}
 				</jf-karte>
-			} @empty {
+			}
+			@for (h of helfer(); track h.modulId) {
+				<jf-karte [attr.data-helfer]="h.modulId">
+					<div class="kopf">
+						<h2>{{ h.titel }}</h2>
+						<span class="ohne gedaempft klein">{{ h.ohneEintrag }} ohne Eintrag</span>
+					</div>
+					@if (h.frist) {
+						<p class="gedaempft klein">{{ h.frist }}</p>
+					}
+					@if (helferFehler(); as f) {
+						@if (f.modulId === h.modulId) {
+							<p class="fehler" role="alert">{{ f.text }}</p>
+						}
+					}
+					@for (p of h.positionen; track p.id) {
+						<section class="position" [attr.data-position]="p.id" [attr.aria-label]="p.text">
+							<div class="kopf">
+								<h3>{{ p.text }}</h3>
+								<span class="fuell">
+									<span class="zahl">{{ p.belegt }}/{{ p.anzahl }}</span>
+									@if (p.voll) {
+										<span class="voll">voll</span>
+									}
+								</span>
+							</div>
+							@if (p.eintraege.length === 0) {
+								<p class="gedaempft klein">Noch niemand eingetragen.</p>
+							} @else {
+								<ul>
+									@for (e of p.eintraege; track e.fuerId) {
+										<li class="eintrag">
+											<div class="zeile">
+												<span class="name">{{ e.name }}</span>
+												@if (e.notiz) {
+													<span class="notiz">{{ e.notiz }}</span>
+												}
+												@if (darfNachtragen()) {
+													<button
+														type="button"
+														class="knopf leise klein"
+														[disabled]="sendet()"
+														(click)="trageAus(h, p, e)"
+													>
+														Austragen<span class="unsichtbar"> {{ e.name }} aus {{ p.text }}</span>
+													</button>
+												}
+											</div>
+											@if (e.eingetragenVon) {
+												<span class="gedaempft klein">eingetragen von {{ e.eingetragenVon }}</span>
+											}
+										</li>
+									}
+								</ul>
+							}
+							@if (darfNachtragen() && !p.voll) {
+								@if (p.auswahl.length === 0) {
+									<p class="gedaempft klein">Alle Gefragten stehen schon in dieser Position.</p>
+								} @else {
+									<form
+										class="formular"
+										[attr.aria-label]="'Eintragen in ' + p.text"
+										(submit)="eintragen($event, h, p)"
+									>
+										<label class="feld">
+											<span>Person</span>
+											<select name="person" [disabled]="sendet()" (change)="waehlePerson(p.id, wert($event))">
+												<option value="" [selected]="p.gewaehlt === ''">Person wählen</option>
+												@for (g of p.auswahl; track g.fuerId) {
+													<option [value]="g.fuerId" [selected]="g.fuerId === p.gewaehlt">{{ g.name }}</option>
+												}
+											</select>
+										</label>
+										<label class="feld">
+											<span>Notiz (optional)</span>
+											<input
+												name="notiz"
+												maxlength="80"
+												autocomplete="off"
+												placeholder="z. B. Marmorkuchen"
+												[value]="p.notiz"
+												[disabled]="sendet()"
+												(input)="schreibeNotiz(p.id, wert($event))"
+											/>
+										</label>
+										<button type="submit" class="knopf primaer klein" [disabled]="sendet() || p.gewaehlt === ''">
+											Eintragen<span class="unsichtbar"> in {{ p.text }}</span>
+										</button>
+									</form>
+								}
+							}
+						</section>
+					}
+				</jf-karte>
+			}
+			@if (umfragen().length === 0 && helfer().length === 0) {
 				<jf-karte>
-					<p class="gedaempft">Dieser Thread hat keine Umfrage, deshalb gibt es hier keine Antworten.</p>
+					<p class="gedaempft">
+						Dieser Thread hat keine Umfrage oder Helferliste, deshalb gibt es hier keine Antworten.
+					</p>
 				</jf-karte>
 			}
 		} @else {
@@ -219,6 +357,43 @@ interface UmfrageSicht {
 			border-color: var(--akzent);
 			color: var(--auf-akzent);
 		}
+		.kopf {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: baseline;
+			justify-content: space-between;
+			gap: var(--a1) var(--a3);
+		}
+		.position {
+			padding-top: var(--a2);
+			border-top: 1px solid var(--linie);
+		}
+		.fuell {
+			display: inline-flex;
+			align-items: baseline;
+			gap: var(--a2);
+			font-size: var(--schrift-klein);
+			font-weight: 600;
+		}
+		.voll {
+			color: var(--warnung);
+		}
+		.eintrag {
+			display: grid;
+			gap: 2px;
+		}
+		.notiz {
+			color: var(--text-gedaempft);
+			overflow-wrap: anywhere;
+		}
+		.formular {
+			display: grid;
+			gap: var(--a2);
+			justify-items: start;
+		}
+		.formular .feld {
+			justify-self: stretch;
+		}
 		.fehler {
 			color: var(--fehler);
 		}
@@ -249,12 +424,22 @@ export class ThreadAntwortenComponent {
 	protected readonly offeneZeile = signal<string | null>(null);
 	protected readonly sendet = signal(false);
 	protected readonly fehler = signal<string | null>(null);
+	/** Der Satz zu einer gescheiterten Handlung, am Block der Liste, in der sie scheiterte. */
+	protected readonly helferFehler = signal<{ modulId: string; text: string } | null>(null);
+	/** Die gewaehlte Person und die Notiz je Position; geleert wird nur nach einem gelungenen Eintragen dort. */
+	private readonly auswahlen = signal<Record<string, string>>({});
+	private readonly notizen = signal<Record<string, string>>({});
 
 	protected readonly darfNachtragen = computed(
 		() => this.uebersicht.hasValue() && this.uebersicht.value().darfNachtragen,
 	);
 	protected readonly umfragen = computed<UmfrageSicht[]>(() =>
 		this.uebersicht.hasValue() ? this.uebersicht.value().umfragen.map(sicht) : [],
+	);
+	protected readonly helfer = computed<HelferSicht[]>(() =>
+		this.uebersicht.hasValue()
+			? this.uebersicht.value().helfer.map((h) => helferSicht(h, this.auswahlen(), this.notizen()))
+			: [],
 	);
 
 	constructor() {
@@ -290,12 +475,80 @@ export class ThreadAntwortenComponent {
 		);
 	}
 
+	protected wert(e: Event): string {
+		return (e.target as HTMLInputElement | HTMLSelectElement).value;
+	}
+
+	protected waehlePerson(positionId: string, fuerId: string): void {
+		this.auswahlen.update((a) => ({ ...a, [positionId]: fuerId }));
+	}
+
+	protected schreibeNotiz(positionId: string, text: string): void {
+		this.notizen.update((n) => ({ ...n, [positionId]: text }));
+	}
+
+	/**
+	 * Eine neue clientId je Absenden: Wiederholt das Netz die Anfrage, erkennt der Server sie. Eine
+	 * leere Notiz geht als null, damit sie nicht als leerer Text neben dem Namen landet; der Server
+	 * schneidet ebenfalls zu und entscheidet ueber die Grenzen.
+	 */
+	protected async eintragen(ereignis: Event, h: HelferSicht, p: HelferPositionSicht): Promise<void> {
+		ereignis.preventDefault();
+		if (p.gewaehlt === '') return;
+		const notiz = p.notiz.trim();
+		const gelungen = await this.fuehreHelferAus(h.modulId, () =>
+			this.threadApi.trageEin(this.slug(), p.id, p.gewaehlt, {
+				notiz: notiz === '' ? null : notiz,
+				clientId: crypto.randomUUID(),
+			}),
+		);
+		if (!gelungen) return;
+		this.auswahlen.update((a) => ohne(a, p.id));
+		this.notizen.update((n) => ohne(n, p.id));
+	}
+
+	protected async trageAus(h: HelferSicht, p: HelferPositionSicht, e: EintragSicht): Promise<void> {
+		await this.fuehreHelferAus(h.modulId, () => this.threadApi.trageAus(this.slug(), p.id, e.fuerId));
+	}
+
+	/** Liefert, ob die Handlung gelang; nur dann bereinigt der Aufrufer sein Formular. */
+	private async fuehreHelferAus(modulId: string, aufruf: () => Observable<unknown>): Promise<boolean> {
+		// Der zweite Tipp eines Doppeltipps kommt an, bevor der Knopf als gesperrt gezeichnet ist.
+		if (this.sendet()) return false;
+		this.sendet.set(true);
+		this.fehler.set(null);
+		this.helferFehler.set(null);
+		try {
+			await firstValueFrom(aufruf());
+			if (this.weg) return false;
+			this.uebersicht.reload();
+			return true;
+		} catch (ursache) {
+			if (this.weg) return false;
+			const fehler = alsApiFehler(ursache);
+			if (await beiAbgelaufenerSitzung(this.router, this.slug(), fehler)) return false;
+			// Bei 409 stimmen Fuellstand und Auswahl nicht mehr; die Eingabe bleibt stehen. Verworfen: auch
+			// bei 404 neu laden, denn schlaegt das Laden dann ebenfalls fehl, ersetzte der Ladefehler die ganze Seite.
+			if (fehler.status === 409) this.uebersicht.reload();
+			this.helferFehler.set({
+				modulId,
+				text: fehler.code === 'VOLL' ? 'Hier sind schon alle Plätze vergeben.' : fehlertextNichtGefunden(fehler),
+			});
+			return false;
+		} finally {
+			this.sendet.set(false);
+		}
+	}
+
 	/** Eine neue clientId je Klick: Wiederholt das Netz die Anfrage, erkennt der Server sie. */
 	private async trageNach(modulId: string, fuerId: string, optionIds: string[]): Promise<void> {
 		// Der zweite Tipp eines Doppeltipps kommt an, bevor der Knopf als gesperrt gezeichnet ist.
 		if (this.sendet()) return;
 		this.sendet.set(true);
+		// Beide Saetze weg, wie in fuehreHelferAus: Ein Fehler am Helfer-Block bezoege sich sonst nach
+		// der naechsten Handlung noch auf einen Stand, den das Neuladen schon ersetzt hat.
 		this.fehler.set(null);
+		this.helferFehler.set(null);
 		try {
 			await firstValueFrom(
 				this.threadApi.antworte(this.slug(), modulId, fuerId, {
@@ -341,4 +594,38 @@ function sicht(u: UmfrageUebersicht): UmfrageSicht {
 		knoepfe: u.optionen.map((o) => ({ id: o.id, text: u.teilnahme ? teilnahmeText(o.schluessel, o.text) : o.text })),
 		gruppen,
 	};
+}
+
+function helferSicht(
+	h: HelferUebersicht,
+	auswahlen: Record<string, string>,
+	notizen: Record<string, string>,
+): HelferSicht {
+	return {
+		modulId: h.modulId,
+		titel: h.titel || 'Helferliste',
+		frist: h.fristAbgelaufen ? 'Frist abgelaufen' : h.frist === null ? null : fristText(new Date(h.frist), new Date()),
+		ohneEintrag: h.ohneEintrag,
+		positionen: h.positionen.map((p) => {
+			const eingetragen = new Set(p.eintraege.map((e) => e.fuerId));
+			const auswahl = h.gefragte.filter((g) => !eingetragen.has(g.fuerId));
+			const gewaehlt = auswahlen[p.id] ?? '';
+			return {
+				id: p.id,
+				text: p.text,
+				anzahl: p.anzahl,
+				belegt: p.belegt,
+				voll: p.belegt >= p.anzahl,
+				eintraege: p.eintraege,
+				auswahl,
+				// Eine Person, die inzwischen eingetragen ist (oder nicht mehr gefragt), gilt als nicht gewaehlt.
+				gewaehlt: auswahl.some((g) => g.fuerId === gewaehlt) ? gewaehlt : '',
+				notiz: notizen[p.id] ?? '',
+			};
+		}),
+	};
+}
+
+function ohne(zuordnung: Record<string, string>, schluessel: string): Record<string, string> {
+	return Object.fromEntries(Object.entries(zuordnung).filter(([k]) => k !== schluessel));
 }

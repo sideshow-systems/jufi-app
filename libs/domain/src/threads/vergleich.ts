@@ -1,12 +1,17 @@
+import { helferSperre, pruefeHelferAenderung } from '../module/helfer/helfer.js';
 import { pruefeUmfrageAenderung, TEILNAHME_OPTIONEN } from '../module/umfrage/umfrage.js';
 import type { ModulDaten } from './ansicht.js';
-import type { Feldfehler, ModulEntwurf, OptionEntwurf, ThreadEntwurf } from './entwurf.js';
-import type { UmfrageDaten, ThreadKopf } from './typen.js';
+import type { Feldfehler, ModulEntwurf, OptionEntwurf, PositionEntwurf, ThreadEntwurf } from './entwurf.js';
+import type { HelferDaten, UmfrageDaten, ThreadKopf } from './typen.js';
 import type { SystemArt } from './verlauf.js';
 
 const UNGUELTIG = 'Ungültige Anfrage';
 
 type UmfrageEntwurf = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
+type HelferEntwurf = Extract<ModulEntwurf, { typ: 'HELFER' }>;
+
+// Ersatztitel einer Helferliste ohne eigenen Titel, in Konflikt und Systemeintrag (Entscheidung 10).
+const HELFERLISTE = 'Helferliste';
 
 // Was an einer Umfrage durch Antworten festliegt. Der Editor sperrt damit seine Felder,
 // bevor der Server mit 409 antworten muss; beide fragen dieselbe Funktion.
@@ -36,12 +41,14 @@ export interface ModulPlan {
 	geaendert: boolean;
 	/** Schluessel unbeantworteter Optionen, die der Entwurf nicht mehr hat. */
 	optionenLoeschen: string[];
+	/** Schluessel unbelegter Positionen einer Helferliste, die der Entwurf nicht mehr hat. */
+	positionenLoeschen: string[];
 }
 
 export interface EntwurfVergleich {
-	/** 400: unbekannte oder doppelte Modul-ID, Typwechsel, fremder Optionsschluessel. */
+	/** 400: unbekannte oder doppelte Modul-ID, Typwechsel, fremder Options- oder Positionsschluessel. */
 	fehler: Feldfehler | null;
-	/** 409 BEANTWORTET. */
+	/** 409 BEANTWORTET (Antworten einer Umfrage oder Eintraege einer Helferliste). */
 	konflikt: Feldfehler | null;
 	/** Modul-IDs. */
 	loeschen: string[];
@@ -72,10 +79,13 @@ function leer(rest: Partial<Pick<EntwurfVergleich, 'fehler' | 'konflikt'>>): Ent
 	};
 }
 
-// Ein Schluessel darf nur auf eine Option zeigen, die es gibt: der Server vergibt neue
-// Schluessel selbst (Entscheidung 11), ein erfundener oder doppelter gehoerte sonst zwei
-// Optionen oder keiner. Ausnahme Teilnahme: ihre Schluessel sind fest.
-function schluesselUngueltig(optionen: readonly OptionEntwurf[], erlaubt: ReadonlySet<string>): boolean {
+// Ein Schluessel darf nur auf eine Option oder Position zeigen, die es gibt: der Server vergibt
+// neue Schluessel selbst (Entscheidung 11), ein erfundener oder doppelter gehoerte sonst zwei
+// Eintraegen oder keinem. Ausnahme Teilnahme: ihre Schluessel sind fest.
+function schluesselUngueltig(
+	optionen: readonly (OptionEntwurf | PositionEntwurf)[],
+	erlaubt: ReadonlySet<string>,
+): boolean {
 	const gesehen = new Set<string>();
 	for (const o of optionen) {
 		if (o.schluessel === null) continue;
@@ -89,7 +99,14 @@ function gleicheOptionen(alt: UmfrageDaten['optionen'], neu: readonly OptionEntw
 	return alt.length === neu.length && alt.every((o, i) => o.schluessel === neu[i].schluessel && o.text === neu[i].text);
 }
 
-const fristIso = (u: UmfrageDaten) => (u.frist ? u.frist.toISOString() : null);
+function gleichePositionen(alt: HelferDaten['positionen'], neu: readonly PositionEntwurf[]): boolean {
+	return (
+		alt.length === neu.length &&
+		alt.every((p, i) => p.schluessel === neu[i].schluessel && p.text === neu[i].text && p.anzahl === neu[i].anzahl)
+	);
+}
+
+const fristIso = (u: { frist: Date | null }) => (u.frist ? u.frist.toISOString() : null);
 
 const KONFLIKT_TEXT = {
 	einheit: 'Die Einheit lässt sich nach den ersten Antworten nicht mehr ändern.',
@@ -97,38 +114,64 @@ const KONFLIKT_TEXT = {
 	mehrfach: 'Mehrfachauswahl lässt sich nicht abschalten, solange jemand mehrere Antworten gewählt hat.',
 } as const;
 
+// Eigener Satz statt KONFLIKT_TEXT.einheit: Eine Helferliste hat Eintraege, keine Antworten.
+// Exportiert, weil der Editor denselben Satz als Hinweis an der gesperrten Einheit zeigt, bevor
+// der Server ihn als 409 schicken muesste.
+export const HELFER_EINHEIT_GESPERRT = 'Die Einheit lässt sich nach den ersten Einträgen nicht mehr ändern.';
+
 interface Bestehendes {
 	geaendert: boolean;
 	optionenLoeschen: string[];
+	positionenLoeschen: string[];
 	konflikt: Feldfehler | null;
 	system: EntwurfVergleich['system'];
 }
 
-// Vergleich eines Moduls, das der Thread schon hat (gleicher Typ ist geprueft).
+// Vergleich eines Moduls, das der Thread schon hat. Der gleiche Typ ist vorher geprueft; die
+// Weiche geht trotzdem ueber beide, damit TypeScript den Entwurf mit verengt. Erschoepfend ueber
+// alt.typ: Ein neuer Modultyp bricht hier den Bau, statt still als unveraendert zu gelten.
 function vergleicheBestehendes(alt: ModulDaten, neu: ModulEntwurf, i: number): Bestehendes {
 	const ergebnis: Bestehendes = {
 		geaendert: alt.titel !== neu.titel,
 		optionenLoeschen: [],
+		positionenLoeschen: [],
 		konflikt: null,
 		system: [],
 	};
-	if (alt.typ === 'INFO' && neu.typ === 'INFO') {
-		ergebnis.geaendert ||= alt.text !== neu.text;
-	} else if (alt.typ === 'TERMIN' && neu.typ === 'TERMIN') {
-		const a = alt.termin;
-		const n = neu.termin;
-		const zeit =
-			a.startDatum !== n.startDatum || a.endDatum !== n.endDatum || a.beginn !== n.beginn || a.ende !== n.ende;
-		ergebnis.geaendert ||= zeit || a.ort !== n.ort || a.treffpunkt !== n.treffpunkt;
-		// Nur die Zeit ist eine Nachricht an die Gruppe; ein anderer Ort nicht (Entscheidung 6).
-		// Die Daten tragen den ganzen Termin, damit der Satz im Verlauf ohne zweite Abfrage steht.
-		if (zeit) eintrag(ergebnis, 'TERMIN_GEAENDERT', { termin: { modulId: alt.id, ...n } });
-	} else if (alt.typ === 'UMFRAGE' && neu.typ === 'UMFRAGE') {
-		umfrage(ergebnis, alt, neu, i);
-	} else if (alt.typ === 'FOTOS' && neu.typ === 'FOTOS') {
-		// Wer hochladen darf, ist eine Einstellung des Moduls und keine Nachricht an die Gruppe:
-		// kein Systemeintrag. Die Dateien selbst zaehlen nie, sie haben eigene Routen.
-		ergebnis.geaendert ||= alt.hochladen !== neu.hochladen;
+	switch (alt.typ) {
+		case 'INFO':
+			if (neu.typ === 'INFO') ergebnis.geaendert ||= alt.text !== neu.text;
+			break;
+		case 'TERMIN':
+			if (neu.typ === 'TERMIN') {
+				const a = alt.termin;
+				const n = neu.termin;
+				const zeit =
+					a.startDatum !== n.startDatum || a.endDatum !== n.endDatum || a.beginn !== n.beginn || a.ende !== n.ende;
+				ergebnis.geaendert ||= zeit || a.ort !== n.ort || a.treffpunkt !== n.treffpunkt;
+				// Nur die Zeit ist eine Nachricht an die Gruppe; ein anderer Ort nicht (Entscheidung 6).
+				// Die Daten tragen den ganzen Termin, damit der Satz im Verlauf ohne zweite Abfrage steht.
+				if (zeit) eintrag(ergebnis, 'TERMIN_GEAENDERT', { termin: { modulId: alt.id, ...n } });
+			}
+			break;
+		case 'UMFRAGE':
+			if (neu.typ === 'UMFRAGE') umfrage(ergebnis, alt, neu, i);
+			break;
+		case 'HELFER':
+			if (neu.typ === 'HELFER') helfer(ergebnis, alt, neu, i);
+			break;
+		// Die Dateien selbst zaehlen nie, sie haben eigene Routen; ausser dem Titel bleibt nichts.
+		case 'DATEIEN':
+			break;
+		case 'FOTOS':
+			// Wer hochladen darf, ist eine Einstellung des Moduls und keine Nachricht an die Gruppe:
+			// kein Systemeintrag.
+			if (neu.typ === 'FOTOS') ergebnis.geaendert ||= alt.hochladen !== neu.hochladen;
+			break;
+		default: {
+			const unerreichbar: never = alt;
+			return unerreichbar;
+		}
 	}
 	return ergebnis;
 }
@@ -177,6 +220,35 @@ function umfrage(e: Bestehendes, alt: ModulDaten & { typ: 'UMFRAGE' }, neu: Umfr
 			e.konflikt = { feld: f(k.feld), text: KONFLIKT_TEXT[k.feld], konflikt: true };
 		}
 	}
+}
+
+function helfer(e: Bestehendes, alt: ModulDaten & { typ: 'HELFER' }, neu: HelferEntwurf, i: number): void {
+	const h = alt.helfer;
+	const frist = fristIso(h) !== neu.frist;
+	e.geaendert ||= frist || h.einheit !== neu.einheit || !gleichePositionen(h.positionen, neu.positionen);
+	// Entscheidung 10: wie bei der Umfrage, mit dem Titel, wie er jetzt heisst, an Stelle der Frage.
+	if (frist) eintrag(e, 'FRIST_GEAENDERT', { frage: neu.titel ?? HELFERLISTE, frist: neu.frist });
+
+	const bleibt = new Set(neu.positionen.flatMap((p) => (p.schluessel === null ? [] : [p.schluessel])));
+	// Eine belegte Position unter den wegfallenden ist ein Konflikt, und dann bleibt der Plan leer;
+	// in positionenLoeschen kann also nur Unbelegtes landen, sobald es gilt.
+	e.positionenLoeschen = h.positionen.filter((p) => !bleibt.has(p.schluessel)).map((p) => p.schluessel);
+	// Nur der erste Konflikt, wie bei der Umfrage: Die uebrigen kennt der Editor aus helferSperre.
+	const [k] = pruefeHelferAenderung(h, { einheit: neu.einheit, positionen: neu.positionen });
+	if (!k) return;
+	const f = (name: string) => `module.${i}.${name}`;
+	if (k.feld === 'einheit') {
+		e.konflikt = { feld: f('einheit'), text: HELFER_EINHEIT_GESPERRT, konflikt: true };
+		return;
+	}
+	// Eine entfernte Position nennt ihren alten Text, denn im Editor steht sie nicht mehr. Eine
+	// zu kleine Anzahl nennt den Text, den der Editor gerade zeigt, auch wenn er umbenannt ist.
+	const altText = h.positionen.find((p) => p.schluessel === k.schluessel)?.text ?? k.schluessel;
+	const text =
+		k.art === 'ENTFERNT'
+			? `Für „${altText}“ hat sich schon jemand eingetragen.`
+			: `Für „${neu.positionen.find((p) => p.schluessel === k.schluessel)?.text ?? altText}“ sind schon ${k.belegt} eingetragen.`;
+	e.konflikt = { feld: f('positionen'), text, konflikt: true };
 }
 
 function gleicheMenge(a: readonly string[], b: readonly string[]): boolean {
@@ -237,6 +309,8 @@ export function vergleicheEntwurf(
 
 		if (m.id === null) {
 			if (m.typ === 'UMFRAGE' && schluesselUngueltig(m.optionen, new Set(fest))) return ungueltig('.optionen');
+			// Eine neue Liste hat noch keine Position, auf die ein Schluessel zeigen koennte.
+			if (m.typ === 'HELFER' && schluesselUngueltig(m.positionen, new Set())) return ungueltig('.positionen');
 			anlegen.push({ position, neu: m });
 			continue;
 		}
@@ -248,6 +322,10 @@ export function vergleicheEntwurf(
 			const erlaubt = new Set([...fest, ...bisher.umfrage.optionen.map((o) => o.schluessel)]);
 			if (schluesselUngueltig(m.optionen, erlaubt)) return ungueltig('.optionen');
 		}
+		if (bisher.typ === 'HELFER' && m.typ === 'HELFER') {
+			const erlaubt = new Set(bisher.helfer.positionen.map((p) => p.schluessel));
+			if (schluesselUngueltig(m.positionen, erlaubt)) return ungueltig('.positionen');
+		}
 
 		const b = vergleicheBestehendes(bisher, m, position);
 		if (b.konflikt) konflikte.push({ rang: index, fehler: b.konflikt });
@@ -258,6 +336,7 @@ export function vergleicheEntwurf(
 			neu: m,
 			geaendert: b.geaendert || index !== position,
 			optionenLoeschen: b.optionenLoeschen,
+			positionenLoeschen: b.positionenLoeschen,
 		});
 	}
 
@@ -271,6 +350,18 @@ export function vergleicheEntwurf(
 				fehler: {
 					feld: 'module',
 					text: `Die Umfrage „${m.umfrage.frage}“ hat schon Antworten und lässt sich nicht entfernen.`,
+					konflikt: true,
+				},
+			});
+		}
+		// Spec 8: Eintraege zaehlen wie Antworten. Ohne diese Pruefung endete das Loeschen am
+		// Fremdschluessel (NoAction) statt mit einem Satz am Feld.
+		if (m.typ === 'HELFER' && helferSperre(m.helfer).eingetragen) {
+			konflikte.push({
+				rang: index,
+				fehler: {
+					feld: 'module',
+					text: `Die Helferliste „${m.titel ?? HELFERLISTE}“ hat schon Einträge und lässt sich nicht entfernen.`,
 					konflikt: true,
 				},
 			});

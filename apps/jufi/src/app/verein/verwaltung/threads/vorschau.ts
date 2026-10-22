@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import type { ModulAnsicht, ThreadEntwurf } from '@jufi/domain';
 import { DateienModulComponent } from '../../threads/dateien-modul';
 import { FotosModulComponent } from '../../threads/fotos-modul';
+import { HelferModul } from '../../threads/helfer-modul';
 import { InfoModul } from '../../threads/info-modul';
 import { TerminModul } from '../../threads/termin-modul';
 import { UmfrageModul } from '../../threads/umfrage-modul';
@@ -30,6 +31,26 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 				fotos: [],
 				darfHochladen: false,
 				hinweis: null,
+			};
+		}
+		// Ohne Eintraege und ohne Zeilen wie die Umfrage: So bietet die Karte keinen Knopf an, der
+		// die API riefe. Positionen ohne Schluessel tragen Ersatz-IDs wie die Optionen.
+		if (m.typ === 'HELFER') {
+			return {
+				typ: 'HELFER',
+				id,
+				titel: m.titel,
+				einheit: m.einheit,
+				frist: m.frist,
+				fristAbgelaufen: m.frist !== null && jetzt.getTime() >= Date.parse(m.frist),
+				positionen: m.positionen.map((p, j) => ({
+					id: `${id}-${j}`,
+					text: p.text,
+					anzahl: p.anzahl,
+					belegt: 0,
+					eintraege: [],
+				})),
+				zeilen: [],
 			};
 		}
 		return {
@@ -62,7 +83,7 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
  */
 @Component({
 	selector: 'jf-thread-vorschau',
-	imports: [DateienModulComponent, FotosModulComponent, InfoModul, TerminModul, UmfrageModul],
+	imports: [DateienModulComponent, FotosModulComponent, HelferModul, InfoModul, TerminModul, UmfrageModul],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<div class="rahmen" role="region" aria-label="Vorschau am Handy">
@@ -93,6 +114,9 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 							}
 							@case ('UMFRAGE') {
 								<jf-umfrage-modul [modul]="m" slug="" [vorschau]="true" />
+							}
+							@case ('HELFER') {
+								<jf-helfer-modul [modul]="m" slug="" [vorschau]="true" />
 							}
 							<!-- Leere Listen ohne Rechte: kein Upload, kein Hinweis, und slug leer wie beim Termin. -->
 							@case ('DATEIEN') {

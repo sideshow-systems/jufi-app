@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
 	baueUmfeld,
 	EINWILLIGUNG_TEXT_VERSION,
+	gefragte,
 	istArchiviert,
 	siehtThread,
 	teilnahmeOptionen,
@@ -46,9 +47,60 @@ describe('demoEinspielen', () => {
 			mitglieder: await prisma.untergruppeMitglied.count(),
 			threads: await prisma.thread.count(),
 			module: await prisma.threadModul.count(),
+			helferPositionen: await prisma.helferPosition.count(),
+			helferEintraege: await prisma.helferEintrag.count(),
 			aenderungen: await prisma.aenderung.count(),
 			aenderungsstand: (await prisma.verein.findUniqueOrThrow({ where: { slug: 'demo' } })).aenderungsstand,
 		};
+	}
+
+	/** Kopf, Termine und Umfeld aus der Datenbank wie ladeThread und ladeThreadUmfeld der App (die liegen in apps/jufi). */
+	async function laden(vereinId: string) {
+		const [personen, zuordnungen, mitgliedschaften] = await Promise.all([
+			prisma.person.findMany({ where: { vereinId, entferntAm: null } }),
+			prisma.bezugsperson.findMany({ where: { vereinId } }),
+			prisma.untergruppeMitglied.findMany({ where: { vereinId } }),
+		]);
+		const umfeld = baueUmfeld(personen, zuordnungen, mitgliedschaften);
+		const zeilen = await prisma.thread.findMany({
+			where: { vereinId },
+			include: { untergruppen: true, module: { include: { termin: true } } },
+		});
+		const tag = (d: Date) => d.toISOString().slice(0, 10);
+		const thread = (titel: string) => {
+			const z = zeilen.find((t) => t.titel === titel)!;
+			const kopf: ThreadKopf = {
+				id: z.id,
+				art: z.art,
+				titel: z.titel,
+				modus: z.modus,
+				rollenfilter: z.rollenfilter,
+				alleUntergruppen: z.alleUntergruppen,
+				untergruppenIds: z.untergruppen.map((u) => u.untergruppeId),
+				angepinnt: z.angepinnt,
+				archivModus: z.archivModus,
+				veroeffentlichtAm: z.veroeffentlichtAm,
+				erstelltVonId: z.erstelltVonId,
+			};
+			const termine: TerminDaten[] = z.module.flatMap((m) =>
+				m.termin
+					? [
+							{
+								modulId: m.id,
+								startDatum: tag(m.termin.startDatum),
+								endDatum: m.termin.endDatum ? tag(m.termin.endDatum) : null,
+								beginn: m.termin.beginn,
+								ende: m.termin.ende,
+								ort: m.termin.ort,
+								treffpunkt: m.termin.treffpunkt,
+							},
+						]
+					: [],
+			);
+			return { kopf, termine };
+		};
+		const person = (vorname: string) => [...umfeld.personen.values()].find((p) => p.vorname === vorname)!;
+		return { umfeld, thread, person };
 	}
 
 	it('legt 11 Personen, 7 Familienzuordnungen, 2 Untergruppen und 2 Einwilligungen an', async () => {
@@ -194,7 +246,7 @@ describe('demoEinspielen', () => {
 		expect(module[1].titel).toBe('Nächste Gruppenstunde');
 	});
 
-	it('Bowling hat Info-Text, Termin am uebernaechsten Samstag und eine Teilnahme-Umfrage ohne Antworten', async () => {
+	it('Bowling hat Info-Text, Termin am uebernaechsten Samstag, eine Teilnahme-Umfrage ohne Antworten und zuletzt eine Helferliste', async () => {
 		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
 
 		const thread = await prisma.thread.findFirstOrThrow({ where: { vereinId, titel: '🎳 Bowling' } });
@@ -203,7 +255,7 @@ describe('demoEinspielen', () => {
 			orderBy: { position: 'asc' },
 			include: { info: true, termin: true, umfrage: { include: { optionen: { orderBy: { position: 'asc' } } } } },
 		});
-		expect(module.map((m) => m.typ)).toEqual(['INFO', 'TERMIN', 'UMFRAGE']);
+		expect(module.map((m) => m.typ)).toEqual(['INFO', 'TERMIN', 'UMFRAGE', 'HELFER']);
 		// Der naechste Samstag ist der 17.10., der uebernaechste der 24.10.
 		expect(module[1].termin).toMatchObject({
 			startDatum: new Date('2026-10-24T00:00:00Z'),
@@ -238,6 +290,55 @@ describe('demoEinspielen', () => {
 		expect(umfrage.frist).toEqual(new Date('2026-10-22T16:00:00Z'));
 	});
 
+	it('die Helferliste von Bowling fragt Erwachsene nach Fahrern und Snacks, Sandra bringt Gemuesesticks', async () => {
+		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+		const bowling = await prisma.thread.findFirstOrThrow({ where: { vereinId, titel: '🎳 Bowling' } });
+		const modul = await prisma.threadModul.findFirstOrThrow({
+			where: { threadId: bowling.id, typ: 'HELFER' },
+			include: {
+				helfer: {
+					include: {
+						positionen: {
+							orderBy: { position: 'asc' },
+							include: { eintraege: { include: { fuer: true, von: true } } },
+						},
+					},
+				},
+			},
+		});
+		// Das letzte Modul: Mitbringen kommt nach Termin und Zusage, wie ein Ersteller es anordnete.
+		expect(modul).toMatchObject({ position: 3, titel: 'Mitbringen und fahren' });
+		const helfer = modul.helfer!;
+		expect(helfer.einheit).toBe('ERWACHSENER');
+		// Fuenf Berliner Tage nach dem Bezugstag, 18:00 wie die Vorgabe des Editors: Samstag, 17.10.2026,
+		// noch Sommerzeit, also 16:00 UTC; damit vor dem Termin am 24.10.
+		expect(helfer.frist).toEqual(new Date('2026-10-17T16:00:00Z'));
+		expect(helfer.positionen.map((p) => [p.text, p.anzahl])).toEqual([
+			['Fahrer', 2],
+			['Snacks', 3],
+		]);
+		// Schluessel wie der Server sie im Editor vergibt (neuerSchluessel in apps/jufi).
+		for (const p of helfer.positionen) expect(p.schluessel).toMatch(/^o[a-z0-9]{8}$/);
+		expect(new Set(helfer.positionen.map((p) => p.schluessel)).size).toBe(2);
+
+		const [fahrer, snacks] = helfer.positionen;
+		expect(fahrer.eintraege).toEqual([]);
+		expect(snacks.eintraege).toHaveLength(1);
+		expect(snacks.eintraege[0]).toMatchObject({
+			notiz: 'Gemüsesticks',
+			eingetragenAm: BEZUGSTAG,
+			fuer: { vorname: 'Sandra' },
+			von: { vorname: 'Sandra' },
+		});
+
+		// Der Eintrag ist einer, den die App auch annaehme: Sandra ist als Mutter von Lena und Max gefragt.
+		const { umfeld, thread, person } = await laden(vereinId);
+		const ids = gefragte(helfer, thread('🎳 Bowling').kopf, umfeld).map((p) => p.id);
+		expect(ids).toContain(person('Sandra').id);
+		expect(ids).not.toContain(person('Lena').id);
+	});
+
 	it('Termine und Frist rechnen mit der Berliner Wandzeit, auch ueber die Zeitumstellung', async () => {
 		// Montag 26.10.2026, einen Tag nach der Umstellung auf Winterzeit: der naechste Freitag ist der 30.10., der
 		// uebernaechste Samstag der 7.11. und die Frist Donnerstag 5.11., 18:00 Berlin = 17:00 UTC.
@@ -245,6 +346,9 @@ describe('demoEinspielen', () => {
 
 		const umfrage = await prisma.umfrageModul.findFirstOrThrow({ where: { vereinId, teilnahme: true } });
 		expect(umfrage.frist).toEqual(new Date('2026-11-05T17:00:00Z'));
+		// Die Helferliste fuenf Tage spaeter: Samstag 31.10., schon Winterzeit, 18:00 Berlin = 17:00 UTC.
+		const helfer = await prisma.helferModul.findFirstOrThrow({ where: { vereinId } });
+		expect(helfer.frist).toEqual(new Date('2026-10-31T17:00:00Z'));
 		// Nur die Threads, die dem Bezugstag folgen; Zeltlager und Fischerfest haben ihre eigenen Termine.
 		const termine = await prisma.terminModul.findMany({
 			where: { vereinId, modul: { thread: { titel: { in: ['Wichtige Infos', '🎳 Bowling'] } } } },
@@ -292,10 +396,12 @@ describe('demoEinspielen', () => {
 		const eintraege = await prisma.verlaufEintrag.findMany({ where: { vereinId } });
 		const antworten = await prisma.umfrageAntwort.findMany({ where: { vereinId } });
 		const module = await prisma.threadModul.findMany({ where: { vereinId } });
+		const helferListen = await prisma.helferModul.findMany({ where: { vereinId } });
+		// Ein Helfer-Eintrag schreibt ANTWORT mit dem Modul als Objekt (TP4-Spec 8), die Umfrage ihre Antwortzeile.
 		const objekte = {
 			THREAD: threads,
 			MODUL: module,
-			ANTWORT: antworten,
+			ANTWORT: [...antworten, ...helferListen],
 			VERLAUF: eintraege,
 		} as Record<string, { id: string }[] | undefined>;
 		for (const a of aenderungen) {
@@ -340,14 +446,20 @@ describe('demoEinspielen', () => {
 				expect(threadAenderungen[0].urheberId).toBe(t.erstelltVonId);
 			}
 		}
-		expect(threads.reduce((summe, t) => summe + t.module.length, 0)).toBe(10);
-		// Antworten und Nachrichten haben eigene Staende, die Antwort mit der Antwortzeile als Objekt.
+		expect(threads.reduce((summe, t) => summe + t.module.length, 0)).toBe(11);
+		// Antworten, Helfer-Eintraege und Nachrichten haben eigene Staende. Objekt ist bei der Antwort die
+		// Antwortzeile (schreibeAntwort), beim Helfer-Eintrag das Modul (TP4-Spec 8, schreibeEintrag).
 		const antworten = await prisma.umfrageAntwort.findMany({ where: { vereinId } });
+		const helferEintraege = await prisma.helferEintrag.findMany({ where: { vereinId }, include: { position: true } });
+		expect(helferEintraege).toHaveLength(1);
 		const antwortAenderungen = aenderungen.filter((a) => a.art === 'ANTWORT');
-		expect(antwortAenderungen.map((a) => a.objektId).sort()).toEqual(antworten.map((a) => a.id).sort());
-		for (const a of antwortAenderungen) {
-			expect(a.urheberId).toBe(antworten.find((x) => x.id === a.objektId)!.vonId);
-		}
+		const paar = (objektId: string, urheberId: string | null) => `${objektId}/${urheberId}`;
+		expect(antwortAenderungen.map((a) => paar(a.objektId, a.urheberId)).sort()).toEqual(
+			[
+				...antworten.map((a) => paar(a.id, a.vonId)),
+				...helferEintraege.map((e) => paar(e.position.modulId, e.vonId)),
+			].sort(),
+		);
 		expect(aenderungen.filter((a) => a.art === 'VERLAUF')).toHaveLength(4);
 	});
 
@@ -466,55 +578,6 @@ describe('demoEinspielen', () => {
 			expect(fest.module.find((m) => m.typ === 'INFO')!.info!.text).not.toBe('');
 		});
 
-		/** Kopf, Termine und Umfeld aus der Datenbank wie ladeThread und ladeThreadUmfeld der App (die liegen in apps/jufi). */
-		async function laden(vereinId: string) {
-			const [personen, zuordnungen, mitgliedschaften] = await Promise.all([
-				prisma.person.findMany({ where: { vereinId, entferntAm: null } }),
-				prisma.bezugsperson.findMany({ where: { vereinId } }),
-				prisma.untergruppeMitglied.findMany({ where: { vereinId } }),
-			]);
-			const umfeld = baueUmfeld(personen, zuordnungen, mitgliedschaften);
-			const zeilen = await prisma.thread.findMany({
-				where: { vereinId },
-				include: { untergruppen: true, module: { include: { termin: true } } },
-			});
-			const tag = (d: Date) => d.toISOString().slice(0, 10);
-			const thread = (titel: string) => {
-				const z = zeilen.find((t) => t.titel === titel)!;
-				const kopf: ThreadKopf = {
-					id: z.id,
-					art: z.art,
-					titel: z.titel,
-					modus: z.modus,
-					rollenfilter: z.rollenfilter,
-					alleUntergruppen: z.alleUntergruppen,
-					untergruppenIds: z.untergruppen.map((u) => u.untergruppeId),
-					angepinnt: z.angepinnt,
-					archivModus: z.archivModus,
-					veroeffentlichtAm: z.veroeffentlichtAm,
-					erstelltVonId: z.erstelltVonId,
-				};
-				const termine: TerminDaten[] = z.module.flatMap((m) =>
-					m.termin
-						? [
-								{
-									modulId: m.id,
-									startDatum: tag(m.termin.startDatum),
-									endDatum: m.termin.endDatum ? tag(m.termin.endDatum) : null,
-									beginn: m.termin.beginn,
-									ende: m.termin.ende,
-									ort: m.termin.ort,
-									treffpunkt: m.termin.treffpunkt,
-								},
-							]
-						: [],
-				);
-				return { kopf, termine };
-			};
-			const person = (vorname: string) => [...umfeld.personen.values()].find((p) => p.vorname === vorname)!;
-			return { umfeld, thread, person };
-		}
-
 		it('das Zeltlager sieht nur, wer zu den Aelteren gehoert: Lena ja, Max nein', async () => {
 			const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
 
@@ -548,10 +611,12 @@ describe('demoEinspielen', () => {
 		expect(erster.vereine).toBe(1);
 		expect(erster.personen).toBe(11);
 		expect(erster.threads).toBe(5);
-		expect(erster.aenderungsstand).toBe(11);
-		// 5 Threads, 10 Module, 2 Antworten und 4 Nachrichten.
-		expect(erster.aenderungen).toBe(21);
-		expect(erster.module).toBe(10);
+		expect(erster.aenderungsstand).toBe(12);
+		// 5 Threads, 11 Module, 2 Antworten, 1 Helfer-Eintrag und 4 Nachrichten.
+		expect(erster.aenderungen).toBe(23);
+		expect(erster.module).toBe(11);
+		expect(erster.helferPositionen).toBe(2);
+		expect(erster.helferEintraege).toBe(1);
 	});
 
 	it('andere Vereine bleiben unberuehrt', async () => {

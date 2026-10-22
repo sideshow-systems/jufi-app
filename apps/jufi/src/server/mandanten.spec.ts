@@ -17,7 +17,7 @@ import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
 import { Nachlauf } from './nachlauf.js';
-import { legeThreadAn } from './threads/test-threads.js';
+import { legeThreadAn, trageEinTest } from './threads/test-threads.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
 import { vereinsApi, vereinsRouten } from './verein.js';
@@ -136,6 +136,31 @@ async function fremdeAntworten(k: Kontext) {
 			where: { vereinId: k.fremd.id },
 			orderBy: [{ antwortId: 'asc' }, { optionId: 'asc' }],
 		}),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/**
+ * Eine Helferliste in fremd mit einem Eintrag der fremden Person; jeder Fall legt seine eigene an,
+ * damit Ein- und Austragen nicht vom Zustand eines anderen Falls abhaengen.
+ */
+async function fremdeHelferliste(k: Kontext): Promise<{ positionId: string; clientId: string }> {
+	const { positionIds } = await legeThreadAn(k.prisma, k.fremd, new Date(), {
+		titel: 'Fremde Helferliste',
+		erstelltVonId: k.fremdePersonId,
+		module: [{ typ: 'HELFER', einheit: 'PERSON', positionen: [{ text: 'Kuchen', anzahl: 3 }] }],
+	});
+	const positionId = positionIds['kuchen'] as string;
+	const db = vereinDb(k.prisma, k.fremd.id);
+	const id = await trageEinTest(db, positionId, k.fremdePersonId, k.fremdePersonId, 'Fremder Kuchen');
+	const { clientId } = await db.helferEintrag.findUniqueOrThrow({ where: { id }, select: { clientId: true } });
+	return { positionId, clientId };
+}
+
+/** Alles, was Ein- oder Austragen in fremd veraendern koennte: die Eintraege und der Vereinsstand. */
+async function fremdeEintraege(k: Kontext) {
+	return {
+		eintraege: await k.prisma.helferEintrag.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
 		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
 	};
 }
@@ -966,6 +991,58 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 			(await antworte(k.eigen.slug, eigenesModul, ich.personId, eigeneOption, 'mandant-antwort', ich.cookie)).status,
 		).toBe(200);
 		expect(await fremdeAntworten(k)).toEqual(vorher);
+	},
+	'PUT /helfer/:positionId/eintraege/:fuerId': async (k) => {
+		const f = await fremdeHelferliste(k);
+		const vorher = await fremdeEintraege(k);
+		const trage = (slug: string, positionId: string, fuerId: string, clientId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/helfer/${positionId}/eintraege/${fuerId}`, {
+				methode: 'PUT',
+				body: { notiz: 'Uebernommen', clientId },
+				cookie,
+			});
+		const fremd = (slug: string) => trage(slug, f.positionId, k.fremdePersonId, 'mandant-neu', k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		// Eine eigene Helferliste, in die sich eine neue Person aus eigen selbst eintragen darf.
+		const ich = await legeMitgliedAn(k.prisma, k.eigen, { art: 'ERWACHSENER', rechte: ['THREADS_ERSTELLEN'] });
+		const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: ich.personId,
+			module: [{ typ: 'HELFER', einheit: 'PERSON', positionen: [{ text: 'Kuchen', anzahl: 3 }] }],
+		});
+		const eigenePosition = eigene.positionIds['kuchen'] as string;
+		// Die Person aus fremd ist in der eigenen Liste unbekannt.
+		const fremdePerson = await trage(k.eigen.slug, eigenePosition, k.fremdePersonId, 'mandant-1', ich.cookie);
+		expect(fremdePerson.status).toBe(404);
+		expect(await fremdePerson.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Die clientId des Eintrags in fremd ist in eigen frei: ein 409 verriete, dass es sie dort gibt.
+		expect((await trage(k.eigen.slug, eigenePosition, ich.personId, f.clientId, ich.cookie)).status).toBe(200);
+		expect(await fremdeEintraege(k)).toEqual(vorher);
+	},
+	'DELETE /helfer/:positionId/eintraege/:fuerId': async (k) => {
+		const f = await fremdeHelferliste(k);
+		const vorher = await fremdeEintraege(k);
+		const trageAus = (slug: string, positionId: string, fuerId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/helfer/${positionId}/eintraege/${fuerId}`, { methode: 'DELETE', cookie });
+		const fremd = (slug: string) => trageAus(slug, f.positionId, k.fremdePersonId, k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+		// Gegenprobe: Der Leiter traegt in einer eigenen Liste aus, das Recht fehlt also nicht.
+		const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'HELFER', einheit: 'PERSON', positionen: [{ text: 'Kuchen', anzahl: 3 }] }],
+		});
+		const eigenePosition = eigene.positionIds['kuchen'] as string;
+		await trageEinTest(vereinDb(k.prisma, k.eigen.id), eigenePosition, k.eigenerLeiterId, k.eigenerLeiterId);
+		expect((await trageAus(k.eigen.slug, eigenePosition, k.eigenerLeiterId, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeEintraege(k)).toEqual(vorher);
 	},
 	'PATCH /untergruppen/:id': async (k) => {
 		const vorher = await k.prisma.untergruppe.findUniqueOrThrow({ where: { id: k.fremdeGruppeId } });

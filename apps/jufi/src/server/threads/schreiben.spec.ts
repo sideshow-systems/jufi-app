@@ -8,7 +8,7 @@ import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { neuerSchluessel } from './schreiben.js';
-import { legeThreadAn, ordneZu, type TestModul } from './test-threads.js';
+import { legeThreadAn, ordneZu, trageEinTest, type TestModul } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
 /** Donnerstag, 22.10.2026, 18:00 in Berlin: nach JETZT, Antworten sind also noch offen. */
@@ -18,6 +18,16 @@ const VERALTET = { fehler: 'Der Thread wurde inzwischen geändert. Bitte neu lad
 
 type Umfrage = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
 type Termin = Extract<ModulEntwurf, { typ: 'TERMIN' }>;
+type Helfer = Extract<ModulEntwurf, { typ: 'HELFER' }>;
+
+/** Eine Helferliste ohne Titel und ohne Frist; legeThreadAn gibt den Positionen die Schluessel "kuchen" und "salat". */
+const HELFER: TestModul = {
+	typ: 'HELFER',
+	positionen: [
+		{ text: 'Kuchen', anzahl: 4 },
+		{ text: 'Salat', anzahl: 2 },
+	],
+};
 
 /** Die drei Module des Bowling-Threads aus Spec 1.1, wie legeThreadAn sie anlegt. */
 const BOWLING_MODULE: TestModul[] = [
@@ -1043,6 +1053,229 @@ describe('Threads anlegen und ersetzen', () => {
 				expect(r.status).toBe(404);
 				expect(await r.json()).toEqual(NICHT_GEFUNDEN);
 			});
+		});
+	});
+
+	describe('Helferliste', () => {
+		/** Die Positionen eines Moduls, wie sie in der Datenbank stehen, in der Reihenfolge der Liste. */
+		const positionen = (modulId: string) =>
+			prisma.helferPosition.findMany({ where: { modulId }, orderBy: [{ position: 'asc' }, { id: 'asc' }] });
+
+		it('POST legt eine Helferliste mit zwei Positionen an: Schluessel vom Server, die Ansicht zeigt beide unbelegt', async () => {
+			const s = await szenario();
+			const e = s.bowling();
+			e.module.push({
+				typ: 'HELFER',
+				id: null,
+				titel: null,
+				einheit: 'ERWACHSENER',
+				frist: null,
+				positionen: [
+					{ schluessel: null, text: 'Kuchen', anzahl: 4 },
+					{ schluessel: null, text: 'Salat', anzahl: 2 },
+				],
+			});
+			const r = await s.lege(e, s.thomas.cookie);
+			expect(r.status).toBe(201);
+			const b = (await r.json()) as ThreadBearbeitung;
+			const h = b.entwurf.module[3] as Helfer;
+			expect(h).toMatchObject({ typ: 'HELFER', titel: null, einheit: 'ERWACHSENER', frist: null });
+			expect(h.positionen.map((p) => [p.text, p.anzahl])).toEqual([
+				['Kuchen', 4],
+				['Salat', 2],
+			]);
+			for (const p of h.positionen) expect(p.schluessel).toMatch(/^o[a-z0-9]{8}$/);
+			expect(b.helferSperren).toEqual({ [h.id as string]: { eingetragen: false, belegt: {} } });
+			expect(b.darfLoeschen).toBe(true);
+			expect(await s.arten(b.version)).toEqual(['MODUL', 'MODUL', 'MODUL', 'MODUL', 'THREAD']);
+
+			const zeilen = await positionen(h.id as string);
+			expect(zeilen.map((z) => [z.schluessel, z.text, z.anzahl, z.position])).toEqual([
+				[h.positionen[0]?.schluessel, 'Kuchen', 4, 0],
+				[h.positionen[1]?.schluessel, 'Salat', 2, 1],
+			]);
+			expect(await prisma.helferModul.findUniqueOrThrow({ where: { id: h.id as string } })).toMatchObject({
+				vereinId: s.verein.id,
+				einheit: 'ERWACHSENER',
+				frist: null,
+			});
+
+			const a = await sende(server.url, s.api(`/threads/${b.id}`), { cookie: s.thomas.cookie });
+			expect(a.status).toBe(200);
+			const ansicht = (await a.json()) as ThreadAnsicht;
+			expect(ansicht.module[3]).toMatchObject({
+				typ: 'HELFER',
+				id: h.id,
+				titel: null,
+				positionen: [
+					{ id: zeilen[0]?.id, text: 'Kuchen', anzahl: 4, belegt: 0, eintraege: [] },
+					{ id: zeilen[1]?.id, text: 'Salat', anzahl: 2, belegt: 0, eintraege: [] },
+				],
+			});
+		});
+
+		it('PUT benennt um und sortiert um: Schluessel und Zeilen bleiben, der Eintrag haengt weiter an seiner Position', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [HELFER] });
+			await trageEinTest(s.db, t.positionIds['kuchen'] as string, s.sandra.personId, s.sandra.personId, 'Marmor');
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const e = structuredClone(b.entwurf);
+			(e.module[0] as Helfer).positionen = [
+				{ schluessel: 'salat', text: 'Salat', anzahl: 2 },
+				{ schluessel: 'kuchen', text: 'Kuchen oder Muffins', anzahl: 4 },
+			];
+			const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const neu = (await r.json()) as ThreadBearbeitung;
+			expect((neu.entwurf.module[0] as Helfer).positionen).toEqual([
+				{ schluessel: 'salat', text: 'Salat', anzahl: 2 },
+				{ schluessel: 'kuchen', text: 'Kuchen oder Muffins', anzahl: 4 },
+			]);
+			expect(neu.helferSperren).toEqual({ [t.modulIds[0] as string]: { eingetragen: true, belegt: { kuchen: 1 } } });
+
+			const zeilen = await positionen(t.modulIds[0] as string);
+			expect(zeilen.map((z) => [z.id, z.text, z.position])).toEqual([
+				[t.positionIds['salat'], 'Salat', 0],
+				[t.positionIds['kuchen'], 'Kuchen oder Muffins', 1],
+			]);
+			expect(await prisma.helferEintrag.count({ where: { positionId: t.positionIds['kuchen'] } })).toBe(1);
+			expect(await s.arten(await s.stand())).toEqual(['MODUL', 'THREAD']);
+		});
+
+		it('PUT entfernt eine leere Position und legt eine neue an: die Zeile ist weg, die neue hat einen Schluessel vom Server', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [HELFER] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const e = structuredClone(b.entwurf);
+			(e.module[0] as Helfer).positionen = [
+				{ schluessel: 'kuchen', text: 'Kuchen', anzahl: 4 },
+				{ schluessel: null, text: 'Getränke', anzahl: 3 },
+			];
+			const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+			expect(r.status).toBe(200);
+
+			const zeilen = await positionen(t.modulIds[0] as string);
+			expect(zeilen.map((z) => [z.text, z.position])).toEqual([
+				['Kuchen', 0],
+				['Getränke', 1],
+			]);
+			expect(zeilen[0]?.id).toBe(t.positionIds['kuchen']);
+			expect(zeilen[1]?.schluessel).toMatch(/^o[a-z0-9]{8}$/);
+			expect(await prisma.helferPosition.count({ where: { id: t.positionIds['salat'] } })).toBe(0);
+		});
+
+		it('PUT entfernt eine Helferliste ohne Eintraege samt ihren Positionen', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [{ typ: 'INFO', text: 'Bitte eintragen.' }, HELFER] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const r = await s.ersetze(
+				t.threadId,
+				b.version,
+				{ ...b.entwurf, module: b.entwurf.module.slice(0, 1) },
+				s.thomas.cookie,
+			);
+			expect(r.status).toBe(200);
+			expect(await prisma.threadModul.count({ where: { id: t.modulIds[1] } })).toBe(0);
+			expect(await prisma.helferModul.count({ where: { id: t.modulIds[1] } })).toBe(0);
+			expect(await prisma.helferPosition.count({ where: { modulId: t.modulIds[1] } })).toBe(0);
+		});
+
+		describe('Konflikte mit Eintraegen (Review Focus 3)', () => {
+			/** Thread mit Helferliste, Sandra hat sich fuer Kuchen eingetragen; dazu der Zustand vor dem PUT. */
+			async function mitEintrag() {
+				const s = await szenario();
+				const t = await s.bowlingThread({ module: [HELFER] });
+				await trageEinTest(s.db, t.positionIds['kuchen'] as string, s.sandra.personId, s.sandra.personId);
+				const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+				const vorher = {
+					...(await s.zustand(t.threadId)),
+					positionen: await positionen(t.modulIds[0] as string),
+					helfer: await prisma.helferModul.findUniqueOrThrow({ where: { id: t.modulIds[0] } }),
+				};
+				const nachher = async () => ({
+					...(await s.zustand(t.threadId)),
+					positionen: await positionen(t.modulIds[0] as string),
+					helfer: await prisma.helferModul.findUniqueOrThrow({ where: { id: t.modulIds[0] } }),
+				});
+				return { s, t, b, vorher, nachher };
+			}
+
+			it('eine Position mit Eintrag entfernen ergibt 409 BEANTWORTET mit ihrem Text, nichts geaendert', async () => {
+				const { s, t, b, vorher, nachher } = await mitEintrag();
+				const e = structuredClone(b.entwurf);
+				(e.module[0] as Helfer).positionen = [{ schluessel: 'salat', text: 'Salat', anzahl: 2 }];
+				const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+				expect(r.status).toBe(409);
+				expect(await r.json()).toEqual({
+					fehler: 'Für „Kuchen“ hat sich schon jemand eingetragen.',
+					code: 'BEANTWORTET',
+					feld: 'module.0.positionen',
+				});
+				expect(await nachher()).toEqual(vorher);
+			});
+
+			it('die Anzahl unter die Eingetragenen senken ergibt 409 mit der Zahl', async () => {
+				const { s, t, vorher } = await mitEintrag();
+				await trageEinTest(s.db, t.positionIds['kuchen'] as string, s.tina.personId, s.tina.personId);
+				const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+				const e = structuredClone(b.entwurf);
+				(e.module[0] as Helfer).positionen = [
+					{ schluessel: 'kuchen', text: 'Kuchen', anzahl: 1 },
+					{ schluessel: 'salat', text: 'Salat', anzahl: 2 },
+				];
+				const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+				expect(r.status).toBe(409);
+				expect(await r.json()).toEqual({
+					fehler: 'Für „Kuchen“ sind schon 2 eingetragen.',
+					code: 'BEANTWORTET',
+					feld: 'module.0.positionen',
+				});
+				expect(await s.stand()).toBe(vorher.stand);
+			});
+
+			it('die Einheit nach dem ersten Eintrag aendern ergibt 409 am Feld einheit', async () => {
+				const { s, t, b, vorher, nachher } = await mitEintrag();
+				const e = structuredClone(b.entwurf);
+				(e.module[0] as Helfer).einheit = 'PERSON';
+				const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+				expect(r.status).toBe(409);
+				expect(await r.json()).toEqual({
+					fehler: 'Die Einheit lässt sich nach den ersten Einträgen nicht mehr ändern.',
+					code: 'BEANTWORTET',
+					feld: 'module.0.einheit',
+				});
+				expect(await nachher()).toEqual(vorher);
+			});
+
+			it('die ganze Helferliste mit Eintrag entfernen ergibt 409 statt eines Fremdschluesselfehlers', async () => {
+				const { s, t, b, vorher, nachher } = await mitEintrag();
+				const r = await s.ersetze(t.threadId, b.version, { ...b.entwurf, module: [] }, s.thomas.cookie);
+				expect(r.status).toBe(409);
+				expect(await r.json()).toEqual({
+					fehler: 'Die Helferliste „Helferliste“ hat schon Einträge und lässt sich nicht entfernen.',
+					code: 'BEANTWORTET',
+					feld: 'module',
+				});
+				expect(await nachher()).toEqual(vorher);
+			});
+		});
+
+		it('veroeffentlicht: eine neue Frist ergibt FRIST_GEAENDERT mit "Helferliste" als Frage, wenn die Liste keinen Titel hat', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [HELFER] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const e = structuredClone(b.entwurf);
+			(e.module[0] as Helfer).frist = '2026-10-23T16:00:00.000Z';
+			const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const stand = await s.stand();
+			const eintraege = (await s.system(t.threadId)).filter((x) => x.stand === stand);
+			expect(eintraege.map((x) => [x.systemArt, x.systemDaten])).toEqual([
+				['FRIST_GEAENDERT', { frage: 'Helferliste', frist: '2026-10-23T16:00:00.000Z' }],
+			]);
+			expect(await s.arten(stand)).toEqual(['MODUL', 'THREAD', 'VERLAUF']);
+			const helfer = await prisma.helferModul.findUniqueOrThrow({ where: { id: t.modulIds[0] } });
+			expect(helfer.frist).toEqual(new Date('2026-10-23T16:00:00.000Z'));
 		});
 	});
 });
