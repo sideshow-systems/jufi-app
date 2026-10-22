@@ -107,7 +107,9 @@ Ablauf:
 4. Fotos verarbeitet 2.4; Dateien bleiben, wie sie sind. Die fertigen Bytes werden **vor** dem Commit an ihren Zielort verschoben, damit keine Zeile je auf fehlende Bytes zeigt.
 5. In `mitAenderung` unter der Vereinssperre: Kontingent mit der echten Größe prüfen, Zeile anlegen, Änderung schreiben; nach dem Commit Meldung an `deps.bus`. Scheitert die Prüfung oder der Commit, sind die Bytes verwaist und fallen nach 2.7 weg.
 
-Der Dateiname kommt im Kopf `X-Dateiname` (Prozent-kodiertes UTF-8; Entscheidung 9). Bereinigt werden Pfadtrenner, Steuerzeichen und Länge; die Endung bleibt. Der Titel eines neuen Dokuments ist der bereinigte Name ohne Endung.
+Der Dateiname kommt im Kopf `X-Dateiname` (Prozent-kodiertes UTF-8; Entscheidung 9). Bereinigt werden Pfadtrenner, Steuerzeichen, unsichtbare Formatzeichen (`\p{Cf}`, etwa U+202E, das die Leserichtung umdreht) und Länge. Der Titel eines neuen Dokuments ist der bereinigte Name ohne Endung.
+
+**Die Endung passt zum erkannten Typ** (Plan zu Etappe 2, Entscheidung 9; Rückstand aus Etappe 1), bei Dateien im Modul wie bei Dokumenten: `x.pdf` mit PNG-Inhalt wird `x.png`, `Packliste` ohne Endung wird `Packliste.pdf`. Verworfen: die Endung des Clients behalten — dann öffnete ein Gerät die Datei mit dem falschen Programm, obwohl der Server den Typ kennt.
 
 **Hochladen aus dem Browser** geht über `XMLHttpRequest` und nicht über `fetch`, **nur** wegen des Fortschrittsbalkens: `fetch` meldet den Fortschritt des Sendens nicht. Der Rest der Oberfläche bleibt bei `HttpClient`. Die Seite lädt die Dateien einzeln nacheinander hoch, über alle Kategorien hinweg.
 
@@ -119,11 +121,24 @@ Mit `sharp`, aus der Temp-Datei, nicht aus einem Puffer:
 
 - Eingabe höchstens 50 Megapixel (`limitInputPixels`), sonst 413 `GROESSE`.
 - EXIF-Ausrichtung anwenden (`rotate()`), dann verkleinern auf **2560 px lange Seite** (nie vergrößern), JPEG Qualität 82; **Vorschaubild 480 px** lange Seite, JPEG Qualität 75. Transparenz (PNG, WebP) wird auf Weiß gelegt.
+- **Das Vorschaubild entsteht aus der fertigen 2560er-Fassung, nicht aus dem Original** (Plan zu Etappe 2, Entscheidung 3). Ein 48-MP-Bild wird so nur einmal dekodiert. Verworfen: beide Fassungen in einem Zug aus dem Original — das wäre der doppelte Speicherbedarf.
 - Neu kodiert ohne Metadaten: **EXIF und GPS fallen weg** (Rahmen 7.7).
 - **Das Original wird verworfen.** Verworfen: Original zusätzlich aufbewahren — 3–8 MB je Foto, die Sicherung wüchse entsprechend, und 2560 px reichen fürs Handy und für Abzüge bis etwa 20 × 30 cm.
-- **Immer nur eine Verarbeitung gleichzeitig** je Prozess (`sharp.concurrency(1)`, Cache aus, eigene Warteschlange). Bis zu 8 Fotos warten; darüber 503 `BESCHAEFTIGT`, der Client wiederholt nach kurzer Pause.
+- **Immer nur eine Verarbeitung gleichzeitig** je Prozess (`sharp.concurrency(1)`, Cache aus, eigene Warteschlange). Bis zu 8 Fotos warten; darüber **503 `BESCHAEFTIGT` mit `Retry-After: 2`** (Plan zu Etappe 2, Entscheidung 16). Der Client wiederholt bis zu dreimal von selbst und zeigt erst dann „Nochmal“: Voll ist die Schlange meist nur kurz, wenn mehrere zugleich hochladen, und ein Tippen je Foto wäre dafür zu viel.
+- **`foto.ts` importiert nur `sharp` und `node:*` und nutzt nur löschbare TypeScript-Syntax** (keine `enum`, keine Parameter-Properties; Plan zu Etappe 2, Entscheidung 2). Nur so läuft genau diese Datei im gebauten Image ohne Bau (Abnahme unten): Node 22 entfernt die Typen beim Laden. Die Pixelprüfung steht deshalb dort noch einmal, statt aus `verein/logo.ts` zu kommen.
 
 **Abnahme von Etappe 2:** Ein 48-Megapixel-JPEG und ein 20-MB-PNG werden im gebauten Image unter `mem_limit: 256m` verarbeitet, ohne dass der Kernel die App beendet; der Spitzenverbrauch steht im Bericht. Reicht der Speicher nicht, wird das Limit angehoben, nicht die Fotogrenze gesenkt.
+
+**Die Abnahme ist ein dauerhaftes Tor im Rauchtest** (`tools/deploy.sh`, Tor 4; Plan zu Etappe 2, Entscheidung 1), keine einmalige Messung:
+
+- Der Rauchtest-Container läuft mit derselben Speichergrenze wie `jufi` in `deploy/jufi-services.yml` (`--memory` und `--memory-swap` gleich, also ohne Swap wie auf dem Server). Fehlt dort `mem_limit`, bricht der Rauchtest ab.
+- `tools/erzeuge-testbilder.mjs` erzeugt die beiden Bilder auf dem Entwicklungsrechner. Im laufenden Container verarbeitet `tools/fotoprobe.mjs` sie mit genau der Datei `foto.ts` der App. Danach liest das Tor `memory.peak` der cgroup und gibt „Fotoprobe: 48 MP und 20-MB-PNG verarbeitet, Spitze <MiB> von 256m“ aus; die App muss danach weiter auf `/healthz` antworten.
+- Gemessen werden App im Leerlauf und Probe zusammen. Das liegt über dem Betrieb, wo nur ein Node-Prozess läuft, und ist damit die vorsichtige Seite.
+- Exit 137 oder ein beendeter App-Container brechen ab: „Speicher reicht nicht; mem_limit anheben“. Dann legt man dem Eigentümer die gemessenen Werte für einen neuen `mem_limit` vor.
+- Verworfen: die Messung über die echte Upload-Route. Sie bräuchte eine Mitgliedssitzung im Wegwerf-Verein, und Demo-Personen haben kein Passwort.
+- Verworfen: einmal von Hand messen. Die nächste `sharp`-Version kann es kippen, ohne dass es jemand merkt.
+
+Erste Messung (Probelauf vom 22.10.2026, `sharp` 0.35): „Fotoprobe: 48 MP und 20-MB-PNG verarbeitet, Spitze 170 MiB von 256m“, die App allein im Leerlauf rund 79 MiB. Das JPEG dekodiert `sharp` beim Verkleinern gleich in geringerer Auflösung, das PNG liest es zeilenweise (`sequentialRead`); daher bleibt die Spitze weit unter dem, was ein ganz entpacktes 48-MP-Bild (rund 144 MB) allein bräuchte.
 
 ### 2.5 Ausliefern
 
@@ -134,6 +149,7 @@ Köpfe:
 - `Content-Type` aus `Datei.typ`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'` auf der Datei.
 - Fotos und PDF `inline`, alle anderen `attachment`; Dateiname über `filename*=UTF-8''…`. Mit `?herunterladen=1` immer `attachment` („Speichern“ am Rechner).
 - `Cache-Control: private, max-age=31536000, immutable`: Eine ID ändert nie ihren Inhalt (Ersetzen erzeugt eine neue Datei, 3.1).
+- **`Content-Length` kommt aus dem Speicher, nicht aus `Datei.groesse`** (Plan zu Etappe 2, Entscheidung 4): Bei Fotos zählt `groesse` beide Fassungen (2.1), ausgeliefert wird aber nur eine. `DateiSpeicher.lies` liefert dafür `{ strom, bytes }`.
 
 Die CSP der App bekommt `img-src 'self' blob:`, damit ausgewählte Fotos vor dem Hochladen als Vorschau erscheinen. **Das kommt mit Etappe 2** (1.4): Ohne Foto-Modul gibt es keine Vorschau, die es brauchte.
 
@@ -167,7 +183,7 @@ Der Abstand von 24 Stunden sorgt dafür, dass zwischen Datenbank-Dump und Sicher
 
 `DokumentKategorie (id, vereinId, name, position)`, Name 1–40 Zeichen, je Verein eindeutig. Neue Vereine (und per Migration die bestehenden) bekommen „Ordnungen“, „Merkblätter“, „Formulare“.
 
-`Dokument (id, vereinId, kategorieId, titel, angelegtAm)` mit genau einer `Datei` (`art = DATEI`), Titel 1–120 Zeichen, vorbelegt mit dem Dateinamen ohne Endung. Titel und Kategorienamen mit Steuerzeichen lehnt der Server mit 400 ab.
+`Dokument (id, vereinId, kategorieId, titel, angelegtAm)` mit genau einer `Datei` (`art = DATEI`), Titel 1–120 Zeichen, vorbelegt mit dem Dateinamen ohne Endung. Titel und Kategorienamen mit Steuerzeichen oder unsichtbaren Formatzeichen (`\p{Cf}`, Plan zu Etappe 2, Entscheidung 9) lehnt der Server mit 400 ab.
 
 **Dokumente stehen alphabetisch nach Titel** (`localeCompare` mit `'de'`; Plan, Entscheidung 4), nicht in Handreihenfolge: Das Dokument hat deshalb keine `position`. Verworfen: Handreihenfolge — sie bräuchte eine Sortier-Oberfläche je Kategorie, und alphabetisch findet man schneller. Kategorien behalten ihre Handreihenfolge.
 
@@ -184,30 +200,41 @@ Untere Leiste: **Start · Threads · Termine · Medien · Mehr**. „Medien“ h
 - **Fotos & Dateien**: je sichtbarem, veröffentlichtem Thread mit mindestens einem Foto oder einer Datei ein Block, sortiert nach letzter Aktivität; ein Block zeigt bis zu 6 Vorschaubilder, die Zahl aller Fotos, die Dateien (höchstens 10, dann „und n weitere“) und „Zum Thread“. Archivierte Threads erscheinen mit. Keine eigenen Daten (Rahmen 6.5); `GET /medien` rechnet aus den Modulen.
 - **Dokumente**: Kategorien in ihrer Reihenfolge, darin die Dokumente mit Titel, Typ und Größe; Antippen öffnet (PDF) oder lädt herunter.
 
+**Der Reiter steht im Query-Parameter `reiter`** (`?reiter=dokumente`; Plan zu Etappe 2, Entscheidung 13), damit „Zurück“ aus einem Dokument oder Thread in den Reiter führt, aus dem man kam. Vorgabe ist „Fotos & Dateien“. Ohne Blöcke steht dort „Noch keine Fotos oder Dateien.“
+
 ---
 
 ## 4. Module Dateien und Fotos
 
 ### 4.1 Datei-Modul
 
-`DateienModul (id)` ohne eigene Felder; die Dateien hängen über `Datei.modulId` daran, sortiert nach `hochgeladenAm`. Höchstens 20 je Modul.
+`DateienModul (id)` ohne eigene Felder; die Dateien hängen über `Datei.modulId` daran, sortiert nach `hochgeladenAm`. Höchstens 20 je Modul; die einundzwanzigste ergibt 409 `VOLL` (9.3). Ohne Dateien steht „Noch keine Dateien.“
 
-Hochladen, Umbenennen und Löschen: wer den Thread bearbeiten darf (TP3 3.5). Leser sehen Name, Typ und Größe.
+Hochladen, Umbenennen und Löschen: wer den Thread bearbeiten darf (TP3 3.5). Leser sehen Name, Typ und Größe. Umbenennen und einzelnes Löschen gibt es auf der Thread-Seite, nicht im Editor (4.3).
+
+**Die Thread-Suche findet auch Dateinamen** in Datei-Modulen (Plan zu Etappe 2, Entscheidung 14), wie sie die Texte der übrigen Module findet. Wer „Packliste“ sucht, meint den Thread, in dem sie liegt.
 
 ### 4.2 Foto-Modul
 
-`FotosModul (id, hochladen)` mit `hochladen` `JUGENDLEITER` (Vorgabe) oder `ALLE`. Höchstens 500 Fotos je Modul.
+`FotosModul (id, hochladen)` mit `hochladen` `JUGENDLEITER` (Vorgabe) oder `ALLE`. Höchstens 500 Fotos je Modul; darüber 409 `VOLL` (9.3). Ohne Fotos steht „Noch keine Fotos.“
+
+**Fotos haben keinen Namen** (`Datei.name` leer, 2.1). Beim Speichern heißen sie `foto-<erste 8 Zeichen der ID>.jpg` (Plan zu Etappe 2, Entscheidung 12), also nie zwei gespeicherte Fotos gleich.
 
 - **Hochladen**: wer den Thread bearbeiten darf; bei `ALLE` außerdem jeder Leser, solange der Thread nicht im Archiv ist (wie Schreiben im Verlauf, TP3 3.5). Die Vorgabe „Nur Jugendleiter“ ist die vorsichtige; wer Fotos von allen will, stellt es bewusst um. Verworfen: feste Regel für alle Foto-Module (alle Leser, nur Erwachsene oder nur Leitung) — je nach Anlass passt etwas anderes.
 - **Löschen**: eigene Fotos immer, alle Fotos mit Bearbeitungsrecht.
 - **Ansicht**: Raster mit drei Spalten aus Vorschaubildern; Großansicht mit Wischen, Name des Hochladenden (TP3 3.10), „Speichern“ (am Handy Web Share mit der Datei, sonst Download) und „Löschen“, wo erlaubt.
 - **Mehrfachauswahl**: Jedes Foto wird einzeln hochgeladen, mit eigenem Fortschritt und eigener Wiederholung.
+- **Fehlende Rechte ergeben 404** beim Hochladen, Umbenennen und Löschen (Plan zu Etappe 2, Entscheidung 5; Rahmen 8.3), auch für Leser eines archivierten Threads mit „Alle Leser laden hoch“. Der Client zeigt den Knopf dort ohnehin nicht. Ein volles Modul ist dagegen kein Rechtefall und ergibt 409 `VOLL`.
 
 ### 4.3 Hochladen ist kein Teil des Entwurfs
 
 Fotos und Dateien wirken sofort, auch in einem Thread im Entwurf. Im Editor erscheint der Upload erst, wenn das Modul gespeichert ist („Erst speichern, dann hochladen“). Verworfen: Uploads als Teil des Entwurfs — der Editor ersetzt den Thread als Ganzes (TP3 4.2), Bytes passen nicht in diesen Weg.
 
+**Im Editor wird nur hochgeladen** (Plan zu Etappe 2, Entscheidung 10). Ein gespeichertes Datei- oder Foto-Modul zeigt dort die Zahl der Dateien bzw. Fotos und einen Upload; ein ungespeichertes zeigt „Erst speichern, dann hochladen“. Umbenennen und einzelnes Löschen gibt es auf der Thread-Seite. Verworfen: die volle Liste im Editor — sie stünde doppelt und bräuchte die Ansicht samt Rechten im Bearbeitungsweg.
+
 Ein Modul oder Thread mit Fotos oder Dateien lässt sich löschen; die Bestätigung nennt die Zahl („löscht 23 Fotos von 5 Personen“). Verworfen: Sperre wie bei Antworten (TP3 3.6) — die Leitung darf ohnehin jedes Foto einzeln löschen, eine Sperre brächte nur Klickarbeit.
+
+**Ein Modul mit Fotos oder Dateien zu entfernen fragt im Editor nach**, mit Zahlen: „Beim Speichern löscht das 23 Fotos von 5 Personen.“ (Plan zu Etappe 2, Entscheidung 11). Ein Modul ohne Medien wird weiter ohne Rückfrage entfernt; erst das Speichern löscht.
 
 Hochladen und Löschen schreiben eine Änderung der Art `MODUL` (Live, „Neu“), aber **keinen Systemeintrag** im Verlauf; nach einem Zeltlager stünde er sonst voll davon.
 
@@ -215,7 +242,9 @@ Hochladen und Löschen schreiben eine Änderung der Art `MODUL` (Live, „Neu“
 
 Zweite Art `FOTOS` im vorhandenen Modell `Einwilligung` (TP2: Zeitpunkt, `erteiltVon`, Widerruf, `textVersion`). Ohne Eintrag gilt **keine Einwilligung**.
 
-- **Pflege** unter „Meine Jungfischer“ durch alle, die nach `darfEinwilligen` einwilligen dürfen; volljährige Jungfischer pflegen sie selbst im Profil. Die Verwaltung zeigt sie bei der Person (Rahmen 6.6).
+- **Pflege** unter „Meine Jungfischer“ durch alle, die nach `darfEinwilligen` einwilligen dürfen; volljährige Jungfischer pflegen sie selbst im Profil, über die eigene Route `POST /ich/einwilligung`. Die Verwaltung zeigt sie bei der Person (Rahmen 6.6).
+- **Volljährige willigen nur selbst ein** (Plan zu Etappe 2, Entscheidung 6). Die Foto-Einwilligung eines volljährigen Jungfischers gilt nur, wenn er sie selbst erteilt hat (`erteiltVon = jungfischerId`). Die Einwilligung der Eltern erlischt mit dem 18. Geburtstag; das folgt aus `darfEinwilligen` (TP2 Entscheidung 6) und gilt für die DSGVO-Einwilligung schon heute. Bis er selbst einwilligt, steht er im Hinweis. Gerechnet wird bei jeder Abfrage (`fotoEinwilligungGilt`), nicht gespeichert. Verworfen: die Elterneinwilligung über 18 hinaus gelten lassen — ein Erwachsener entscheidet über Fotos von sich selbst.
+- **Eigener Wortlaut** (Plan zu Etappe 2, Entscheidung 8): `FOTO_EINWILLIGUNG_TEXT` für Eltern und `FOTO_EINWILLIGUNG_TEXT_SELBST` in der Ich-Form für Volljährige, Version `'1'`, als Platzhalter in `einwilligung.ts` neben dem DSGVO-Text; `tools/pruefe-texte.sh` findet sie dort. Die Foto-Einwilligung öffnet keinen Zugang, und der Widerruf der einen Art zieht die andere nicht mit.
 - **Hinweis im Foto-Modul** für alle, die dort hochladen dürfen: „Von Tim S. und Mats K. dürfen keine Fotos gezeigt werden“. Gemeint sind die Jungfischer der Zielgruppe ohne gültige Foto-Einwilligung, bei einer Teilnahme-Umfrage nur die mit „Dabei“ (TP3 3.12); Namen nach TP3 3.10. Ohne solche Kinder entfällt der Hinweis.
 - Kein Filter, keine Sperre (Rahmen 6.6). Der Hinweis zeigt Hochladenden außerhalb der Leitung, welche Kinder keine Einwilligung haben; das ist der Zweck und so entschieden.
 
@@ -344,8 +373,11 @@ Alle unter `/<slug>/api/v1`, mit `brauchtMitglied` und je einem Eintrag im Manda
 | `PUT /fahrten/:modulId/:richtung/:kindId`, `DELETE` ebenso   | Kind einsetzen (`{ autoId \| null, clientId }`), herausnehmen       |
 | `PUT /kosten/:modulId/:kindId/meldung`                       | Familie: `{ gemeldet: boolean, clientId }`                          |
 | `PUT /kosten/:modulId/:kindId`                               | Leitung: `{ status?, betragCent? \| null }`                         |
-| vorhandene Einwilligungs-Route der Jungfischer               | nimmt die Art (`DSGVO_ART8`, `FOTOS`)                               |
+| vorhandene Einwilligungs-Route der Jungfischer               | nimmt `art` optional (`DSGVO_ART8` Vorgabe, `FOTOS`), 4.4           |
+| `POST /ich/einwilligung`                                     | Foto-Einwilligung eines Volljährigen für sich selbst (4.4)          |
 | Plattform-Admin                                              | Verbrauch je Verein in der Vereinsliste, Speichergrenze ändern      |
+
+**`art` ist optional, Vorgabe `DSGVO_ART8`** (Plan zu Etappe 2, Entscheidung 7): So bleiben Client und Tests der DSGVO-Einwilligung unverändert.
 
 Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, Kostenbetrag und Bankdaten) laufen weiter über `POST /threads` und `PUT /threads/:id` (TP3 4.1); `ModulTyp` bekommt `HELFER`, `FAHRT`, `KOSTEN`, `DATEIEN`, `FOTOS`.
 
@@ -357,7 +389,9 @@ Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, K
 
 ### 9.3 Fehler
 
-Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Feld `code`**: `{ fehler: '<Text>', code: 'GROESSE' | 'KONTINGENT' | 'TYP' | 'HEIC' }` (Plan, Entscheidung 2). Die API antwortet sonst nur mit `{ fehler }`; verworfen: Codes statt Text — der Client zeigt den Text überall direkt an, und Tests und Skripte prüfen den Code. Zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` (Warteschlange voll); 409 `VOLL` (Helfer-Position, Auto). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
+Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Feld `code`**: `{ fehler: '<Text>', code: 'GROESSE' | 'KONTINGENT' | 'TYP' | 'HEIC' | 'BESCHAEFTIGT' | 'VOLL' }` (Plan zu Etappe 1, Entscheidung 2; `BESCHAEFTIGT` und `VOLL` mit Etappe 2). Die API antwortet sonst nur mit `{ fehler }`; verworfen: Codes statt Text — der Client zeigt den Text überall direkt an, und Tests und Skripte prüfen den Code. Zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` mit `Retry-After: 2` (Warteschlange voll, 2.4); 409 `VOLL` (Datei-Modul mit 20 Dateien, Foto-Modul mit 500 Fotos, später Helfer-Position und Auto). Fehlende Rechte beim Hochladen, Umbenennen und Löschen ergeben 404, nicht 403 (4.2; Plan zu Etappe 2, Entscheidung 5). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
+
+`GROESSE` und `TYP` haben je Art einen eigenen Text: „Das Foto ist zu groß (höchstens 20 MB)“ und „Die Datei ist zu groß (höchstens 25 MB)“, bei zu vielen Pixeln „Das Foto hat zu viele Pixel (höchstens 50 Megapixel)“; für Fotos „Diese Bildart geht nicht. Erlaubt sind JPEG, PNG und WebP.“ `VOLL` heißt „Hier passen höchstens 20 Dateien hinein“ bzw. „Hier passen höchstens 500 Fotos hinein“, `BESCHAEFTIGT` „Gerade werden viele Fotos verarbeitet. Bitte gleich noch einmal versuchen.“
 
 ---
 
@@ -425,6 +459,8 @@ Das Zeltlager-Szenario (1.1) mit erzeugten Testbildern; dazu die Leiste mit fün
 ### 13.4 Demo
 
 `pnpm run demo` baut das Zeltlager mit allen Modulen auf: erzeugte Fotos, zwei Dateien, Helfer-Einträge, zwei Autos, Kostenposten in allen drei Zuständen und eine Befreiung; Tim ohne Foto-Einwilligung; Dokumente in den drei Kategorien.
+
+**Demo-Fotos kommen mit Etappe 6** (Plan zu Etappe 2, Entscheidung 15). Für die lokale Abnahme von Etappe 2 erzeugt `node tools/erzeuge-testbilder.mjs <verzeichnis> --bunt <n>` bunte Testbilder aus Kreisen und Rechtecken (1600 × 1200, mit Nummer); dasselbe Skript erzeugt die beiden Bilder der Fotoprobe (2.4).
 
 ---
 
