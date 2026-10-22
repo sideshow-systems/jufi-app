@@ -1,60 +1,24 @@
-import { randomUUID } from 'node:crypto';
-import { rm } from 'node:fs/promises';
-import { sperreVereinszeile, type VereinDb, type VereinTx } from '@jufi/db';
+import { sperreVereinszeile, type VereinTx } from '@jufi/db';
 import {
 	bereinigeDateiname,
-	erkenneTyp,
-	FEHLER_TEXT,
-	GRENZE_BYTES,
 	hatRecht,
 	istJugendleiter,
-	kontingentReicht,
-	MB,
 	ohneEndung,
 	pruefeDokumentTitel,
 	pruefeKategorieName,
 	sortiereDokumente,
-	speicherText,
 	type DokumentAnsicht,
 	type DokumenteAntwort,
 	type SpeicherAntwort,
 } from '@jufi/domain';
-import type { RequestHandler, Response, Router } from 'express';
+import type { RequestHandler, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
 import { brauchtMitglied, mitgliedKontext } from '../mitglieder/sitzung.js';
 import { statt404 } from '../mitglieder/verwaltung.js';
 import { vereinsKontext } from '../verein.js';
-import { nimmUpload } from './hochladen.js';
+import { Abbruch, antworteBeiAbbruch, nimmDatei, verbrauchBytes, type NeueDatei } from './annehmen.js';
 import { loescheDateien } from './loeschen.js';
-import { dateiSchluessel } from './speicher.js';
-
-/**
- * Was die Dateien des Vereins zusammen wiegen. Eine Summe ueber Datei.groesse statt eines
- * mitgefuehrten Zaehlers am Verein: Ein Zaehler muesste mit jedem Anlegen, Ersetzen und
- * Loeschen mitwandern und liefe bei einem vergessenen Pfad still auseinander.
- *
- * _sum bei einem Int liefert Prisma als number; es ueberlaeuft nicht bei 2^31 (der Test mit 100
- * Dateien zu je 25 MB sichert das). Verworfen: $queryRaw -- vereinDb sperrt Rohabfragen, weil
- * sie den eingesetzten Verein umgingen.
- */
-export async function verbrauchBytes(db: VereinDb | VereinTx): Promise<number> {
-	const summe = await db.datei.aggregate({ _sum: { groesse: true } });
-	return summe._sum.groesse ?? 0;
-}
-
-/**
- * Ende einer Transaktion mit Status und Antwort. In der Transaktion geworfen, damit Prisma
- * zuruecknimmt, was bis dahin geschrieben wurde; ein Rueckgabewert liesse es stehen.
- */
-class Abbruch extends Error {
-	constructor(
-		readonly status: number,
-		readonly antwort: object,
-	) {
-		super('Abgebrochen');
-	}
-}
 
 /** Steht ein Text so in der Datenbank oder wuerde sie ihn ablehnen (0x00) bzw. verfaelschen (halbe Surrogate). */
 const UNZULAESSIG = /[\p{Cc}\p{Surrogate}]/u;
@@ -79,21 +43,6 @@ const brauchtDokumenteVorUpload: RequestHandler = (_req, res, next) => {
 	next();
 };
 
-/**
- * Antwort, bevor der Koerper eines Uploads gelesen ist. Connection: close, weil ein
- * ungelesener Koerper die Verbindung fuer die naechste Anfrage verdirbt (hochladen.ts).
- */
-function fruehAntwort(res: Response, status: number, antwort: object): void {
-	res.set('Connection', 'close').status(status).json(antwort);
-}
-
-function kontingentFehler(belegtBytes: number, grenzeMb: number): { fehler: string; code: 'KONTINGENT' } {
-	return {
-		fehler: FEHLER_TEXT.KONTINGENT(speicherText(belegtBytes), speicherText(grenzeMb * MB)),
-		code: 'KONTINGENT',
-	};
-}
-
 interface DateiZeile {
 	id: string;
 	typ: string;
@@ -115,6 +64,24 @@ function ansicht(dokument: { id: string; titel: string }, datei: DateiZeile): Do
 }
 
 const DATEI_FELDER = { id: true, typ: true, groesse: true, name: true, hochgeladenAm: true } as const;
+
+/** Die Zeile zu einer angenommenen Datei eines Dokuments; die Bytes liegen schon (nimmDatei). */
+function legeDateiAn(tx: VereinTx, e: NeueDatei, dokumentId: string, vonId: string, jetzt: Date): Promise<DateiZeile> {
+	return tx.datei.create({
+		data: {
+			id: e.id,
+			art: 'DATEI',
+			dokumentId,
+			name: e.name,
+			typ: e.typ,
+			groesse: e.groesse,
+			sha256: e.sha256,
+			vonId,
+			hochgeladenAm: jetzt,
+		},
+		select: DATEI_FELDER,
+	});
+}
 
 /**
  * Ein Text-Feld des Bodys, geprueft auf das, was die Regeln in libs/domain nicht kennen: Etwas
@@ -142,117 +109,12 @@ function koerper(body: unknown): Record<string, unknown> | null {
 	return typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
 }
 
-/** Ein Upload nach den Schritten 2 bis 7 der Spec; Schritt 8 (die Datenbank) macht der Aufrufer. */
-interface Hochgeladen {
-	dateiId: string;
-	name: string;
-	typ: string;
-	bytes: number;
-	sha256: string;
-}
-
 /**
  * Keine dieser Routen meldet nach dem Commit an deps.bus: Dokumente haben kein Live (TP4-Spec 3.1)
  * und schreiben keine Aenderung; die Liste laedt beim Oeffnen der Seite neu. Verworfen: ein Signal
  * "dokumente" -- ein Abonnent, den keine Oberflaeche braucht, und ein Zaehler mehr am Verein.
  */
 export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
-	/**
-	 * Der gemeinsame Teil von POST /dokumente und PUT /dokumente/:id/datei. `freiBytes` ist, was
-	 * das Ersetzen an alten Bytes freigibt (0 beim Anlegen): Ein Verein an der Grenze soll eine Datei
-	 * durch eine gleich grosse tauschen koennen. Die Schreibfunktion laeuft unter der Vereinssperre.
-	 *
-	 * Fuer die Pruefung vor dem Koerper steht die Schaetzung aus Content-Length: Sie erspart das
-	 * Hochladen von 25 MB in einen vollen Verein. Verbindlich ist erst die zweite Pruefung in der
-	 * Transaktion, weil zwei Uploads, die einzeln passen, zusammen nicht passen muessen.
-	 */
-	async function nimmDatei(
-		req: Parameters<typeof nimmUpload>[0],
-		res: Response,
-		erfolgsStatus: 200 | 201,
-		freiBytes: number,
-		schreibe: (tx: VereinTx, e: Hochgeladen & { jetzt: Date }) => Promise<DokumentAnsicht>,
-	): Promise<void> {
-		const { verein, db } = vereinsKontext(res);
-		const { person } = mitgliedKontext(res);
-
-		const wartezeit = deps.uploadFenster.pruefe(person.id);
-		if (wartezeit > 0) {
-			res.set('Retry-After', String(Math.ceil(wartezeit / 1000)));
-			return fruehAntwort(res, 429, { fehler: 'Zu viele Uploads. Bitte warte einen Moment.' });
-		}
-
-		const name = bereinigeDateiname(req.header('x-dateiname'));
-		if (name === null) return fruehAntwort(res, 400, { fehler: 'Dateiname fehlt' });
-
-		const laenge = req.header('content-length');
-		const geschaetzt = laenge !== undefined && /^\d+$/u.test(laenge) ? Number(laenge) : 0;
-		const belegt = await verbrauchBytes(db);
-		if (
-			!kontingentReicht({
-				verbrauchBytes: belegt - freiBytes,
-				grenzeMb: verein.speicherGrenzeMb,
-				zusatzBytes: geschaetzt,
-			})
-		) {
-			return fruehAntwort(res, 413, kontingentFehler(belegt, verein.speicherGrenzeMb));
-		}
-
-		const upload = await nimmUpload(req, { speicher: deps.dateiSpeicher, maxBytes: GRENZE_BYTES.DATEI });
-		if (!upload.ok) {
-			return upload.status === 411
-				? fruehAntwort(res, 411, { fehler: 'Die Größe der Datei fehlt' })
-				: fruehAntwort(res, 413, { fehler: FEHLER_TEXT.GROESSE.DATEI, code: 'GROESSE' });
-		}
-
-		const typ = erkenneTyp(upload.kopf, name, 'DATEI');
-		if (!typ.ok) {
-			await rm(upload.tempPfad, { force: true });
-			return void res
-				.status(415)
-				.json({ fehler: typ.grund === 'HEIC' ? FEHLER_TEXT.HEIC : FEHLER_TEXT.TYP.DATEI, code: typ.grund });
-		}
-
-		// Die ID steht vor der Zeile fest, weil die Bytes vorher abgelegt werden: Eine Zeile ohne
-		// Bytes waere ein Dokument, das sich nicht oeffnen laesst; Bytes ohne Zeile raeumt der
-		// Aufraeumer als Waise weg. Verworfen: erst die Zeile, dann die Bytes -- ein Abbruch dazwischen
-		// hinterliesse genau das Dokument, das sich nicht oeffnen laesst.
-		const dateiId = randomUUID();
-		try {
-			await deps.dateiSpeicher.uebernimm(upload.tempPfad, dateiSchluessel(verein.id, dateiId));
-		} catch (fehler) {
-			await rm(upload.tempPfad, { force: true });
-			throw fehler;
-		}
-
-		const jetzt = deps.jetzt();
-		try {
-			const antwort = await db.$transaction(async (tx) => {
-				await sperreVereinszeile(tx, verein.id);
-				return schreibe(tx, { dateiId, name, typ: typ.typ, bytes: upload.bytes, sha256: upload.sha256, jetzt });
-			});
-			res.status(erfolgsStatus).json(antwort);
-		} catch (fehler) {
-			if (fehler instanceof Abbruch) return void res.status(fehler.status).json(fehler.antwort);
-			throw fehler;
-		}
-	}
-
-	/** Prueft das Kontingent unter der Sperre und wirft Abbruch(413), wenn die Datei nicht mehr passt. */
-	async function pruefeKontingent(tx: VereinTx, vereinId: string, bytes: number, freiBytes: number): Promise<void> {
-		// Die Grenze neu lesen: Der Plattform-Admin kann sie zwischen dem Laden des Vereins und hier geaendert haben.
-		const { speicherGrenzeMb } = await tx.verein.findUniqueOrThrow({
-			where: { id: vereinId },
-			select: { speicherGrenzeMb: true },
-		});
-		const belegt = await verbrauchBytes(tx);
-		if (!kontingentReicht({ verbrauchBytes: belegt - freiBytes, grenzeMb: speicherGrenzeMb, zusatzBytes: bytes })) {
-			// Die Bytes liegen schon im Speicher und bleiben dort als Waise fuer den Aufraeumer: sie
-			// hier zu loeschen waere ein Schreibzugriff auf die Platte mitten in der Sperre.
-			throw new Abbruch(413, kontingentFehler(belegt, speicherGrenzeMb));
-		}
-	}
-
 	router.get(
 		'/dokumente',
 		brauchtMitglied,
@@ -283,7 +145,7 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 		brauchtMitglied,
 		brauchtDokumenteVorUpload,
 		asynchron(async (req, res) => {
-			const { verein, db } = vereinsKontext(res);
+			const { db } = vereinsKontext(res);
 			const kategorieId = req.query['kategorie'];
 			const kategorie =
 				typeof kategorieId === 'string'
@@ -293,36 +155,28 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 				res.set('Connection', 'close');
 				return statt404(res);
 			}
-			await nimmDatei(req, res, 201, 0, async (tx, e) => {
-				// Die Kategorie kann zwischen dem Pruefen oben und der Sperre geloescht worden sein.
-				if (!(await tx.dokumentKategorie.findFirst({ where: { id: kategorie.id }, select: { id: true } }))) {
-					throw new Abbruch(404, NICHT_GEFUNDEN);
-				}
-				await pruefeKontingent(tx, verein.id, e.bytes, 0);
-				// Der Titel ist der Name ohne Endung; faellt dabei etwas Unbrauchbares heraus (der Name
-				// "x .pdf" haette ein Leerzeichen am Ende, das der CHECK der Datenbank ablehnt), hilft der
-				// Standardtitel mehr als ein Fehler, den die Person nicht beheben kann.
-				const titel = pruefeDokumentTitel(ohneEndung(e.name));
-				const dokument = await tx.dokument.create({
-					data: { kategorieId: kategorie.id, titel: titel.ok ? titel.titel : 'Dokument', angelegtAm: e.jetzt },
-					select: { id: true, titel: true },
-				});
-				const datei = await tx.datei.create({
-					data: {
-						id: e.dateiId,
-						art: 'DATEI',
-						dokumentId: dokument.id,
-						name: e.name,
-						typ: e.typ,
-						groesse: e.bytes,
-						sha256: e.sha256,
-						vonId: mitgliedKontext(res).person.id,
-						hochgeladenAm: e.jetzt,
-					},
-					select: DATEI_FELDER,
-				});
-				return ansicht(dokument, datei);
+			const ergebnis = await nimmDatei(req, res, deps, {
+				art: 'DATEI',
+				name: bereinigeDateiname(req.header('x-dateiname')),
+				freiBytes: 0,
+				schreibe: async (tx, e) => {
+					// Die Kategorie kann zwischen dem Pruefen oben und der Sperre geloescht worden sein.
+					if (!(await tx.dokumentKategorie.findFirst({ where: { id: kategorie.id }, select: { id: true } }))) {
+						throw new Abbruch(404, NICHT_GEFUNDEN);
+					}
+					// Der Titel ist der Name ohne Endung; faellt dabei etwas Unbrauchbares heraus (der Name
+					// "x .pdf" haette ein Leerzeichen am Ende, das der CHECK der Datenbank ablehnt), hilft der
+					// Standardtitel mehr als ein Fehler, den die Person nicht beheben kann.
+					const titel = pruefeDokumentTitel(ohneEndung(e.name));
+					const jetzt = deps.jetzt();
+					const dokument = await tx.dokument.create({
+						data: { kategorieId: kategorie.id, titel: titel.ok ? titel.titel : 'Dokument', angelegtAm: jetzt },
+						select: { id: true, titel: true },
+					});
+					return ansicht(dokument, await legeDateiAn(tx, e, dokument.id, mitgliedKontext(res).person.id, jetzt));
+				},
 			});
+			if (ergebnis.ok) res.status(201).json(ergebnis.wert);
 		}),
 	);
 
@@ -340,38 +194,30 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 				res.set('Connection', 'close');
 				return statt404(res);
 			}
+			// Was die alte Datei freigibt, so wie es vor dem Koerper aussah; nimmDatei rechnet das
+			// Kontingent unter der Sperre damit. Ersetzen zwei Anfragen dasselbe Dokument gleichzeitig,
+			// gibt die zweite in Wahrheit die Datei der ersten frei; die Abweichung ist der Groessenunterschied
+			// zweier Fassungen eines Dokuments. Verworfen: die Freigabe als Funktion unter der Sperre
+			// nachzurechnen -- eine zweite Form von freiBytes nur fuer dieses Rennen.
 			const frei = dokument.dateien.reduce((summe, d) => summe + d.groesse, 0);
-			await nimmDatei(req, res, 200, frei, async (tx, e) => {
-				const aktuell = await tx.dokument.findFirst({
-					where: { id: dokument.id },
-					select: { id: true, titel: true, dateien: { select: { id: true, art: true, groesse: true } } },
-				});
-				if (!aktuell) throw new Abbruch(404, NICHT_GEFUNDEN);
-				await pruefeKontingent(
-					tx,
-					verein.id,
-					e.bytes,
-					aktuell.dateien.reduce((summe, d) => summe + d.groesse, 0),
-				);
-				// Erst die alte Datei: Der Index laesst nur eine Datei je Dokument zu. Die alte ID liefert
-				// danach 404, die neue Bytes; die alten Bytes liegen bis zum Aufraeumer noch da.
-				await loescheDateien(tx, verein.id, aktuell.dateien, e.jetzt);
-				const datei = await tx.datei.create({
-					data: {
-						id: e.dateiId,
-						art: 'DATEI',
-						dokumentId: aktuell.id,
-						name: e.name,
-						typ: e.typ,
-						groesse: e.bytes,
-						sha256: e.sha256,
-						vonId: mitgliedKontext(res).person.id,
-						hochgeladenAm: e.jetzt,
-					},
-					select: DATEI_FELDER,
-				});
-				return ansicht(aktuell, datei);
+			const ergebnis = await nimmDatei(req, res, deps, {
+				art: 'DATEI',
+				name: bereinigeDateiname(req.header('x-dateiname')),
+				freiBytes: frei,
+				schreibe: async (tx, e) => {
+					const aktuell = await tx.dokument.findFirst({
+						where: { id: dokument.id },
+						select: { id: true, titel: true, dateien: { select: { id: true, art: true } } },
+					});
+					if (!aktuell) throw new Abbruch(404, NICHT_GEFUNDEN);
+					const jetzt = deps.jetzt();
+					// Erst die alte Datei: Der Index laesst nur eine Datei je Dokument zu. Die alte ID liefert
+					// danach 404, die neue Bytes; die alten Bytes liegen bis zum Aufraeumer noch da.
+					await loescheDateien(tx, verein.id, aktuell.dateien, jetzt);
+					return ansicht(aktuell, await legeDateiAn(tx, e, aktuell.id, mitgliedKontext(res).person.id, jetzt));
+				},
 			});
+			if (ergebnis.ok) res.status(200).json(ergebnis.wert);
 		}),
 	);
 
@@ -425,8 +271,7 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 				});
 				res.json(antwort);
 			} catch (fehler) {
-				if (fehler instanceof Abbruch) return void res.status(fehler.status).json(fehler.antwort);
-				throw fehler;
+				if (!antworteBeiAbbruch(res, fehler)) throw fehler;
 			}
 		}),
 	);
@@ -479,8 +324,7 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 				});
 				res.status(201).json(kategorie);
 			} catch (fehler) {
-				if (fehler instanceof Abbruch) return void res.status(fehler.status).json(fehler.antwort);
-				throw fehler;
+				if (!antworteBeiAbbruch(res, fehler)) throw fehler;
 			}
 		}),
 	);
@@ -515,8 +359,7 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 				});
 				res.status(204).end();
 			} catch (fehler) {
-				if (fehler instanceof Abbruch) return void res.status(fehler.status).json(fehler.antwort);
-				throw fehler;
+				if (!antworteBeiAbbruch(res, fehler)) throw fehler;
 			}
 		}),
 	);
@@ -549,8 +392,7 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 				});
 				res.json(kategorie);
 			} catch (fehler) {
-				if (fehler instanceof Abbruch) return void res.status(fehler.status).json(fehler.antwort);
-				throw fehler;
+				if (!antworteBeiAbbruch(res, fehler)) throw fehler;
 			}
 		}),
 	);
@@ -577,8 +419,7 @@ export function dokumentRouten(router: Router, deps: VolleAppDeps): void {
 				});
 				res.status(204).end();
 			} catch (fehler) {
-				if (fehler instanceof Abbruch) return void res.status(fehler.status).json(fehler.antwort);
-				throw fehler;
+				if (!antworteBeiAbbruch(res, fehler)) throw fehler;
 			}
 		}),
 	);

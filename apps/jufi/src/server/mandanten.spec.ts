@@ -222,6 +222,63 @@ async function dokumenteMitFremderId(
 	expect(await fremdeDokumente(k)).toEqual(vorher);
 }
 
+/** Ein Thread in fremd mit je einem Datei- und Foto-Modul, darin eine Datei und ein Foto (Zeilen ohne Bytes). */
+async function fremdeMedien(k: Kontext) {
+	const { modulIds, dateiIds } = await legeThreadAn(k.prisma, k.fremd, new Date(), {
+		titel: 'Fremde Medien',
+		erstelltVonId: k.fremdePersonId,
+		module: [
+			{ typ: 'DATEIEN', dateien: [{ name: 'fremd.pdf' }] },
+			{ typ: 'FOTOS', hochladen: 'ALLE', fotos: [{}] },
+		],
+	});
+	return {
+		dateienModul: modulIds[0] as string,
+		fotosModul: modulIds[1] as string,
+		datei: dateiIds[0] as string,
+		foto: dateiIds[1] as string,
+	};
+}
+
+/** Alles, was eine Route der Datei- und Foto-Module in fremd veraendern koennte. */
+async function fremdeModulDateien(k: Kontext) {
+	const where = { vereinId: k.fremd.id };
+	return {
+		dateien: await k.prisma.datei.findMany({ where, orderBy: { id: 'asc' } }),
+		loeschliste: await k.prisma.dateiLoeschung.count({ where }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/**
+ * Eine Route der Datei- und Foto-Module mit der Id aus fremd: gesperrt 404, das Cookie aus eigen gilt
+ * in fremd nicht (401), in eigen ist die Id unbekannt (404), und in fremd ist danach nichts anders.
+ * Uploads gehen als Koerper mit X-Dateiname wie aus der Oberflaeche.
+ */
+async function modulDateiMitFremderId(
+	k: Kontext,
+	e: { methode: 'POST' | 'PUT' | 'DELETE'; pfad: string; body?: object },
+): Promise<void> {
+	const vorher = await fremdeModulDateien(k);
+	const sendeAn = (slug: string, cookie: string) =>
+		e.methode === 'POST'
+			? fetch(`${k.url}/${slug}/api/v1${e.pfad}`, {
+					method: 'POST',
+					headers: {
+						Origin: TEST_UMGEBUNG.basisUrl,
+						'Content-Type': 'application/octet-stream',
+						'X-Dateiname': 'mandant.pdf',
+						Cookie: cookie,
+					},
+					body: new Uint8Array(Buffer.from('%PDF-1.7\n mandant')),
+				})
+			: sende(k.url, `/${slug}/api/v1${e.pfad}`, { methode: e.methode, body: e.body, cookie });
+	expect((await sendeAn(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+	expect((await sendeAn(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+	expect((await sendeAn(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+	expect(await fremdeModulDateien(k)).toEqual(vorher);
+}
+
 /**
  * Jede Vereins-Route braucht hier einen Fall (Spec 9). Kommt eine Route
  * hinzu, scheitert der erste Test, bis der Fall eingetragen ist.
@@ -1130,6 +1187,40 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Gegenprobe: In fremd selbst kommt dieselbe Datei an.
 		const fremdesMitglied = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
 		expect((await hole(k.fremd.slug, fremdesMitglied.cookie)).status).toBe(200);
+	},
+	'POST /module/:modulId/dateien': async (k) => {
+		const { dateienModul } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'POST', pfad: `/module/${dateienModul}/dateien` });
+		// Gegenprobe: In ein eigenes Datei-Modul laedt dieselbe Person hoch, das 404 oben kommt also
+		// von der Vereinsgrenze und nicht von fehlenden Rechten.
+		const eigen = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'DATEIEN' }],
+		});
+		const r = await fetch(`${k.url}/${k.eigen.slug}/api/v1/module/${eigen.modulIds[0]}/dateien`, {
+			method: 'POST',
+			headers: {
+				Origin: TEST_UMGEBUNG.basisUrl,
+				'Content-Type': 'application/octet-stream',
+				'X-Dateiname': 'eigen.pdf',
+				Cookie: k.eigenerLeiter,
+			},
+			body: new Uint8Array(Buffer.from('%PDF-1.7\n eigen')),
+		});
+		expect(r.status).toBe(201);
+	},
+	'POST /module/:modulId/fotos': async (k) => {
+		const { fotosModul } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'POST', pfad: `/module/${fotosModul}/fotos` });
+	},
+	'PUT /dateien/:id': async (k) => {
+		const { datei } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'PUT', pfad: `/dateien/${datei}`, body: { name: 'Uebernommen' } });
+	},
+	'DELETE /dateien/:id': async (k) => {
+		const { datei, foto } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'DELETE', pfad: `/dateien/${datei}` });
+		await modulDateiMitFremderId(k, { methode: 'DELETE', pfad: `/dateien/${foto}` });
 	},
 	'GET /dokumente': async (k) => {
 		const fremd = await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');

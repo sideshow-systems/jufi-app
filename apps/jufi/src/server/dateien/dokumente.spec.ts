@@ -246,6 +246,8 @@ describe('Dokumente-API', () => {
 			const s = await szenario();
 			const d = await s.neu('x.pdf', PNG);
 			expect(d.typ).toBe('image/png');
+			// Plan-Entscheidung 9: Der Name folgt dem erkannten Typ, auch bei Dokumenten.
+			expect(d.name).toBe('x.png');
 		});
 
 		it('weist Text als x.pdf mit 415 TYP ab und hinterlaesst nichts', async () => {
