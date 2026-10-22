@@ -206,6 +206,20 @@ describe('jf-foto-grossansicht', () => {
 		expect(document.activeElement).toBe(zurueck);
 	});
 
+	it('gibt den Fokus bei genau zwei Fotos an den Gegenknopf, der eben noch gesperrt war', () => {
+		const f = zeige(0, FOTOS.slice(0, 2));
+		const zurueck = f.beschriftet('Vorheriges Foto') as HTMLButtonElement;
+		const vor = f.beschriftet('Nächstes Foto') as HTMLButtonElement;
+		expect(zurueck.disabled).toBe(true);
+		vor.focus();
+
+		vor.click();
+		f.an();
+
+		expect(vor.disabled).toBe(true);
+		expect(document.activeElement).toBe(zurueck);
+	});
+
 	it('ueberlaesst Tasten mit Alt, Strg oder Meta dem Browser', () => {
 		const f = zeige(1);
 

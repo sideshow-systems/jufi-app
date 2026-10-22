@@ -7,6 +7,7 @@ import {
 	effect,
 	ElementRef,
 	inject,
+	Injector,
 	input,
 	linkedSignal,
 	output,
@@ -202,6 +203,7 @@ export class FotoGrossansichtComponent {
 
 	private readonly api = inject(DateienApi);
 	private readonly router = inject(Router);
+	private readonly injector = inject(Injector);
 
 	protected readonly titelId = `foto-gross-titel-${naechsteId++}`;
 	protected readonly frage = signal(false);
@@ -316,10 +318,16 @@ export class FotoGrossansichtComponent {
 		const ziel = this.position() + schritt;
 		if (ziel < 0 || ziel >= this.fotos().length) return;
 		// Der Knopf, der den Fokus hat, wird mit diesem Schritt gesperrt, wenn das Ende erreicht ist.
+		// Den Gegenknopf erst nach dem Zeichnen fokussieren: Bei genau zwei Fotos ist er jetzt noch
+		// gesperrt, focus() bliebe wirkungslos und der Fokus fiele mit dem Sperren auf body.
+		// Verworfen: sofort fokussieren (galt nur ab drei Fotos) und disabled selbst am Element aufheben
+		// (griffe der Vorlage vor, die den Zustand aus position() ableitet).
 		const amEnde = ziel + schritt < 0 || ziel + schritt >= this.fotos().length;
 		const knopf = schritt === 1 ? this.vorKnopf() : this.zurueckKnopf();
 		const gegen = schritt === 1 ? this.zurueckKnopf() : this.vorKnopf();
-		if (amEnde && document.activeElement === knopf?.nativeElement) gegen?.nativeElement.focus();
+		if (amEnde && document.activeElement === knopf?.nativeElement) {
+			afterNextRender(() => gegen?.nativeElement.focus(), { injector: this.injector });
+		}
 		this.fehler.set(null);
 		this.position.set(ziel);
 	}
