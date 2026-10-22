@@ -33,7 +33,7 @@ describe('jf-hochladen-feld', () => {
 		fixture.detectChanges();
 		const el = fixture.nativeElement as HTMLElement;
 		const hochgeladen: unknown[] = [];
-		fixture.componentInstance.hochgeladen.subscribe((a) => hochgeladen.push(a));
+		fixture.componentInstance.hochgeladen.subscribe(() => hochgeladen.push(true));
 		return {
 			fixture,
 			el,
@@ -83,7 +83,7 @@ describe('jf-hochladen-feld', () => {
 		http.expectOne(ZIEL);
 	});
 
-	it('schickt die Datei an das Ziel, meldet hochgeladen mit der Antwort und raeumt die Zeile ab', () => {
+	it('schickt die Datei an das Ziel, meldet hochgeladen und raeumt die Zeile ab', () => {
 		const f = zeige();
 		f.waehle([datei('eins.pdf')]);
 
@@ -92,8 +92,20 @@ describe('jf-hochladen-feld', () => {
 		anfrage.flush({ id: 'd1' }, { status: 201, statusText: 'Created' });
 		f.fixture.detectChanges();
 
-		expect(f.hochgeladen).toEqual([{ id: 'd1' }]);
+		expect(f.hochgeladen).toHaveLength(1);
 		expect(f.el.querySelectorAll('li')).toHaveLength(0);
+	});
+
+	it('meldet hochgeladen fuer drei Dateien nur einmal, nach der letzten', () => {
+		const f = zeige();
+		f.waehle([datei('a.pdf'), datei('b.pdf'), datei('c.pdf')]);
+
+		http.expectOne(ZIEL).flush({}, { status: 201, statusText: 'Created' });
+		http.expectOne(ZIEL).flush({}, { status: 201, statusText: 'Created' });
+		expect(f.hochgeladen).toHaveLength(0);
+		http.expectOne(ZIEL).flush({}, { status: 201, statusText: 'Created' });
+
+		expect(f.hochgeladen).toHaveLength(1);
 	});
 
 	it('zeigt den Fehler mit Nochmal und Verwerfen', () => {

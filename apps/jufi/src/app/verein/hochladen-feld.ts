@@ -151,8 +151,8 @@ export class HochladenFeldComponent {
 	readonly ziel = input.required<string>();
 	readonly art = input.required<DateiArt>();
 	readonly beschriftung = input.required<string>();
-	/** Je angenommene Datei, mit der Antwort des Servers. */
-	readonly hochgeladen = output<unknown>();
+	/** Einmal je Stapel, wenn alles Gewaehlte durch ist und mindestens eine Datei angenommen wurde (siehe Hochladeschlange.nachStapel). */
+	readonly hochgeladen = output<void>();
 
 	private readonly api = inject(DateienApi);
 	private readonly router = inject(Router);
@@ -188,7 +188,7 @@ export class HochladenFeldComponent {
 			s = new Hochladeschlange({
 				http: this.api.hochlader(),
 				art: this.art(),
-				nachErfolg: (_h, antwort) => this.hochgeladen.emit(antwort),
+				nachStapel: () => this.hochgeladen.emit(),
 				beiNichtAngemeldet: () => void zurAnmeldung(this.router, this.slug()),
 			});
 			this.schlange.set(s);

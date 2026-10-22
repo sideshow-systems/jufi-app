@@ -215,12 +215,13 @@ type Bearbeitung = { art: 'kategorie' | 'dokument'; id: string; wert: string };
 												>
 													Umbenennen
 												</button>
-												<label class="knopf klein datei" [attr.aria-label]="'Datei von „' + d.titel + '“ ersetzen'">
+												<label class="knopf klein datei">
 													Ersetzen
 													<input
 														type="file"
 														class="unsichtbar"
 														[accept]="endungen"
+														[attr.aria-label]="'Datei von „' + d.titel + '“ ersetzen'"
 														(change)="waehleErsatz($event, k, d)"
 													/>
 												</label>
@@ -680,7 +681,8 @@ export class DokumenteVerwaltungComponent implements OnInit {
 			s = new Hochladeschlange({
 				http: this.api.hochlader(),
 				art: 'DATEI',
-				nachErfolg: () => void this.ladeAlles(),
+				// Einmal je Stapel: Zehn Dateien ergaeben sonst zehn Neuladungen von Liste und Speicherstand.
+				nachStapel: () => void this.ladeAlles(),
 				// Mehrere Anfragen koennen zugleich "nicht angemeldet" melden; zur Anmeldung geht es nur einmal.
 				beiNichtAngemeldet: () => {
 					if (this.abgelaufen) return;

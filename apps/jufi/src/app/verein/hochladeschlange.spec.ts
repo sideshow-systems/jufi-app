@@ -15,6 +15,7 @@ describe('Hochladeschlange', () => {
 	let client: HttpClient;
 	let http: HttpTestingController;
 	let erfolge: Array<{ h: Hochladung; antwort: unknown }>;
+	let staepel: number;
 	let erstellt: string[];
 	let freigegeben: string[];
 	let schlangen: Hochladeschlange[];
@@ -24,6 +25,7 @@ describe('Hochladeschlange', () => {
 		client = TestBed.inject(HttpClient);
 		http = TestBed.inject(HttpTestingController);
 		erfolge = [];
+		staepel = 0;
 		erstellt = [];
 		freigegeben = [];
 		schlangen = [];
@@ -47,6 +49,7 @@ describe('Hochladeschlange', () => {
 			http: client,
 			art,
 			nachErfolg: (h, antwort) => erfolge.push({ h, antwort }),
+			nachStapel: () => void staepel++,
 			...(beiNichtAngemeldet ? { beiNichtAngemeldet } : {}),
 		});
 		schlangen.push(s);
@@ -177,6 +180,18 @@ describe('Hochladeschlange', () => {
 
 			http.expectOne(URL_FOTOS).flush(belegt, sperre('5'));
 			vi.advanceTimersByTime(4999);
+			http.expectNone(URL_FOTOS);
+			vi.advanceTimersByTime(1);
+			http.expectOne(URL_FOTOS).flush({}, { status: 201, statusText: 'Created' });
+		});
+
+		it('wartet hoechstens 30 Sekunden, auch wenn Retry-After mehr verlangt', () => {
+			vi.useFakeTimers();
+			const s = neu('FOTO');
+			s.fuegeHinzu([datei('a.jpg', 10, 'image/jpeg')], URL_FOTOS);
+
+			http.expectOne(URL_FOTOS).flush(belegt, sperre('3600'));
+			vi.advanceTimersByTime(29_999);
 			http.expectNone(URL_FOTOS);
 			vi.advanceTimersByTime(1);
 			http.expectOne(URL_FOTOS).flush({}, { status: 201, statusText: 'Created' });
@@ -333,16 +348,80 @@ describe('Hochladeschlange', () => {
 	});
 
 	describe('abgelaufene Sitzung', () => {
-		it('ruft den Weg zur Anmeldung genau einmal, auch bei mehreren Dateien', () => {
+		const abgelaufen = { fehler: 'nicht angemeldet' };
+		const unauthorized = { status: 401, statusText: 'Unauthorized' };
+
+		it('ruft den Weg zur Anmeldung genau einmal und startet die wartenden Dateien nicht', () => {
 			const weg = vi.fn();
 			const s = neu('DATEI', weg);
-			s.fuegeHinzu([datei('a.pdf'), datei('b.pdf')], URL_A);
+			s.fuegeHinzu([datei('a.pdf'), datei('b.pdf'), datei('c.pdf')], URL_A);
 
-			http.expectOne(URL_A).flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
-			http.expectOne(URL_A).flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+			http.expectOne(URL_A).flush(abgelaufen, unauthorized);
 
 			expect(weg).toHaveBeenCalledTimes(1);
-			expect(s.reihe().map((h) => h.code)).toEqual(['NICHT_ANGEMELDET', 'NICHT_ANGEMELDET']);
+			http.expectNone(URL_A);
+			expect(zustaende(s)).toEqual(['fehler', 'wartet', 'wartet']);
+			expect(s.reihe()[0]?.code).toBe('NICHT_ANGEMELDET');
+		});
+
+		it('setzt die Reihe nach Nochmal fort', () => {
+			const s = neu('DATEI', vi.fn());
+			s.fuegeHinzu([datei('a.pdf'), datei('b.pdf')], URL_A);
+			http.expectOne(URL_A).flush(abgelaufen, unauthorized);
+
+			s.nochmal(s.reihe()[0]?.schluessel as number);
+			const wieder = http.expectOne(URL_A);
+			expect(wieder.request.headers.get('X-Dateiname')).toBe('a.pdf');
+			wieder.flush({}, { status: 201, statusText: 'Created' });
+			const zweite = http.expectOne(URL_A);
+			expect(zweite.request.headers.get('X-Dateiname')).toBe('b.pdf');
+			zweite.flush({}, { status: 201, statusText: 'Created' });
+
+			expect(s.reihe()).toEqual([]);
+		});
+	});
+
+	describe('nachStapel', () => {
+		const angenommen = { status: 201, statusText: 'Created' };
+
+		it('meldet drei Dateien einmal, erst wenn die letzte durch ist', () => {
+			const s = neu();
+			s.fuegeHinzu([datei('a.pdf'), datei('b.pdf'), datei('c.pdf')], URL_A);
+
+			http.expectOne(URL_A).flush({}, angenommen);
+			http.expectOne(URL_A).flush({}, angenommen);
+			expect(staepel).toBe(0);
+			http.expectOne(URL_A).flush({}, angenommen);
+
+			expect(staepel).toBe(1);
+			expect(erfolge).toHaveLength(3);
+		});
+
+		it('meldet auch dann, wenn eine Fehlerzeile stehen bleibt', () => {
+			const s = neu();
+			s.fuegeHinzu([datei('a.pdf'), datei('b.pdf')], URL_A);
+			http.expectOne(URL_A).flush({}, angenommen);
+			http.expectOne(URL_A).flush({ fehler: 'x', code: 'TYP' }, { status: 415, statusText: 'x' });
+
+			expect(staepel).toBe(1);
+		});
+
+		it('meldet nichts, wenn keine Datei angenommen wurde', () => {
+			const s = neu();
+			s.fuegeHinzu([datei('a.pdf')], URL_A);
+			http.expectOne(URL_A).flush({ fehler: 'x', code: 'TYP' }, { status: 415, statusText: 'x' });
+
+			expect(staepel).toBe(0);
+		});
+
+		it('meldet einen zweiten Stapel noch einmal', () => {
+			const s = neu();
+			s.fuegeHinzu([datei('a.pdf')], URL_A);
+			http.expectOne(URL_A).flush({}, angenommen);
+			s.fuegeHinzu([datei('b.pdf')], URL_A);
+			http.expectOne(URL_A).flush({}, angenommen);
+
+			expect(staepel).toBe(2);
 		});
 	});
 });

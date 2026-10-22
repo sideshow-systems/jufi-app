@@ -24,10 +24,25 @@ export interface SchlangeEinstellung {
 	http: HttpClient;
 	art: DateiArt;
 	/** Je angenommene Datei; die Zeile ist dann schon aus der Reihe. */
-	nachErfolg: (hochladung: Hochladung, antwort: unknown) => void;
+	nachErfolg?: (hochladung: Hochladung, antwort: unknown) => void;
+	/**
+	 * Einmal, wenn nichts mehr laeuft oder wartet und seit dem letzten Mal mindestens eine Datei
+	 * angenommen wurde (Fehlerzeilen zaehlen nicht als offen). Die Seite laedt dann einmal neu statt je
+	 * Datei: Zehn Fotos ergaeben sonst zehn Neuladungen des Threads. Verworfen: je Datei melden und in
+	 * den Modul-Bauteilen entprellen; die Schlange weiss als einzige, wann der Stapel durch ist, und
+	 * ein Zeitfenster kaeme bei langsamen Uploads zu frueh oder bei schnellen zu spaet.
+	 */
+	nachStapel?: () => void;
 	/** Einmal je Schlange, wenn der Server "nicht angemeldet" sagt; die Seite geht dann zur Anmeldung. */
 	beiNichtAngemeldet?: () => void;
 }
+
+/**
+ * Mehr als diese Wartezeit nimmt die Schlange aus Retry-After nicht an: Ein falscher oder von einem
+ * Proxy gesetzter Wert (3600) liesse sonst die ganze Reihe eine Stunde stehen, waehrend die Person
+ * davor sitzt. Der Server nennt 2 s; nach 30 s ist "Nochmal" die bessere Antwort als Warten.
+ */
+const WIEDERHOLEN_MAX_S = 30;
 
 /** Wiederholungen nach 503 (Plan-Entscheidung 16); mit dem ersten Versuch sind es vier. */
 const WIEDERHOLUNGEN = 3;
@@ -67,6 +82,8 @@ export class Hochladeschlange {
 	private readonly versuche = new Map<number, number>();
 	private beendet = false;
 	private abgemeldet = false;
+	/** Seit der letzten Meldung nachStapel angenommene Dateien. */
+	private erfolge = 0;
 
 	constructor(private readonly e: SchlangeEinstellung) {}
 
@@ -139,7 +156,11 @@ export class Hochladeschlange {
 	private starteNaechste(): void {
 		if (this.beendet || this.lauf !== null) return;
 		const h = this.zeilen().find((x) => x.zustand === 'wartet');
-		if (h) this.starte(h.schluessel);
+		if (h) return this.starte(h.schluessel);
+		if (this.erfolge > 0) {
+			this.erfolge = 0;
+			this.e.nachStapel?.();
+		}
 	}
 
 	private starte(schluessel: number): void {
@@ -156,7 +177,8 @@ export class Hochladeschlange {
 			if (stand.art === 'fertig') {
 				this.lauf = null;
 				this.entferne(h);
-				this.e.nachErfolg(h, stand.antwort);
+				this.erfolge++;
+				this.e.nachErfolg?.(h, stand.antwort);
 				return this.starteNaechste();
 			}
 			if (stand.code === 'BESCHAEFTIGT' && (this.versuche.get(schluessel) ?? 0) < WIEDERHOLUNGEN) {
@@ -169,7 +191,7 @@ export class Hochladeschlange {
 						this.zeitgeber = null;
 						if (this.lauf === lauf) this.starte(schluessel);
 					},
-					(stand.wiederholenNach ?? WIEDERHOLEN_NACH_VORGABE_S) * 1000,
+					Math.min(stand.wiederholenNach ?? WIEDERHOLEN_NACH_VORGABE_S, WIEDERHOLEN_MAX_S) * 1000,
 				);
 				return;
 			}
@@ -180,9 +202,14 @@ export class Hochladeschlange {
 				fehler: stand.text,
 				code: stand.code ?? null,
 			});
-			if (stand.code === NICHT_ANGEMELDET && !this.abgemeldet) {
-				this.abgemeldet = true;
-				this.e.beiNichtAngemeldet?.();
+			// Nach einem 401 starten die wartenden Dateien nicht: Sie bekaemen alle dasselbe 401, und nach der
+			// Anmeldung soll Nochmal sie wieder in Gang setzen. Sie bleiben dafuer auf wartet.
+			if (stand.code === NICHT_ANGEMELDET) {
+				if (!this.abgemeldet) {
+					this.abgemeldet = true;
+					this.e.beiNichtAngemeldet?.();
+				}
+				return;
 			}
 			this.starteNaechste();
 		});

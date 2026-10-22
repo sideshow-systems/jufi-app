@@ -241,10 +241,8 @@ describe('Verwaltung Dokumente', () => {
 				expect(zweite.request.headers.get('X-Dateiname')).toBe('zwei.pdf');
 				zweite.flush({}, { status: 201, statusText: 'Created' });
 			});
-			// Je gelungene Datei laedt die Seite neu.
-			await vi.waitFor(() => http.match(`${API}/dokumente`).forEach((a) => a.flush(ANTWORT)));
-			http.match(`${API}/speicher`).forEach((a) => a.flush(SPEICHER));
-			await stabil(harness);
+			// Der Stapel laedt die Seite einmal neu, nicht je Datei.
+			await neuGeladen();
 		});
 
 		it('zeigt bei einem Fehler den Text der Zeile mit Nochmal, und Nochmal schickt dieselbe Datei erneut', async () => {
@@ -280,6 +278,14 @@ describe('Verwaltung Dokumente', () => {
 				expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo%2Fverwaltung%2Fdokumente'),
 			);
 			http.match(() => true);
+		});
+
+		it('benennt das Ersetzen-Feld am Feld selbst, mit dem Titel des Dokuments', async () => {
+			await oeffne();
+			const eingabe = zeile('Satzung').querySelector('input[type="file"]') as HTMLInputElement;
+
+			expect(eingabe.getAttribute('aria-label')).toBe('Datei von „Satzung“ ersetzen');
+			expect(eingabe.closest('label')?.hasAttribute('aria-label')).toBe(false);
 		});
 
 		it('zeigt eine wartende Datei ohne Balken', async () => {

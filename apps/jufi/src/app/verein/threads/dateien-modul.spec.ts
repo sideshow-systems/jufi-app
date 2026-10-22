@@ -193,4 +193,19 @@ describe('jf-dateien-modul', () => {
 
 		expect(f.geaendert).toHaveBeenCalledTimes(1);
 	});
+
+	it('meldet nach drei Dateien in einem Stapel nur einmal geaendert', async () => {
+		const f = zeige(modul(true));
+		const eingabe = f.el.querySelector('input[type="file"]') as HTMLInputElement;
+		const neu = (n: string) => new File([new Uint8Array(5)], n, { type: 'application/pdf' });
+		Object.defineProperty(eingabe, 'files', { value: [neu('a.pdf'), neu('b.pdf'), neu('c.pdf')], configurable: true });
+		eingabe.dispatchEvent(new Event('change'));
+
+		for (let i = 0; i < 3; i++) {
+			http.expectOne(`${API}/module/m1/dateien`).flush(zeile(`n${i}`, 'x.pdf'), { status: 201, statusText: 'Created' });
+		}
+		await stabil(f);
+
+		expect(f.geaendert).toHaveBeenCalledTimes(1);
+	});
 });
