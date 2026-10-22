@@ -1,6 +1,6 @@
 import { HttpBackend, HttpClient } from '@angular/common/http';
 import { inject, Injectable, InjectionToken } from '@angular/core';
-import type { DateiZeile, DokumentAnsicht, DokumenteAntwort, SpeicherAntwort } from '@jufi/domain';
+import type { DateiZeile, DokumentAnsicht, DokumenteAntwort, MedienAntwort, SpeicherAntwort } from '@jufi/domain';
 import { catchError, type Observable, throwError } from 'rxjs';
 import { alsApiFehler } from '../gemeinsam/api-fehler';
 import { vereinsApi } from './dateien-anzeige';
@@ -40,6 +40,13 @@ export class DateienApi {
 	dokumente(slug: string): Observable<DokumenteAntwort> {
 		return this.http
 			.get<DokumenteAntwort>(`${this.basis(slug)}/dokumente`)
+			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
+	}
+
+	/** Die Fotos und Dateien aller Threads, die die Person sehen darf (Reiter "Fotos & Dateien"). */
+	medien(slug: string): Observable<MedienAntwort> {
+		return this.http
+			.get<MedienAntwort>(`${this.basis(slug)}/medien`)
 			.pipe(catchError((e: unknown) => throwError(() => alsApiFehler(e))));
 	}
 

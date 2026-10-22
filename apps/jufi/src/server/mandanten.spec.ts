@@ -1,6 +1,6 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
-import type { DokumenteAntwort, EchtzeitSignal, SpeicherAntwort } from '@jufi/domain';
+import type { DokumenteAntwort, EchtzeitSignal, MedienAntwort, SpeicherAntwort } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
@@ -657,6 +657,32 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Der Termin aus fremd steht nicht im Kalender von eigen; der eigene schon, er ist also nicht nur leer.
 		expect(titel).not.toContain('Fremder Termin');
 		expect(titel).toContain('Eigener Termin');
+	},
+	'GET /medien': async (k) => {
+		await legeThreadAn(k.prisma, k.fremd, new Date(), {
+			titel: 'Fremdes Lager',
+			erstelltVonId: k.fremdePersonId,
+			module: [
+				{ typ: 'FOTOS', fotos: [{}, {}] },
+				{ typ: 'DATEIEN', dateien: [{}] },
+			],
+		});
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			titel: 'Eigenes Lager',
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'FOTOS', fotos: [{}] }],
+		});
+		const pfad = '/api/v1/medien';
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const antwort = (await r.json()) as MedienAntwort;
+		// Weder der Thread noch seine Foto- und Dateizeilen aus fremd stehen in der Galerie von eigen.
+		expect(antwort.bloecke.map((b) => b.titel)).not.toContain('Fremdes Lager');
+		expect(JSON.stringify(antwort)).not.toContain(k.fremderThread.threadId);
+		// Positiv: Der eigene Thread steht da, die Antwort ist also nicht nur leer.
+		expect(antwort.bloecke.map((b) => b.threadId)).toContain(eigener.threadId);
 	},
 	'GET /sync': async (k) => {
 		// Der Stand vor dem Schreiben: seit=0 koennte vor einem aufgeraeumten Verlauf liegen und "vollstaendig" ohne Listen liefern.

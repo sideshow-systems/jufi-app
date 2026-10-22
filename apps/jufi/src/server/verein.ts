@@ -4,6 +4,7 @@ import { Router, type RequestHandler, type Response } from 'express';
 import type { VolleAppDeps } from './abhaengigkeiten.js';
 import { dateiRouten } from './dateien/ausliefern.js';
 import { dokumentRouten, speicherRoute } from './dateien/dokumente.js';
+import { medienRoute } from './dateien/medien.js';
 import { modulDateiRouten } from './dateien/modul-dateien.js';
 import { anmeldeRouten } from './mitglieder/anmeldung.js';
 import { einladungsRouten } from './mitglieder/einladung.js';
@@ -151,6 +152,7 @@ export function vereinsApi(deps: VolleAppDeps): Router {
 	modulDateiRouten(router, deps);
 	dokumentRouten(router, deps);
 	speicherRoute(router, deps);
+	medienRoute(router, deps);
 
 	return router;
 }

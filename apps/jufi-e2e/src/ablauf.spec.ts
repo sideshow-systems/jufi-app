@@ -761,7 +761,7 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await kontext.close();
 
 		const mutter = await ausSitzung(browser, 'mutter');
-		await mutter.seite.goto(`/${SLUG}/medien`);
+		await mutter.seite.goto(`/${SLUG}/medien?reiter=dokumente`);
 		await expect(mutter.seite.getByRole('heading', { name: 'Medien', level: 1 })).toBeVisible();
 		await expect(mutter.seite.getByRole('heading', { name: 'Ordnungen', level: 2 })).toBeVisible();
 		// Leere Kategorien (Merkblaetter, Formulare) zeigt die Mitgliederseite nicht.
@@ -793,7 +793,7 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await leitung.kontext.close();
 
 		const mutter = await ausSitzung(browser, 'mutter');
-		await mutter.seite.goto(`/${SLUG}/medien`);
+		await mutter.seite.goto(`/${SLUG}/medien?reiter=dokumente`);
 		await expect(mutter.seite.getByText('Noch keine Dokumente.')).toBeVisible();
 		await expect(mutter.seite.getByRole('heading', { level: 2 })).toHaveCount(0);
 		await expect(mutter.seite.getByRole('link', { name: /Jugendfischereiordnung/ })).toHaveCount(0);
