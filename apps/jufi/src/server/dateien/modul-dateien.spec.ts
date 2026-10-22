@@ -5,13 +5,15 @@ import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import sharp from 'sharp';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app.js';
 import { Bus, type BusEreignis } from '../echtzeit/bus.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
+import { Fensterzaehler } from '../threads/fenster.js';
 import { legeThreadAn, ordneZu, type TestModul } from '../threads/test-threads.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
+import { FOTO_AUSGABE_SCHAETZUNG } from './annehmen.js';
 import { FotoSchlange } from './foto-schlange.js';
 import { dateiSchluessel, VerzeichnisSpeicher, type DateiSpeicher } from './speicher.js';
 import { erzeugeBild } from './test-bilder.js';
@@ -27,6 +29,8 @@ describe('Dateien und Fotos in Modulen', () => {
 	// Ohne Wartende: Ein einziger blockierter Lauf fuellt die Schlange (Fall BESCHAEFTIGT). Die
 	// Faelle laufen nacheinander, ein Foto-Upload findet sie sonst immer leer.
 	const schlange = new FotoSchlange(0);
+	/** Wie der Standard (60 je 10 Minuten), aber hier, damit ein Test zaehlen kann, wann ein Platz verbraucht wird. */
+	const uploadFenster = new Fensterzaehler(60, 600_000, () => Date.now());
 	let wurzel: string;
 	let server: TestServer;
 	/** Haelt jeden Upload in uebernimm an, solange gesetzt (Barriere wie in dokumente.spec.ts). */
@@ -36,6 +40,8 @@ describe('Dateien und Fotos in Modulen', () => {
 	 * ist die des Uploads, die folgenden sind die Ausgaben der Fotoverarbeitung.
 	 */
 	let kaputteAusgaben: { aufrufe: number } | undefined;
+	/** Gesetzt: laeuft einmal beim ersten neueTempDatei, also wenn der Koerper gerade gelesen wird. */
+	let beimLesen: (() => void) | undefined;
 
 	beforeAll(async () => {
 		wurzel = await mkdtemp(join(tmpdir(), 'jufi-module-'));
@@ -46,6 +52,14 @@ describe('Dateien und Fotos in Modulen', () => {
 					return async (...args: Parameters<DateiSpeicher['uebernimm']>) => {
 						await anUebernimm?.();
 						return ziel.uebernimm(...args);
+					};
+				}
+				if (name === 'neueTempDatei' && beimLesen) {
+					const einmal = beimLesen;
+					beimLesen = undefined;
+					return async () => {
+						einmal();
+						return ziel.neueTempDatei();
 					};
 				}
 				if (name === 'neueTempDatei' && kaputteAusgaben) {
@@ -65,6 +79,7 @@ describe('Dateien und Fotos in Modulen', () => {
 				umgebung: TEST_UMGEBUNG,
 				dateiSpeicher: weiche,
 				fotoSchlange: schlange,
+				uploadFenster,
 				bus,
 			}),
 		);
@@ -135,7 +150,32 @@ describe('Dateien und Fotos in Modulen', () => {
 		const stand = async () => (await prisma.verein.findUniqueOrThrow({ where: { id: verein.id } })).aenderungsstand;
 		const meldungen = () => ereignisse.filter((e) => e.vereinId === verein.id);
 
-		return { verein, db, leiter, leser, thread, fotoThread, lade, json, stand, meldungen };
+		/** Belegt Speicher mit Dokument-Dateien ohne Bytes; fuer das Kontingent zaehlt nur die Zeile. */
+		async function fuelle(bytes: number) {
+			const kategorie = await db.dokumentKategorie.findFirstOrThrow({ orderBy: { position: 'asc' } });
+			let rest = bytes;
+			while (rest > 0) {
+				const groesse = Math.min(rest, 25 * MB);
+				const dokument = await db.dokument.create({
+					data: { kategorieId: kategorie.id, titel: 'Fuellung', angelegtAm: new Date() },
+				});
+				await db.datei.create({
+					data: {
+						art: 'DATEI',
+						dokumentId: dokument.id,
+						name: 'fuellung.pdf',
+						typ: 'application/pdf',
+						groesse,
+						sha256: 'x',
+						vonId: leiter.personId,
+						hochgeladenAm: new Date(),
+					},
+				});
+				rest -= groesse;
+			}
+		}
+
+		return { verein, db, leiter, leser, thread, fotoThread, lade, json, stand, meldungen, fuelle };
 	}
 
 	describe('Dateien hochladen', () => {
@@ -338,13 +378,14 @@ describe('Dateien und Fotos in Modulen', () => {
 			expect(await tempInhalt()).toEqual([]);
 		});
 
-		it('antwortet bei voller Schlange mit 503 BESCHAEFTIGT und Retry-After 2', async () => {
+		it('antwortet bei voller Schlange vor dem Koerper mit 503 BESCHAEFTIGT, ohne einen Platz im Upload-Fenster', async () => {
 			const s = await szenario();
 			const { modulIds } = await s.fotoThread();
 			let frei!: () => void;
 			const tor = new Promise<void>((ok) => (frei = ok));
 			const laufend = schlange.reihe(() => tor);
 			expect(laufend).not.toBeNull();
+			const pruefe = vi.spyOn(uploadFenster, 'pruefe');
 			try {
 				const bild = await erzeugeBild({ breite: 300, hoehe: 200, format: 'jpeg' });
 				const r = await s.lade(`/module/${modulIds[0]}/fotos`, { body: bild });
@@ -352,10 +393,69 @@ describe('Dateien und Fotos in Modulen', () => {
 				expect(r.headers.get('retry-after')).toBe('2');
 				expect(await r.json()).toEqual({ fehler: FEHLER_TEXT.BESCHAEFTIGT, code: 'BESCHAEFTIGT' });
 				expect(await tempInhalt()).toEqual([]);
+				// Die automatische Wiederholung des Clients soll die 60 Plaetze nicht aufbrauchen.
+				expect(pruefe).not.toHaveBeenCalled();
 			} finally {
+				pruefe.mockRestore();
 				frei();
 				await laufend;
 			}
+		});
+
+		it('antwortet mit 503, wenn die Schlange erst waehrend des Lesens vollaeuft; der Platz im Fenster ist dann verbraucht', async () => {
+			const s = await szenario();
+			const { modulIds } = await s.fotoThread();
+			let frei!: () => void;
+			const tor = new Promise<void>((ok) => (frei = ok));
+			let laufend: Promise<void> | null = null;
+			// Vor dem Koerper ist die Schlange leer; erst beim Anlegen der Temp-Datei fuer den Koerper
+			// stellt sich eine fremde Arbeit an. So erreicht der Upload den Zweig in nimmFoto sicher.
+			beimLesen = () => {
+				laufend = schlange.reihe(() => tor);
+			};
+			const pruefe = vi.spyOn(uploadFenster, 'pruefe');
+			try {
+				const bild = await erzeugeBild({ breite: 300, hoehe: 200, format: 'jpeg' });
+				const r = await s.lade(`/module/${modulIds[0]}/fotos`, { body: bild });
+				expect(laufend).not.toBeNull();
+				expect(r.status).toBe(503);
+				expect(r.headers.get('retry-after')).toBe('2');
+				expect(await r.json()).toEqual({ fehler: FEHLER_TEXT.BESCHAEFTIGT, code: 'BESCHAEFTIGT' });
+				expect(pruefe).toHaveBeenCalledTimes(1);
+				expect(await s.db.datei.count({ where: { modulId: modulIds[0] } })).toBe(0);
+				expect(await tempInhalt()).toEqual([]);
+			} finally {
+				beimLesen = undefined;
+				pruefe.mockRestore();
+				frei();
+				await laufend;
+			}
+		});
+
+		it('schaetzt das Kontingent vor dem Koerper bei Fotos mit der Obergrenze der Ausgabe, nicht mit dem Original', async () => {
+			const s = await szenario();
+			const { modulIds } = await s.fotoThread();
+			await prisma.verein.update({ where: { id: s.verein.id }, data: { speicherGrenzeMb: 100 } });
+			// Rauschen komprimiert nicht: Das PNG ist groesser als der freie Platz, das fertige Foto nicht.
+			const roh = Buffer.alloc(1400 * 1400 * 3);
+			for (let i = 0; i < roh.length; i++) roh[i] = (i * 7919) % 251;
+			const gross = await sharp(roh, { raw: { width: 1400, height: 1400, channels: 3 } })
+				.png({ compressionLevel: 0 })
+				.toBuffer();
+			const frei = FOTO_AUSGABE_SCHAETZUNG + MB;
+			expect(gross.length).toBeGreaterThan(frei);
+			await s.fuelle(100 * MB - frei);
+			const r = await s.lade(`/module/${modulIds[0]}/fotos`, { body: gross });
+			expect(r.status).toBe(201);
+			const { id } = (await r.json()) as FotoZeile;
+			expect((await s.db.datei.findUniqueOrThrow({ where: { id } })).groesse).toBeLessThan(frei);
+
+			// Ist weniger frei als die Obergrenze, scheitert ein grosses Original schon vor dem Koerper.
+			await s.fuelle(frei - MB / 2);
+			const voll = await s.lade(`/module/${modulIds[0]}/fotos`, { body: gross });
+			expect(voll.status).toBe(413);
+			expect(((await voll.json()) as { code: string }).code).toBe('KONTINGENT');
+			expect(await tempInhalt()).toEqual([]);
 		});
 
 		it('meldet einen Fehler des Dateisystems bei der Verarbeitung als 500, nicht als TYP, und raeumt auf', async () => {

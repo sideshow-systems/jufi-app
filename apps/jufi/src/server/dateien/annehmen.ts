@@ -111,18 +111,23 @@ export interface NeueDatei {
 
 const BESCHAEFTIGT: AbbruchKoerper = { fehler: FEHLER_TEXT.BESCHAEFTIGT, code: 'BESCHAEFTIGT' };
 
+/** Was ein Foto nach der Verarbeitung hoechstens belegt, fuer die Schaetzung vor dem Koerper (unten). */
+export const FOTO_AUSGABE_SCHAETZUNG = 3 * MB;
+
 /**
- * Nimmt einen Upload an, in dieser Reihenfolge (Plan, Task 6): Rate-Limit, bei Fotos die
- * Schlange, Kontingent nach Content-Length, dann erst der Koerper; Groesse, Typ am Inhalt, bei
- * Fotos die Verarbeitung; Bytes unter ihren Schluessel; zuletzt die Transaktion unter der
- * Vereinssperre mit dem Kontingent nach der echten Groesse und `schreibe`. Ort, Sichtbarkeit,
- * Recht und Anzahl prueft der Aufrufer vorher, denn nur er kennt sie.
+ * Nimmt einen Upload an, in dieser Reihenfolge (Plan, Task 6): bei Fotos die Schlange,
+ * Rate-Limit, Kontingent nach Content-Length (bei Fotos hoechstens FOTO_AUSGABE_SCHAETZUNG), dann
+ * erst der Koerper; Groesse, Typ am Inhalt, bei Fotos die Verarbeitung; Bytes unter ihren
+ * Schluessel; zuletzt die Transaktion unter der Vereinssperre mit dem Kontingent nach der
+ * echten Groesse und `schreibe`. Ort, Sichtbarkeit, Recht und Anzahl prueft der Aufrufer
+ * vorher, denn nur er kennt sie.
  *
  * `freiBytes` ist, was das Ersetzen an alten Bytes freigibt (0 beim Anlegen): Ein Verein an der
  * Grenze soll eine Datei durch eine gleich grosse tauschen koennen. Fuer die Pruefung vor dem
- * Koerper steht die Schaetzung aus Content-Length: Sie erspart das Hochladen von 25 MB in einen
- * vollen Verein. Verbindlich ist erst die zweite Pruefung in der Transaktion, weil zwei Uploads,
- * die einzeln passen, zusammen nicht passen muessen.
+ * Koerper steht die Schaetzung aus Content-Length (bei Fotos gedeckelt auf die Obergrenze der
+ * Ausgabe): Sie erspart das Hochladen von 25 MB in einen vollen Verein. Verbindlich ist erst
+ * die zweite Pruefung in der Transaktion, weil zwei Uploads, die einzeln passen, zusammen
+ * nicht passen muessen.
  *
  * Die Sperre nimmt diese Funktion selbst, nicht `schreibe`: Das Kontingent muss unter ihr
  * stehen, und Dokumente haben keinen Aenderungsstand. Ruft `schreibe` danach mitAenderung (die
@@ -154,6 +159,18 @@ export async function nimmDatei<T>(
 		return { ok: false };
 	};
 
+	// Vor dem Koerper: Wer jetzt schon keinen Platz bekaeme, soll nicht erst 20 MB senden. Ein Platz
+	// ist damit nicht reserviert; ist die Schlange nach dem Lesen voll, gilt dieselbe Antwort (unten).
+	// Vor dem Upload-Fenster, damit dieses 503 keinen der 60 Plaetze kostet: Der Client wiederholt
+	// es von selbst bis zu dreimal (Entscheidung 16), und sonst kostete ein Foto bei voller Schlange
+	// bis zu vier Plaetze. Das 503 nach dem Koerper (nimmFoto) hat seinen Platz dagegen schon
+	// verbraucht; es kommt nur, wenn die Schlange genau waehrend des Lesens vollaeuft, und den Platz
+	// zurueckzugeben braeuchte eine eigene Methode am Fensterzaehler fuer diesen seltenen Fall.
+	if (e.art === 'FOTO' && deps.fotoSchlange.voll()) {
+		res.set('Retry-After', '2');
+		return nein(503, BESCHAEFTIGT);
+	}
+
 	const wartezeit = deps.uploadFenster.pruefe(person.id);
 	if (wartezeit > 0) {
 		res.set('Retry-After', String(Math.ceil(wartezeit / 1000)));
@@ -161,15 +178,18 @@ export async function nimmDatei<T>(
 	}
 	if (e.art === 'DATEI' && e.name === null) return nein(400, { fehler: 'Dateiname fehlt' });
 
-	// Vor dem Koerper: Wer jetzt schon keinen Platz bekaeme, soll nicht erst 20 MB senden. Ein Platz
-	// ist damit nicht reserviert; ist die Schlange nach dem Lesen voll, gilt dieselbe Antwort (unten).
-	if (e.art === 'FOTO' && deps.fotoSchlange.voll()) {
-		res.set('Retry-After', '2');
-		return nein(503, BESCHAEFTIGT);
-	}
-
+	// Bei Fotos zaehlt nicht das Original (bis 20 MB), sondern was davon bleibt: die neu kodierte
+	// 2560er-Fassung samt Vorschau, bei Handyfotos meist unter 1 MB. Mit der vollen Content-Length
+	// bekaeme ein Verein knapp unter der Grenze "Speicher voll" fuer ein Foto, das noch passt.
+	// Darum gilt fuer Fotos hoechstens FOTO_AUSGABE_SCHAETZUNG, eine grosszuegige Obergrenze der
+	// Ausgabe; ein kleineres Original zaehlt mit seiner eigenen Laenge, sonst scheiterte an einem
+	// fast vollen Verein auch ein Foto mit 200 KB vor dem Koerper. Beides ist keine Zusage:
+	// Verbindlich prueft erst die Transaktion mit der echten Groesse. Verworfen: Fotos vor dem
+	// Koerper gar nicht zu schaetzen -- ein voller Verein liesse dann jeden noch 20 MB hochladen
+	// und verarbeiten.
 	const laenge = req.header('content-length');
-	const geschaetzt = laenge !== undefined && /^\d+$/u.test(laenge) ? Number(laenge) : 0;
+	const angegeben = laenge !== undefined && /^\d+$/u.test(laenge) ? Number(laenge) : 0;
+	const geschaetzt = e.art === 'FOTO' ? Math.min(angegeben, FOTO_AUSGABE_SCHAETZUNG) : angegeben;
 	const belegt = await verbrauchBytes(db);
 	if (
 		!kontingentReicht({
