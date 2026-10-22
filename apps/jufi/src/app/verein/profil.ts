@@ -352,6 +352,9 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
 		li .fehler {
 			margin: 0;
 		}
+		.frage p {
+			margin-bottom: var(--a3);
+		}
 		.erfolg {
 			color: var(--erfolg);
 			font-weight: 600;

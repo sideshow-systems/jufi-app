@@ -93,7 +93,7 @@ describe('Personenseite', () => {
 		expect((seite.querySelector('input[name="vorname"]') as HTMLInputElement).value).toBe('Lena');
 	});
 
-	it('zeigt bei Jungfischern den Foto-Stand neben den Hinweisen, bei Erwachsenen und ohne Angabe nichts', async () => {
+	it('Foto-Stand true heisst Fotos: erlaubt', async () => {
 		const { seite: erlaubt } = await oeffneVerwaltung(kind({ fotoEinwilligung: true }));
 		expect(erlaubt.querySelector('[data-fotos]')?.textContent).toContain('Fotos: erlaubt');
 		expect(erlaubt.querySelector('[data-fotos]')?.textContent).not.toContain('nicht erlaubt');
@@ -107,10 +107,24 @@ describe('Personenseite', () => {
 		expect(seite.textContent).toContain('Einwilligung fehlt');
 	});
 
-	it('Foto-Stand null (Erwachsene) oder fehlend (ohne Verwaltungsrecht) zeigt keine Zeile', async () => {
+	it('Foto-Stand null bei Erwachsenen zeigt keine Zeile', async () => {
 		const erw: PersonDetail = { ...kind(), id: 'e2', art: 'ERWACHSENER', familie: [], fotoEinwilligung: null };
-		const { seite: erwachsen } = await oeffneVerwaltung(erw);
-		expect(erwachsen.querySelector('[data-fotos]')).toBeNull();
+		const { seite } = await oeffneVerwaltung(erw);
+		expect(seite.querySelector('[data-fotos]')).toBeNull();
+	});
+
+	it('Erwachsene ohne Foto-Stand im Body zeigen keine Zeile', async () => {
+		const erw: PersonDetail = { ...kind(), id: 'e2', art: 'ERWACHSENER', familie: [], fotoEinwilligung: undefined };
+		const { seite } = await oeffneVerwaltung(erw);
+		expect(seite.querySelector('[data-fotos]')).toBeNull();
+	});
+
+	it('Jungfischer ohne Foto-Stand im Body (ohne Verwaltungsrecht) zeigen keine Zeile', async () => {
+		const { seite } = await oeffneSeite('/demo/verwaltung/personen/k1', ichMit(['ANTWORTEN_DETAIL']), [
+			['/personen/k1', kind({ einladung: undefined, zugang: undefined })],
+		]);
+		expect(seite.textContent).toContain('Lena Muster');
+		expect(seite.querySelector('[data-fotos]')).toBeNull();
 	});
 
 	it('Betreuer sieht die Person ohne Bearbeiten-Knöpfe und ohne Zugangsstand', async () => {

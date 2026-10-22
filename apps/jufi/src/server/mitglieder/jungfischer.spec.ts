@@ -574,6 +574,30 @@ describe('Meine Jungfischer', () => {
 			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [v.kind.personId])).toBe(1);
 		});
 
+		it('Widerruf meldet eine Aenderung, der wiederholte Widerruf ohne offene Zeile meldet nichts', async () => {
+			const v = await neuerVerein();
+			await prisma.einwilligung.create({
+				data: {
+					vereinId: v.verein.id,
+					jungfischerId: v.kind.personId,
+					erteiltVon: v.mutter.personId,
+					art: 'FOTOS',
+					textVersion: '1',
+				},
+			});
+			expect(
+				(await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false, art: 'FOTOS' })).status,
+			).toBe(200);
+			await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [v.kind.personId]);
+			const stand = (await prisma.verein.findUniqueOrThrow({ where: { id: v.verein.id } })).aenderungsstand;
+
+			expect(
+				(await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false, art: 'FOTOS' })).status,
+			).toBe(200);
+			expect((await prisma.verein.findUniqueOrThrow({ where: { id: v.verein.id } })).aenderungsstand).toBe(stand);
+			expect(ereignisse.fuer(v.verein.id)).toHaveLength(1);
+		});
+
 		it('Selbst-Route meldet eine Umfeld-Aenderung mit der Person, 404 und 400 melden nichts', async () => {
 			const v = await neuerVerein();
 			const ich = await volljaehrig(v);

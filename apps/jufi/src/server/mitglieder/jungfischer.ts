@@ -334,11 +334,14 @@ async function aendereFotoEinwilligung(
 		});
 		return;
 	}
-	await vermerke([kind.id]);
 	// Ein Volljaehriger zieht nur seine eigenen Zeilen zurueck; die der Eltern gelten fuer ihn ohnehin nicht mehr.
 	const eigene = istVolljaehrig(kind, zeit) ? { erteiltVon: erteiler.id } : {};
-	await tx.einwilligung.updateMany({
+	const { count } = await tx.einwilligung.updateMany({
 		where: { jungfischerId: kind.id, art: 'FOTOS', widerrufenAm: null, ...eigene },
 		data: { widerrufenAm: zeit },
 	});
+	// Nur vermerkt, wenn sich etwas geaendert hat: an der Foto-Einwilligung haengt kein Zugang, anders
+	// als bei der DSGVO-Einwilligung, wo der Haken danach dem Kind den Zugang nehmen kann. Ein
+	// wiederholter Widerruf soll darum niemanden zum Neuladen bewegen.
+	if (count > 0) await vermerke([kind.id]);
 }
