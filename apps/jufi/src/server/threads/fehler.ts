@@ -17,6 +17,11 @@ export const ENTWURF: Antwortkoerper = { fehler: 'Der Thread ist noch ein Entwur
 export const NUR_AUSHANG: Antwortkoerper = { fehler: 'In diesem Thread kann niemand schreiben', code: 'NUR_AUSHANG' };
 export const ARCHIVIERT: Antwortkoerper = { fehler: 'Der Thread ist archiviert', code: 'ARCHIVIERT' };
 export const FRIST_ABGELAUFEN: Antwortkoerper = { fehler: 'Frist abgelaufen', code: 'FRIST_ABGELAUFEN' };
+/**
+ * Die Position der Helferliste hat keinen freien Platz mehr (TP4 Etappe 3). 409 und kein 404:
+ * Wer bis hierher kommt, sieht die Liste und ihren Fuellstand ohnehin.
+ */
+export const VOLL: Antwortkoerper = { fehler: 'Hier sind schon alle Plätze vergeben.', code: 'VOLL' };
 /** Bewusst nichtssagend: Wem die clientId gehoert, darf der Anfragende nicht erfahren. */
 export const CLIENT_ID_VERGEBEN: Antwortkoerper = { fehler: 'Ungültige Anfrage', code: 'CLIENT_ID_VERGEBEN' };
 
