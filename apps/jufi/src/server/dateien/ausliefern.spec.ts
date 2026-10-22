@@ -1,4 +1,4 @@
-import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
+import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -59,6 +59,8 @@ describe('GET /dateien/:id', () => {
 	let speicher: VerzeichnisSpeicher;
 	let server: TestServer;
 	let ersatz: DateiSpeicher | undefined;
+	/** Jede Abfrage des Servers als "Modell.operation", solange gesetzt (Test zur Abfragezahl). */
+	let abfragen: string[] | undefined;
 
 	beforeAll(async () => {
 		wurzel = await mkdtemp(join(tmpdir(), 'jufi-ausliefern-'));
@@ -67,9 +69,19 @@ describe('GET /dateien/:id', () => {
 		const weiche = new Proxy(speicher, {
 			get: (ziel, name, empfaenger) => Reflect.get(ersatz ?? ziel, name, empfaenger) as unknown,
 		});
+		const zaehlend = prisma.$extends({
+			query: {
+				$allModels: {
+					async $allOperations({ model, operation, args, query }) {
+						abfragen?.push(`${model}.${operation}`);
+						return query(args);
+					},
+				},
+			},
+		}) as unknown as PrismaClient;
 		server = await starteTestServer(
 			createApp({
-				prisma,
+				prisma: zaehlend,
 				version: { version: '1.2.3', commit: 'abc' },
 				umgebung: TEST_UMGEBUNG,
 				dateiSpeicher: weiche,
@@ -254,6 +266,23 @@ describe('GET /dateien/:id', () => {
 		expect(r.headers.get('content-disposition')).toMatch(/^inline; filename="foto-[0-9a-z]{8}\.jpg"/u);
 	});
 
+	it('prueft die Sicht am Kopf des Threads: die Vorschau laedt keine Fotozeilen und keine Antworten', async () => {
+		const s = await szenario();
+		const foto = await s.foto();
+		abfragen = [];
+		try {
+			const r = await s.hole(foto.id, { cookie: s.mutter.cookie, vorschau: true });
+			expect(r.status).toBe(200);
+			// Die eigene Zeile liest die Route mit findFirst; ein findMany auf Datei hiesse, dass die
+			// Rechtepruefung wieder den ganzen Thread mit allen Fotos laedt (Gesamtreview, I1).
+			expect(abfragen).toContain('Datei.findFirst');
+			expect(abfragen).not.toContain('Datei.findMany');
+			expect(abfragen.filter((a) => a.startsWith('UmfrageAntwort'))).toEqual([]);
+		} finally {
+			abfragen = undefined;
+		}
+	});
+
 	it('antwortet 404 fuer Haupt- und Vorschaufassung, wenn der Thread ein Entwurf ist und die Person kein Jugendleiter', async () => {
 		const s = await szenario();
 		const foto = await s.foto({ veroeffentlicht: false });
@@ -272,7 +301,7 @@ describe('GET /dateien/:id', () => {
 		expect((await s.hole(foto.id, { cookie: s.leiter.cookie })).status).toBe(200);
 	});
 
-	it('antwortet 404 fuer eine entfernte Person, auch wenn ihre Sitzung noch gilt', async () => {
+	it('antwortet 401 fuer eine entfernte Person: ihre Sitzung gilt nicht mehr', async () => {
 		const s = await szenario();
 		const foto = await s.foto();
 		await s.db.person.update({ where: { id: s.mutter.personId }, data: { entferntAm: new Date() } });
