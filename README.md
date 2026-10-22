@@ -223,9 +223,9 @@ Fehlt `jufi-tools` auf dem Server, bricht Tor 5 ab und verweist auf `tools/insta
 
 **Fotoprobe** (Tor 4, TP4-Spec 2.4): Der Rauchtest-Container läuft mit dem `mem_limit` des Dienstes `jufi` aus
 `deploy/jufi-services.yml` (ohne Swap, wie auf dem Server; fehlt die Zeile, bricht der Rauchtest ab). Das Skript
-erzeugt mit `tools/erzeuge-testbilder.mjs` die teuersten Fotos, die die Upload-Route annimmt: ein 48-MP-JPEG baseline,
-dasselbe progressiv mit 4:2:0 und mit 4:4:4, ein interlaced PNG (Adam7) mit knapp 50 MP, ein 48-MP-WebP und ein knapp
-20 MB großes PNG (Begründung im Kopf des Skripts). Es kopiert sie mit `foto.ts` (als `foto.mts`) und
+erzeugt mit `tools/erzeuge-testbilder.mjs` die teuersten bekannten Fotos, die die Upload-Route annimmt: ein 48-MP-JPEG
+baseline, dasselbe progressiv mit 4:2:0, mit 4:4:4 und in CMYK, ein interlaced PNG (Adam7) mit knapp 50 MP in 8 und in
+16 Bit je Kanal, ein 48-MP-WebP und ein knapp 20 MB großes PNG (Begründung im Kopf des Skripts). Es kopiert sie mit `foto.ts` (als `foto.mts`) und
 `tools/fotoprobe.mjs` nach `/app/probe/` und lässt sie im laufenden App-Container durch `verarbeiteFoto` gehen: erst
 jedes Bild in einem eigenen Prozess (Spitze je Bild), dann alle nacheinander in einem Prozess wie im Betrieb. Danach
 liest es `memory.peak` der cgroup (App im Leerlauf und Probe zusammen, also mehr als im Betrieb) und prüft, dass die App
@@ -236,10 +236,12 @@ weiter auf `/healthz` antwortet. Die Ausgabe sieht so aus:
   gross.png: 2980 x 2228 -> 2560 x 1914, … Bytes (beide Fassungen), … ms, Prozess bisher hoechstens … MiB
   gross-progressiv.jpg: 8000 x 6000 -> 2560 x 1920, …
   gross-progressiv-444.jpg: 8000 x 6000 -> 2560 x 1920, …
+  gross-cmyk.jpg: 8000 x 6000 -> 2560 x 1920, …
   gross-adam7.png: 8160 x 6120 -> 2560 x 1920, …
+  gross-adam7-16bit.png: 8160 x 6120 -> 2560 x 1920, …
   gross.webp: 8000 x 6000 -> 2560 x 1920, …
   alle nacheinander: Probe-Prozess: hoechstens … MiB
-  Fotoprobe: 6 Bilder bis 50 MP verarbeitet, Spitze … MiB von 640m
+  Fotoprobe: 8 Bilder bis 50 MP verarbeitet, Spitze … MiB von 768m
 ```
 
 **„Speicher reicht nicht; mem_limit anheben (Spec 2.4)“**: Der Kernel hat die Probe beendet (Exit 137) oder die App ist
@@ -260,10 +262,11 @@ Der ausgegebene Link führt nach `https://test.jufi-app.de/admin/einrichten#…`
 
 **Warum `run` und nicht `exec`:** Das Speicherlimit von `jufi` (`mem_limit` in `deploy/jufi-services.yml`) deckt die App
 und genau eine Fotoverarbeitung (Fotoprobe, oben). Die CLI als zweiter Node-Prozess im laufenden Container kann es
-sprengen, wenn gerade ein Foto verarbeitet wird; der Kernel beendet dann Prozesse (Exit 137, oft ohne Ausgabe) und startet dabei die App neu. `run`
-startet einen eigenen Wegwerf-Container mit demselben Image und derselben Umgebung; `--no-deps` lässt Datenbank und
-Migration in Ruhe, `-l traefik.enable=false` hält Traefik davon ab, Anfragen an den Wegwerf-Container zu schicken. Dasselbe
-gilt für jede CLI-Aufgabe, etwa den Demo-Verein: `… jufi node apps/cli/dist/main.js demo einspielen`.
+sprengen, wenn gerade ein Foto verarbeitet wird; der Kernel beendet dann Prozesse (Exit 137, oft ohne Ausgabe) und
+startet dabei die App neu. `run` startet einen eigenen Wegwerf-Container mit demselben Image und derselben Umgebung;
+`--no-deps` lässt Datenbank und Migration in Ruhe, `-l traefik.enable=false` hält Traefik davon ab, Anfragen an den
+Wegwerf-Container zu schicken. Dasselbe gilt für jede CLI-Aufgabe, etwa den Demo-Verein:
+`… jufi node apps/cli/dist/main.js demo einspielen`.
 
 **Mails lesen** — Mailpit ist absichtlich nicht öffentlich (die Mails enthalten Einladungs- und Zurücksetzen-Links),
 sondern nur an `127.0.0.1` des Servers gebunden:
@@ -346,8 +349,8 @@ aber nie im Original:
   ```
 
   (`bunt-1.jpg` … `bunt-12.jpg`, 1600 × 1200, mit Nummer, damit man beim Blättern sieht, welches gerade da ist). Dazu
-  entstehen immer die sechs Bilder der Fotoprobe (`gross.jpg`, `gross.png`, `gross-progressiv.jpg`,
-  `gross-progressiv-444.jpg`, `gross-adam7.png`, `gross.webp`). Demo-Fotos kommen mit Etappe 6.
+  entstehen immer die acht Bilder der Fotoprobe (`gross.jpg`, `gross.png`, `gross-progressiv.jpg`,
+  `gross-progressiv-444.jpg`, `gross-cmyk.jpg`, `gross-adam7.png`, `gross-adam7-16bit.png`, `gross.webp`). Demo-Fotos kommen mit Etappe 6.
 
 ## Sicherung
 

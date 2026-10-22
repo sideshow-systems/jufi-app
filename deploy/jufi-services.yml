@@ -167,29 +167,34 @@ services:
       # `up -d jufi` die Mail-Falle mitbringt und kein Dienst vergessen wird.
       jufi-mailpit:
         condition: service_started
-    # Bemessen nach dem teuersten Foto, das die Upload-Route annimmt (TP4-Spec 2.4).
-    # Die App allein braucht im Leerlauf rund 79 MiB (Spec 2.4; docker stats zeigt
-    # im Rauchtest rund 100 MiB).
+    # Bemessen nach dem teuersten bekannten Foto, das die Upload-Route annimmt
+    # (TP4-Spec 2.4). Die App allein braucht im Leerlauf rund 79 MiB (Spec 2.4;
+    # docker stats zeigt im Rauchtest 82 bis 100 MiB).
     # Die Fotoverarbeitung laeuft immer nur einmal zur Zeit (FotoSchlange, auch das
     # Vereinslogo), braucht aber je nach Kodierung sehr verschieden viel: Ein
     # progressives JPEG haelt alle Koeffizienten, ein Adam7-PNG wird ganz entpackt.
     # Gemessen am 22.10.2026 (sharp 0.35, Probe allein im Image, cgroup-Spitze):
     # 48-MP-JPEG 79 MiB, 20-MB-PNG 86 MiB, 48-MP-WebP 96 MiB, progressives
     # 48-MP-JPEG 4:2:0 218 MiB, Adam7-PNG mit 50 MP 282 MiB, progressives
-    # 48-MP-JPEG 4:4:4 356 MiB, alle nacheinander in einem Prozess 362 MiB.
-    # Mit 256m beendete der Kernel die Probe schon am 4:4:4-JPEG. Im Rauchtest
-    # (App im Leerlauf plus Probe, Spitze der cgroup) 471 MiB; plus rund 25 %
-    # Reserve fuer argon2 beim Anmelden (19 MB je Hash, libs/auth passwords.ts)
-    # und gleichzeitige Anfragen sind das 589 MiB, aufgerundet auf 64m: 640m.
+    # 48-MP-JPEG 4:4:4 356 MiB, progressives CMYK-JPEG mit 48 MP 457 MiB,
+    # Adam7-PNG mit 50 MP und 16 Bit 511 MiB, alle nacheinander in einem
+    # Prozess 521 MiB. Mit 256m beendete der Kernel die Probe schon am
+    # 4:4:4-JPEG. Im Rauchtest (App im Leerlauf plus Probe, Spitze der cgroup)
+    # 576 MiB; plus rund 25 % Reserve fuer argon2 beim Anmelden (19 MB je Hash,
+    # libs/auth passwords.ts) und gleichzeitige Anfragen sind das 720 MiB,
+    # aufgerundet auf 64m: 768m.
     # Verworfen: die Fotoverarbeitung in einen Kindprozess auslagern -- er liefe
     # in derselben cgroup, braeuchte also dieselbe Grenze plus eine zweite
     # Node-Laufzeit, und machte nur die Folgen eines Abbruchs kleiner, nicht den
     # Bedarf;
     # verworfen: eine Pixelgrenze je Kodierung (z. B. 24 MP fuer progressive
     # JPEGs) -- sie wiese Fotos ab, die Handys so liefern, und die Spec waehlt
-    # ausdruecklich das Anheben der Grenze statt einer kleineren Fotogrenze.
-    # Die VM teilt sich 3,7 GB ohne Swap; ueber 768m geht es nicht ohne
-    # Ruecksprache mit dem Eigentuemer.
+    # ausdruecklich das Anheben der Grenze statt einer kleineren Fotogrenze;
+    # verworfen: CMYK und 16 Bit vor dem Dekodieren abweisen -- der Eigentuemer
+    # hat am 22.10.2026 entschieden, beide anzunehmen und die Grenze danach zu
+    # bemessen.
+    # Die VM teilt sich 3,7 GB ohne Swap; 768m ist die Obergrenze, mehr geht
+    # nicht ohne Ruecksprache mit dem Eigentuemer.
     mem_limit: 768m
     volumes:
       - jufi-dateien:/daten
