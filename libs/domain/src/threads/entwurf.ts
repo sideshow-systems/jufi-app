@@ -17,6 +17,10 @@ export const GRENZEN = {
 	modulTitel: 80,
 	ort: 200,
 	treffpunkt: 200,
+	positionen: 30,
+	positionText: 80,
+	anzahl: 99,
+	notiz: 80,
 } as const;
 
 export const ROLLENFILTER_TEXT: Readonly<Record<Rollenfilter, string>> = {

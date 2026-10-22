@@ -170,7 +170,7 @@ describe('Foto-Einwilligung im Thread', () => {
 			{ fuerId: 'tim', vonId: 'tim', optionIds: ['o-nein'], abgegebenAm: JETZT },
 		],
 	});
-	const daten = (umfragen: UmfrageDaten[]): ThreadDaten => ({ kopf: kopf(), termine: [], umfragen });
+	const daten = (umfragen: UmfrageDaten[]): ThreadDaten => ({ kopf: kopf(), termine: [], umfragen, helfer: [] });
 
 	describe('ohneFotoEinwilligung', () => {
 		it('nennt nur Tim, wenn Lena eine Einwilligung hat', () => {

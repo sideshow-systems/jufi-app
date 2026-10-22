@@ -62,6 +62,8 @@ export function threadDatenAus(kopf: ThreadKopf, module: readonly ModulDaten[]):
 		kopf,
 		termine: module.flatMap((m) => (m.typ === 'TERMIN' ? [m.termin] : [])),
 		umfragen: module.flatMap((m) => (m.typ === 'UMFRAGE' ? [m.umfrage] : [])),
+		// ModulDaten kennt das Helfer-Modul noch nicht; bis es dort steht, hat kein Thread eine Liste.
+		helfer: [],
 	};
 }
 

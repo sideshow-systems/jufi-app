@@ -102,7 +102,7 @@ export function threadListe(e: {
 			archiviert,
 			entwurf: t.kopf.veroeffentlichtAm === null,
 			naechsterTermin: naechsterTerminText(t.kopf, daten.termine, e.jetzt),
-			neu: !archiviert && istNeu(neuEingabeFuer(e.ich, t, daten.umfragen, e.zugangSeit)),
+			neu: !archiviert && istNeu(neuEingabeFuer(e.ich, t, daten, e.zugangSeit)),
 		});
 	}
 	return { threads: zeilen, archiv };

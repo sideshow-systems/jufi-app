@@ -2,14 +2,14 @@ import { darfFuerKindHandeln, hatRecht, istJugendleiter } from '../rechte.js';
 import { kinderImThread, siehtThread } from './sichtbarkeit.js';
 import { EHEMALIGES_MITGLIED, kurzname } from './namen.js';
 import { darfBearbeiten } from './rechte.js';
-import type { ErgebnisSicht, ThreadKopf, ThreadPerson, Umfeld, UmfrageDaten } from './typen.js';
+import type { AntwortRegel, ErgebnisSicht, ThreadKopf, ThreadPerson, Umfeld, UmfrageDaten } from './typen.js';
 import { nachVorname } from './umfeld.js';
 
 // Spec 3.2. Entfernte sind nie gefragt, weil das Umfeld sie nicht enthaelt; ihre
 // Antworten fallen deshalb in jeder Auswertung von selbst weg. Dasselbe gilt fuer
 // Personen, die aus der Zielgruppe gefallen sind: gefragt ist, wer jetzt zur Zielgruppe
 // gehoert, nicht wer einmal geantwortet hat.
-export function gefragte(umfrage: Pick<UmfrageDaten, 'einheit'>, kopf: ThreadKopf, umfeld: Umfeld): ThreadPerson[] {
+export function gefragte(regel: Pick<AntwortRegel, 'einheit'>, kopf: ThreadKopf, umfeld: Umfeld): ThreadPerson[] {
 	const kinder = kinderImThread(kopf, umfeld);
 	const kinderIds = new Set(kinder.map((k) => k.id));
 	const alle = [...umfeld.personen.values()];
@@ -34,9 +34,9 @@ export function gefragte(umfrage: Pick<UmfrageDaten, 'einheit'>, kopf: ThreadKop
 	const erwachsene = [...bezugspersonen, ...jugendleiter];
 
 	const gruppe: ThreadPerson[] =
-		umfrage.einheit === 'JUNGFISCHER'
+		regel.einheit === 'JUNGFISCHER'
 			? gefragteKinder
-			: umfrage.einheit === 'ERWACHSENER'
+			: regel.einheit === 'ERWACHSENER'
 				? erwachsene
 				: [...gefragteKinder, ...erwachsene];
 
@@ -57,12 +57,12 @@ export interface AntwortZeile {
 // als "jeder mit Zugang", weil Kinder ohne Zugang dann keine Stimme haetten.
 export function antwortZeilen(
 	betrachter: ThreadPerson,
-	umfrage: Pick<UmfrageDaten, 'einheit'>,
+	regel: Pick<AntwortRegel, 'einheit'>,
 	kopf: ThreadKopf,
 	umfeld: Umfeld,
 ): AntwortZeile[] {
 	if (!siehtThread(betrachter, kopf, umfeld)) return [];
-	const gefragt = gefragte(umfrage, kopf, umfeld);
+	const gefragt = gefragte(regel, kopf, umfeld);
 	const zeilen: AntwortZeile[] = [];
 	if (gefragt.some((p) => p.id === betrachter.id)) {
 		zeilen.push({ fuerId: betrachter.id, vorname: betrachter.vorname, selbst: true });
@@ -87,20 +87,20 @@ export type AntwortErlaubnis = 'ERLAUBT' | 'NICHT_GEFUNDEN' | 'ENTWURF' | 'FRIST
 export function darfAntworten(
 	person: ThreadPerson,
 	fuerId: string,
-	umfrage: Pick<UmfrageDaten, 'einheit' | 'frist'>,
+	regel: AntwortRegel,
 	kopf: ThreadKopf,
 	umfeld: Umfeld,
 	jetzt: Date,
 ): AntwortErlaubnis {
 	if (!siehtThread(person, kopf, umfeld)) return 'NICHT_GEFUNDEN';
-	const fuer = gefragte(umfrage, kopf, umfeld).find((p) => p.id === fuerId);
+	const fuer = gefragte(regel, kopf, umfeld).find((p) => p.id === fuerId);
 	if (!fuer) return 'NICHT_GEFUNDEN';
 	if (!kopf.veroeffentlichtAm) return 'ENTWURF';
 	if (darfBearbeiten(person, kopf)) return 'ERLAUBT';
 	const eigen =
 		fuer.id === person.id || (fuer.art === 'JUNGFISCHER' && darfFuerKindHandeln(person, fuer, umfeld.zuordnungen));
 	if (!eigen) return 'NICHT_GEFUNDEN';
-	if (umfrage.frist && jetzt.getTime() >= umfrage.frist.getTime()) return 'FRIST_ABGELAUFEN';
+	if (regel.frist && jetzt.getTime() >= regel.frist.getTime()) return 'FRIST_ABGELAUFEN';
 	return 'ERLAUBT';
 }
 

@@ -79,8 +79,38 @@ export interface UmfrageDaten {
 	antworten: readonly AntwortDaten[];
 }
 
+// Was Gefragte, Antwortzeilen und Antwortrecht von einem Antwort-Modul brauchen. Umfrage
+// und Helferliste teilen es, damit "wer ist gefragt" und "bis wann" nur eine Regel haben.
+export interface AntwortRegel {
+	einheit: AntwortEinheit;
+	frist: Date | null;
+}
+
+export interface HelferEintragDaten {
+	fuerId: string;
+	vonId: string;
+	notiz: string | null;
+	eingetragenAm: Date;
+}
+
+export interface HelferPositionDaten {
+	id: string;
+	schluessel: string;
+	text: string;
+	anzahl: number;
+	/** Nach eingetragenAm aufsteigend: die Reihenfolge der Anmeldung. */
+	eintraege: readonly HelferEintragDaten[];
+}
+
+export interface HelferDaten extends AntwortRegel {
+	modulId: string;
+	/** In der Reihenfolge, die der Ersteller gewaehlt hat. */
+	positionen: readonly HelferPositionDaten[];
+}
+
 export interface ThreadDaten {
 	kopf: ThreadKopf;
 	termine: readonly TerminDaten[];
 	umfragen: readonly UmfrageDaten[];
+	helfer: readonly HelferDaten[];
 }

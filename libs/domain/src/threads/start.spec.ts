@@ -13,8 +13,16 @@ import {
 	type OffenerPunkt,
 	type StartThread,
 } from './start.js';
-import type { AenderungArt, AntwortDaten, ThreadDaten, ThreadKopf, UmfrageDaten } from './typen.js';
-import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
+import type {
+	AenderungArt,
+	AntwortDaten,
+	HelferDaten,
+	HelferPositionDaten,
+	ThreadDaten,
+	ThreadKopf,
+	UmfrageDaten,
+} from './typen.js';
+import { bowlingUmfeld, JETZT, kopf, MIA } from './testhilfe.js';
 
 const umfeld = bowlingUmfeld();
 const person = (id: string) => umfeld.personen.get(id)!;
@@ -45,8 +53,39 @@ function antwort(fuerId: string, vonId: string, optionId = 'o-dabei'): AntwortDa
 	return { fuerId, vonId, optionIds: [optionId], abgegebenAm: new Date('2026-10-21T12:00:00Z') };
 }
 
-function thread(k: ThreadKopf, umfragen: UmfrageDaten[], termine: TerminDaten[] = []): ThreadDaten {
-	return { kopf: k, termine, umfragen };
+function thread(
+	k: ThreadKopf,
+	umfragen: UmfrageDaten[],
+	termine: TerminDaten[] = [],
+	helfer: HelferDaten[] = [],
+): ThreadDaten {
+	return { kopf: k, termine, umfragen, helfer };
+}
+
+function helferPosition(id: string, anzahl: number, belegtVon: string[] = []): HelferPositionDaten {
+	return {
+		id,
+		schluessel: id,
+		text: id,
+		anzahl,
+		eintraege: belegtVon.map((fuerId, i) => ({
+			fuerId,
+			vonId: fuerId,
+			notiz: null,
+			eingetragenAm: new Date(Date.UTC(2026, 9, 21, 12, i)),
+		})),
+	};
+}
+
+// Die Helferliste des Bowling-Threads: Fahrer 2, Snacks 3, pro Erwachsener.
+function helferliste(daten: Partial<HelferDaten> = {}): HelferDaten {
+	return {
+		modulId: 'm-helfer',
+		einheit: 'ERWACHSENER',
+		frist: FRIST,
+		positionen: [helferPosition('fahrer', 2), helferPosition('snacks', 3)],
+		...daten,
+	};
 }
 
 // Die zweite Umfrage ohne Frist: pro Erwachsener, damit sie eine eigene Zeile (vorname
@@ -178,6 +217,53 @@ describe('brauchtAntwort', () => {
 	});
 });
 
+describe('brauchtAntwort mit Helferliste', () => {
+	const mitHelfer = (h: Partial<HelferDaten> = {}) => thread(kopf(), [], [], [helferliste(h)]);
+	const fuerSandra = (threads: ThreadDaten[], jetzt = JETZT) =>
+		brauchtAntwort(person('sandra'), threads, umfeld, jetzt);
+
+	it('nennt die Liste mit Frist, solange Sandra nirgends eingetragen ist', () => {
+		expect(fuerSandra([mitHelfer()])).toEqual([
+			{ threadId: 'bowling', titel: '🎳 Bowling', modulId: 'm-helfer', fuerId: 'sandra', vorname: null, frist: FRIST },
+		]);
+	});
+
+	it('nennt nichts, sobald Sandra in einer Position steht', () => {
+		const eingetragen = mitHelfer({
+			positionen: [helferPosition('fahrer', 2), helferPosition('snacks', 3, ['sandra'])],
+		});
+		expect(fuerSandra([eingetragen])).toEqual([]);
+	});
+
+	it('nennt nichts ohne Frist', () => {
+		expect(fuerSandra([mitHelfer({ frist: null })])).toEqual([]);
+	});
+
+	it('nennt nichts ab der Fristsekunde', () => {
+		expect(fuerSandra([mitHelfer()], FRIST)).toEqual([]);
+	});
+
+	it('nennt nichts, wenn alle Positionen voll sind', () => {
+		const voll = mitHelfer({
+			positionen: [helferPosition('fahrer', 1, ['thomas']), helferPosition('snacks', 2, ['hans', 'peter'])],
+		});
+		expect(fuerSandra([voll])).toEqual([]);
+	});
+
+	it('nennt pro Jungfischer eine Zeile je Kind', () => {
+		const ergebnis = fuerSandra([mitHelfer({ einheit: 'JUNGFISCHER' })]);
+		expect(ergebnis.map((p) => [p.modulId, p.fuerId, p.vorname])).toEqual([
+			['m-helfer', 'lena', 'Lena'],
+			['m-helfer', 'max', 'Max'],
+		]);
+	});
+
+	it('sortiert Helferliste und Umfrage desselben Threads nach Frist', () => {
+		const beide = thread(kopf(), [umfrage({ frist: null })], [], [helferliste()]);
+		expect(punkte(fuerSandra([beide]))).toEqual(['bowling/sandra', 'bowling/lena', 'bowling/max']);
+	});
+});
+
 describe('istNeu', () => {
 	const basis = {
 		personId: 'sandra',
@@ -305,24 +391,30 @@ describe('istNeu', () => {
 
 describe('siehtErgebnisse', () => {
 	const bowling = kopf();
+	const nur = (umfragen: UmfrageDaten[]) => ({ umfragen, helfer: [] });
 
 	it('verneint fuer eine Familie, wenn nur Jugendleiter Ergebnisse sehen', () => {
-		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'JUGENDLEITER' })])).toBe(false);
+		expect(siehtErgebnisse(person('sandra'), bowling, nur([umfrage({ ergebnisse: 'JUGENDLEITER' })]))).toBe(false);
+	});
+
+	it('bejaht in einem Thread mit Helferliste, denn Eintraege sieht jeder (Entscheidung 7)', () => {
+		expect(siehtErgebnisse(person('sandra'), bowling, { umfragen: [], helfer: [helferliste()] })).toBe(true);
+		expect(siehtErgebnisse(MIA, bowling, { umfragen: [], helfer: [helferliste()] })).toBe(false);
 	});
 
 	it('bejaht fuer eine Familie bei Ergebnissen fuer alle oder als Summe', () => {
-		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'ALLE' })])).toBe(true);
-		expect(siehtErgebnisse(person('sandra'), bowling, [umfrage({ ergebnisse: 'SUMME' })])).toBe(true);
+		expect(siehtErgebnisse(person('sandra'), bowling, nur([umfrage({ ergebnisse: 'ALLE' })]))).toBe(true);
+		expect(siehtErgebnisse(person('sandra'), bowling, nur([umfrage({ ergebnisse: 'SUMME' })]))).toBe(true);
 	});
 
 	it('bejaht fuer eine Jugendleiterin, auch wenn nur Jugendleiter Ergebnisse sehen', () => {
-		expect(siehtErgebnisse(person('petra'), bowling, [umfrage({ ergebnisse: 'JUGENDLEITER' })])).toBe(true);
+		expect(siehtErgebnisse(person('petra'), bowling, nur([umfrage({ ergebnisse: 'JUGENDLEITER' })]))).toBe(true);
 	});
 
 	it('bejaht, sobald eine von mehreren Umfragen Ergebnisse zeigt, und verneint ohne Umfrage', () => {
 		const zwei = [umfrage({ ergebnisse: 'JUGENDLEITER' }), umfrage({ modulId: 'm-2', ergebnisse: 'SUMME' })];
-		expect(siehtErgebnisse(person('sandra'), bowling, zwei)).toBe(true);
-		expect(siehtErgebnisse(person('sandra'), bowling, [])).toBe(false);
+		expect(siehtErgebnisse(person('sandra'), bowling, nur(zwei))).toBe(true);
+		expect(siehtErgebnisse(person('sandra'), bowling, nur([]))).toBe(false);
 	});
 });
 
