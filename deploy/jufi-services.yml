@@ -190,7 +190,7 @@ services:
     # ausdruecklich das Anheben der Grenze statt einer kleineren Fotogrenze.
     # Die VM teilt sich 3,7 GB ohne Swap; ueber 768m geht es nicht ohne
     # Ruecksprache mit dem Eigentuemer.
-    mem_limit: 640m
+    mem_limit: 768m
     volumes:
       - jufi-dateien:/daten
     # Wie im Image (Dockerfile), hier noch einmal, damit der Block fuer sich lesbar

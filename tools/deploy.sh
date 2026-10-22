@@ -265,10 +265,10 @@ done
 note 'Initialen-Icon: DejaVu Sans Bold, 192 und 512 px, Buchstaben gezeichnet'
 
 # Fotoprobe (TP4-Spec 2.4, Plan Entscheidung 1): Die teuersten Fotos, die die Upload-Route
-# annimmt (Liste und Begruendung in tools/erzeuge-testbilder.mjs: progressive JPEGs,
-# interlaced PNG mit 50 MP, WebP, dazu die beiden bisherigen Bilder), gehen durch genau die
-# foto.ts, die im Betrieb laeuft, im laufenden App-Container und unter seiner
-# Speichergrenze. Danach zaehlt der Spitzenwert der cgroup: App im Leerlauf und Probe
+# annimmt (Liste und Begruendung in tools/erzeuge-testbilder.mjs: progressive JPEGs in
+# 4:2:0, 4:4:4 und CMYK, interlaced PNG mit 50 MP in 8 und 16 Bit, WebP, dazu die beiden
+# bisherigen Bilder), gehen durch genau die foto.ts, die im Betrieb laeuft, im laufenden
+# App-Container und unter seiner Speichergrenze. Danach zaehlt der Spitzenwert der cgroup: App im Leerlauf und Probe
 # zusammen, also mehr als im Betrieb, wo nur ein Node-Prozess arbeitet -- die vorsichtige
 # Seite. Ein dauerhaftes Tor statt einer einmaligen Messung, weil die naechste sharp-Version
 # den Speicherbedarf aendern kann, ohne dass es jemand merkt. Verworfen: ueber die echte
@@ -277,7 +277,7 @@ note 'Initialen-Icon: DejaVu Sans Bold, 192 und 512 px, Buchstaben gezeichnet'
 # Die Bilder entstehen hier (sharp auf dem Entwicklungsrechner), nie echte Fotos.
 # Die Liste steht hier ausdruecklich und nicht als Glob ueber das Verzeichnis: Erzeugte das
 # Skript ein Bild nicht mehr, fiele die Probe mit "fehlt" um, statt still weniger zu messen.
-PROBE_BILDER=(gross.jpg gross.png gross-progressiv.jpg gross-progressiv-444.jpg gross-adam7.png gross.webp)
+PROBE_BILDER=(gross.jpg gross.png gross-progressiv.jpg gross-progressiv-444.jpg gross-cmyk.jpg gross-adam7.png gross-adam7-16bit.png gross.webp)
 LOG="$(mktemp)"
 node tools/erzeuge-testbilder.mjs "$PROBE_DIR" >"$LOG" 2>&1 \
 	|| { cat "$LOG" >&2; fail 'Die Testbilder der Fotoprobe liessen sich nicht erzeugen.'; }

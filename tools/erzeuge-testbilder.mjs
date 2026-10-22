@@ -4,7 +4,7 @@
 //   node tools/erzeuge-testbilder.mjs <verzeichnis> [--bunt <n>]
 //
 // Immer entstehen die Bilder der Fotoprobe im Rauchtest (tools/deploy.sh, Tor 4). Sie decken
-// die teuersten Faelle ab, die die Upload-Route noch annimmt (hoechstens 20 MiB und 50 MP,
+// die teuersten bekannten Faelle ab, die die Upload-Route noch annimmt (hoechstens 20 MiB und 50 MP,
 // TP4-Spec 2.4). Teuer heisst dabei nicht gross nach Bytes, sondern viele Pixel in einer
 // Kodierung, die der Dekoder nicht zeilenweise lesen kann:
 //   - gross.jpg: 8000 x 6000 (48 MP), baseline, Farbverlauf mit leichtem Rauschen,
@@ -14,11 +14,15 @@
 //     Dekoder alle DCT-Koeffizienten (bei 48 MP rund 144 MB); so speichern Lightroom,
 //     Photoshop und manche Bildbearbeitungs-Apps.
 //   - gross-progressiv-444.jpg: progressiv ohne Farbunterabtastung (4:4:4), doppelt so
-//     viele Koeffizienten (rund 288 MB): der teuerste JPEG-Fall.
+//     viele Koeffizienten (rund 288 MB).
+//   - gross-cmyk.jpg: dasselbe Bild progressiv in CMYK, vier volle Kanaele (rund 384 MB
+//     Koeffizienten): der teuerste JPEG-Fall. So exportieren Druckvorlagen.
 //   - gross-adam7.png: 8160 x 6120 (knapp 50 MP), RGBA, interlaced (Adam7). Interlaced
 //     muss der Dekoder das ganze Bild entpacken, bevor er die erste Zeile liefert (rund
 //     200 MB); der Alphakanal laesst zudem flatten arbeiten. Glatte Verlaeufe, damit die
 //     Datei trotz 50 MP weit unter 20 MiB bleibt.
+//   - gross-adam7-16bit.png: dasselbe mit 16 Bit je Kanal; entpackt doppelt so gross
+//     (rund 400 MB): der teuerste Fall ueberhaupt.
 //   - gross.webp: 8000 x 6000, dasselbe Bild wie gross.jpg; libwebp dekodiert immer ganz.
 //   - gross.png: RGB-Rauschen, so bemessen, dass die Datei knapp unter der Fotogrenze
 //     liegt (18 bis 20 MiB). Rauschen, weil es sich nicht komprimieren laesst: Nur so wird
@@ -114,6 +118,14 @@ async function grosseFotos() {
 		['gross.jpg', (bild) => bild.jpeg({ quality: 90 })],
 		['gross-progressiv.jpg', (bild) => bild.jpeg({ quality: 90, progressive: true, chromaSubsampling: '4:2:0' })],
 		['gross-progressiv-444.jpg', (bild) => bild.jpeg({ quality: 90, progressive: true, chromaSubsampling: '4:4:4' })],
+		// CMYK: vier volle Kanaele ohne Farbunterabtastung, also noch ein Drittel mehr
+		// Koeffizienten als 4:4:4. Qualitaet 85, weil die Datei mit 90 nur knapp unter
+		// 20 MiB laege; fuer den Speicher des Dekoders zaehlt die Zahl der Koeffizienten,
+		// nicht die Qualitaet.
+		[
+			'gross-cmyk.jpg',
+			(bild) => bild.toColourspace('cmyk').jpeg({ quality: 85, progressive: true, chromaSubsampling: '4:4:4' }),
+		],
 		// effort 0: Das Kodieren von 48 MP dauerte mit dem Standard (4) ein Vielfaches, und
 		// fuer den Dekoder ist die Datei dieselbe Arbeit.
 		['gross.webp', (bild) => bild.webp({ quality: 90, effort: 0 })],
@@ -145,6 +157,16 @@ async function interlacedPng() {
 		.png({ progressive: true })
 		.toFile(pfad);
 	pruefe(pfad, breite, hoehe, 0, FOTO_GRENZE);
+	// Dasselbe mit 16 Bit je Kanal: doppelt so viele Bytes beim Entpacken. Bildbearbeitungen
+	// exportieren PNG so, ein Handy nie; die Route nimmt es trotzdem an.
+	const pfad16 = join(ziel, 'gross-adam7-16bit.png');
+	await sharp(roh, { raw: { width: breite, height: hoehe, channels: 4 } })
+		.toColourspace('rgb16')
+		.png({ progressive: true })
+		.toFile(pfad16);
+	const tiefe = (await sharp(pfad16).metadata()).depth;
+	if (tiefe !== 'ushort') abbruch(`${pfad16} hat die Tiefe ${tiefe}, erwartet ushort (16 Bit).`);
+	pruefe(pfad16, breite, hoehe, 0, FOTO_GRENZE);
 }
 
 async function grossesPng() {
