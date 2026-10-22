@@ -106,8 +106,8 @@ export async function hatEinwilligung(tx: Transaktion, kind: Person, jetzt: Date
  * Ob die Person heute auf Fotos gezeigt werden darf. Die Regel steht in fotoEinwilligungGilt
  * (Volljaehrige nur mit eigener Zeile, sonst wie die DSGVO-Einwilligung); hier wird nur
  * gelesen, was sie braucht, und zwar frisch und nur die FOTOS-Zeilen: eine DSGVO-Zeile
- * erlaubt keine Fotos (Rahmen, Entscheidung 8). Eine Stelle fuer "Meine Jungfischer", GET /ich,
- * die Personenansicht und die Schreibrouten, damit sie nicht auseinanderlaufen.
+ * erlaubt keine Fotos (Plan zu Etappe 2, Entscheidung 8). Eine Stelle fuer "Meine Jungfischer",
+ * GET /ich, die Personenansicht und die Schreibrouten, damit sie nicht auseinanderlaufen.
  */
 export async function hatFotoEinwilligung(db: VereinDb | VereinTx, kind: Person, jetzt: Date): Promise<boolean> {
 	const [zeilen, zuordnungen] = await Promise.all([

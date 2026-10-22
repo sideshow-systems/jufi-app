@@ -1004,6 +1004,14 @@ export class ThreadEditorComponent {
 	// Die Rueckfrage nennt die Zahlen, solange noch nichts verloren ist. Ein Modul ohne Medien, auch
 	// ein ungespeichertes, faellt ohne Rueckfrage weg; verworfen: jedes Entfernen bestaetigen zu
 	// lassen, das machte aus dem Alltag (ein Info-Text zu viel) eine Huerde.
+	//
+	// Bekannte Luecke (gilt ebenso fuer loeschText): Die Zahl stammt vom Laden der Bearbeitung und vom
+	// eigenen Upload (ladeMedien). Fotos, die andere danach hochladen, kennt die Rueckfrage nicht; das
+	// Speichern loescht sie trotzdem mit. Bei "Alle Leser laden hoch" kann das waehrend eines Zeltlagers
+	// geschehen, ist aber selten, denn ein Foto-Modul entfernt man kaum mitten im Hochladen. Verworfen:
+	// ein Abgleich beim Speichern (die Route kennt die echte Zahl und antwortete bei Abweichung mit 409,
+	// der Editor fragte neu) -- ein eigener Konflikt-Weg durch Route, Editor und Tests fuer einen Fall,
+	// den die Person auch nach dem Speichern noch sieht (die Fotos fehlen im Thread).
 	protected entfernenFragen(i: number): void {
 		const e = this.arbeit().module[i];
 		if (e === undefined) return;
@@ -1080,7 +1088,10 @@ export class ThreadEditorComponent {
 		return this.bearbeitung()?.medien.module[m.id] ?? KEINE_MEDIEN;
 	}
 
-	/** Was das Loeschen des Threads mitnimmt, wenn Fotos oder Dateien daran haengen. */
+	/**
+	 * Was das Loeschen des Threads mitnimmt, wenn Fotos oder Dateien daran haengen. Dieselbe Luecke
+	 * wie bei entfernenFragen: Was andere seit dem Laden hochgeladen haben, fehlt in der Zahl.
+	 */
 	protected readonly loeschText = computed(() => {
 		const basis = 'Der Thread wird mit allen Modulen endgültig gelöscht.';
 		const medien = medienZahlText(this.bearbeitung()?.medien.gesamt ?? KEINE_MEDIEN);

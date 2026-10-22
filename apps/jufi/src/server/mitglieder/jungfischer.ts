@@ -56,10 +56,12 @@ async function ladeErziehungsberechtigt(tx: Transaktion, handelndenId: string, k
 type Einwilligungsart = 'DSGVO_ART8' | 'FOTOS';
 
 /**
- * Die Art der Einwilligung aus dem Body; ohne Angabe die DSGVO-Einwilligung, damit Client und
- * Tests, die nur erteilen schicken, unveraendert bleiben (Rahmen, Entscheidung 7). Alles andere
- * ist 400, auch null und eine andere Schreibweise: eine Art, die wir nicht kennen, soll nicht
- * stillschweigend als DSGVO-Einwilligung gelten.
+ * Die Art der Einwilligung aus dem Body; ohne Angabe die DSGVO-Einwilligung (Plan zu Etappe 2,
+ * Entscheidung 7). Der Grund ist die Anfrage, nicht der Test: Der DSGVO-Weg des Clients schickt bis
+ * heute nur erteilen (mitglieder-api.ts), und eine Seite, die beim Ausrollen noch in der alten
+ * Fassung offen ist, ebenso. Verworfen: art zur Pflicht machen -- dann scheiterte jede solche
+ * Anfrage mit 400. Alles andere ist 400, auch null und eine andere Schreibweise: eine Art, die
+ * wir nicht kennen, soll nicht stillschweigend als DSGVO-Einwilligung gelten.
  */
 function lesArt(body: unknown): Einwilligungsart {
 	const wert = ((body ?? {}) as Record<string, unknown>)['art'];
@@ -276,10 +278,11 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 	);
 
 	/**
-	 * Ein volljaehriger Jungfischer pflegt seine Foto-Einwilligung selbst (Rahmen, Entscheidung 6):
-	 * die der Eltern erloescht mit dem 18. Geburtstag, und ein Erwachsener entscheidet ueber Fotos
-	 * von sich. Unter derselben Sperre wie die Elternroute, denn "angenommen oder nicht" haengt
-	 * am Geburtsdatum und am Entfernt-Stand, die eine gleichzeitige Anfrage aendern kann.
+	 * Ein volljaehriger Jungfischer pflegt seine Foto-Einwilligung selbst (Plan zu Etappe 2,
+	 * Entscheidung 6): die der Eltern erloescht mit dem 18. Geburtstag, und ein Erwachsener
+	 * entscheidet ueber Fotos von sich. Unter derselben Sperre wie die Elternroute, denn
+	 * "angenommen oder nicht" haengt am Geburtsdatum und am Entfernt-Stand, die eine gleichzeitige
+	 * Anfrage aendern kann.
 	 * Alles andere ist "nicht gefunden": ein Minderjaehriger oder Erwachsener hat diese Route nicht.
 	 */
 	router.post(
