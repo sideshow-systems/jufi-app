@@ -24,7 +24,8 @@ export interface TerminEintrag {
 }
 
 const WOCHENTAG = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
-const UHRZEIT = /^([01]\d|2[0-3]):[0-5]\d$/;
+// Exportiert, damit die Abfahrtszeit der Fahrgemeinschaft dieselbe Form prueft.
+export const UHRZEIT = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** "Sa" */
 export function wochentagKurz(tag: string): string {

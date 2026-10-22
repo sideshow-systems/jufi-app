@@ -66,6 +66,8 @@ export function threadDatenAus(kopf: ThreadKopf, module: readonly ModulDaten[]):
 		termine: module.flatMap((m) => (m.typ === 'TERMIN' ? [m.termin] : [])),
 		umfragen: module.flatMap((m) => (m.typ === 'UMFRAGE' ? [m.umfrage] : [])),
 		helfer: module.flatMap((m) => (m.typ === 'HELFER' ? [m.helfer] : [])),
+		// Die Variante FAHRT von ModulDaten kommt mit der Ansicht der Fahrgemeinschaft.
+		fahrt: null,
 	};
 }
 

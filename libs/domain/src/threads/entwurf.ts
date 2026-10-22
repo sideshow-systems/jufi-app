@@ -21,6 +21,9 @@ export const GRENZEN = {
 	positionText: 80,
 	anzahl: 99,
 	notiz: 80,
+	plaetze: 8,
+	autosJeRichtung: 30,
+	autoText: 200,
 } as const;
 
 export const ROLLENFILTER_TEXT: Readonly<Record<Rollenfilter, string>> = {

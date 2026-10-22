@@ -107,7 +107,7 @@ export function ohneFotoEinwilligung(
 // alle gemeint, mit Umfrage ohne Zusagen niemand. Fehlt der Schluessel (der Ersteller hat die
 // Option geloescht), gibt es ebenfalls keine Auskunft statt "niemand", damit der Hinweis nicht
 // leise verschwindet.
-export function dabeiKinder(daten: ThreadDaten): ReadonlySet<string> | null {
+export function dabeiKinder(daten: Pick<ThreadDaten, 'umfragen'>): ReadonlySet<string> | null {
 	const umfrage = daten.umfragen.find((u) => u.teilnahme);
 	const option = umfrage?.optionen.find((o) => o.schluessel === 'dabei');
 	if (!umfrage || !option) return null;
