@@ -129,6 +129,7 @@ enum ModulTyp {
   UMFRAGE
   DATEIEN
   FOTOS
+  HELFER
 }
 
 /// Wer in ein Foto-Modul hochladen darf (TP4-Spec). Dieselben Werte wie
@@ -236,6 +237,9 @@ model Verein {
   umfrageOptionen        UmfrageOption[]
   umfrageAntworten       UmfrageAntwort[]
   umfrageAntwortOptionen UmfrageAntwortOption[]
+  helferModule           HelferModul[]
+  helferPositionen       HelferPosition[]
+  helferEintraege        HelferEintrag[]
   verlauf                VerlaufEintrag[]
   gelesenStaende         GelesenStand[]
   aenderungen            Aenderung[]
@@ -311,6 +315,8 @@ model Person {
   erstellteThreads             Thread[]              @relation("ThreadErstelltVon")
   antwortenFuer                UmfrageAntwort[]      @relation("AntwortFuer")
   antwortenVon                 UmfrageAntwort[]      @relation("AntwortVon")
+  helferEintraegeFuer          HelferEintrag[]       @relation("HelferEintragFuer")
+  helferEintraegeVon           HelferEintrag[]       @relation("HelferEintragVon")
   verlaufAlsAutor              VerlaufEintrag[]      @relation("VerlaufAutor")
   verlaufGeloescht             VerlaufEintrag[]      @relation("VerlaufGeloeschtVon")
   gelesenStaende               GelesenStand[]
@@ -664,7 +670,7 @@ model ThreadUntergruppe {
 }
 
 /// Kopfzeile eines Moduls; je Typ haengt eine Tabelle mit derselben id daran
-/// (InfoModul, TerminModul, UmfrageModul). Verworfen: ein JSON-Feld je Modul --
+/// (InfoModul, TerminModul, UmfrageModul, HelferModul). Verworfen: ein JSON-Feld je Modul --
 /// Regeln wie "eine Antwort pro Kind" sollen in der Datenbank abgesichert sein.
 ///
 /// position ist nicht eindeutig: Beim Umsortieren in einer Transaktion verletzte
@@ -686,6 +692,7 @@ model ThreadModul {
   umfrage     UmfrageModul?
   dateienKopf DateienModul?
   fotosKopf   FotosModul?
+  helfer      HelferModul?
   dateien     Datei[]
 
   @@unique([vereinId, id])
@@ -754,6 +761,91 @@ model TerminModul {
 
   @@unique([vereinId, id])
   @@index([vereinId, startDatum])
+}
+
+/// Kopfzeile der Helferliste ("Wer bringt was mit?"): Positionen mit Plaetzen, in
+/// die sich Personen eintragen. Eigene Tabellen statt UmfrageModul mit Optionen:
+/// Eine Position hat eine Anzahl, und mehrere Personen teilen sie sich -- die
+/// Umfrage kennt nur "gewaehlt oder nicht".
+model HelferModul {
+  /// Dieselbe id wie das ThreadModul.
+  id       String         @id
+  vereinId String
+  verein   Verein         @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modul    ThreadModul    @relation(fields: [vereinId, id], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  /// Wer eingetragen wird: wie bei der Umfrage der Jungfischer, der Erwachsene
+  /// oder die Person. Nach dem ersten Eintrag nicht mehr aenderbar (Domaene).
+  einheit  AntwortEinheit @default(ERWACHSENER)
+  /// Ab jetzt >= frist ist die Frist abgelaufen; die Server-Uhr entscheidet.
+  frist    DateTime?
+
+  positionen HelferPosition[]
+
+  /// Prisma verlangt fuer die 1:1-Relation einen Schluessel genau ueber deren Felder.
+  @@unique([vereinId, id])
+}
+
+/// Eine Zeile der Helferliste, z. B. "Kuchen", 4 Plaetze.
+model HelferPosition {
+  id         String      @id @default(cuid())
+  vereinId   String
+  verein     Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modulId    String
+  modul      HelferModul @relation(fields: [vereinId, modulId], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  /// 1-80 Zeichen (CHECK helfer_position_text).
+  text       String
+  /// Plaetze, 1-99 (CHECK helfer_position_anzahl).
+  anzahl     Int
+  /// Mindestens 0 (CHECK helfer_position_position); nicht eindeutig, wie bei ThreadModul.
+  position   Int
+  /// Bleibt beim Umbenennen und Umsortieren stabil, damit Eintraege an ihrer
+  /// Position bleiben (CHECK helfer_position_schluessel).
+  schluessel String
+
+  eintraege HelferEintrag[]
+
+  @@unique([modulId, schluessel])
+  /// Ziel des Fremdschluessels von HelferEintrag: Ein Eintrag gehoert so zu einer
+  /// Position desselben Vereins.
+  @@unique([vereinId, id])
+}
+
+/// Eine Person in einer Position; ein neuer Eintrag derselben Person ueberschreibt
+/// den alten (Upsert), wie bei UmfrageAntwort. Jeder Eintrag belegt einen Platz,
+/// auch wenn die Person nicht mehr gefragt ist (Plan, Entscheidung 1).
+///
+/// Alle drei Relationen ohne Kaskade: Von Thread, Modul oder Helferliste fuehrt
+/// kein Kaskadenweg zu den Eintraegen, jeder Eintrag haelt seine Position fest
+/// (P2003) -- eine Liste mit Eintraegen verschwindet nie still. Verworfen: Cascade
+/// an der Position; ein Thread mit Zusagen waere mit einem Klick samt allen
+/// Zusagen weg. Der Editor lehnt das Entfernen vorher mit 409 ab. Das Loeschen
+/// eines ganzen Vereins geht trotzdem durch, weil jede Tabelle direkt vom Verein
+/// kaskadiert. Die Personen ohne Kaskade aus demselben Grund wie bei Einwilligung:
+/// entfernt wird per Grabstein.
+model HelferEintrag {
+  id            String         @id @default(cuid())
+  vereinId      String
+  verein        Verein         @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  positionId    String
+  position      HelferPosition @relation(fields: [vereinId, positionId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Wer hilft (Jungfischer oder Erwachsener).
+  fuerId        String
+  fuer          Person         @relation("HelferEintragFuer", fields: [vereinId, fuerId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Wer den Eintrag vorgenommen hat.
+  vonId         String
+  von           Person         @relation("HelferEintragVon", fields: [vereinId, vonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// 1-80 Zeichen oder null (CHECK helfer_eintrag_notiz); ein Leerstring ist keine Notiz.
+  notiz         String?
+  /// Bleibt beim Aendern der Notiz stehen: Die Reihenfolge in der Position ist die der Anmeldung.
+  eingetragenAm DateTime
+  /// Je Verein eindeutig: Macht die Anfrage wiederholbar, wenn die Outbox des
+  /// Clients sie ein zweites Mal schickt.
+  clientId      String
+
+  @@unique([positionId, fuerId])
+  @@unique([vereinId, clientId])
+  @@index([vereinId, fuerId])
+  @@index([vereinId, vonId])
 }
 
 model UmfrageModul {

@@ -351,4 +351,8 @@ describe('VEREINS_MODELLE', () => {
 
 		expect([...VEREINS_MODELLE].sort()).toEqual(mitVereinId.sort());
 	});
+
+	it('kennt die Modelle der Helferliste', () => {
+		expect(VEREINS_MODELLE).toEqual(expect.arrayContaining(['HelferModul', 'HelferPosition', 'HelferEintrag']));
+	});
 });
