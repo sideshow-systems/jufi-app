@@ -2,9 +2,11 @@
  * Reihe fuer die Fotoverarbeitung (TP4 Etappe 2, Entscheidung 16).
  *
  * Eine Arbeit laeuft, bis zu `wartend` weitere warten, jede darueber hinaus
- * lehnt `reihe` ab. Der Container hat 256 MiB und dekodiert ein grosses Foto mit
- * mehreren Hundert MB Spitze; zwei gleichzeitig liessen den Kernel den Prozess
- * beenden. Verworfen: eine unbegrenzte Reihe, denn wartende Uploads
+ * lehnt `reihe` ab. Ein teures Foto (progressives 4:4:4-JPEG, Adam7-PNG) braucht
+ * beim Dekodieren mehrere Hundert MiB, das mem_limit in deploy/jufi-services.yml
+ * deckt genau eines davon; zwei gleichzeitig liessen den Kernel den Prozess
+ * beenden. Deshalb stellt sich auch das Vereinslogo hier an, sharp dekodiert es
+ * genauso. Verworfen: eine unbegrenzte Reihe, denn wartende Uploads
  * halten ihre Verbindung und ihre Temp-Datei; wer mehr schickt, als die Reihe
  * fasst, soll es nach Antwort 503 spaeter noch einmal versuchen.
  */

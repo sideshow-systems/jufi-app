@@ -1,8 +1,10 @@
 import { createPrismaClientFromEnv } from '@jufi/db';
+import { FEHLER_TEXT } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app.js';
+import { FotoSchlange } from '../dateien/foto-schlange.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
@@ -26,10 +28,18 @@ describe('Vereinseinstellungen', () => {
 	// DATABASE_URL zeigt hier auf jufi_test_server (test-umgebung.ts).
 	const prisma = createPrismaClientFromEnv();
 	let server: TestServer;
+	// Ohne Wartende: Ein einziger blockierter Lauf fuellt die Schlange (Fall BESCHAEFTIGT). Die
+	// Faelle laufen nacheinander, ein Logo-Upload findet sie sonst immer leer.
+	const schlange = new FotoSchlange(0);
 
 	beforeAll(async () => {
 		server = await starteTestServer(
-			createApp({ prisma, version: { version: '1.2.3', commit: 'abc' }, umgebung: TEST_UMGEBUNG }),
+			createApp({
+				prisma,
+				version: { version: '1.2.3', commit: 'abc' },
+				umgebung: TEST_UMGEBUNG,
+				fotoSchlange: schlange,
+			}),
 		);
 	});
 
@@ -284,6 +294,38 @@ describe('Vereinseinstellungen', () => {
 		// Das Bild mit 100 Megapixeln zu erzeugen und zu pruefen dauert unter der Last der parallelen Serverspecs
 		// laenger als die fuenf Sekunden von Vitest; ohne eigenes Limit scheiterte das Deployment-Tor zufaellig.
 	}, 30_000);
+
+	it('bei voller Fotoschlange ist ein Logo-Upload 503 BESCHAEFTIGT, danach geht er durch', async () => {
+		const v = await neuerVerein();
+		let frei!: () => void;
+		const tor = new Promise<void>((ok) => (frei = ok));
+		const laufend = schlange.reihe(() => tor);
+		expect(laufend).not.toBeNull();
+		try {
+			const r = await v.lade(await png());
+			expect(r.status).toBe(503);
+			expect(r.headers.get('retry-after')).toBe('2');
+			expect(await r.json()).toEqual({ fehler: FEHLER_TEXT.BESCHAEFTIGT, code: 'BESCHAEFTIGT' });
+			expect(await v.logo()).toBeNull();
+		} finally {
+			frei();
+			await laufend;
+		}
+		// Danach ist die Schlange wieder frei, und dasselbe Logo geht durch.
+		expect((await v.lade(await png())).status).toBe(200);
+		expect(await v.logo()).not.toBeNull();
+	});
+
+	it('das Logo belegt die Schlange, solange es verarbeitet wird', async () => {
+		const v = await neuerVerein();
+		const reihe = vi.spyOn(schlange, 'reihe');
+		try {
+			expect((await v.lade(await png())).status).toBe(200);
+			expect(reihe).toHaveBeenCalledTimes(1);
+		} finally {
+			reihe.mockRestore();
+		}
+	});
 
 	it('DELETE entfernt das Logo, auch ohne vorhandenes', async () => {
 		const v = await neuerVerein();
