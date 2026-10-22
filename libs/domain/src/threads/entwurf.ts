@@ -21,6 +21,9 @@ export const GRENZEN = {
 	positionText: 80,
 	anzahl: 99,
 	notiz: 80,
+	plaetze: 8,
+	autosJeRichtung: 30,
+	autoText: 200,
 } as const;
 
 export const ROLLENFILTER_TEXT: Readonly<Record<Rollenfilter, string>> = {
@@ -88,7 +91,8 @@ export type ModulEntwurf =
 			einheit: AntwortEinheit;
 			frist: string | null;
 			positionen: PositionEntwurf[];
-	  };
+	  }
+	| { typ: 'FAHRT'; id: string | null; titel: string | null; hin: boolean; rueck: boolean };
 
 export interface ThreadEntwurf {
 	titel: string;
@@ -103,6 +107,13 @@ export interface Feldfehler {
 	feld: string;
 	text: string;
 	konflikt?: true;
+	/**
+	 * Ein Konflikt an einer Fahrgemeinschaft. Der Server meldet ihn mit eigenem Code (DOPPELTE_FAHRT,
+	 * FAHRT_BELEGT) statt mit dem der Umfrage, die vorher die einzigen Konflikte stellte. Verworfen: den
+	 * Code am Feldnamen oder am Satz zu erkennen, denn "module" (Entfernen) teilen sich Umfrage,
+	 * Helferliste und Fahrgemeinschaft.
+	 */
+	fahrt?: true;
 }
 
 const MODI: readonly ThreadModus[] = ['AUSHANG', 'KOMMENTARE', 'CHAT'];
@@ -115,7 +126,7 @@ const ROLLENFILTER: readonly Rollenfilter[] = [
 const EINHEITEN: readonly AntwortEinheit[] = ['JUNGFISCHER', 'ERWACHSENER', 'PERSON'];
 const ERGEBNISSE: readonly ErgebnisSicht[] = ['ALLE', 'SUMME', 'JUGENDLEITER'];
 const FOTO_HOCHLADEN: readonly FotoHochladen[] = ['JUGENDLEITER', 'ALLE'];
-const MODULTYPEN = ['INFO', 'TERMIN', 'UMFRAGE', 'DATEIEN', 'FOTOS', 'HELFER'] as const;
+const MODULTYPEN = ['INFO', 'TERMIN', 'UMFRAGE', 'DATEIEN', 'FOTOS', 'HELFER', 'FAHRT'] as const;
 
 // ---------------------------------------------------------------------------------
 // Form: entwurfAus
@@ -216,6 +227,9 @@ function modul(w: unknown, i: number): ModulEntwurf {
 	if (typ === 'TERMIN') return { typ, ...kopf, termin: termin(w['termin'], i) };
 	if (typ === 'DATEIEN') return { typ, ...kopf };
 	if (typ === 'FOTOS') return { typ, ...kopf, hochladen: wahl(w['hochladen'], FOTO_HOCHLADEN, f('hochladen')) };
+	if (typ === 'FAHRT') {
+		return { typ, ...kopf, hin: wahrheit(w['hin'], f('hin')), rueck: wahrheit(w['rueck'], f('rueck')) };
+	}
 	if (typ === 'HELFER') {
 		return {
 			typ,
@@ -380,7 +394,13 @@ function umfrageFehler(
 }
 
 // Erschoepfend ueber typ: Ein neuer Modultyp bricht hier den Bau, statt ungeprueft durchzugehen.
-function modulFehler(m: ModulEntwurf, i: number, rollenfilter: Rollenfilter, teilnahmeSchonDa: boolean): Feldfehler[] {
+function modulFehler(
+	m: ModulEntwurf,
+	i: number,
+	rollenfilter: Rollenfilter,
+	teilnahmeSchonDa: boolean,
+	fahrtSchonDa: boolean,
+): Feldfehler[] {
 	const f = (name: string) => `module.${i}.${name}`;
 	const titel = laengeFehler(f('titel'), m.titel, GRENZEN.modulTitel);
 	switch (m.typ) {
@@ -402,6 +422,17 @@ function modulFehler(m: ModulEntwurf, i: number, rollenfilter: Rollenfilter, tei
 				...einheitFehler(f('einheit'), m.einheit, rollenfilter),
 				...positionenFehler(f('positionen'), m.positionen),
 			];
+		// Ohne Richtung gaebe es nichts zu fahren; das Feld ist der Umschalter "Hin". Die zweite
+		// Fahrgemeinschaft ist wie die zweite Teilnahme ein Konflikt (Plan-Entscheidung 9): Der
+		// Editor blendet den Typ aus, ein Client ohne ihn wuerde sonst an der Datenbank scheitern.
+		case 'FAHRT': {
+			const fehler: Feldfehler[] = [...titel];
+			if (!m.hin && !m.rueck) fehler.push({ feld: f('hin'), text: 'Bitte mindestens eine Richtung.' });
+			if (fahrtSchonDa) {
+				fehler.push({ feld: f('typ'), text: 'Es gibt schon eine Fahrgemeinschaft.', konflikt: true, fahrt: true });
+			}
+			return fehler;
+		}
 		default: {
 			const unerreichbar: never = m;
 			return unerreichbar;
@@ -427,9 +458,11 @@ export function entwurfFehler(e: ThreadEntwurf, untergruppenIds: ReadonlySet<str
 	}
 	if (e.module.length > GRENZEN.module) fehler.push({ feld: 'module', text: `Höchstens ${GRENZEN.module} Module.` });
 	let teilnahmeSchonDa = false;
+	let fahrtSchonDa = false;
 	e.module.forEach((m, i) => {
-		fehler.push(...modulFehler(m, i, e.rollenfilter, teilnahmeSchonDa));
+		fehler.push(...modulFehler(m, i, e.rollenfilter, teilnahmeSchonDa, fahrtSchonDa));
 		if (m.typ === 'UMFRAGE' && m.teilnahme) teilnahmeSchonDa = true;
+		if (m.typ === 'FAHRT') fahrtSchonDa = true;
 	});
 	return fehler;
 }
@@ -454,6 +487,10 @@ export function neuesModul(
 	const neu = { id: null, titel: null };
 	if (typ === 'INFO') return { typ, ...neu, text: '' };
 	if (typ === 'DATEIEN') return { typ, ...neu };
+	// Beide Richtungen sind die Vorgabe: Wer nur hin oder nur rueck braucht, schaltet eine ab.
+	// Die vorhandenen Module kennt die Funktion hier nicht; ob schon eine Fahrgemeinschaft da ist,
+	// sagt modulFehler beim Speichern, und der Editor bietet den Typ dann gar nicht an.
+	if (typ === 'FAHRT') return { typ, ...neu, hin: true, rueck: true };
 	// Fotos von allen Lesern sind die Ausnahme, die der Ersteller bewusst waehlt: Die Vorgabe
 	// bleibt bei den Jugendleitern. Verworfen: "ALLE" als Vorgabe, weil ein vergessener Schalter
 	// dann fremde Bilder in einen Familien-Thread liesse.
@@ -528,6 +565,9 @@ export function entwurfAusThread(k: ThreadKopf, module: readonly ModulDaten[]): 
 						positionen: h.positionen.map((p) => ({ schluessel: p.schluessel, text: p.text, anzahl: p.anzahl })),
 					};
 				}
+				case 'FAHRT':
+					// Ohne Autos und Mitfahrten: Die haben eigene Routen, der Entwurf beschreibt nur das Modul.
+					return { typ: m.typ, id: m.id, titel: m.titel, hin: m.fahrt.hin, rueck: m.fahrt.rueck };
 				case 'UMFRAGE': {
 					const u = m.umfrage;
 					return {

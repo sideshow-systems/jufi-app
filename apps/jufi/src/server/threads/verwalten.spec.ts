@@ -7,7 +7,7 @@ import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { legeThreadAn, ordneZu, trageEinTest, type TestModul } from './test-threads.js';
+import { bieteAutoTest, legeThreadAn, ordneZu, setzeEinTest, trageEinTest, type TestModul } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
 /** Donnerstag, 22.10.2026, 18:00 in Berlin: nach JETZT, Antworten sind also noch offen. */
@@ -553,6 +553,42 @@ describe('Veroeffentlichen, Archiv, Anpinnen und Loeschen', () => {
 			expect(await s.stand()).toBe(stand);
 			expect(await prisma.thread.count({ where: { id: t.threadId } })).toBe(1);
 			expect(await prisma.helferEintrag.count({ where: { positionId: t.positionIds['kuchen'] } })).toBe(1);
+		});
+
+		it('mit einer Mitfahrt "kommt selbst" 409 NICHT_LOESCHBAR, nichts geschrieben (Review Focus 4)', async () => {
+			const s = await szenario();
+			const t = await s.thread({ module: [{ typ: 'FAHRT' }] });
+			await setzeEinTest(s.db, t.modulIds[0] as string, 'HIN', s.lena.personId, null, s.sandra.personId);
+			const stand = await s.stand();
+			const r = await s.loesche(t.threadId, s.thomas.cookie);
+			expect(r.status).toBe(409);
+			expect(await r.json()).toEqual({
+				fehler: 'Der Thread hat Antworten oder Nachrichten und lässt sich nicht löschen. Archiviere ihn stattdessen.',
+				code: 'NICHT_LOESCHBAR',
+			});
+			expect(await s.stand()).toBe(stand);
+			expect(await prisma.thread.count({ where: { id: t.threadId } })).toBe(1);
+			expect(await prisma.mitfahrt.count({ where: { modulId: t.modulIds[0] } })).toBe(1);
+		});
+
+		it('mit einem Auto ohne Mitfahrer 409 NICHT_LOESCHBAR, nichts geschrieben', async () => {
+			const s = await szenario();
+			const t = await s.thread({ module: [{ typ: 'FAHRT' }] });
+			await bieteAutoTest(s.db, t.modulIds[0] as string, s.sandra.personId, 'RUECK', 3);
+			const stand = await s.stand();
+			const r = await s.loesche(t.threadId, s.thomas.cookie);
+			expect(r.status).toBe(409);
+			expect(((await r.json()) as { code: string }).code).toBe('NICHT_LOESCHBAR');
+			expect(await s.stand()).toBe(stand);
+			expect(await prisma.auto.count({ where: { modulId: t.modulIds[0] } })).toBe(1);
+		});
+
+		it('mit einer leeren Fahrgemeinschaft 204, das Modul geht mit', async () => {
+			const s = await szenario();
+			const t = await s.thread({ module: [{ typ: 'FAHRT' }] });
+			const r = await s.loesche(t.threadId, s.thomas.cookie);
+			expect(r.status).toBe(204);
+			expect(await prisma.fahrtModul.count({ where: { id: t.modulIds[0] } })).toBe(0);
 		});
 
 		it('mit einer leeren Helferliste 204, Liste und Positionen gehen mit', async () => {

@@ -51,6 +51,10 @@ const FEHLERFELDER = {
 	// Die Helferliste zeigt jf-helfer-felder (TP4-Spec 10). Die Konflikte des Servers an belegten
 	// Positionen stehen an "positionen", der an der Einheit an "einheit" (vergleich.ts).
 	HELFER: ['titel', 'einheit', 'frist', 'positionen'],
+	// Die Fahrgemeinschaft zeigt jf-fahrt-felder (TP4-Spec 10). Der Fehler "Bitte mindestens eine
+	// Richtung." und die Konflikte an gesperrten Richtungen stehen an "hin" bzw. "rueck", die zweite
+	// Fahrgemeinschaft an "typ" (entwurf.ts, vergleich.ts); "typ" zeigt sie als Satz am Modul.
+	FAHRT: ['titel', 'hin', 'rueck', 'typ'],
 	UMFRAGE: ['titel', 'frage', 'teilnahme', 'optionen', 'mehrfach', 'einheit', 'frist'],
 } as const satisfies Record<string, readonly string[]>;
 

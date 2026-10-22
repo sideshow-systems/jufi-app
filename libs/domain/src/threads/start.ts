@@ -129,12 +129,14 @@ export interface NeuEingabe {
 // Ergebnis-Einstellung), also ist ein Thread mit Helferliste für alle außer Entfernten
 // sichtbar beantwortet. Die Kosten wie oben: Auch eine Umfrage-Antwort mit
 // "nur Jugendleiter" macht ihn dann für die Familie neu.
+// Plan-Entscheidung 11: Mit der Fahrgemeinschaft ebenso, denn Autos und Mitfahrten sieht
+// auch jeder Leser.
 export function siehtErgebnisse(
 	ich: ThreadPerson,
 	kopf: ThreadKopf,
-	daten: Pick<ThreadDaten, 'umfragen' | 'helfer'>,
+	daten: Pick<ThreadDaten, 'umfragen' | 'helfer' | 'fahrt'>,
 ): boolean {
-	if (daten.helfer.length > 0 && !ich.entferntAm) return true;
+	if ((daten.helfer.length > 0 || daten.fahrt !== null) && !ich.entferntAm) return true;
 	return daten.umfragen.some((u) => ergebnisAnsicht(ich, u, kopf) !== 'NICHTS');
 }
 
@@ -143,7 +145,7 @@ export function siehtErgebnisse(
 export function neuEingabeFuer(
 	ich: ThreadPerson,
 	t: Pick<ListenThread, 'kopf' | 'gelesenBis' | 'aenderungen'>,
-	daten: Pick<ThreadDaten, 'umfragen' | 'helfer'>,
+	daten: Pick<ThreadDaten, 'umfragen' | 'helfer' | 'fahrt'>,
 	zugangSeit: Date,
 ): NeuEingabe {
 	return {

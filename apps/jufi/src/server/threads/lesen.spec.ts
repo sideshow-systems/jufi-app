@@ -1,12 +1,12 @@
 import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
-import type { ThreadAnsicht, ZeilenAnsicht } from '@jufi/domain';
+import type { FahrtModulAnsicht, ThreadAnsicht, ZeilenAnsicht } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { legeThreadAn, machJugendsprecher, ordneZu } from './test-threads.js';
+import { bieteAutoTest, legeThreadAn, machJugendsprecher, ordneZu, setzeEinTest } from './test-threads.js';
 
 const TAG_MS = 24 * 60 * 60 * 1000;
 // Feste Uhr der App und fester Zugangszeitpunkt: Was "vor dem Zugang" und "danach" heisst,
@@ -130,6 +130,37 @@ describe('Thread lesen und Gelesen-Stand', () => {
 	}
 
 	describe('GET /threads/:id', () => {
+		it('zeigt die Fahrgemeinschaft mit Auto, Mitfahrer und dem Kind, das noch eine Mitfahrt braucht', async () => {
+			const s = await szenario();
+			const db = vereinDb(prisma, s.verein.id);
+			const t = await legeThreadAn(prisma, s.verein, JETZT, {
+				titel: 'Zeltlager',
+				erstelltVonId: s.leiter.personId,
+				module: [{ typ: 'FAHRT' }],
+			});
+			const modulId = t.modulIds[0] as string;
+			const auto = await bieteAutoTest(db, modulId, s.hans.personId, 'HIN', 3, { ort: 'Vereinsheim' });
+			await setzeEinTest(db, modulId, 'HIN', s.max.personId, auto, s.hans.personId);
+
+			const ansicht = await s.holeAnsicht(t.threadId, s.sandra.cookie);
+			const modul = ansicht.module[0] as FahrtModulAnsicht;
+			expect(modul.typ).toBe('FAHRT');
+			const [hin, rueck] = modul.richtungen;
+			expect(hin?.autos).toHaveLength(1);
+			expect(hin?.autos[0]).toMatchObject({
+				id: auto,
+				fahrerId: s.hans.personId,
+				ort: 'Vereinsheim',
+				plaetze: 3,
+				frei: 2,
+			});
+			expect(hin?.autos[0]?.mitfahrer.map((k) => k.kindId)).toEqual([s.max.personId]);
+			expect(hin?.brauchtMitfahrt.map((k) => k.kindId)).toEqual([s.lena.personId]);
+			// Die Rueckrichtung rechnet getrennt: Dort braucht noch jeder eine Mitfahrt.
+			expect(rueck?.autos).toEqual([]);
+			expect(rueck?.brauchtMitfahrt.map((k) => k.kindId).sort()).toEqual([s.lena.personId, s.max.personId].sort());
+		});
+
 		it("Sandra sieht Bowling mit genau den Feldern der Ansicht und zwei Zeilen; Hans' Antwort traegt seinen Namen", async () => {
 			const s = await szenario();
 			const t = await s.bowling();

@@ -31,7 +31,9 @@ import {
 	antworteThreadFehler,
 	AUSTAUSCH,
 	BEANTWORTET,
+	DOPPELTE_FAHRT,
 	DOPPELTE_TEILNAHME,
+	FAHRT_BELEGT,
 	NICHT_GEFUNDEN,
 	ThreadAbbruch,
 	VERALTET,
@@ -91,8 +93,8 @@ export async function ichUnterSperre(tx: VereinTx, personId: string): Promise<Th
 
 /**
  * Prueft, was der Entwurf bedeutet, und bricht mit dem ersten Fehler ab. Ein Eingabefehler
- * geht der doppelten Teilnahme (dem einzigen Konflikt von entwurfFehler) vor, wie fehler vor
- * konflikt in vergleicheEntwurf: Ein Entwurf, der nicht lesbar ist, soll nicht erst am
+ * geht den Konflikten von entwurfFehler (doppelte Teilnahme, zweite Fahrgemeinschaft) vor, wie
+ * fehler vor konflikt in vergleicheEntwurf: Ein Entwurf, der nicht lesbar ist, soll nicht erst am
  * Konflikt scheitern und nach dessen Behebung an etwas anderem.
  */
 function pruefeEntwurf(e: ThreadEntwurf, untergruppenIds: ReadonlySet<string>): void {
@@ -100,14 +102,19 @@ function pruefeEntwurf(e: ThreadEntwurf, untergruppenIds: ReadonlySet<string>): 
 	const ungueltig = fehler.find((f) => !f.konflikt);
 	if (ungueltig) throw new ThreadAbbruch(400, { fehler: ungueltig.text, feld: ungueltig.feld });
 	const [konflikt] = fehler;
-	if (konflikt) throw new ThreadAbbruch(409, amFeld(DOPPELTE_TEILNAHME, konflikt));
+	if (konflikt) throw new ThreadAbbruch(409, amFeld(konflikt.fahrt ? DOPPELTE_FAHRT : DOPPELTE_TEILNAHME, konflikt));
 }
 
-/** Der Plan aus vergleicheEntwurf, oder der Abbruch mit seinem Fehler (400) oder Konflikt (409 BEANTWORTET). */
+/**
+ * Der Plan aus vergleicheEntwurf, oder der Abbruch mit seinem Fehler (400) oder Konflikt (409
+ * BEANTWORTET, an einer Fahrgemeinschaft FAHRT_BELEGT).
+ */
 function planeAenderung(alt: { kopf: ThreadKopf; module: GeladenerThread['module'] }, e: ThreadEntwurf) {
 	const plan = vergleicheEntwurf(alt, e);
 	if (plan.fehler) throw new ThreadAbbruch(400, { fehler: plan.fehler.text, feld: plan.fehler.feld });
-	if (plan.konflikt) throw new ThreadAbbruch(409, amFeld(BEANTWORTET, plan.konflikt));
+	if (plan.konflikt) {
+		throw new ThreadAbbruch(409, amFeld(plan.konflikt.fahrt ? FAHRT_BELEGT : BEANTWORTET, plan.konflikt));
+	}
 	return plan;
 }
 
@@ -159,6 +166,8 @@ async function schreibeUntergruppen(tx: VereinTx, threadId: string, e: ThreadEnt
  * geantwortet hat, die Fremdschluessel ohne Kaskade (UmfrageAntwort.umfrage,
  * UmfrageAntwortOption.option) halten also nicht. Info, Termin, Umfrage, die Koepfe von Datei-
  * und Foto-Modul und die Optionen gehen per Kaskade mit dem ThreadModul; die Dateien selbst nie.
+ * Die Fahrgemeinschaft geht ebenso mit, ihre Autos und Mitfahrten nie (NoAction): Eine mit
+ * Eintraegen laesst vergleicheEntwurf nicht loeschen, unter der Sperre geprueft.
  * Eine Helferliste geht samt Positionen per Kaskade mit, ihre Eintraege nie (NoAction): Eine
  * Liste mit Eintraegen laesst vergleicheEntwurf nicht loeschen, unter der Sperre geprueft, also
  * kommt hier keine an. Wegfallende Positionen behaltener Listen loescht schreibePositionen.
@@ -305,8 +314,18 @@ async function schreibeModul(
 		const daten = { einheit: neu.einheit, frist: neu.frist ? new Date(neu.frist) : null };
 		await tx.helferModul.upsert({ where: { id: modulId }, create: { id: modulId, ...daten }, update: daten });
 		await schreibePositionen(tx, modulId, neu.positionen, positionenLoeschen);
+	} else if (neu.typ === 'FAHRT') {
+		// Nur die Richtungen; Autos und Mitfahrten haben eigene Routen und sind nie Teil des Entwurfs.
+		// Der Thread steht in der Zeile, damit (vereinId, threadId) hoechstens eine Fahrgemeinschaft
+		// je Thread zulaesst, wie bei der Teilnahme-Umfrage.
+		const daten = { hin: neu.hin, rueck: neu.rueck };
+		await tx.fahrtModul.upsert({
+			where: { id: modulId },
+			create: { id: modulId, threadId, ...daten },
+			update: daten,
+		});
 	} else {
-		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN, FOTOS und HELFER sind oben behandelt).
+		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN, FOTOS, HELFER und FAHRT sind oben behandelt).
 		const daten = {
 			frage: neu.frage,
 			einheit: neu.einheit,

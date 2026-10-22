@@ -708,6 +708,123 @@ describe('Thread-Seite', () => {
 			expect(karte).toContain('Hier sind schon alle Plätze vergeben.');
 		});
 
+		const FAHRT: Extract<ModulAnsicht, { typ: 'FAHRT' }> = {
+			typ: 'FAHRT',
+			id: 'm8',
+			titel: null,
+			richtungen: [
+				{
+					richtung: 'HIN',
+					vorschlagTag: '2026-10-23',
+					darfAnbieten: true,
+					autos: [
+						{
+							id: 'a1',
+							fahrerId: 'p-sandra',
+							fahrer: 'Sandra M. (Mutter von Lena)',
+							eigenes: false,
+							darfAendern: false,
+							plaetze: 3,
+							frei: 3,
+							abfahrtTag: '2026-10-23',
+							abfahrtZeit: '15:30',
+							ort: 'Vereinsheim',
+							notiz: null,
+							mitfahrer: [],
+						},
+					],
+					brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.', umsetzen: { autoIds: [], selbst: false } }],
+					kommtSelbst: [],
+				},
+			],
+			kinder: [{ kindId: 'k-lena', vorname: 'Lena', selbst: false }],
+		};
+
+		it('legt eine Fahrgemeinschaft in ihre Karte', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ module: [FAHRT] }) });
+
+			expect(text(seite.querySelector('jf-karte#modul-m8 jf-fahrt-modul') as HTMLElement)).toContain('Vereinsheim');
+		});
+
+		it('setzt nach dem Einsteigen die neue Fahrgemeinschaft ein, ohne den Thread neu zu laden', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ module: [FAHRT] }),
+			});
+			const knopf = (wurzel: Element, t: string) =>
+				Array.from(wurzel.querySelectorAll('button')).find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+			knopf(seite.querySelector('#modul-m8') as HTMLElement, 'Lena einsteigen').click();
+
+			const einsteigen = await vi.waitFor(() => http.expectOne('/demo/api/v1/fahrten/m8/hin/k-lena'));
+			expect(einsteigen.request.method).toBe('PUT');
+			const richtung = FAHRT.richtungen[0]!;
+			einsteigen.flush({
+				modul: {
+					...FAHRT,
+					richtungen: [
+						{
+							...richtung,
+							autos: [
+								{
+									...richtung.autos[0]!,
+									frei: 2,
+									mitfahrer: [
+										{
+											kindId: 'k-lena',
+											name: 'Lena M.',
+											nichtMehrDabei: false,
+											darfHerausnehmen: true,
+											umsetzen: { autoIds: [], selbst: false },
+										},
+									],
+								},
+							],
+							brauchtMitfahrt: [],
+						},
+					],
+				},
+				stand: 43,
+			});
+			await beendeSeite(harness);
+			await new Promise((r) => setTimeout(r));
+			harness.detectChanges();
+
+			expect(text(seite.querySelector('#modul-m8') as HTMLElement)).toContain('2 frei');
+			// Eine zweite Anfrage (GET oder PUT gelesen) waere offen, und afterEach wuerde scheitern.
+		});
+
+		it('laedt nach 409 VOLL still neu und zeigt den Satz am Modul', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ module: [FAHRT] }),
+			});
+			const knopf = (wurzel: Element, t: string) =>
+				Array.from(wurzel.querySelectorAll('button')).find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+			knopf(seite.querySelector('#modul-m8') as HTMLElement, 'Lena einsteigen').click();
+
+			(await vi.waitFor(() => http.expectOne('/demo/api/v1/fahrten/m8/hin/k-lena'))).flush(
+				{ fehler: 'In diesem Auto ist kein Platz mehr frei.', code: 'VOLL' },
+				{ status: 409, statusText: 'Conflict' },
+			);
+			const still = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1'));
+			expect(text(seite)).not.toContain('Wird geladen');
+			const richtung = FAHRT.richtungen[0]!;
+			still.flush(
+				thread({
+					stand: 43,
+					module: [
+						{ ...FAHRT, richtungen: [{ ...richtung, autos: [{ ...richtung.autos[0]!, plaetze: 1, frei: 0 }] }] },
+					],
+				}),
+			);
+			expect(await quittiereGelesen()).toEqual({ bereich: 'uebersicht', bis: 43 });
+			await beendeSeite(harness);
+
+			const karte = text(seite.querySelector('#modul-m8') as HTMLElement);
+			expect(karte).toContain('voll');
+			expect(karte).toContain('In diesem Auto ist kein Platz mehr frei.');
+		});
+
 		it('legt ein Foto-Modul in seine Karte statt des Platzhalters', async () => {
 			const fotos: ModulAnsicht = {
 				typ: 'FOTOS',
@@ -760,7 +877,7 @@ describe('Thread-Seite', () => {
 		});
 
 		it('zeigt fuer einen unbekannten Modultyp eines neueren Servers einen Hinweis statt einer leeren Karte', async () => {
-			const fremd = { typ: 'FAHRT', id: 'm9', titel: 'Mitfahrt' } as unknown as ModulAnsicht;
+			const fremd = { typ: 'ZUKUNFT', id: 'm9', titel: 'Neu' } as unknown as ModulAnsicht;
 			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ module: [fremd] }) });
 
 			expect(text(seite.querySelector('jf-karte#modul-m9') as HTMLElement)).toContain(

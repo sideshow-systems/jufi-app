@@ -3,11 +3,14 @@ import {
 	baueUmfeld,
 	kinderImThread,
 	type AntwortDaten,
+	type AutoDaten,
 	type DateiDaten,
 	type EinwilligungZeile,
+	type FahrtDaten,
 	type FotoDaten,
 	type HelferDaten,
 	type HelferEintragDaten,
+	type MitfahrtDaten,
 	type ModulDaten,
 	type NachrichtenEingabe,
 	type NeuAenderung,
@@ -140,9 +143,10 @@ function tag(datum: Date): string {
  *
  * `mitAntworten: false` laesst die Antworten weg (`UmfrageDaten.antworten` ist dann leer, Optionen
  * und `ergebnisse` bleiben), ebenso die Eintraege der Helferlisten (Positionen bleiben, ihre
- * `eintraege` sind leer). Liste und Kalender zeigen keine Antworten, und deren Zahl waechst mit
- * jeder Abgabe; die Startseite laedt sie nur fuer die Threads nach, die sie nach dem Filter wirklich
- * braucht. Verworfen: eigene schmale Abfragen je Route -- die Abbildung der Module stuende dreimal.
+ * `eintraege` sind leer) und die Autos und Mitfahrten der Fahrgemeinschaft (die Richtungen bleiben).
+ * Liste und Kalender zeigen keine Antworten, und deren Zahl waechst mit jeder Abgabe; die Startseite
+ * laedt sie nur fuer die Threads nach, die sie nach dem Filter wirklich braucht. Verworfen: eigene
+ * schmale Abfragen je Route -- die Abbildung der Module stuende dreimal.
  *
  * Welche Untertabelle gilt, entscheidet `typ` des Moduls. Verworfen: die vorhandene
  * Untertabelle nehmen -- hinge an einem INFO-Modul von Hand eine Terminzeile, bestimmte
@@ -192,7 +196,7 @@ export async function ladeThreads(
 		}),
 	]);
 	const umfrageIds = umfragen.map((u) => u.id);
-	const [optionen, antworten, positionen] = await Promise.all([
+	const [optionen, antworten, positionen, fahrtModule, autoZeilen, mitfahrtZeilen] = await Promise.all([
 		db.umfrageOption.findMany({
 			where: { umfrageId: { in: umfrageIds } },
 			orderBy: [{ position: 'asc' }, { id: 'asc' }],
@@ -208,6 +212,23 @@ export async function ladeThreads(
 			where: { modulId: { in: helferModule.map((h) => h.id) } },
 			orderBy: [{ position: 'asc' }, { id: 'asc' }],
 		}),
+		db.fahrtModul.findMany({ where: { id: { in: ids } } }),
+		// Wie die Antworten: Liste und Kalender zeigen keine Autos. Die Reihenfolge ist die des
+		// Anbietens und des Einsteigens (Plan-Entscheidung 16), mit der ID als Tiebreaker. Ueber alle
+		// Module des Threads wie bei den Dateien: Die Fremdschluessel binden jedes Auto an eine
+		// Fahrgemeinschaft, eine eigene Abfrage nach den Fahrgemeinschaften davor kostete eine Wartezeit.
+		mitAntworten
+			? db.auto.findMany({
+					where: { modulId: { in: ids } },
+					orderBy: [{ angelegtAm: 'asc' }, { id: 'asc' }],
+				})
+			: Promise.resolve([]),
+		mitAntworten
+			? db.mitfahrt.findMany({
+					where: { modulId: { in: ids } },
+					orderBy: [{ eingetragenAm: 'asc' }, { id: 'asc' }],
+				})
+			: Promise.resolve([]),
 	]);
 	// Nach den Positionen, weil die Eintraege an deren IDs haengen: Ohne Helferliste faellt die Abfrage
 	// ganz weg, und mit einer filtert sie ueber den Index (positionId, fuerId) statt ueber einen Join.
@@ -226,6 +247,7 @@ export async function ladeThreads(
 	const terminVon = new Map(termine.map((t) => [t.id, t]));
 	const umfrageVon = new Map(umfragen.map((u) => [u.id, u]));
 	const helferVon = new Map(helferModule.map((h) => [h.id, h]));
+	const fahrtVon = new Map(fahrtModule.map((f) => [f.id, f]));
 	const dateienModulIds = new Set(dateienModule.map((d) => d.id));
 	const fotosVon = new Map(fotosModule.map((f) => [f.id, f]));
 	const dateiVon = new Map<string, typeof dateiZeilen>();
@@ -270,91 +292,149 @@ export async function ladeThreads(
 		positionenVon.set(p.modulId, liste);
 	}
 
+	// Autos und Mitfahrten je Fahrgemeinschaft, in der Reihenfolge der Abfragen (siehe oben).
+	const autosVon = new Map<string, AutoDaten[]>();
+	for (const a of autoZeilen) {
+		const liste = autosVon.get(a.modulId) ?? [];
+		liste.push({
+			id: a.id,
+			fahrerId: a.fahrerId,
+			richtung: a.richtung,
+			plaetze: a.plaetze,
+			abfahrtTag: a.abfahrtTag ? tag(a.abfahrtTag) : null,
+			abfahrtZeit: a.abfahrtZeit,
+			ort: a.ort,
+			notiz: a.notiz,
+			angelegtAm: a.angelegtAm,
+		});
+		autosVon.set(a.modulId, liste);
+	}
+	const mitfahrtenVon = new Map<string, MitfahrtDaten[]>();
+	for (const m of mitfahrtZeilen) {
+		const liste = mitfahrtenVon.get(m.modulId) ?? [];
+		liste.push({
+			richtung: m.richtung,
+			kindId: m.kindId,
+			autoId: m.autoId,
+			vonId: m.vonId,
+			eingetragenAm: m.eingetragenAm,
+		});
+		mitfahrtenVon.set(m.modulId, liste);
+	}
+
+	// Erschoepfend ueber den Typ des Moduls, wie vergleicheBestehendes: Ein neuer Wert in ModulTyp
+	// bricht hier den Bau. Vorher fiel alles Unbekannte in den Umfrage-Zweig, fand dort keine Zeile
+	// und verschwand still aus dem Thread (Gesamtreview TP4 Etappe 3, M7).
 	const modulVon = (m: (typeof moduleZeilen)[number]): ModulDaten | null => {
 		const titel = m.titel;
-		if (m.typ === 'INFO') {
-			const info = infoVon.get(m.id);
-			return info ? { typ: 'INFO', id: m.id, titel, text: info.text } : null;
+		switch (m.typ) {
+			case 'INFO': {
+				const info = infoVon.get(m.id);
+				return info ? { typ: 'INFO', id: m.id, titel, text: info.text } : null;
+			}
+			case 'TERMIN': {
+				const t = terminVon.get(m.id);
+				if (!t) return null;
+				const termin: TerminDaten = {
+					modulId: m.id,
+					startDatum: tag(t.startDatum),
+					endDatum: t.endDatum ? tag(t.endDatum) : null,
+					beginn: t.beginn,
+					ende: t.ende,
+					ort: t.ort,
+					treffpunkt: t.treffpunkt,
+				};
+				return { typ: 'TERMIN', id: m.id, titel, termin };
+			}
+			case 'DATEIEN':
+				if (!dateienModulIds.has(m.id)) return null;
+				return {
+					typ: 'DATEIEN',
+					id: m.id,
+					titel,
+					dateien: (dateiVon.get(m.id) ?? []).map((d): DateiDaten => ({
+						id: d.id,
+						name: d.name,
+						typ: d.typ,
+						groesse: d.groesse,
+						vonId: d.vonId,
+						hochgeladenAm: d.hochgeladenAm,
+					})),
+				};
+			case 'FOTOS': {
+				const f = fotosVon.get(m.id);
+				if (!f) return null;
+				return {
+					typ: 'FOTOS',
+					id: m.id,
+					titel,
+					hochladen: f.hochladen,
+					// Breite und Hoehe stehen bei Fotos immer (Spec 2.1); fehlen sie in einer kaputten Zeile,
+					// zaehlt 0 statt eines Fehlers, damit ein Thread nicht an einem Foto haengt.
+					fotos: (dateiVon.get(m.id) ?? []).map((d): FotoDaten => ({
+						id: d.id,
+						breite: d.breite ?? 0,
+						hoehe: d.hoehe ?? 0,
+						vonId: d.vonId,
+						hochgeladenAm: d.hochgeladenAm,
+					})),
+				};
+			}
+			case 'HELFER': {
+				const h = helferVon.get(m.id);
+				if (!h) return null;
+				const helfer: HelferDaten = {
+					modulId: m.id,
+					// Der Titel des Moduls, damit Regeln, die nur ThreadDaten bekommen, die Liste benennen koennen.
+					titel,
+					einheit: h.einheit,
+					frist: h.frist,
+					positionen: positionenVon.get(m.id) ?? [],
+				};
+				return { typ: 'HELFER', id: m.id, titel, helfer };
+			}
+			case 'FAHRT': {
+				const f = fahrtVon.get(m.id);
+				if (!f) return null;
+				const fahrt: FahrtDaten = {
+					modulId: m.id,
+					// Wie bei der Helferliste: Regeln, die nur ThreadDaten bekommen, sollen das Modul benennen koennen.
+					titel,
+					hin: f.hin,
+					rueck: f.rueck,
+					autos: autosVon.get(m.id) ?? [],
+					mitfahrten: mitfahrtenVon.get(m.id) ?? [],
+				};
+				return { typ: 'FAHRT', id: m.id, titel, fahrt };
+			}
+			case 'UMFRAGE': {
+				const u = umfrageVon.get(m.id);
+				if (!u) return null;
+				const umfrage: UmfrageDaten = {
+					modulId: m.id,
+					frage: u.frage,
+					einheit: u.einheit,
+					mehrfach: u.mehrfach,
+					teilnahme: u.teilnahme,
+					vielleicht: u.vielleicht,
+					frist: u.frist,
+					ergebnisse: u.ergebnisse,
+					optionen: optionen
+						.filter((o) => o.umfrageId === u.id)
+						.map((o) => ({ id: o.id, schluessel: o.schluessel, text: o.text })),
+					antworten: antwortenVon.get(u.id) ?? [],
+				};
+				return { typ: 'UMFRAGE', id: m.id, titel, umfrage };
+			}
+			// Erschoepfend ueber typ: Ein neuer Modultyp bricht hier den Bau. Kommt zur Laufzeit doch einer
+			// (Datenbank neuer als der Code), endet das Laden mit einem Fehler statt mit dem Typnamen als
+			// Moduldaten. Verworfen: unerreichbar zurueckzugeben wie an den Stellen, die das Modul selbst
+			// pruefen; hier waere der Rueckgabewert ein String, den jeder Aufrufer als Modul laese.
+			default: {
+				const unerreichbar: never = m.typ;
+				throw new Error(`Unbekannter Modultyp: ${String(unerreichbar)}`);
+			}
 		}
-		if (m.typ === 'TERMIN') {
-			const t = terminVon.get(m.id);
-			if (!t) return null;
-			const termin: TerminDaten = {
-				modulId: m.id,
-				startDatum: tag(t.startDatum),
-				endDatum: t.endDatum ? tag(t.endDatum) : null,
-				beginn: t.beginn,
-				ende: t.ende,
-				ort: t.ort,
-				treffpunkt: t.treffpunkt,
-			};
-			return { typ: 'TERMIN', id: m.id, titel, termin };
-		}
-		if (m.typ === 'DATEIEN') {
-			if (!dateienModulIds.has(m.id)) return null;
-			return {
-				typ: 'DATEIEN',
-				id: m.id,
-				titel,
-				dateien: (dateiVon.get(m.id) ?? []).map((d): DateiDaten => ({
-					id: d.id,
-					name: d.name,
-					typ: d.typ,
-					groesse: d.groesse,
-					vonId: d.vonId,
-					hochgeladenAm: d.hochgeladenAm,
-				})),
-			};
-		}
-		if (m.typ === 'FOTOS') {
-			const f = fotosVon.get(m.id);
-			if (!f) return null;
-			return {
-				typ: 'FOTOS',
-				id: m.id,
-				titel,
-				hochladen: f.hochladen,
-				// Breite und Hoehe stehen bei Fotos immer (Spec 2.1); fehlen sie in einer kaputten Zeile,
-				// zaehlt 0 statt eines Fehlers, damit ein Thread nicht an einem Foto haengt.
-				fotos: (dateiVon.get(m.id) ?? []).map((d): FotoDaten => ({
-					id: d.id,
-					breite: d.breite ?? 0,
-					hoehe: d.hoehe ?? 0,
-					vonId: d.vonId,
-					hochgeladenAm: d.hochgeladenAm,
-				})),
-			};
-		}
-		if (m.typ === 'HELFER') {
-			const h = helferVon.get(m.id);
-			if (!h) return null;
-			const helfer: HelferDaten = {
-				modulId: m.id,
-				// Der Titel des Moduls, damit Regeln, die nur ThreadDaten bekommen, die Liste benennen koennen.
-				titel,
-				einheit: h.einheit,
-				frist: h.frist,
-				positionen: positionenVon.get(m.id) ?? [],
-			};
-			return { typ: 'HELFER', id: m.id, titel, helfer };
-		}
-		const u = umfrageVon.get(m.id);
-		if (!u) return null;
-		const umfrage: UmfrageDaten = {
-			modulId: m.id,
-			frage: u.frage,
-			einheit: u.einheit,
-			mehrfach: u.mehrfach,
-			teilnahme: u.teilnahme,
-			vielleicht: u.vielleicht,
-			frist: u.frist,
-			ergebnisse: u.ergebnisse,
-			optionen: optionen
-				.filter((o) => o.umfrageId === u.id)
-				.map((o) => ({ id: o.id, schluessel: o.schluessel, text: o.text })),
-			antworten: antwortenVon.get(u.id) ?? [],
-		};
-		return { typ: 'UMFRAGE', id: m.id, titel, umfrage };
 	};
 
 	return threads.map((thread) => ({
@@ -396,7 +476,7 @@ export async function ladeKoepfe(db: VereinDb, threadIds: readonly string[]): Pr
 }
 
 /**
- * Zu welchem Thread ein Modul gehoert und welcher Art es ist (jeder ModulTyp, auch HELFER); null,
+ * Zu welchem Thread ein Modul gehoert und welcher Art es ist (jeder ModulTyp, auch HELFER und FAHRT); null,
  * wenn es im Verein kein solches Modul gibt.
  */
 export async function modulOrt(db: VereinDb, modulId: string): Promise<{ threadId: string; typ: ModulTyp } | null> {

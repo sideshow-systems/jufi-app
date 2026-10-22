@@ -114,9 +114,46 @@ export interface HelferDaten extends AntwortRegel {
 	positionen: readonly HelferPositionDaten[];
 }
 
+export type Richtung = 'HIN' | 'RUECK';
+
+export interface AutoDaten {
+	id: string;
+	fahrerId: string;
+	richtung: Richtung;
+	plaetze: number;
+	abfahrtTag: string | null;
+	abfahrtZeit: string | null;
+	ort: string | null;
+	notiz: string | null;
+	angelegtAm: Date;
+}
+
+// autoId null heisst "kommt selbst": das Kind faehrt in dieser Richtung in keinem Auto mit
+// und braucht trotzdem keine Mitfahrt mehr.
+export interface MitfahrtDaten {
+	richtung: Richtung;
+	kindId: string;
+	autoId: string | null;
+	vonId: string;
+	eingetragenAm: Date;
+}
+
+export interface FahrtDaten {
+	modulId: string;
+	titel: string | null;
+	hin: boolean;
+	rueck: boolean;
+	/** Nach angelegtAm, dann id (Plan-Entscheidung 16). */
+	autos: readonly AutoDaten[];
+	/** Nach eingetragenAm aufsteigend: die Reihenfolge des Einsteigens. */
+	mitfahrten: readonly MitfahrtDaten[];
+}
+
 export interface ThreadDaten {
 	kopf: ThreadKopf;
 	termine: readonly TerminDaten[];
 	umfragen: readonly UmfrageDaten[];
 	helfer: readonly HelferDaten[];
+	/** Hoechstens eine Fahrgemeinschaft je Thread (Plan-Entscheidung 9). */
+	fahrt: FahrtDaten | null;
 }

@@ -1190,6 +1190,163 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		}
 	});
 
+	// Die Fahrgemeinschaft (TP4 Etappe 4, Spec 1.1 Schritt 4 verkleinert), wieder auf Bowling und nur fuer die
+	// Hinfahrt: Die Mutter bietet ein Auto an und setzt Mia hinein, die Leitung setzt Mats dazu, die Mutter zieht
+	// das Auto zurueck. Erst hier, weil "Braucht noch Mitfahrt" nur Kinder mit "Dabei" kennt: Mia hat seit den
+	// Foto-Schritten zugesagt, Mats seit dem Nachtragen nach Fristende.
+
+	/** Die Fahrgemeinschaft auf der Thread-Seite. */
+	function fahrt(seite: Page): Locator {
+		return seite.locator('jf-fahrt-modul');
+	}
+
+	/** Das Auto der Mutter in der Fahrgemeinschaft, nach dem Namen des Fahrers. */
+	function autoDerMutter(seite: Page): Locator {
+		return fahrt(seite).locator('section.auto').filter({ hasText: 'Mara M.' });
+	}
+
+	/** Die Kinder unter "Braucht noch Mitfahrt". */
+	function brauchtMitfahrt(seite: Page): Locator {
+		return fahrt(seite).locator('[data-abschnitt="braucht"]');
+	}
+
+	test('Leitung fuegt Bowling eine Fahrgemeinschaft nur fuer die Hinfahrt hinzu', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'leitung', { viewport: { width: 1280, height: 800 } });
+		await seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}`);
+		await expect(seite.getByRole('heading', { name: 'Thread bearbeiten', level: 1 })).toBeVisible();
+		const module = seite.locator('ol.module > li');
+		const vorher = await module.count();
+
+		const hinzufuegen = seite.getByRole('group', { name: 'Modul hinzufügen' });
+		await hinzufuegen.getByRole('button', { name: 'Fahrgemeinschaft' }).click();
+		await expect(module).toHaveCount(vorher + 1);
+		// Hoechstens eine je Thread (Plan-Entscheidung 9): "Modul hinzufuegen" bietet keine zweite an.
+		await expect(hinzufuegen.getByRole('button', { name: 'Fahrgemeinschaft' })).toHaveCount(0);
+		const felder = seite.locator('jf-fahrt-felder');
+		await expect(felder.getByRole('checkbox', { name: 'Hinfahrt' })).toBeChecked();
+		await felder.getByRole('checkbox', { name: 'Rückfahrt' }).uncheck();
+
+		// Die Vorschau zeigt nur die Hinfahrt, also keinen Umschalter Hin/Rueck, und noch kein Auto.
+		const vorschau = seite.getByRole('region', { name: 'Vorschau am Handy' }).locator('jf-fahrt-modul');
+		await expect(vorschau.getByRole('heading', { name: 'Hinfahrt' })).toBeVisible();
+		await expect(vorschau.getByRole('tablist')).toHaveCount(0);
+		await expect(vorschau).toContainText('Noch kein Auto.');
+
+		await seite.getByRole('button', { name: 'Speichern', exact: true }).click();
+		await expect(seite.getByRole('status').filter({ hasText: 'Gespeichert' })).toBeVisible();
+		await kontext.close();
+	});
+
+	test('Mutter bietet ein Auto an und setzt Mia hinein, Mia sieht sich live darin', async ({ browser }) => {
+		// Mia hat den Thread offen, bevor die Mutter das Auto anbietet.
+		const kind = await ausSitzung(browser, 'kind');
+		const ws = await oeffneVerbunden(kind.seite, `/${SLUG}/t/${bowling}`);
+		await expect(fahrt(kind.seite)).toContainText('Noch kein Auto.');
+		const signal = ws.waitForEvent('framereceived', {
+			predicate: (f) => alsSignal(f.payload)?.threadId === bowlingId,
+		});
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		// Beide Kinder haben zugesagt und noch keine Mitfahrt.
+		await expect(brauchtMitfahrt(mutter.seite)).toContainText('Mia M.');
+		await expect(brauchtMitfahrt(mutter.seite)).toContainText('Mats M.');
+
+		await fahrt(mutter.seite).getByRole('button', { name: 'Auto anbieten' }).click();
+		const formular = fahrt(mutter.seite).locator('jf-fahrt-auto-formular');
+		// Der Abfahrtstag ist mit dem Tag des Termins vorbelegt (Plan-Entscheidung 15).
+		await expect(formular.getByLabel('Abfahrt am')).toHaveValue(terminTag);
+		await formular.getByLabel('Plätze für Kinder').fill('2');
+		await formular.getByLabel('Uhrzeit').fill('15:30');
+		await formular.getByLabel('Treffpunkt').fill('Vereinsheim');
+		await formular.getByRole('button', { name: 'Anbieten' }).click();
+		await expect(formular).toHaveCount(0);
+
+		const auto = autoDerMutter(mutter.seite);
+		await expect(auto).toContainText('15:30 · Vereinsheim');
+		await expect(auto.locator('.frei')).toHaveText('2 frei');
+		// Der zugaengliche Name nennt den Fahrer wie die Karte (Einsteigen steht an jedem Auto gleich).
+		await auto.getByRole('button', { name: 'Mia einsteigen bei Mara M.' }).click();
+		await expect(auto.locator('.kind').filter({ hasText: 'Mia M.' })).toBeVisible();
+		await expect(auto.locator('.frei')).toHaveText('1 frei');
+		await expect(brauchtMitfahrt(mutter.seite)).not.toContainText('Mia M.');
+		await expect(brauchtMitfahrt(mutter.seite)).toContainText('Mats M.');
+		await mutter.kontext.close();
+
+		const autoKind = autoDerMutter(kind.seite);
+		await expect(autoKind.locator('.kind').filter({ hasText: 'Mia M.' })).toBeVisible({ timeout: 5000 });
+		await expect(autoKind.locator('.frei')).toHaveText('1 frei');
+		await kamLive(ws, signal);
+		await kind.kontext.close();
+	});
+
+	test('Leitung setzt Mats aus Braucht noch Mitfahrt ins Auto, die Mutter sieht es live voll', async ({ browser }) => {
+		// Die Mutter hat den Thread offen, bevor die Leitung umsetzt.
+		const mutter = await ausSitzung(browser, 'mutter');
+		const ws = await oeffneVerbunden(mutter.seite, `/${SLUG}/t/${bowling}`);
+		const autoMutter = autoDerMutter(mutter.seite);
+		await expect(autoMutter.locator('.frei')).toHaveText('1 frei');
+		const signal = ws.waitForEvent('framereceived', {
+			predicate: (f) => alsSignal(f.payload)?.threadId === bowlingId,
+		});
+
+		const leitung = await ausSitzung(browser, 'leitung');
+		await leitung.seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(leitung.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		const autoLeitung = autoDerMutter(leitung.seite);
+		const autoId = await autoLeitung.getAttribute('data-auto');
+		expect(autoId).toBeTruthy();
+		await brauchtMitfahrt(leitung.seite).getByRole('button', { name: 'Mats M. umsetzen' }).click();
+		await brauchtMitfahrt(leitung.seite)
+			.getByLabel('Mats M. umsetzen in')
+			.selectOption(autoId ?? '');
+		await brauchtMitfahrt(leitung.seite).getByRole('button', { name: 'Speichern' }).click();
+		await expect(autoLeitung.locator('.kind').filter({ hasText: 'Mats M.' })).toBeVisible();
+		await expect(autoLeitung.locator('.frei')).toHaveText('voll');
+		await expect(brauchtMitfahrt(leitung.seite)).toContainText('Alle haben eine Mitfahrt.');
+		await leitung.kontext.close();
+
+		await expect(autoMutter.locator('.kind').filter({ hasText: 'Mats M.' })).toBeVisible({ timeout: 5000 });
+		await expect(autoMutter.locator('.frei')).toHaveText('voll');
+		// Im vollen Auto steigt niemand mehr ein.
+		await expect(autoMutter.getByRole('button', { name: /einsteigen/ })).toHaveCount(0);
+		await kamLive(ws, signal);
+		await mutter.kontext.close();
+	});
+
+	test('Mutter zieht das Auto zurueck, beide brauchen wieder eine Mitfahrt, der Verlauf sagt es', async ({
+		browser,
+	}) => {
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		const auto = autoDerMutter(mutter.seite);
+		await expect(auto.locator('.frei')).toHaveText('voll');
+
+		await auto.getByRole('button', { name: 'Auto zurückziehen' }).click();
+		// Die Rueckfrage nennt die Kinder in der Reihenfolge des Einsteigens.
+		const dialog = mutter.seite.getByRole('dialog', { name: 'Auto zurückziehen' });
+		await expect(dialog).toContainText('Mia M. und Mats M. brauchen dann wieder eine Mitfahrt.');
+		await dialog.getByRole('button', { name: 'Zurückziehen' }).click();
+
+		await expect(auto).toHaveCount(0);
+		await expect(fahrt(mutter.seite)).toContainText('Noch kein Auto.');
+		await expect(brauchtMitfahrt(mutter.seite)).toContainText('Mia M.');
+		await expect(brauchtMitfahrt(mutter.seite)).toContainText('Mats M.');
+
+		await mutter.seite
+			.getByRole('navigation', { name: 'Ansicht' })
+			.getByRole('link', { name: /^Verlauf/ })
+			.click();
+		// Der Systemeintrag, mit dem Fahrer als Kurzname und den Kindern in der Reihenfolge des Einsteigens.
+		await expect(
+			mutter.seite.getByRole('list', { name: 'Verlauf' }).getByRole('listitem').filter({
+				hasText: 'Auto von Mara M. (Hinfahrt) zurückgezogen – Mia M. und Mats M. brauchen wieder eine Mitfahrt.',
+			}),
+		).toBeVisible();
+		await mutter.kontext.close();
+	});
+
 	test('Die Link-Vorschau nennt den Titel nur, wo die Familie ihn sehen darf', async () => {
 		// Ohne Sitzung: So holt ein Messenger die Seite. Der Kontext von Playwright traegt keine Cookies hinein.
 		const ohneSitzung = await request.newContext({ baseURL: BASIS_URL });

@@ -266,6 +266,19 @@ describe('teilenText: Datei- und Foto-Module', () => {
 		};
 		expect(zeilen(ansicht([terminModul(), helfer]))).toEqual(zeilen(ansicht([terminModul()])));
 	});
+
+	it('gibt fuer eine Fahrgemeinschaft vorerst keine Zeile (Etappe 6)', () => {
+		const fahrt: ModulAnsicht = {
+			typ: 'FAHRT',
+			id: 'f1',
+			titel: null,
+			richtungen: [
+				{ richtung: 'HIN', vorschlagTag: null, darfAnbieten: true, autos: [], brauchtMitfahrt: [], kommtSelbst: [] },
+			],
+			kinder: [],
+		};
+		expect(zeilen(ansicht([terminModul(), fahrt]))).toEqual(zeilen(ansicht([terminModul()])));
+	});
 });
 
 describe('ohneFormat', () => {

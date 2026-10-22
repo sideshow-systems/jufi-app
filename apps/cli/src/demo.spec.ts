@@ -2,9 +2,11 @@ import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
 	baueUmfeld,
+	brauchtMitfahrt,
 	EINWILLIGUNG_TEXT_VERSION,
 	gefragte,
 	istArchiviert,
+	kinderImThread,
 	siehtThread,
 	teilnahmeOptionen,
 	threadSegment,
@@ -49,6 +51,9 @@ describe('demoEinspielen', () => {
 			module: await prisma.threadModul.count(),
 			helferPositionen: await prisma.helferPosition.count(),
 			helferEintraege: await prisma.helferEintrag.count(),
+			fahrten: await prisma.fahrtModul.count(),
+			autos: await prisma.auto.count(),
+			mitfahrten: await prisma.mitfahrt.count(),
 			aenderungen: await prisma.aenderung.count(),
 			aenderungsstand: (await prisma.verein.findUniqueOrThrow({ where: { slug: 'demo' } })).aenderungsstand,
 		};
@@ -246,7 +251,7 @@ describe('demoEinspielen', () => {
 		expect(module[1].titel).toBe('Nächste Gruppenstunde');
 	});
 
-	it('Bowling hat Info-Text, Termin am uebernaechsten Samstag, eine Teilnahme-Umfrage ohne Antworten und zuletzt eine Helferliste', async () => {
+	it('Bowling hat Info-Text, Termin am uebernaechsten Samstag, eine Teilnahme-Umfrage, eine Helferliste und zuletzt eine Fahrgemeinschaft', async () => {
 		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
 
 		const thread = await prisma.thread.findFirstOrThrow({ where: { vereinId, titel: '🎳 Bowling' } });
@@ -255,7 +260,7 @@ describe('demoEinspielen', () => {
 			orderBy: { position: 'asc' },
 			include: { info: true, termin: true, umfrage: { include: { optionen: { orderBy: { position: 'asc' } } } } },
 		});
-		expect(module.map((m) => m.typ)).toEqual(['INFO', 'TERMIN', 'UMFRAGE', 'HELFER']);
+		expect(module.map((m) => m.typ)).toEqual(['INFO', 'TERMIN', 'UMFRAGE', 'HELFER', 'FAHRT']);
 		// Der naechste Samstag ist der 17.10., der uebernaechste der 24.10.
 		expect(module[1].termin).toMatchObject({
 			startDatum: new Date('2026-10-24T00:00:00Z'),
@@ -275,7 +280,74 @@ describe('demoEinspielen', () => {
 		expect(umfrage.optionen.map((o) => o.schluessel)).toEqual(
 			teilnahmeOptionen(umfrage.vielleicht).map((o) => o.schluessel),
 		);
-		expect(await prisma.umfrageAntwort.count({ where: { umfrageId: umfrage.id } })).toBe(0);
+		// Nur Lena und Max haben zugesagt, die Fahrgemeinschaft braucht sie; Tim und Jonas sind noch offen.
+		const antworten = await prisma.umfrageAntwort.findMany({
+			where: { umfrageId: umfrage.id },
+			include: { fuer: true, von: true, optionen: { include: { option: true } } },
+		});
+		expect(
+			antworten.map((a) => [a.fuer.vorname, a.von.vorname, a.optionen.map((o) => o.option.schluessel)]).sort(),
+		).toEqual([
+			['Lena', 'Lena', ['dabei']],
+			// Max hat keine Einwilligung und also keinen Zugang; fuer ihn sagt die Mutter zu.
+			['Max', 'Sandra', ['dabei']],
+		]);
+	});
+
+	it('die Fahrgemeinschaft von Bowling: Sandra faehrt hin mit Lena, Max braucht noch eine Mitfahrt', async () => {
+		const { vereinId } = await demoEinspielen(prisma, BEZUGSTAG);
+
+		const bowling = await prisma.thread.findFirstOrThrow({ where: { vereinId, titel: '🎳 Bowling' } });
+		const modul = await prisma.threadModul.findFirstOrThrow({
+			where: { threadId: bowling.id, typ: 'FAHRT' },
+			include: {
+				fahrt: {
+					include: {
+						autos: { include: { fahrer: true } },
+						mitfahrten: { include: { kind: true, von: true } },
+					},
+				},
+			},
+		});
+		// Nach der Helferliste, ohne eigene Ueberschrift: Die Seite zeigt dann "Fahrgemeinschaft".
+		expect(modul).toMatchObject({ position: 4, titel: null });
+		const fahrt = modul.fahrt!;
+		expect(fahrt).toMatchObject({ hin: true, rueck: true });
+
+		expect(fahrt.autos).toHaveLength(1);
+		const [auto] = fahrt.autos;
+		// Der Abfahrtstag ist der Tag des Termins (Samstag, 24.10.2026), wie ihn das Formular vorbelegt.
+		expect(auto).toMatchObject({
+			richtung: 'HIN',
+			plaetze: 3,
+			abfahrtTag: new Date('2026-10-24T00:00:00Z'),
+			abfahrtZeit: '13:00',
+			ort: 'Vereinsheim',
+			notiz: null,
+			angelegtAm: BEZUGSTAG,
+			fahrer: { vorname: 'Sandra' },
+		});
+		expect(fahrt.mitfahrten.map((m) => [m.richtung, m.kind.vorname, m.von.vorname, m.autoId === auto.id])).toEqual([
+			['HIN', 'Lena', 'Sandra', true],
+		]);
+
+		// "Braucht noch Mitfahrt" so, wie die App sie bildet: die zugesagten Kinder ohne Eintrag. Hin ist es Max,
+		// zurueck sind es beide; Tim und Jonas haben nicht zugesagt und stehen dort nicht.
+		const { umfeld, thread } = await laden(vereinId);
+		const dabei = new Set(
+			(
+				await prisma.umfrageAntwort.findMany({
+					where: {
+						umfrage: { threadId: bowling.id, teilnahme: true },
+						optionen: { some: { option: { schluessel: 'dabei' } } },
+					},
+				})
+			).map((a) => a.fuerId),
+		);
+		const betrachtete = kinderImThread(thread('🎳 Bowling').kopf, umfeld).filter((k) => dabei.has(k.id));
+		const daten = { modulId: modul.id, titel: null, hin: true, rueck: true, autos: [], mitfahrten: fahrt.mitfahrten };
+		expect(brauchtMitfahrt(daten, 'HIN', betrachtete).map((k) => k.vorname)).toEqual(['Max']);
+		expect(brauchtMitfahrt(daten, 'RUECK', betrachtete).map((k) => k.vorname)).toEqual(['Lena', 'Max']);
 	});
 
 	it('die Frist der Bowling-Umfrage ist Donnerstag 18:00 Berliner Zeit vor dem Termin und nach dem Bezugstag', async () => {
@@ -397,11 +469,13 @@ describe('demoEinspielen', () => {
 		const antworten = await prisma.umfrageAntwort.findMany({ where: { vereinId } });
 		const module = await prisma.threadModul.findMany({ where: { vereinId } });
 		const helferListen = await prisma.helferModul.findMany({ where: { vereinId } });
-		// Ein Helfer-Eintrag schreibt ANTWORT mit dem Modul als Objekt (TP4-Spec 8), die Umfrage ihre Antwortzeile.
+		const fahrten = await prisma.fahrtModul.findMany({ where: { vereinId } });
+		// Helfer-Eintrag, Auto und Mitfahrt schreiben ANTWORT mit dem Modul als Objekt (TP4-Spec 8), die Umfrage
+		// ihre Antwortzeile.
 		const objekte = {
 			THREAD: threads,
 			MODUL: module,
-			ANTWORT: [...antworten, ...helferListen],
+			ANTWORT: [...antworten, ...helferListen, ...fahrten],
 			VERLAUF: eintraege,
 		} as Record<string, { id: string }[] | undefined>;
 		for (const a of aenderungen) {
@@ -446,18 +520,24 @@ describe('demoEinspielen', () => {
 				expect(threadAenderungen[0].urheberId).toBe(t.erstelltVonId);
 			}
 		}
-		expect(threads.reduce((summe, t) => summe + t.module.length, 0)).toBe(11);
-		// Antworten, Helfer-Eintraege und Nachrichten haben eigene Staende. Objekt ist bei der Antwort die
-		// Antwortzeile (schreibeAntwort), beim Helfer-Eintrag das Modul (TP4-Spec 8, schreibeEintrag).
+		expect(threads.reduce((summe, t) => summe + t.module.length, 0)).toBe(12);
+		// Antworten, Helfer-Eintraege, Autos, Mitfahrten und Nachrichten haben eigene Staende. Objekt ist bei der
+		// Antwort die Antwortzeile (schreibeAntwort), bei Helfer-Eintrag, Auto und Mitfahrt das Modul (TP4-Spec 8).
 		const antworten = await prisma.umfrageAntwort.findMany({ where: { vereinId } });
 		const helferEintraege = await prisma.helferEintrag.findMany({ where: { vereinId }, include: { position: true } });
 		expect(helferEintraege).toHaveLength(1);
+		const autos = await prisma.auto.findMany({ where: { vereinId } });
+		const mitfahrten = await prisma.mitfahrt.findMany({ where: { vereinId } });
+		expect(autos).toHaveLength(1);
+		expect(mitfahrten).toHaveLength(1);
 		const antwortAenderungen = aenderungen.filter((a) => a.art === 'ANTWORT');
 		const paar = (objektId: string, urheberId: string | null) => `${objektId}/${urheberId}`;
 		expect(antwortAenderungen.map((a) => paar(a.objektId, a.urheberId)).sort()).toEqual(
 			[
 				...antworten.map((a) => paar(a.id, a.vonId)),
 				...helferEintraege.map((e) => paar(e.position.modulId, e.vonId)),
+				...autos.map((a) => paar(a.modulId, a.fahrerId)),
+				...mitfahrten.map((m) => paar(m.modulId, m.vonId)),
 			].sort(),
 		);
 		expect(aenderungen.filter((a) => a.art === 'VERLAUF')).toHaveLength(4);
@@ -611,12 +691,15 @@ describe('demoEinspielen', () => {
 		expect(erster.vereine).toBe(1);
 		expect(erster.personen).toBe(11);
 		expect(erster.threads).toBe(5);
-		expect(erster.aenderungsstand).toBe(12);
-		// 5 Threads, 11 Module, 2 Antworten, 1 Helfer-Eintrag und 4 Nachrichten.
-		expect(erster.aenderungen).toBe(23);
-		expect(erster.module).toBe(11);
+		expect(erster.aenderungsstand).toBe(16);
+		// 5 Threads, 12 Module, 4 Antworten, 1 Helfer-Eintrag, 1 Auto, 1 Mitfahrt und 4 Nachrichten.
+		expect(erster.aenderungen).toBe(28);
+		expect(erster.module).toBe(12);
 		expect(erster.helferPositionen).toBe(2);
 		expect(erster.helferEintraege).toBe(1);
+		expect(erster.fahrten).toBe(1);
+		expect(erster.autos).toBe(1);
+		expect(erster.mitfahrten).toBe(1);
 	});
 
 	it('andere Vereine bleiben unberuehrt', async () => {

@@ -299,31 +299,61 @@ Eine Person kann sich für mehrere Positionen eintragen, je Position einmal. Ver
 
 ### 6.1 Datenmodell
 
-- `FahrtModul (id, threadId, hin, rueck)`: welche Richtungen es gibt (mindestens eine, Vorgabe beide). Höchstens eine Fahrgemeinschaft je Thread (Partial-Unique-Index wie bei der Teilnahme-Umfrage).
-- `Auto (id, vereinId, modulId, fahrerId, richtung, plaetze, abfahrtTag?, abfahrtZeit?, ort?, notiz?, angelegtAm)`: `richtung` `HIN` oder `RUECK`; `plaetze` 1–8 („Plätze für Kinder“, eigene Kinder mitgezählt); Tag als `@db.Date`, Zeit als `HH:MM` (Wandzeit wie TP3 2.2); Ort und Notiz höchstens 200 Zeichen. Eindeutig je `(modulId, fahrerId, richtung)`; höchstens 30 Autos je Richtung.
+- `FahrtModul (id, threadId, hin, rueck)`: welche Richtungen es gibt (mindestens eine, Vorgabe beide).
+  - **Höchstens eine Fahrgemeinschaft je Thread über einen gewöhnlichen Unique-Index `(vereinId, threadId)`** (Plan zu Etappe 4, Entscheidung 9). Ein Partial-Unique-Index wie bei der Teilnahme-Umfrage braucht eine Bedingung; hier ist jede Zeile eine Fahrgemeinschaft. Der Editor meldet eine zweite mit „Es gibt schon eine Fahrgemeinschaft.“ (409 `DOPPELTE_FAHRT`, `konflikt: true`), und „Modul hinzufügen“ bietet keine zweite an.
+- `Auto (id, vereinId, modulId, fahrerId, richtung, plaetze, abfahrtTag?, abfahrtZeit?, ort?, notiz?, angelegtAm, clientId)`: `richtung` `HIN` oder `RUECK`; `plaetze` 1–8 („Plätze für Kinder“, eigene Kinder mitgezählt); Tag als `@db.Date`, Zeit als `HH:MM` (Wandzeit wie TP3 2.2); Ort und Notiz höchstens 200 Zeichen (Codepunkte nach `trim`, ohne Steuer- und Formatzeichen). Eindeutig je `(modulId, fahrerId, richtung)`; höchstens 30 Autos je Richtung. Die Grenzen stehen in `GRENZEN` (`plaetze: 8`, `autosJeRichtung: 30`, `autoText: 200`) und als CHECKs im Schema.
+  - **Ein Auto trägt eine `clientId`** (je Verein eindeutig; Plan zu Etappe 4, Entscheidung 1), damit `POST /fahrten/:modulId/autos` eine Wiederholung erkennt (8). Ohne sie bekäme die wiederholte Anfrage 409 `AUTO_SCHON_DA`, weil das Auto aus der ersten schon steht.
 - `Mitfahrt (id, vereinId, modulId, richtung, kindId, autoId?, vonId, eingetragenAm, clientId)`, eindeutig je `(modulId, richtung, kindId)`. **`autoId = null` heißt „kommt selbst“.** Ein zusammengesetzter Fremdschlüssel sichert, dass Auto, Modul und Richtung zusammenpassen.
 
 Ohne „kommt selbst“ stünde jedes Kind, das die Familie selbst bringt, für immer unter „Braucht noch Mitfahrt“.
 
+**Autos und Mitfahrten hängen mit `NoAction` an Modul, Auto und Personen** (wie Helfer-Einträge, 5.1): Sie sperren das Löschen von Modul und Thread (`loeschZaehler`, 8). Das Zurückziehen eines Autos löscht seine Mitfahrten ausdrücklich in der Route, nie per Kaskade, damit der Systemeintrag (6.2) entsteht. Verworfen: Kaskade vom Auto auf die Mitfahrten, die die Kinder still mitnähme.
+
+**Eine Mitfahrt ist ein Upsert je `(modulId, richtung, kindId)`** (Plan zu Etappe 4, Entscheidung 5). Wechselt `autoId`, werden `autoId`, `vonId`, `clientId` und `eingetragenAm` (= jetzt) überschrieben; die Reihenfolge im Auto ist die des Einsteigens. Bleibt `autoId` gleich, antwortet die Route 200 und schreibt nichts.
+
 ### 6.2 Regeln
 
-- **Wer betrachtet wird**: die Jungfischer der Zielgruppe, bei einer Teilnahme-Umfrage nur die mit „Dabei“ (Rahmen 6.4.1).
-- **Auto anbieten**: Erwachsene, die den Thread sehen; das Formular belegt den Tag mit Start (hin) bzw. Ende (rück) des ersten Termins vor. Der Fahrer ändert sein Auto; die Plätze nicht unter die Zahl der Mitfahrer.
-- **Kind einsetzen** (in ein Auto oder auf „kommt selbst“): Bezugspersonen, die für das Kind antworten dürfen (TP3 3.3); Jungfischer mit Zugang sich selbst. Eingesetzt werden nur betrachtete Kinder; ein „Vielleicht“ reserviert keinen Platz (409). Freie Plätze prüft der Server unter der Vereinssperre (409 `VOLL`).
-- **Kind herausnehmen**: wer es einsetzen darf, der Fahrer aus seinem eigenen Auto, die Leitung.
-- **Leitung** (Thread bearbeiten): verschiebt jedes Kind, ändert Plätze und löscht Autos.
-- **Auto zurückziehen** (Fahrer oder Leitung): erlaubt, auch mit Kindern darin; deren Mitfahrten werden gelöscht, sie stehen wieder unter „Braucht noch Mitfahrt“. Der Verlauf bekommt den Systemeintrag `AUTO_ZURUECKGEZOGEN`: „Auto von Sandra M. (Hinfahrt) zurückgezogen – Lena M. und Max M. brauchen wieder eine Mitfahrt.“ Ab Teilprojekt 5 folgt ein Push.
+„Leitung“ heißt hier: darf den Thread bearbeiten (`darfBearbeiten`), wie bei der Helferliste.
+
+- **Wer betrachtet wird** (`betrachteteKinder`): die Jungfischer der Zielgruppe, bei einer Teilnahme-Umfrage nur die mit „Dabei“ (Rahmen 6.4.1).
+  - **Die Fahrgemeinschaft ist in jedem Rollenfilter erlaubt** (Plan zu Etappe 4, Entscheidung 14; vom Eigentümer noch zu bestätigen). Die Spezifikation schränkt nur Kosten ein. In einem Thread ohne Jungfischer bleibt „Braucht noch Mitfahrt“ leer.
+- **Auto anbieten**: Erwachsene, die den Thread sehen, je Richtung eines (409 `AUTO_SCHON_DA`) und höchstens 30 je Richtung (409 `VOLL`). Der Fahrer ändert sein Auto; die Plätze nicht unter die Zahl der Mitfahrer (409 `PLAETZE`).
+  - **Ein Auto bietet jede Person nur für sich selbst an** (Plan zu Etappe 4, Entscheidung 8), auch die Leitung. Verworfen: Autos im Namen anderer, denn wer fährt, soll das selbst zusagen.
+  - **Vorbelegung des Abfahrtstags** (Plan zu Etappe 4, Entscheidung 15): Die Ansicht liefert je Richtung `vorschlagTag`, hin den Starttag, rück den letzten Tag (`letzterTag`) des ersten Termins in Modulreihenfolge, ohne Termin `null`. Nur der Tag, keine Uhrzeit.
+- **Kind einsetzen** (in ein Auto oder auf „kommt selbst“): Das Kind gehört zum Thread, und die Person ist das Kind selbst oder darf für es handeln (`darfFuerKindHandeln`: sie ist ihm zugeordnet). Die Leitung darf immer.
+  - **Nicht `darfAntworten`**: Das hängt an `gefragte`, und die ist bei „Nur Familie“ für Kinder leer. Dort dürfte sonst nur die Leitung einsetzen, obwohl die Fahrgemeinschaft in jedem Rollenfilter erlaubt ist.
+  - **Eingesetzt werden nur betrachtete Kinder** (Plan zu Etappe 4, Entscheidung 7): sonst 409 `NICHT_DABEI`, für Autos und für „kommt selbst“, auch für die Leitung; ein „Vielleicht“ reserviert keinen Platz. Erst kommt das Recht: Wer ein Kind nicht einsetzen darf, bekommt 404 und erfährt nicht, ob es zugesagt hat. Ein Kind, das nicht zum Thread gehört, und eine erwachsene Person sind für alle 404, auch für die Leitung.
+  - Freie Plätze prüft der Server unter der Vereinssperre (409 `VOLL`). Wer schon im Auto sitzt, darf bleiben, auch im vollen Auto.
+  - **`fahrtAnsicht.kinder` sind die betrachteten Kinder, für die die Person das Einsetzen selbst darf.** Für die Leitung sind das nur ihre eigenen; andere Kinder setzt sie über „Umsetzen“ (6.3). Verworfen: alle Kinder als Knöpfe der Leitung, dann stünde am Handy jedes Kind des Vereins neben ihrem.
+- **Kind herausnehmen**: die Leitung, der Fahrer aus seinem eigenen Auto und wer für das Kind handeln darf. **Herausnehmen geht immer**, auch für ein Kind, das nicht mehr betrachtet wird oder inzwischen aus der Zielgruppe gefallen ist; sonst bliebe ein Platz belegt, den niemand mehr freigeben dürfte.
+- **Leitung**: verschiebt jedes betrachtete Kind („Umsetzen“ in ein Auto mit freiem Platz oder auf „kommt selbst“), ändert Plätze und löscht Autos.
+  - **Die Umsetzen-Ziele rechnet die Ansicht je Kind mit den Regeln des Servers** (`umsetzenZiele`, Feld `umsetzen` an jedem Kind der Ansicht): ein Auto der Richtung, wenn `darfEinsetzen` erlaubt und Platz ist (ohne das, in dem das Kind sitzt), „kommt selbst“, wenn `darfEinsetzen` erlaubt und das Kind nicht schon dort steht; beides schickt der Client als `PUT`. Ohne Ziel kein Knopf. Ein Kind ohne Zusage, ein Thread im Entwurf und ein Kind außerhalb der Zielgruppe haben darum kein Umsetzen, Herausnehmen bleibt. Verworfen: Umsetzen an der Rolle allein — der Knopf stand dann an Kindern, für die der Server jedes Ziel ablehnte.
+- **Auto zurückziehen** (Fahrer oder Leitung): erlaubt, auch mit Kindern darin; deren Mitfahrten werden gelöscht, sie stehen wieder unter „Braucht noch Mitfahrt“. Der Verlauf bekommt den Systemeintrag `AUTO_ZURUECKGEZOGEN`: „Auto von Sandra M. (Hinfahrt) zurückgezogen – Lena M. und Max M. brauchen wieder eine Mitfahrt.“, bei einem Kind „braucht wieder eine Mitfahrt.“ Ab Teilprojekt 5 folgt ein Push.
+  - **Der Systemeintrag entsteht nur, wenn Kinder im Auto saßen** (Plan zu Etappe 4, Entscheidung 4). Er speichert `{ fahrerId, richtung, kindIds }` (Kinder in der Reihenfolge des Einsteigens); die Namen entstehen beim Lesen wie bei allen Systemsätzen (`verlauf.ts`), `systemSatz` bekommt dafür das `Umfeld` als vierten Parameter. Unbekannte Personen heißen „ehemaliges Mitglied“. Verworfen: die Namen zu speichern, denn dann stünde ein später entferntes Kind weiter mit Namen im Verlauf.
+  - **Der Fahrer steht mit Kurznamen** („Sandra M.“), nicht mit `absenderName`: Dessen Klammer („Mutter von …“) stünde neben der Klammer mit der Richtung.
 - **Abgesagt, aber im Auto**: Ein Kind, das nicht mehr betrachtet wird (Absage, Zielgruppe geändert), bleibt im Auto und belegt den Platz; Karte und Leitung zeigen es mit „nicht mehr dabei“. Verworfen: automatisch herausnehmen — eine versehentliche Absage kostete den Platz.
-- **Archiv**: nur die Leitung ändert noch.
+- **Archiv**: nur die Leitung ändert noch. Die Fahrgemeinschaft hat keine Frist; 410 gibt es hier nicht.
 - Die Fahrgemeinschaft zählt **nicht** zu „Braucht deine Antwort“. Verworfen: jedes Kind ohne Mitfahrt als offene Aufgabe — Familien, die selbst fahren, müssten erst „kommt selbst“ tippen, damit die Meldung verschwindet.
+- **„Neu“** (Plan zu Etappe 4, Entscheidung 11): Alle Leser sehen die Fahrgemeinschaft. Deshalb ist `antwortenSichtbar` mit Fahrgemeinschaft für Nicht-Entfernte immer `true`, wie bei der Helferliste.
+- **Editor** (Plan zu Etappe 4, Entscheidung 10; `fahrtSperre`, `pruefeFahrtAenderung`): Ohne Richtung meldet er „Bitte mindestens eine Richtung.“
+  - Eine Richtung mit Autos oder Mitfahrten (auch „kommt selbst“) lässt sich nicht abschalten: 409 `FAHRT_BELEGT` „Für die Hinfahrt gibt es schon Autos oder Mitfahrten.“ bzw. „Für die Rückfahrt …“. Der Editor sperrt das Kästchen vorher mit dem Satz „Hat schon Autos oder Mitfahrten.“ daneben. Verworfen: die Einträge dabei still zu löschen, denn dann stünde eine Familie ohne Nachricht nicht mehr in ihrem Auto.
+  - Eine Fahrgemeinschaft mit Autos oder Mitfahrten lässt sich nicht entfernen: 409 `FAHRT_BELEGT` „Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.“
+  - Die Codes `DOPPELTE_FAHRT` und `FAHRT_BELEGT` sind eigene, nicht `DOPPELTE_TEILNAHME` und `BEANTWORTET` der Umfrage: Die Domain markiert diese Konflikte (`Feldfehler.fahrt`). Der Client verzweigt auf keinen davon.
+- **Antworten-Übersicht** (Plan zu Etappe 4, Entscheidung 17): Sie zeigt die Fahrgemeinschaft als `jf-fahrt-modul` mit der Ansicht der Leitung (`AntwortenUebersicht.fahrt`). Verworfen: eine eigene Tabelle; Umsetzen braucht dieselben Bedienelemente wie auf der Thread-Seite.
 
 ### 6.3 Anzeige
 
-Umschalter Hin/Rück (nur bei beiden Richtungen). Je Auto eine Karte: Fahrer (TP3 3.10), Abfahrt, Ort, Notiz, „2 frei“, Mitfahrer („Lena M., Max M.“). Darunter „Braucht noch Mitfahrt“ und „Kommt selbst“. Alle Leser sehen alles davon. **Keine Telefonnummern**; abgestimmt wird im Verlauf (Rahmen 6.4.1).
+Umschalter „Hin“/„Rück“ (nur bei beiden Richtungen), darunter die Richtung als Überschrift („Hinfahrt“, „Rückfahrt“). Je Auto eine Karte: Fahrer (`absenderName`, TP3 3.10), Abfahrt (`tagKurz(abfahrtTag)` und Zeit, wie vorhanden), Ort, Notiz, „2 frei“ bzw. „voll“, Mitfahrer („Lena M., Max M.“), ein nicht betrachtetes Kind mit dem Zusatz „nicht mehr dabei“. Darunter „Braucht noch Mitfahrt“ (leer: „Alle haben eine Mitfahrt.“) und „Kommt selbst“. Alle Leser sehen alles davon. **Keine Telefonnummern**; abgestimmt wird im Verlauf (Rahmen 6.4.1).
 
 Kinder erscheinen als „Lena M.“ nach TP3 3.10, nicht nur mit Vornamen wie in Rahmen 6.4.1: Zwei Lenas wären sonst nicht zu unterscheiden.
 
-Regeln: `fahrtAnsicht(modul, umfeld, teilnahme, betrachter, jetzt)` und `brauchtMitfahrt(…)` in `libs/domain`.
+**Reihenfolge** (Plan zu Etappe 4, Entscheidung 16): Autos nach `angelegtAm`, dann `id`; Mitfahrer nach `eingetragenAm`; „Braucht noch Mitfahrt“ und „Kommt selbst“ nach Kurzname (`localeCompare` mit `'de'`).
+
+- **Knöpfe**: „Auto anbieten“, „Auto ändern“, „Auto zurückziehen“, am Auto „Einsteigen“ (für Kinder „Lena einsteigen“), „Kommt selbst“ (für Kinder „Lena kommt selbst“), „Herausnehmen“, für die Leitung „Umsetzen“ (Auswahl aus den Zielen der Ansicht, 6.2). „Einsteigen“ steht an jedem Auto gleich; der zugängliche Name nennt den Fahrer wie die Karte und beginnt mit dem sichtbaren Text („Lena einsteigen bei Sandra M. (Mutter von Lena)“, WCAG 2.5.3).
+- **Formular „Auto anbieten“**: „Plätze für Kinder“ (1–8), „Abfahrt am“, „Uhrzeit“, „Treffpunkt“ (Feld `ort`), „Notiz (optional)“, Knöpfe „Anbieten“ bzw. „Speichern“ und „Abbrechen“.
+- **Rückfrage beim Zurückziehen mit Kindern** (`jf-bestaetigung`): „Lena M. und Max M. brauchen dann wieder eine Mitfahrt.“ Ohne Kinder zieht der Knopf das Auto ohne Rückfrage zurück.
+
+Regeln in `libs/domain/src/module/fahrt/fahrt.ts`: `fahrtAnsicht(ich, modul, daten, umfeld, jetzt)` (`ich` die betrachtende Person, `daten` die `ThreadDaten` mit Kopf, Terminen und Umfragen), `brauchtMitfahrt(fahrt, richtung, betrachtete)`, `betrachteteKinder`, die Rechte `darfAnbieten`, `darfAutoAendern`, `darfEinsetzen`, `darfHerausnehmen`, `umsetzenZiele`, dazu `pruefeAuto`, `fahrtSperre` und `pruefeFahrtAenderung`.
 
 ---
 
@@ -361,13 +391,17 @@ Der Editor belegt Empfänger, IBAN und PayPal mit denen des zuletzt angelegten K
 
 Helfer-Einträge, Autos, Mitfahrten und Kostenposten heißen hier **Eintragungen**.
 
-- **Löschen**: Eintragungen zählen wie Antworten (TP3 3.6, 3.14): Ein Modul oder Thread mit Eintragungen lässt sich nicht löschen; die Fremdschlüssel sind `NoAction`. Ausnahme: Autos lassen sich zurückziehen (6.2).
+- **Löschen**: Eintragungen zählen wie Antworten (TP3 3.6, 3.14): Ein Modul oder Thread mit Eintragungen lässt sich nicht löschen; die Fremdschlüssel sind `NoAction`, `loeschZaehler` zählt Helfer-Einträge, Autos und Mitfahrten. Ausnahme: Autos lassen sich zurückziehen (6.2); die Route löscht dabei die Mitfahrten des Autos ausdrücklich, nie per Kaskade.
 - **Entwurf**: keine Eintragungen (TP3 3.6).
 - **Archiv**: nur noch Leitung (TP3 3.7).
 - **Wiederholbarkeit**: Jede Eintragungs-Route nimmt eine `clientId` (je Verein eindeutig) wie die Umfrage-Antwort (TP3 2.3).
   - **Ausnahme Austragen**: `DELETE /helfer/:positionId/eintraege/:fuerId` nimmt keine `clientId` und ist idempotent (Plan zu Etappe 3, Entscheidung 4). Ein fehlender Eintrag ergibt 200 mit der frischen Ansicht und schreibt nichts. Nach dem Löschen gibt es keine Zeile mehr, an der eine `clientId` hängen könnte; die Wiederholung erkennt der Server am fehlenden Eintrag. Verworfen: eine eigene Tabelle für gelöschte `clientId`s.
-- **Schreibpfad** wie TP3 4.2: Form (400), Ort des Moduls, Sichtbarkeit und Recht (404), Wiederholung über `clientId`, Entwurf/Frist/Archiv (409/410), dann `mitAenderung` mit Neuprüfung unter der Sperre, nach dem Commit `deps.bus`, Antwort mit frischer Ansicht des Moduls.
-- **Änderungsart**: Eintragungen schreiben `ANTWORT` mit `objektId` = Modul-ID (Plan zu Etappe 3, Entscheidung 6); Autos ebenso. Die Umfrage schreibt dort weiter die ID der Antwort. Ansichten werden je Person neu berechnet; kein Zahlstand erreicht Fremde.
+  - **Ausnahme Herausnehmen**: `DELETE /fahrten/:modulId/:richtung/:kindId` nimmt ebenso keine `clientId` und ist idempotent (Plan zu Etappe 4, Entscheidung 6): ohne Mitfahrt 200 mit frischer Ansicht, ohne Schreiben. Zwei Fälle weichen ab (9.1).
+  - **Auto anbieten** (`POST /fahrten/:modulId/autos`) nimmt eine `clientId` (6.1). **`PUT /autos/:id` nimmt keine** (Plan zu Etappe 4, Entscheidung 2): Es setzt Werte, eine Wiederholung setzt dieselben. Ändert sich nichts, antwortet die Route 200 und schreibt nichts.
+  - **`DELETE /autos/:id` eines unbekannten Autos ergibt 404** (Plan zu Etappe 4, Entscheidung 3): Nach dem Löschen gibt es keine Zeile mehr, die ein wiederholtes Zurückziehen von einem fremden Auto unterschiede. Der Client behandelt 404 wie bei der Helferliste: Satz am Modul und still neu laden.
+  - **Einsetzen** (`PUT /fahrten/:modulId/:richtung/:kindId`) ist ein Upsert (6.1): Bleibt das Auto dasselbe, antwortet die Route 200 und schreibt nichts.
+- **Schreibpfad** wie TP3 4.2: Form (400), Ort des Moduls, Sichtbarkeit und Recht (404), Wiederholung über `clientId`, Entwurf/Frist/Archiv (409/410), dann `mitAenderung` mit Neuprüfung unter der Sperre, nach dem Commit `deps.bus`, Antwort mit frischer Ansicht des Moduls. Vor allem steht das Ratenfenster (`antwortenFenster`, 9.2). Bei der Fahrgemeinschaft sind die 409er `ENTWURF`, `ARCHIVIERT`, `NICHT_DABEI`, `VOLL`, `AUTO_SCHON_DA` und `PLAETZE` (9.3).
+- **Änderungsart**: Eintragungen schreiben `ANTWORT` mit `objektId` = Modul-ID (Plan zu Etappe 3, Entscheidung 6); Autos und Mitfahrten ebenso (Plan zu Etappe 4, Entscheidung 12). Das Zurückziehen eines Autos mit Kindern schreibt zusätzlich `VERLAUF` mit der ID des Systemeintrags. Die Umfrage schreibt dort weiter die ID der Antwort. Ansichten werden je Person neu berechnet; kein Zahlstand erreicht Fremde.
 - **„Neu“**: Eintragungen zählen wie Antworten (TP3 3.9).
 - **Gefragte und Antwortrecht** nutzen die vorhandene Logik aus `threads/antworten.ts` (`gefragte`, `antwortZeilen`, `darfAntworten`); sie ist dafür von `UmfrageDaten` gelöst und nimmt den schmalen Typ `AntwortRegel` (`einheit`, `frist`). Umfrage und Helferliste fragen so dieselbe Logik.
 
@@ -405,6 +439,14 @@ Alle unter `/<slug>/api/v1`, mit `brauchtMitglied` und je einem Eintrag im Manda
 
 **Die Helfer-Routen antworten mit `{ modul, stand }`** wie die Umfrage-Antwort: der frischen Ansicht der Helferliste für die anfragende Person und dem Stand der Änderung (Plan zu Etappe 3). Eine Notiz mit Steuer- oder Formatzeichen (`\p{Cc}`, `\p{Cf}`) oder über 80 Zeichen ergibt 400 am Feld `notiz`. Das Austragen ist idempotent (8).
 
+**Die Fahrt-Routen antworten ebenso mit `{ modul, stand }`**, `modul` die `FahrtModulAnsicht` der anfragenden Person (Plan zu Etappe 4).
+
+- **Körper**: `POST /fahrten/:modulId/autos` nimmt `{ richtung: 'HIN' | 'RUECK', plaetze, abfahrtTag, abfahrtZeit, ort, notiz, clientId }` (Tag, Zeit, Ort und Notiz jeweils `null` erlaubt); `PUT /autos/:id` dieselben Felder ohne `richtung` und `clientId`; `DELETE /autos/:id` und das Herausnehmen sind ohne Körper.
+- **`:richtung` steht klein in der Adresse** (`hin`, `rueck`); jeder andere Wert ergibt 404.
+- **Wiederholung des Herausnehmens** (8), zwei Abweichungen vom idempotenten 200:
+  - **Ein zweites `DELETE` der Fahrerin für ein fremdes Kind ergibt 404**: Ohne Mitfahrt ist nicht mehr erkennbar, dass sie die Fahrerin war (wie beim Zurückziehen, 8). Der Client lädt dann still neu.
+  - **`DELETE` ohne Mitfahrt im Archiv bleibt 409 `ARCHIVIERT`**: Der Schreibpfad prüft das Archiv vor der Wiederholung, anders als beim Austragen aus der Helferliste. Ein Wiederholen über die Archivgrenze ist selten; der Client lädt neu.
+
 Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, Kostenbetrag und Bankdaten) laufen weiter über `POST /threads` und `PUT /threads/:id` (TP3 4.1); `ModulTyp` bekommt `HELFER`, `FAHRT`, `KOSTEN`, `DATEIEN`, `FOTOS`.
 
 ### 9.2 Grenzen
@@ -415,9 +457,19 @@ Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, K
 
 ### 9.3 Fehler
 
-Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Feld `code`**: `{ fehler: '<Text>', code: 'GROESSE' | 'KONTINGENT' | 'TYP' | 'HEIC' | 'BESCHAEFTIGT' | 'VOLL' }` (Plan zu Etappe 1, Entscheidung 2; `BESCHAEFTIGT` und `VOLL` mit Etappe 2). Die API antwortet sonst nur mit `{ fehler }`; verworfen: Codes statt Text — der Client zeigt den Text überall direkt an, und Tests und Skripte prüfen den Code. Zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` mit `Retry-After: 2` (Warteschlange voll, 2.4); 409 `VOLL` (Datei-Modul mit 20 Dateien, Foto-Modul mit 500 Fotos, Helfer-Position ohne freien Platz, später Auto). Fehlende Rechte beim Hochladen, Umbenennen und Löschen ergeben 404, nicht 403 (4.2; Plan zu Etappe 2, Entscheidung 5). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
+Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Feld `code`**: `{ fehler: '<Text>', code: 'GROESSE' | 'KONTINGENT' | 'TYP' | 'HEIC' | 'BESCHAEFTIGT' | 'VOLL' }` (Plan zu Etappe 1, Entscheidung 2; `BESCHAEFTIGT` und `VOLL` mit Etappe 2). Die API antwortet sonst nur mit `{ fehler }`; verworfen: Codes statt Text — der Client zeigt den Text überall direkt an, und Tests und Skripte prüfen den Code. Zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` mit `Retry-After: 2` (Warteschlange voll, 2.4); 409 `VOLL` (Datei-Modul mit 20 Dateien, Foto-Modul mit 500 Fotos, Helfer-Position ohne freien Platz, Auto ohne freien Platz, Richtung mit 30 Autos). Fehlende Rechte beim Hochladen, Umbenennen und Löschen ergeben 404, nicht 403 (4.2; Plan zu Etappe 2, Entscheidung 5). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
 
 `GROESSE` und `TYP` haben je Art einen eigenen Text: „Das Foto ist zu groß (höchstens 20 MB)“ und „Die Datei ist zu groß (höchstens 25 MB)“, bei zu vielen Pixeln „Das Foto hat zu viele Pixel (höchstens 50 Megapixel)“; für Fotos „Diese Bildart geht nicht. Erlaubt sind JPEG, PNG und WebP.“ `VOLL` heißt „Hier passen höchstens 20 Dateien hinein“ bzw. „Hier passen höchstens 500 Fotos hinein“, an der Helfer-Position `{ fehler: 'Hier sind schon alle Plätze vergeben.', code: 'VOLL' }` (Etappe 3; eine Notiz ändern belegt keinen Platz und endet nie so), `BESCHAEFTIGT` „Gerade werden viele Fotos verarbeitet. Bitte gleich noch einmal versuchen.“
+
+**Die Fahrgemeinschaft** (Etappe 4) antwortet bei Konflikten mit 409 und diesen Körpern:
+
+- `{ fehler: 'In diesem Auto ist kein Platz mehr frei.', code: 'VOLL' }` am Auto;
+- `{ fehler: 'Für diese Fahrt gibt es schon 30 Autos.', code: 'VOLL' }` an der Richtung;
+- `{ fehler: 'Du bietest für diese Fahrt schon ein Auto an.', code: 'AUTO_SCHON_DA' }`;
+- `{ fehler: 'Es fahren schon <n> Kinder mit.', code: 'PLAETZE' }`, bei einem Kind `Es fährt schon 1 Kind mit.` (Plätze unter die Zahl der Mitfahrer);
+- `{ fehler: 'Mitfahren kann nur, wer zugesagt hat.', code: 'NICHT_DABEI' }` (6.2).
+
+Eine ungültige Eingabe ergibt 400 `{ fehler: 'Ungültige Anfrage', feld }` (`ungueltigesFeld`) mit `feld` aus `plaetze`, `abfahrtTag`, `abfahrtZeit`, `ort`, `notiz`, `richtung` (`POST /fahrten/:modulId/autos` ohne gültige Richtung im Körper), `autoId` und `clientId`. Ort und Notiz mit Steuer- oder Formatzeichen (`\p{Cc}`, `\p{Cf}`) sind ungültig.
 
 ---
 
@@ -428,7 +480,7 @@ Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Fel
 - **Editor**: neue Modultypen in „Modul hinzufügen“; Felder je Typ; Upload in gespeicherten Datei- und Foto-Modulen (4.3); Vorschau zeigt die neuen Module. `editor.ts` und `modul-felder.ts` sind schon groß (TP3-Rückstand): Die Felder der neuen Typen entstehen in eigenen Komponenten statt in `modul-felder.ts`.
 - **Verwaltung › Dokumente**: Kategorien und Dokumente pflegen (3.1).
 - **Verwaltung › Einstellungen**: Speicherverbrauch (2.6).
-- **Antworten-Übersicht**: Helferliste, Fahrgemeinschaft (nur Ansicht und Umsetzen), Kosten.
+- **Antworten-Übersicht**: Helferliste, Fahrgemeinschaft (Ansicht der Leitung mit Einsetzen, Herausnehmen und Umsetzen wie auf der Thread-Seite, 6.2), Kosten.
 - **Meine Jungfischer**: Foto-Einwilligung (4.4).
 - Gemessen wie TP3 6.7: 375 × 812 und 1280 × 800, hell und dunkel.
 
@@ -454,6 +506,8 @@ Zusätzlich zu TP3 9.1: eigene Helfer-Einträge, eigene Autos, Mitfahrten der ei
 ### 12.2 Entfernen einer Person
 
 Wie Rahmen 8.4: Helfer-Einträge, Kostenposten und hochgeladene Fotos und Dateien bleiben, als „ehemaliges Mitglied“. **Autos und Mitfahrten der entfernten Person werden gelöscht**: Sie fährt nicht mehr und fährt nicht mehr mit. Für gelöschte Autos mit Kindern entsteht der Systemeintrag aus 6.2.
+
+**Das Löschen kommt mit Etappe 6** (Plan zu Etappe 4, Entscheidung 13; vom Eigentümer noch zu bestätigen), wie das Entfernen aus 1.4. Bis dahin bleibt das Auto einer entfernten Person stehen; Fahrer und Kinder heißen „ehemaliges Mitglied“, und die Leitung kann das Auto löschen.
 
 ### 12.3 Datenschutzerklärung
 
@@ -482,11 +536,15 @@ Gegen die Testdatenbank: zwei gleichzeitige Einträge auf den letzten Platz (gen
 
 Das Zeltlager-Szenario (1.1) mit erzeugten Testbildern; dazu die Leiste mit fünf Einträgen im Layout-Test.
 
+**Bis dahin spielt der Ablauf Schritt 4 verkleinert auf Bowling** (Etappe 4): Die Leitung fügt im Editor eine Fahrgemeinschaft nur für die Hinfahrt hinzu; die Mutter bietet ein Auto an (2 Plätze, Vereinsheim, 15:30) und setzt ihr Kind hinein, das Kind sieht sich ohne Neuladen darin; die Leitung setzt ein zweites Kind aus „Braucht noch Mitfahrt“ dazu, die Mutter sieht das volle Auto ohne Neuladen; die Mutter zieht das Auto zurück, beide Kinder stehen wieder unter „Braucht noch Mitfahrt“, und der Verlauf nennt es.
+
 ### 13.4 Demo
 
 `pnpm run demo` baut das Zeltlager mit allen Modulen auf: erzeugte Fotos, zwei Dateien, Helfer-Einträge, zwei Autos, Kostenposten in allen drei Zuständen und eine Befreiung; Tim ohne Foto-Einwilligung; Dokumente in den drei Kategorien.
 
 **Bis dahin hat Bowling eine Helferliste** (Plan zu Etappe 3, Entscheidung 14), damit es zur lokalen Abnahme von Etappe 3 etwas gibt: als letztes Modul „Mitbringen und fahren“, pro Erwachsener, Frist fünf Tage nach dem Einspielen um 18:00, Positionen „Fahrer“ (2) und „Snacks“ (3); Sandra ist bei „Snacks“ eingetragen, mit der Notiz „Gemüsesticks“. Das Zeltlager mit allen Modulen bleibt in Etappe 6.
+
+**Dazu bekommt Bowling eine Fahrgemeinschaft** (Plan zu Etappe 4, Entscheidung 18), hin und rück, nach der Helferliste. Sandra bietet die Hinfahrt an (3 Plätze, Abfahrt am Tag des Termins um 13:00, vor dem Treffpunkt um 13:30; Treffpunkt der Fahrt Vereinsheim), Lena sitzt darin. Lena und Max haben in der Teilnahme-Umfrage zugesagt (für Max die Mutter); ohne Zusage zeigte die Karte Lena als „nicht mehr dabei“. Max hat keine Mitfahrt und steht unter „Braucht noch Mitfahrt“.
 
 **Demo-Fotos kommen mit Etappe 6** (Plan zu Etappe 2, Entscheidung 15). Für die lokale Abnahme von Etappe 2 erzeugt `node tools/erzeuge-testbilder.mjs <verzeichnis> --bunt <n>` bunte Testbilder aus Kreisen und Rechtecken (1600 × 1200, mit Nummer); dasselbe Skript erzeugt die acht Bilder der Fotoprobe (2.4).
 

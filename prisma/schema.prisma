@@ -122,7 +122,7 @@ enum ArchivModus {
   AKTIV_HALTEN
 }
 
-/// Teilprojekt 4 ergaenzt weitere Typen (Etappe 2: DATEIEN, FOTOS).
+/// Teilprojekt 4 ergaenzt weitere Typen (Etappe 2: DATEIEN, FOTOS; Etappe 4: FAHRT).
 enum ModulTyp {
   INFO
   TERMIN
@@ -130,6 +130,13 @@ enum ModulTyp {
   DATEIEN
   FOTOS
   HELFER
+  FAHRT
+}
+
+/// Fahrtrichtung einer Fahrgemeinschaft (TP4-Spec 6.1).
+enum Richtung {
+  HIN
+  RUECK
 }
 
 /// Wer in ein Foto-Modul hochladen darf (TP4-Spec). Dieselben Werte wie
@@ -161,6 +168,8 @@ enum SystemArt {
   TERMIN_GEAENDERT
   FRIST_GEAENDERT
   MODUS_GEAENDERT
+  /// Ein Auto der Fahrgemeinschaft wurde zurueckgezogen, obwohl Kinder darin sassen.
+  AUTO_ZURUECKGEZOGEN
 }
 
 enum AenderungArt {
@@ -240,6 +249,9 @@ model Verein {
   helferModule           HelferModul[]
   helferPositionen       HelferPosition[]
   helferEintraege        HelferEintrag[]
+  fahrtModule            FahrtModul[]
+  autos                  Auto[]
+  mitfahrten             Mitfahrt[]
   verlauf                VerlaufEintrag[]
   gelesenStaende         GelesenStand[]
   aenderungen            Aenderung[]
@@ -317,6 +329,9 @@ model Person {
   antwortenVon                 UmfrageAntwort[]      @relation("AntwortVon")
   helferEintraegeFuer          HelferEintrag[]       @relation("HelferEintragFuer")
   helferEintraegeVon           HelferEintrag[]       @relation("HelferEintragVon")
+  autosAlsFahrer               Auto[]                @relation("AutoFahrer")
+  mitfahrtenAlsKind            Mitfahrt[]            @relation("MitfahrtKind")
+  mitfahrtenVon                Mitfahrt[]            @relation("MitfahrtVon")
   verlaufAlsAutor              VerlaufEintrag[]      @relation("VerlaufAutor")
   verlaufGeloescht             VerlaufEintrag[]      @relation("VerlaufGeloeschtVon")
   gelesenStaende               GelesenStand[]
@@ -670,7 +685,7 @@ model ThreadUntergruppe {
 }
 
 /// Kopfzeile eines Moduls; je Typ haengt eine Tabelle mit derselben id daran
-/// (InfoModul, TerminModul, UmfrageModul, HelferModul). Verworfen: ein JSON-Feld je Modul --
+/// (InfoModul, TerminModul, UmfrageModul, HelferModul, FahrtModul). Verworfen: ein JSON-Feld je Modul --
 /// Regeln wie "eine Antwort pro Kind" sollen in der Datenbank abgesichert sein.
 ///
 /// position ist nicht eindeutig: Beim Umsortieren in einer Transaktion verletzte
@@ -693,11 +708,12 @@ model ThreadModul {
   dateienKopf DateienModul?
   fotosKopf   FotosModul?
   helfer      HelferModul?
+  fahrt       FahrtModul?
   dateien     Datei[]
 
   @@unique([vereinId, id])
-  /// Ziel des Fremdschluessels von UmfrageModul: So stimmt dessen threadId immer
-  /// mit dem Thread des Moduls ueberein.
+  /// Ziel des Fremdschluessels von UmfrageModul und FahrtModul: So stimmt deren
+  /// threadId immer mit dem Thread des Moduls ueberein.
   @@unique([vereinId, id, threadId])
   @@index([vereinId, threadId])
 }
@@ -850,6 +866,114 @@ model HelferEintrag {
   @@unique([positionId, fuerId])
   @@unique([vereinId, clientId])
   @@index([vereinId, fuerId])
+  @@index([vereinId, vonId])
+}
+
+/// Kopfzeile der Fahrgemeinschaft: welche Richtungen die Fahrt hat. Je Thread
+/// hoechstens eine; threadId steht hier (wie bei UmfrageModul), damit der
+/// eindeutige Schluessel darueber moeglich ist. Spec 6.1 nennt einen
+/// Partial-Unique-Index, aber jede Zeile ist eine Fahrgemeinschaft -- es gibt keine
+/// Bedingung, also genuegt ein gewoehnlicher Unique-Index.
+model FahrtModul {
+  /// Dieselbe id wie das ThreadModul.
+  id       String      @id
+  vereinId String
+  verein   Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  threadId String
+  modul    ThreadModul @relation(fields: [vereinId, id, threadId], references: [vereinId, id, threadId], onDelete: Cascade, onUpdate: NoAction)
+  /// Mindestens eine der beiden Richtungen (CHECK fahrt_richtung).
+  hin      Boolean     @default(true)
+  rueck    Boolean     @default(true)
+
+  autos      Auto[]
+  mitfahrten Mitfahrt[]
+
+  @@unique([vereinId, threadId])
+  /// Prisma verlangt fuer die 1:1-Relation einen Schluessel genau ueber deren Felder.
+  @@unique([vereinId, id, threadId])
+  /// Prisma verlangt fuer die Relation der Autos einen Schluessel genau ueber deren Felder.
+  @@unique([vereinId, id])
+}
+
+/// Ein Auto in einer Richtung der Fahrgemeinschaft; jede Person bietet je Richtung
+/// hoechstens eines an und nur fuer sich selbst (Plan, Entscheidung 8).
+///
+/// Modul und Fahrer ohne Kaskade: Von Thread, Modul oder Fahrgemeinschaft fuehrt
+/// kein Kaskadenweg zu den Autos, ein Auto haelt sein Modul fest (P2003) -- eine
+/// Fahrgemeinschaft mit Autos verschwindet nie still. Verworfen: Cascade am Modul;
+/// ein Thread mit Zusagen waere mit einem Klick samt allen Autos weg. Der Editor
+/// lehnt das Entfernen vorher mit 409 ab. Das Loeschen eines ganzen Vereins geht
+/// trotzdem durch, weil jede Tabelle direkt vom Verein kaskadiert. Der Fahrer ohne
+/// Kaskade aus demselben Grund wie bei HelferEintrag: entfernt wird per Grabstein.
+model Auto {
+  id          String     @id @default(cuid())
+  vereinId    String
+  verein      Verein     @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modulId     String
+  modul       FahrtModul @relation(fields: [vereinId, modulId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  fahrerId    String
+  fahrer      Person     @relation("AutoFahrer", fields: [vereinId, fahrerId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  richtung    Richtung
+  /// Plaetze fuer Kinder, 1-8 (CHECK auto_plaetze).
+  plaetze     Int
+  abfahrtTag  DateTime?  @db.Date
+  /// HH:MM (CHECK auto_zeit).
+  abfahrtZeit String?
+  /// Treffpunkt; 1-200 Zeichen oder null (CHECK auto_ort).
+  ort         String?
+  /// 1-200 Zeichen oder null (CHECK auto_notiz).
+  notiz       String?
+  /// Die Reihenfolge der Autos in der Ansicht ist die des Anbietens.
+  angelegtAm  DateTime
+  /// Je Verein eindeutig: Macht das Anbieten wiederholbar, wenn die Outbox des
+  /// Clients die Anfrage ein zweites Mal schickt. Ohne sie bekaeme die Wiederholung
+  /// ein 409, weil das Auto der ersten Anfrage schon steht (Plan, Entscheidung 1).
+  clientId    String
+
+  mitfahrten Mitfahrt[]
+
+  @@unique([modulId, fahrerId, richtung])
+  @@unique([vereinId, clientId])
+  /// Ziel des Fremdschluessels von Mitfahrt: Auto, Modul und Richtung der Mitfahrt
+  /// passen so immer zusammen (Spec 6.1).
+  @@unique([vereinId, modulId, richtung, id])
+  @@index([vereinId, fahrerId])
+}
+
+/// Ein Kind in einer Richtung: im Auto (autoId) oder "kommt selbst" (autoId null).
+/// Je (modulId, richtung, kindId) hoechstens eine; ein Wechsel des Autos ist ein
+/// Upsert (Plan, Entscheidung 5).
+///
+/// Das Auto ohne Kaskade: Das Zurueckziehen loescht die Mitfahrten ausdruecklich und
+/// schreibt den Systemeintrag; eine Kaskade naehme die Kinder still mit. Modul, Kind
+/// und Eintragender ebenfalls ohne Kaskade, aus demselben Grund wie bei Auto.
+model Mitfahrt {
+  id            String     @id @default(cuid())
+  vereinId      String
+  verein        Verein     @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modulId       String
+  modul         FahrtModul @relation(fields: [vereinId, modulId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  richtung      Richtung
+  kindId        String
+  kind          Person     @relation("MitfahrtKind", fields: [vereinId, kindId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Null heisst "kommt selbst". Der Verbund-Fremdschluessel ueber Verein, Modul,
+  /// Richtung und Auto haelt Auto, Modul und Richtung zusammen (Spec 6.1) und prueft
+  /// nur Zeilen mit Auto (MATCH SIMPLE). NoAction statt Cascade: Das Zurueckziehen
+  /// loescht die Mitfahrten ausdruecklich und schreibt den Systemeintrag; eine
+  /// Kaskade naehme die Kinder still mit.
+  autoId        String?
+  auto          Auto?      @relation(fields: [vereinId, modulId, richtung, autoId], references: [vereinId, modulId, richtung, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Wer die Mitfahrt eingetragen hat.
+  vonId         String
+  von           Person     @relation("MitfahrtVon", fields: [vereinId, vonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Beim Wechsel des Autos neu gesetzt: Die Reihenfolge im Auto ist die des Einsteigens.
+  eingetragenAm DateTime
+  clientId      String
+
+  @@unique([modulId, richtung, kindId])
+  @@unique([vereinId, clientId])
+  @@index([vereinId, autoId])
+  @@index([vereinId, kindId])
   @@index([vereinId, vonId])
 }
 

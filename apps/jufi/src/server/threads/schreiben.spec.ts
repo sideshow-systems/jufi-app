@@ -1,5 +1,5 @@
 import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
-import type { ModulEntwurf, ThreadAnsicht, ThreadBearbeitung, ThreadEntwurf } from '@jufi/domain';
+import type { FahrtModulAnsicht, ModulEntwurf, ThreadAnsicht, ThreadBearbeitung, ThreadEntwurf } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
@@ -8,7 +8,7 @@ import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { neuerSchluessel } from './schreiben.js';
-import { legeThreadAn, ordneZu, trageEinTest, type TestModul } from './test-threads.js';
+import { bieteAutoTest, legeThreadAn, ordneZu, setzeEinTest, trageEinTest, type TestModul } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
 /** Donnerstag, 22.10.2026, 18:00 in Berlin: nach JETZT, Antworten sind also noch offen. */
@@ -19,6 +19,7 @@ const VERALTET = { fehler: 'Der Thread wurde inzwischen geändert. Bitte neu lad
 type Umfrage = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
 type Termin = Extract<ModulEntwurf, { typ: 'TERMIN' }>;
 type Helfer = Extract<ModulEntwurf, { typ: 'HELFER' }>;
+type Fahrt = Extract<ModulEntwurf, { typ: 'FAHRT' }>;
 
 /** Eine Helferliste ohne Titel und ohne Frist; legeThreadAn gibt den Positionen die Schluessel "kuchen" und "salat". */
 const HELFER: TestModul = {
@@ -338,6 +339,56 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(r.status).toBe(400);
 			expect(await r.json()).toEqual({ fehler: 'Ungültige Anfrage', feld: 'module.0' });
 			expect(await s.stand()).toBe(vorher);
+		});
+
+		it('legt eine Fahrgemeinschaft nur mit Hinfahrt an: 201, die Ansicht zeigt genau die Hinfahrt, ohne Autos', async () => {
+			const s = await szenario();
+			const e = s.bowling();
+			e.module.push({ typ: 'FAHRT', id: null, titel: null, hin: true, rueck: false });
+			const r = await s.lege(e, s.thomas.cookie);
+			expect(r.status).toBe(201);
+			const b = (await r.json()) as ThreadBearbeitung;
+			const f = b.entwurf.module[3] as Fahrt;
+			expect(f).toMatchObject({ typ: 'FAHRT', titel: null, hin: true, rueck: false });
+			expect(b.fahrtSperre).toEqual({ eingetragen: false, HIN: false, RUECK: false });
+			expect(b.darfLoeschen).toBe(true);
+			expect(await s.arten(b.version)).toEqual(['MODUL', 'MODUL', 'MODUL', 'MODUL', 'THREAD']);
+			expect(await prisma.fahrtModul.findUniqueOrThrow({ where: { id: f.id as string } })).toMatchObject({
+				vereinId: s.verein.id,
+				threadId: b.id,
+				hin: true,
+				rueck: false,
+			});
+			expect(await prisma.threadModul.findUniqueOrThrow({ where: { id: f.id as string } })).toMatchObject({
+				typ: 'FAHRT',
+				position: 3,
+			});
+
+			const a = await sende(server.url, s.api(`/threads/${b.id}`), { cookie: s.thomas.cookie });
+			expect(a.status).toBe(200);
+			const modul = ((await a.json()) as ThreadAnsicht).module[3] as FahrtModulAnsicht;
+			expect(modul).toMatchObject({ typ: 'FAHRT', id: f.id, titel: null });
+			expect(modul.richtungen.map((x) => x.richtung)).toEqual(['HIN']);
+			expect(modul.richtungen[0]?.autos).toEqual([]);
+		});
+
+		it('meldet eine zweite Fahrgemeinschaft wie die zweite Teilnahme, mit eigenem Code: 409 DOPPELTE_FAHRT am Typ, nichts geschrieben', async () => {
+			const s = await szenario();
+			const e = s.bowling();
+			e.module.push(
+				{ typ: 'FAHRT', id: null, titel: null, hin: true, rueck: true },
+				{ typ: 'FAHRT', id: null, titel: null, hin: true, rueck: true },
+			);
+			const vorher = await s.stand();
+			const r = await s.lege(e, s.thomas.cookie);
+			expect(r.status).toBe(409);
+			expect(await r.json()).toEqual({
+				fehler: 'Es gibt schon eine Fahrgemeinschaft.',
+				code: 'DOPPELTE_FAHRT',
+				feld: 'module.4.typ',
+			});
+			expect(await s.stand()).toBe(vorher);
+			expect(await prisma.fahrtModul.count({ where: { vereinId: s.verein.id } })).toBe(0);
 		});
 
 		it('legt ein Datei- und ein Foto-Modul an; die Ansicht zeigt beide mit leeren Listen', async () => {
@@ -1276,6 +1327,179 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(await s.arten(stand)).toEqual(['MODUL', 'THREAD', 'VERLAUF']);
 			const helfer = await prisma.helferModul.findUniqueOrThrow({ where: { id: t.modulIds[0] } });
 			expect(helfer.frist).toEqual(new Date('2026-10-23T16:00:00.000Z'));
+		});
+	});
+
+	describe('Fahrgemeinschaft', () => {
+		const FAHRT: TestModul = { typ: 'FAHRT' };
+
+		/** Alles, was ein abgelehntes PUT an der Fahrgemeinschaft unveraendert lassen muss. */
+		const fahrtZustand = async (s: Awaited<ReturnType<typeof szenario>>, threadId: string, modulId: string) => ({
+			...(await s.zustand(threadId)),
+			fahrt: await prisma.fahrtModul.findUnique({ where: { id: modulId } }),
+			autos: await prisma.auto.findMany({ where: { modulId }, orderBy: { id: 'asc' } }),
+			mitfahrten: await prisma.mitfahrt.findMany({ where: { modulId }, orderBy: { id: 'asc' } }),
+		});
+
+		it('PUT schaltet die Rueckfahrt ein: Aenderung MODUL, die Ansicht zeigt beide Richtungen', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [{ typ: 'FAHRT', rueck: false }] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			expect(b.entwurf.module[0]).toMatchObject({ typ: 'FAHRT', hin: true, rueck: false });
+			const e = structuredClone(b.entwurf);
+			(e.module[0] as Fahrt).rueck = true;
+
+			const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const neu = (await r.json()) as ThreadBearbeitung;
+			expect(neu.entwurf.module[0]).toMatchObject({ typ: 'FAHRT', hin: true, rueck: true });
+			expect(await s.arten(await s.stand())).toEqual(['MODUL', 'THREAD']);
+			expect(await prisma.fahrtModul.findUniqueOrThrow({ where: { id: t.modulIds[0] } })).toMatchObject({
+				hin: true,
+				rueck: true,
+			});
+
+			const a = await sende(server.url, s.api(`/threads/${t.threadId}`), { cookie: s.sandra.cookie });
+			const modul = ((await a.json()) as ThreadAnsicht).module[0] as FahrtModulAnsicht;
+			expect(modul.richtungen.map((x) => x.richtung)).toEqual(['HIN', 'RUECK']);
+		});
+
+		it('PUT aendert nur den Titel: das Modul bleibt, die Richtungen auch', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [FAHRT] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const e = structuredClone(b.entwurf);
+			(e.module[0] as Fahrt).titel = 'Wer fährt?';
+
+			const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			expect(await prisma.threadModul.findUniqueOrThrow({ where: { id: t.modulIds[0] } })).toMatchObject({
+				titel: 'Wer fährt?',
+			});
+			expect(await prisma.fahrtModul.findUniqueOrThrow({ where: { id: t.modulIds[0] } })).toMatchObject({
+				hin: true,
+				rueck: true,
+			});
+		});
+
+		describe('Konflikte mit Eintraegen (Plan-Entscheidung 10)', () => {
+			/** Fahrgemeinschaft mit einem Auto von Sandra in der Hinfahrt; Lena sitzt darin. */
+			async function mitAuto() {
+				const s = await szenario();
+				const t = await s.bowlingThread({ module: [FAHRT] });
+				const modulId = t.modulIds[0] as string;
+				const auto = await bieteAutoTest(s.db, modulId, s.sandra.personId, 'HIN', 3);
+				await setzeEinTest(s.db, modulId, 'HIN', s.lena.personId, auto, s.sandra.personId);
+				const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+				return { s, t, b, modulId, vorher: await fahrtZustand(s, t.threadId, modulId) };
+			}
+
+			it('die Hinfahrt mit Auto abschalten ergibt 409 mit Satz am Feld, nichts geaendert', async () => {
+				const { s, t, b, modulId, vorher } = await mitAuto();
+				expect(b.fahrtSperre).toEqual({ eingetragen: true, HIN: true, RUECK: false });
+				const e = structuredClone(b.entwurf);
+				(e.module[0] as Fahrt).hin = false;
+
+				const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+				expect(r.status).toBe(409);
+				expect(await r.json()).toEqual({
+					fehler: 'Für die Hinfahrt gibt es schon Autos oder Mitfahrten.',
+					code: 'FAHRT_BELEGT',
+					feld: 'module.0.hin',
+				});
+				expect(await fahrtZustand(s, t.threadId, modulId)).toEqual(vorher);
+			});
+
+			it('die Rueckfahrt ohne Eintraege laesst sich abschalten, auch wenn die Hinfahrt Autos hat', async () => {
+				const { s, t, b, modulId } = await mitAuto();
+				const e = structuredClone(b.entwurf);
+				(e.module[0] as Fahrt).rueck = false;
+
+				const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+				expect(r.status).toBe(200);
+				expect(await prisma.fahrtModul.findUniqueOrThrow({ where: { id: modulId } })).toMatchObject({
+					hin: true,
+					rueck: false,
+				});
+				expect(await prisma.auto.count({ where: { modulId } })).toBe(1);
+			});
+
+			it('"kommt selbst" zaehlt: die Rueckfahrt damit abzuschalten ergibt 409 mit "Rueckfahrt"', async () => {
+				const s = await szenario();
+				const t = await s.bowlingThread({ module: [FAHRT] });
+				const modulId = t.modulIds[0] as string;
+				await setzeEinTest(s.db, modulId, 'RUECK', s.lena.personId, null, s.sandra.personId);
+				const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+				expect(b.fahrtSperre).toEqual({ eingetragen: true, HIN: false, RUECK: true });
+				const e = structuredClone(b.entwurf);
+				(e.module[0] as Fahrt).rueck = false;
+
+				const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+				expect(r.status).toBe(409);
+				expect(await r.json()).toEqual({
+					fehler: 'Für die Rückfahrt gibt es schon Autos oder Mitfahrten.',
+					code: 'FAHRT_BELEGT',
+					feld: 'module.0.rueck',
+				});
+			});
+
+			it('die ganze Fahrgemeinschaft mit Eintraegen entfernen ergibt 409 statt eines Fremdschluesselfehlers', async () => {
+				const { s, t, b, modulId, vorher } = await mitAuto();
+				const r = await s.ersetze(t.threadId, b.version, { ...b.entwurf, module: [] }, s.thomas.cookie);
+				expect(r.status).toBe(409);
+				expect(await r.json()).toEqual({
+					fehler: 'Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.',
+					code: 'FAHRT_BELEGT',
+					feld: 'module',
+				});
+				expect(await fahrtZustand(s, t.threadId, modulId)).toEqual(vorher);
+			});
+		});
+
+		it('PUT entfernt eine Fahrgemeinschaft ohne Eintraege', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [{ typ: 'INFO', text: 'Bitte melden.' }, FAHRT] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const r = await s.ersetze(
+				t.threadId,
+				b.version,
+				{ ...b.entwurf, module: b.entwurf.module.slice(0, 1) },
+				s.thomas.cookie,
+			);
+			expect(r.status).toBe(200);
+			expect(await prisma.threadModul.count({ where: { id: t.modulIds[1] } })).toBe(0);
+			expect(await prisma.fahrtModul.count({ where: { id: t.modulIds[1] } })).toBe(0);
+		});
+
+		it('PUT: eine zweite Fahrgemeinschaft neben der gespeicherten ist 409 DOPPELTE_FAHRT am Typ, nichts geschrieben', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [FAHRT] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const e = structuredClone(b.entwurf);
+			e.module.push({ typ: 'FAHRT', id: null, titel: null, hin: true, rueck: true });
+			const vorher = await fahrtZustand(s, t.threadId, t.modulIds[0] as string);
+
+			const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+			expect(r.status).toBe(409);
+			expect(await r.json()).toEqual({
+				fehler: 'Es gibt schon eine Fahrgemeinschaft.',
+				code: 'DOPPELTE_FAHRT',
+				feld: 'module.1.typ',
+			});
+			expect(await fahrtZustand(s, t.threadId, t.modulIds[0] as string)).toEqual(vorher);
+		});
+
+		it('PUT ohne Richtung ist 400 am Umschalter', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({ module: [FAHRT] });
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const e = structuredClone(b.entwurf);
+			(e.module[0] as Fahrt).hin = false;
+			(e.module[0] as Fahrt).rueck = false;
+
+			const r = await s.ersetze(t.threadId, b.version, e, s.thomas.cookie);
+			expect(r.status).toBe(400);
+			expect(await r.json()).toEqual({ fehler: 'Bitte mindestens eine Richtung.', feld: 'module.0.hin' });
 		});
 	});
 });

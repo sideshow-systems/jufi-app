@@ -1,9 +1,11 @@
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { antwortenRouten } from './antworten.js';
+import { autoRouten } from './autos.js';
 import { helferRouten } from './helfer.js';
 import { lesenRouten } from './lesen.js';
 import { listeRouten } from './liste.js';
+import { mitfahrtRouten } from './mitfahrten.js';
 import { schreibenRouten } from './schreiben.js';
 import { syncRouten } from './sync.js';
 import { verlaufRouten } from './verlauf.js';
@@ -20,6 +22,8 @@ export function threadRouten(router: Router, deps: VolleAppDeps): void {
 	verlaufRouten(router, deps);
 	antwortenRouten(router, deps);
 	helferRouten(router, deps);
+	autoRouten(router, deps);
+	mitfahrtRouten(router, deps);
 	verwaltungRouten(router, deps);
 	schreibenRouten(router, deps);
 	verwaltenRouten(router, deps);

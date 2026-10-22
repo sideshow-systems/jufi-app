@@ -1,10 +1,12 @@
 import type { ModulDaten } from './ansicht.js';
 import { teilnahmeOptionen } from '../module/umfrage/umfrage.js';
 import { entwurfAusThread, type ModulEntwurf, type ThreadEntwurf } from './entwurf.js';
-import { kopf } from './testhilfe.js';
-import type { HelferDaten, UmfrageDaten } from './typen.js';
+import { bowlingUmfeld, kopf } from './testhilfe.js';
+import type { FahrtDaten, HelferDaten, UmfrageDaten } from './typen.js';
 import { umfrageSperre, vergleicheEntwurf, zielgruppeGeaendert } from './vergleich.js';
 import { systemSatz } from './verlauf.js';
+
+const umfeld = bowlingUmfeld();
 
 type UmfrageEntwurf = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
 type TerminEntwurf = Extract<ModulEntwurf, { typ: 'TERMIN' }>;
@@ -409,7 +411,7 @@ describe('vergleicheEntwurf', () => {
 			const eintraege = [...vergleicheEntwurf(alt(), e).system, ...vergleicheEntwurf(alt(), f).system];
 			expect(eintraege).toHaveLength(4);
 			for (const s of eintraege) {
-				expect(systemSatz(s.art, s.daten, 'Thomas')).not.toBe('Thomas hat den Thread geändert');
+				expect(systemSatz(s.art, s.daten, 'Thomas', umfeld)).not.toBe('Thomas hat den Thread geändert');
 			}
 		});
 	});
@@ -750,7 +752,9 @@ describe('vergleicheEntwurf: Helferliste', () => {
 			neuerEntwurf((m) => (m.frist = frist), {}, null),
 		);
 		expect(ohneTitel.system).toEqual([{ art: 'FRIST_GEAENDERT', daten: { frage: 'Helferliste', frist } }]);
-		expect(systemSatz('FRIST_GEAENDERT', v.system[0].daten, 'Thomas')).not.toBe('Thomas hat den Thread geändert');
+		expect(systemSatz('FRIST_GEAENDERT', v.system[0].daten, 'Thomas', umfeld)).not.toBe(
+			'Thomas hat den Thread geändert',
+		);
 	});
 
 	it('lehnt einen fremden oder doppelten Schluessel ab', () => {
@@ -773,5 +777,155 @@ describe('vergleicheEntwurf: Helferliste', () => {
 			e.module.push({ ...m, id: null, positionen: m.positionen.map((p) => ({ ...p, schluessel: null })) }),
 		);
 		expect(vergleicheEntwurf(gespeichert(), f)).toMatchObject({ fehler: null, konflikt: null });
+	});
+});
+
+describe('vergleicheEntwurf: Fahrgemeinschaft', () => {
+	type FahrtEntwurf = Extract<ModulEntwurf, { typ: 'FAHRT' }>;
+	const gestern = new Date('2026-10-21T12:00:00Z');
+	const sandrasAuto: FahrtDaten['autos'][number] = {
+		id: 'a1',
+		fahrerId: 'sandra',
+		richtung: 'HIN',
+		plaetze: 3,
+		abfahrtTag: null,
+		abfahrtZeit: null,
+		ort: null,
+		notiz: null,
+		angelegtAm: gestern,
+	};
+	const kommtSelbst = (richtung: 'HIN' | 'RUECK'): FahrtDaten['mitfahrten'][number] => ({
+		richtung,
+		kindId: 'max',
+		autoId: null,
+		vonId: 'sandra',
+		eingetragenAm: gestern,
+	});
+	const fahrt = (f: Partial<FahrtDaten> = {}): FahrtDaten => ({
+		modulId: 'f1',
+		titel: null,
+		hin: true,
+		rueck: true,
+		autos: [],
+		mitfahrten: [],
+		...f,
+	});
+	// Info an Index 0, die Fahrgemeinschaft an Index 1.
+	const module = (f: Partial<FahrtDaten> = {}): ModulDaten[] => [
+		{ typ: 'INFO', id: 'i1', titel: null, text: 'Bitte mitfahren' },
+		{ typ: 'FAHRT', id: 'f1', titel: null, fahrt: fahrt(f) },
+	];
+	const gespeichert = (f: Partial<FahrtDaten> = {}) => ({ kopf: kopf(), module: module(f) });
+	const neuerEntwurf = (
+		aendern: (m: FahrtEntwurf, e: ThreadEntwurf) => void = () => {},
+		f: Partial<FahrtDaten> = {},
+	): ThreadEntwurf => {
+		const e = entwurfAusThread(kopf(), module(f));
+		aendern(e.module[1] as FahrtEntwurf, e);
+		return e;
+	};
+	const mitAuto = { autos: [sandrasAuto] };
+
+	it('findet an einer unveraenderten Fahrgemeinschaft nichts', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(mitAuto),
+			neuerEntwurf(() => {}, mitAuto),
+		);
+		expect(v).toMatchObject({ fehler: null, konflikt: null, loeschen: [], anlegen: [], system: [] });
+		expect(v.behalten.map((b) => [b.id, b.geaendert])).toEqual([
+			['i1', false],
+			['f1', false],
+		]);
+	});
+
+	it('meldet eine Aenderung von Titel, Hin oder Rueck als geaendert, ohne Systemeintrag', () => {
+		for (const aendern of [
+			(m: FahrtEntwurf) => (m.titel = 'Fahrten'),
+			(m: FahrtEntwurf) => (m.hin = false),
+			(m: FahrtEntwurf) => (m.rueck = false),
+		]) {
+			const v = vergleicheEntwurf(gespeichert(), neuerEntwurf(aendern));
+			expect(v.behalten[1].geaendert).toBe(true);
+			expect(v.system).toEqual([]);
+		}
+	});
+
+	it('laesst die Rueckfahrt abschalten, wenn nur die Hinfahrt Autos hat', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(mitAuto),
+			neuerEntwurf((m) => (m.rueck = false), mitAuto),
+		);
+		expect(v).toMatchObject({ fehler: null, konflikt: null });
+		expect(v.behalten[1].geaendert).toBe(true);
+	});
+
+	it('sperrt das Abschalten der Hinfahrt mit Autos, am Feld hin', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(mitAuto),
+			neuerEntwurf((m) => (m.hin = false), mitAuto),
+		);
+		expect(v.konflikt).toEqual({
+			feld: 'module.1.hin',
+			text: 'Für die Hinfahrt gibt es schon Autos oder Mitfahrten.',
+			konflikt: true,
+			fahrt: true,
+		});
+		expect(v.behalten).toEqual([]);
+	});
+
+	it('zaehlt auch ein "kommt selbst" als Eintrag der Rueckfahrt, am Feld rueck', () => {
+		const rueck = { mitfahrten: [kommtSelbst('RUECK')] };
+		const v = vergleicheEntwurf(
+			gespeichert(rueck),
+			neuerEntwurf((m) => (m.rueck = false), rueck),
+		);
+		expect(v.konflikt).toEqual({
+			feld: 'module.1.rueck',
+			text: 'Für die Rückfahrt gibt es schon Autos oder Mitfahrten.',
+			konflikt: true,
+			fahrt: true,
+		});
+	});
+
+	it('meldet nur den ersten Konflikt, die Hinfahrt', () => {
+		const beide = { autos: [sandrasAuto], mitfahrten: [kommtSelbst('RUECK')] };
+		const v = vergleicheEntwurf(
+			gespeichert(beide),
+			neuerEntwurf((m) => {
+				m.hin = false;
+				m.rueck = false;
+			}, beide),
+		);
+		expect(v.konflikt?.feld).toBe('module.1.hin');
+	});
+
+	it('sperrt das Entfernen einer Fahrgemeinschaft mit Eintraegen, am Feld module', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(mitAuto),
+			neuerEntwurf((_, e) => e.module.pop(), mitAuto),
+		);
+		expect(v.konflikt).toEqual({
+			feld: 'module',
+			text: 'Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.',
+			konflikt: true,
+			fahrt: true,
+		});
+		expect(v.loeschen).toEqual([]);
+	});
+
+	it('loescht eine Fahrgemeinschaft ohne Eintraege', () => {
+		const v = vergleicheEntwurf(
+			gespeichert(),
+			neuerEntwurf((_, e) => e.module.pop()),
+		);
+		expect(v).toMatchObject({ konflikt: null, loeschen: ['f1'] });
+	});
+
+	it('plant eine neue Fahrgemeinschaft als anzulegendes Modul', () => {
+		const e = entwurfAusThread(kopf(), module());
+		e.module.splice(1, 1, { typ: 'FAHRT', id: null, titel: null, hin: true, rueck: true });
+		const v = vergleicheEntwurf(gespeichert(), e);
+		expect(v.anlegen).toEqual([{ position: 1, neu: e.module[1] }]);
+		expect(v.loeschen).toEqual(['f1']);
 	});
 });

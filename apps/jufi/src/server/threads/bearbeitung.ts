@@ -4,6 +4,7 @@ import {
 	darfBearbeiten,
 	darfLoeschen,
 	entwurfAusThread,
+	fahrtSperre,
 	helferSperre,
 	istArchiviert,
 	medienZahlen,
@@ -39,6 +40,8 @@ export async function ladeUntergruppen(db: VereinDb | VereinTx): Promise<{ id: s
  * und ohne diese Zaehlung scheiterte DELETE erst am Fremdschluessel des Eintrags (NoAction) und
  * endete als 404 statt als 409 NICHT_LOESCHBAR. Verworfen: ein eigenes Feld `eintraege` --
  * darfLoeschen fragt nur "leer oder nicht", ein drittes Feld aenderte die Regel nicht.
+ * Ebenso Autos und Mitfahrten (TP4 Etappe 4), auch "kommt selbst" und ein Kind im Auto je fuer
+ * sich: Ein Auto haelt sein Modul fest (NoAction), und DELETE endete sonst als 404.
  * `daten` muss dafuer mit Antworten geladen sein (ladeThread tut das).
  */
 export async function loeschZaehler(
@@ -50,7 +53,8 @@ export async function loeschZaehler(
 	});
 	const antworten =
 		daten.umfragen.reduce((summe, u) => summe + u.antworten.length, 0) +
-		daten.helfer.reduce((summe, h) => summe + h.positionen.reduce((n, p) => n + p.eintraege.length, 0), 0);
+		daten.helfer.reduce((summe, h) => summe + h.positionen.reduce((n, p) => n + p.eintraege.length, 0), 0) +
+		(daten.fahrt ? daten.fahrt.autos.length + daten.fahrt.mitfahrten.length : 0);
 	return { antworten, nachrichten };
 }
 
@@ -108,6 +112,7 @@ export async function ladeBearbeitung(
 		entwurf: entwurfAusThread(kopf, module),
 		sperren: Object.fromEntries(daten.umfragen.map((u) => [u.modulId, umfrageSperre(u)])),
 		helferSperren: Object.fromEntries(daten.helfer.map((h) => [h.modulId, helferSperre(h)])),
+		fahrtSperre: daten.fahrt ? fahrtSperre(daten.fahrt) : null,
 		medien: medienZahlen(module),
 		untergruppen,
 	};

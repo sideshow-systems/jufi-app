@@ -1,3 +1,4 @@
+import { GRENZEN } from '@jufi/domain';
 import type { Response } from 'express';
 
 /** Der JSON-Koerper jeder Fehlerantwort der Thread-Routen; `code` und `feld` sind fuer den Client, `fehler` fuer Menschen. */
@@ -22,6 +23,26 @@ export const FRIST_ABGELAUFEN: Antwortkoerper = { fehler: 'Frist abgelaufen', co
  * Wer bis hierher kommt, sieht die Liste und ihren Fuellstand ohnehin.
  */
 export const VOLL: Antwortkoerper = { fehler: 'Hier sind schon alle Plätze vergeben.', code: 'VOLL' };
+// Fahrgemeinschaft (TP4 Etappe 4). Alle 409 und alle mit dem Code der Regel, damit der Client
+// sie wie die der Helferliste behandelt; die Saetze stehen in der Plan-Spec woertlich.
+/** Das Auto hat keinen freien Platz mehr; das Einsteigen (Task 6) wirft sie. */
+export const AUTO_VOLL: Antwortkoerper = { fehler: 'In diesem Auto ist kein Platz mehr frei.', code: 'VOLL' };
+/** Die Richtung hat die Hoechstzahl an Autos; derselbe Code wie AUTO_VOLL, der Satz nennt die Fahrt. */
+export const AUTOS_VOLL: Antwortkoerper = {
+	fehler: `Für diese Fahrt gibt es schon ${GRENZEN.autosJeRichtung} Autos.`,
+	code: 'VOLL',
+};
+export const AUTO_SCHON_DA: Antwortkoerper = {
+	fehler: 'Du bietest für diese Fahrt schon ein Auto an.',
+	code: 'AUTO_SCHON_DA',
+};
+/** Weniger Plaetze, als schon Kinder mitfahren (Singular bei einem Kind). */
+export function plaetzeBelegt(n: number): Antwortkoerper {
+	return { fehler: n === 1 ? 'Es fährt schon 1 Kind mit.' : `Es fahren schon ${n} Kinder mit.`, code: 'PLAETZE' };
+}
+/** Einsetzen und "kommt selbst" gelten nur fuer Kinder mit Zusage (Task 6; hier fuer abbruchAus). */
+export const NICHT_DABEI: Antwortkoerper = { fehler: 'Mitfahren kann nur, wer zugesagt hat.', code: 'NICHT_DABEI' };
+
 /** Bewusst nichtssagend: Wem die clientId gehoert, darf der Anfragende nicht erfahren. */
 export const CLIENT_ID_VERGEBEN: Antwortkoerper = { fehler: 'Ungültige Anfrage', code: 'CLIENT_ID_VERGEBEN' };
 
@@ -40,6 +61,17 @@ export const BEANTWORTET: Antwortkoerper = { fehler: 'Darauf hat schon jemand ge
 export const DOPPELTE_TEILNAHME: Antwortkoerper = {
 	fehler: 'Es gibt schon eine Teilnahme-Umfrage.',
 	code: 'DOPPELTE_TEILNAHME',
+};
+// Die Konflikte der Fahrgemeinschaft (Feldfehler.fahrt) mit eigenem Code: Eine zweite Fahrgemeinschaft
+// ist keine doppelte Teilnahme, eine Richtung mit Autos keine beantwortete Umfrage. Der Client
+// verzweigt auf keinen der Codes, wer die Antwort liest (Protokoll, Test), soll aber den Grund sehen.
+export const DOPPELTE_FAHRT: Antwortkoerper = {
+	fehler: 'Es gibt schon eine Fahrgemeinschaft.',
+	code: 'DOPPELTE_FAHRT',
+};
+export const FAHRT_BELEGT: Antwortkoerper = {
+	fehler: 'Die Fahrgemeinschaft hat schon Autos oder Mitfahrten.',
+	code: 'FAHRT_BELEGT',
 };
 export const NICHT_LOESCHBAR: Antwortkoerper = {
 	fehler: 'Der Thread hat Antworten oder Nachrichten und lässt sich nicht löschen. Archiviere ihn stattdessen.',

@@ -1,7 +1,13 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { type AntwortenUebersicht, fristText, type HelferUebersicht, type UmfrageUebersicht } from '@jufi/domain';
+import {
+	type AntwortenUebersicht,
+	type FahrtModulAnsicht,
+	fristText,
+	type HelferUebersicht,
+	type UmfrageUebersicht,
+} from '@jufi/domain';
 import { adminTestAnbieter, knopf } from '../../../admin/test-hilfen';
 import {
 	antworteAbgelaufen,
@@ -69,6 +75,49 @@ const FISCHERFEST: HelferUebersicht = {
 	ohneEintrag: 2,
 };
 
+// Die Ansicht der Leitung: Sandras Auto mit Lena darin, Max braucht noch eine Mitfahrt. Die
+// Rechte kommen fertig vom Server; Lena darf herausgenommen, Max eingesetzt werden, und beide
+// setzt die Leitung um (umsetzen).
+const FAHRT: FahrtModulAnsicht = {
+	typ: 'FAHRT',
+	id: 'm-fahrt',
+	titel: null,
+	richtungen: [
+		{
+			richtung: 'HIN',
+			vorschlagTag: '2026-10-23',
+			darfAnbieten: false,
+			autos: [
+				{
+					id: 'a1',
+					fahrerId: 'k-sandra',
+					fahrer: 'Sandra M. (Mutter von Lena)',
+					eigenes: false,
+					darfAendern: true,
+					plaetze: 3,
+					frei: 2,
+					abfahrtTag: '2026-10-23',
+					abfahrtZeit: '15:30',
+					ort: 'Vereinsheim',
+					notiz: null,
+					mitfahrer: [
+						{
+							kindId: 'k-lena',
+							name: 'Lena M.',
+							nichtMehrDabei: false,
+							darfHerausnehmen: true,
+							umsetzen: { autoIds: [], selbst: true },
+						},
+					],
+				},
+			],
+			brauchtMitfahrt: [{ kindId: 'k-max', name: 'Max M.', umsetzen: { autoIds: ['a1'], selbst: true } }],
+			kommtSelbst: [],
+		},
+	],
+	kinder: [{ kindId: 'k-max', vorname: 'Max', selbst: false }],
+};
+
 function uebersicht(rest: Partial<AntwortenUebersicht> = {}): AntwortenUebersicht {
 	return {
 		threadId: 't1',
@@ -77,6 +126,7 @@ function uebersicht(rest: Partial<AntwortenUebersicht> = {}): AntwortenUebersich
 		darfNachtragen: true,
 		umfragen: [BOWLING],
 		helfer: [],
+		fahrt: null,
 		...rest,
 	};
 }
@@ -518,6 +568,87 @@ describe('Antworten-Uebersicht der Verwaltung', () => {
 		it('ohne Umfrage und ohne Helferliste sagt die Seite, dass es nichts zu sehen gibt', async () => {
 			const { seite } = await oeffne(uebersicht({ umfragen: [], helfer: [] }));
 			expect(seite.textContent).toContain('keine Umfrage oder Helferliste');
+		});
+	});
+
+	describe('Fahrgemeinschaft', () => {
+		async function oeffneFahrt(f: FahrtModulAnsicht | null = FAHRT, rest: Partial<AntwortenUebersicht> = {}) {
+			const r = await oeffne(uebersicht({ umfragen: [], helfer: [], fahrt: f, ...rest }));
+			const block = () => r.seite.querySelector<HTMLElement>('[data-fahrt="m-fahrt"]');
+			return { ...r, block };
+		}
+
+		it('zeigt unter den Helferlisten einen Block mit Ueberschrift und Karte', async () => {
+			const { seite, block } = await oeffneFahrt(FAHRT, { helfer: [FISCHERFEST] });
+			expect(block()?.querySelector('h2')?.textContent?.trim()).toBe('Fahrgemeinschaft');
+			expect(block()?.querySelector('[data-auto="a1"]')?.textContent).toContain('Sandra M.');
+			const helfer = seite.querySelector('[data-helfer="m-helfer"]')!;
+			// Der Block steht nach den Helferlisten, nicht davor.
+			expect(helfer.compareDocumentPosition(block()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		});
+
+		it('nennt den Titel des Moduls als Ueberschrift', async () => {
+			const { block } = await oeffneFahrt({ ...FAHRT, titel: 'Fahrt zum Bowling' });
+			expect(block()?.querySelector('h2')?.textContent?.trim()).toBe('Fahrt zum Bowling');
+		});
+
+		it('ohne fahrt steht kein Block da', async () => {
+			const { block } = await oeffneFahrt(null);
+			expect(block()).toBeNull();
+		});
+
+		it('ein Thread nur mit Fahrgemeinschaft zeigt sie und nicht den Leerzustand', async () => {
+			const { seite, block } = await oeffneFahrt();
+			expect(block()).not.toBeNull();
+			expect(seite.textContent).not.toContain('keine Umfrage oder Helferliste');
+		});
+
+		it('geaendert setzt die neue Ansicht im Block ein, ohne die Uebersicht neu zu laden', async () => {
+			const { harness, http, block } = await oeffneFahrt();
+			knopf(block()!.querySelector<HTMLElement>('[data-kind="k-lena"]')!, 'Herausnehmen').click();
+
+			const anfrage = await vi.waitFor(() => http.expectOne(`${API}/fahrten/m-fahrt/hin/k-lena`));
+			expect(anfrage.request.method).toBe('DELETE');
+			const neu: FahrtModulAnsicht = {
+				...FAHRT,
+				richtungen: [
+					{
+						...FAHRT.richtungen[0]!,
+						autos: [{ ...FAHRT.richtungen[0]!.autos[0]!, frei: 3, mitfahrer: [] }],
+						brauchtMitfahrt: [{ kindId: 'k-lena', name: 'Lena M.', umsetzen: { autoIds: ['a1'], selbst: true } }],
+					},
+				],
+			};
+			anfrage.flush({ modul: neu, stand: 9 });
+			await stabil(harness);
+
+			expect(block()?.querySelector('[data-kind="k-lena"]')?.closest('[data-auto]')).toBeNull();
+			expect(block()?.textContent).toContain('Lena M.');
+			http.expectNone(`${API}/threads/t1/antworten`);
+		});
+
+		it('veraltet laedt die Uebersicht neu und laesst den Satz des Servers am Modul stehen', async () => {
+			const { harness, http, block } = await oeffneFahrt();
+			knopf(block()!.querySelector<HTMLElement>('[data-auto="a1"]')!, 'Max einsteigen').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne(`${API}/fahrten/m-fahrt/hin/k-max`)
+					.flush(
+						{ fehler: 'In diesem Auto ist kein Platz mehr frei.', code: 'VOLL' },
+						{ status: 409, statusText: 'Conflict' },
+					),
+			);
+			const neu: FahrtModulAnsicht = {
+				...FAHRT,
+				richtungen: [{ ...FAHRT.richtungen[0]!, autos: [{ ...FAHRT.richtungen[0]!.autos[0]!, ort: 'Bahnhof' }] }],
+			};
+			await vi.waitFor(() =>
+				http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [], fahrt: neu })),
+			);
+			await stabil(harness);
+
+			expect(block()?.textContent).toContain('Bahnhof');
+			expect(block()?.querySelector('[role="alert"]')?.textContent).toContain('kein Platz mehr frei');
 		});
 	});
 

@@ -16,6 +16,7 @@ import {
 import type {
 	AenderungArt,
 	AntwortDaten,
+	FahrtDaten,
 	HelferDaten,
 	HelferPositionDaten,
 	ThreadDaten,
@@ -58,9 +59,13 @@ function thread(
 	umfragen: UmfrageDaten[],
 	termine: TerminDaten[] = [],
 	helfer: HelferDaten[] = [],
+	fahrt: FahrtDaten | null = null,
 ): ThreadDaten {
-	return { kopf: k, termine, umfragen, helfer };
+	return { kopf: k, termine, umfragen, helfer, fahrt };
 }
+
+// Eine Fahrgemeinschaft ohne Auto und ohne Mitfahrt: jedes Kind braucht noch eine.
+const FAHRT: FahrtDaten = { modulId: 'm-fahrt', titel: null, hin: true, rueck: true, autos: [], mitfahrten: [] };
 
 function helferPosition(id: string, anzahl: number, belegtVon: string[] = []): HelferPositionDaten {
 	return {
@@ -390,17 +395,32 @@ describe('istNeu', () => {
 	});
 });
 
+describe('brauchtAntwort und die Fahrgemeinschaft', () => {
+	it('nennt ein Kind ohne Mitfahrt nicht: die Fahrgemeinschaft hat keine Frist (Spec 6.2)', () => {
+		const nurFahrt = thread(kopf(), [], [], [], FAHRT);
+		expect(brauchtAntwort(person('sandra'), [nurFahrt], umfeld, JETZT)).toEqual([]);
+	});
+});
+
 describe('siehtErgebnisse', () => {
 	const bowling = kopf();
-	const nur = (umfragen: UmfrageDaten[]) => ({ umfragen, helfer: [] });
+	const nur = (umfragen: UmfrageDaten[]) => ({ umfragen, helfer: [], fahrt: null });
 
 	it('verneint fuer eine Familie, wenn nur Jugendleiter Ergebnisse sehen', () => {
 		expect(siehtErgebnisse(person('sandra'), bowling, nur([umfrage({ ergebnisse: 'JUGENDLEITER' })]))).toBe(false);
 	});
 
 	it('bejaht in einem Thread mit Helferliste, denn Eintraege sieht jeder (Entscheidung 7)', () => {
-		expect(siehtErgebnisse(person('sandra'), bowling, { umfragen: [], helfer: [helferliste()] })).toBe(true);
-		expect(siehtErgebnisse(MIA, bowling, { umfragen: [], helfer: [helferliste()] })).toBe(false);
+		expect(siehtErgebnisse(person('sandra'), bowling, { umfragen: [], helfer: [helferliste()], fahrt: null })).toBe(
+			true,
+		);
+		expect(siehtErgebnisse(MIA, bowling, { umfragen: [], helfer: [helferliste()], fahrt: null })).toBe(false);
+	});
+
+	it('bejaht in einem Thread mit Fahrgemeinschaft, nicht fuer Entfernte (Entscheidung 11)', () => {
+		const nurFahrt = { umfragen: [], helfer: [], fahrt: FAHRT };
+		expect(siehtErgebnisse(person('sandra'), bowling, nurFahrt)).toBe(true);
+		expect(siehtErgebnisse(MIA, bowling, nurFahrt)).toBe(false);
 	});
 
 	it('bejaht fuer eine Familie bei Ergebnissen fuer alle oder als Summe', () => {

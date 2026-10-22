@@ -546,7 +546,11 @@ describe('Threads (TP3)', () => {
 		});
 	}
 
-	async function modul(vereinId: string, threadId: string, typ: 'INFO' | 'TERMIN' | 'UMFRAGE' | 'HELFER' = 'INFO') {
+	async function modul(
+		vereinId: string,
+		threadId: string,
+		typ: 'INFO' | 'TERMIN' | 'UMFRAGE' | 'HELFER' | 'FAHRT' = 'INFO',
+	) {
 		return prisma.threadModul.create({ data: { vereinId, threadId, typ, position: 0 } });
 	}
 
@@ -615,6 +619,53 @@ describe('Threads (TP3)', () => {
 				fuerId,
 				vonId,
 				eingetragenAm: new Date('2026-10-22T10:00:00Z'),
+				clientId: eindeutig(),
+				...daten,
+			},
+		});
+	}
+
+	/** Fahrgemeinschaft samt Kopfzeile; Modul und Fahrgemeinschaft teilen sich die ID. */
+	async function fahrt(vereinId: string, threadId: string, daten: Partial<Prisma.FahrtModulUncheckedCreateInput> = {}) {
+		const m = await modul(vereinId, threadId, 'FAHRT');
+		return prisma.fahrtModul.create({ data: { id: m.id, vereinId, threadId, ...daten } });
+	}
+
+	function auto(
+		vereinId: string,
+		modulId: string,
+		fahrerId: string,
+		daten: Partial<Prisma.AutoUncheckedCreateInput> = {},
+	) {
+		return prisma.auto.create({
+			data: {
+				vereinId,
+				modulId,
+				fahrerId,
+				richtung: 'HIN',
+				plaetze: 3,
+				angelegtAm: new Date('2026-10-22T10:00:00Z'),
+				clientId: eindeutig(),
+				...daten,
+			},
+		});
+	}
+
+	function mitfahrt(
+		vereinId: string,
+		modulId: string,
+		kindId: string,
+		vonId: string,
+		daten: Partial<Prisma.MitfahrtUncheckedCreateInput> = {},
+	) {
+		return prisma.mitfahrt.create({
+			data: {
+				vereinId,
+				modulId,
+				richtung: 'HIN',
+				kindId,
+				vonId,
+				eingetragenAm: new Date('2026-10-22T10:05:00Z'),
 				clientId: eindeutig(),
 				...daten,
 			},
@@ -1198,6 +1249,266 @@ describe('Threads (TP3)', () => {
 			helferModul: await prisma.helferModul.count({ where: { vereinId } }),
 			helferPosition: await prisma.helferPosition.count({ where: { vereinId } }),
 			helferEintrag: await prisma.helferEintrag.count({ where: { vereinId } }),
+		};
+		expect(uebrig).toEqual(Object.fromEntries(Object.keys(uebrig).map((k) => [k, 0])));
+	});
+
+	it('Fahrgemeinschaft braucht Modul und Verein, die zusammenpassen, und mindestens eine Richtung', async () => {
+		const a = await verein();
+		const b = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const t2 = await thread(a.id, (await erwachsener(a.id, 'Claudia')).id);
+		const m = await modul(a.id, t.id, 'FAHRT');
+
+		expect(
+			await fehlercode(prisma.fahrtModul.create({ data: { id: 'gibt-es-nicht', vereinId: a.id, threadId: t.id } })),
+		).toBe('P2003');
+		expect(await fehlercode(prisma.fahrtModul.create({ data: { id: m.id, vereinId: b.id, threadId: t.id } }))).toBe(
+			'P2003',
+		);
+		// Die threadId muss die des Moduls sein.
+		expect(await fehlercode(prisma.fahrtModul.create({ data: { id: m.id, vereinId: a.id, threadId: t2.id } }))).toBe(
+			'P2003',
+		);
+		expect(
+			await fehlertext(
+				prisma.fahrtModul.create({ data: { id: m.id, vereinId: a.id, threadId: t.id, hin: false, rueck: false } }),
+			),
+		).toContain('fahrt_richtung');
+
+		const f = await prisma.fahrtModul.create({ data: { id: m.id, vereinId: a.id, threadId: t.id } });
+		expect(f).toMatchObject({ hin: true, rueck: true });
+	});
+
+	it('hoechstens eine Fahrgemeinschaft je Thread, in einem anderen Thread frei', async () => {
+		const a = await verein();
+		const leiter = await erwachsener(a.id);
+		const t1 = await thread(a.id, leiter.id);
+		const t2 = await thread(a.id, leiter.id);
+		await fahrt(a.id, t1.id);
+
+		expect(await fehlercode(fahrt(a.id, t1.id))).toBe('P2002');
+		await fahrt(a.id, t2.id);
+	});
+
+	it('Auto: Plaetze 1 bis 8, Uhrzeit HH:MM, Ort und Notiz 1 bis 200 Zeichen oder leer', async () => {
+		const a = await verein();
+		const sandra = await erwachsener(a.id);
+		const t = await thread(a.id, sandra.id);
+		const f = await fahrt(a.id, t.id);
+		let n = 0;
+		// Jedes Auto bekommt einen eigenen Fahrer, damit nur der gepruefte CHECK scheitern kann.
+		const neu = async (daten: Partial<Prisma.AutoUncheckedCreateInput>) =>
+			auto(a.id, f.id, (await erwachsener(a.id, `Fahrer${n++}`)).id, daten);
+
+		expect(await fehlertext(neu({ plaetze: 0 }))).toContain('auto_plaetze');
+		expect(await fehlertext(neu({ plaetze: 9 }))).toContain('auto_plaetze');
+		expect(await fehlertext(neu({ abfahrtZeit: '24:00' }))).toContain('auto_zeit');
+		expect(await fehlertext(neu({ abfahrtZeit: '9:30' }))).toContain('auto_zeit');
+		expect(await fehlertext(neu({ abfahrtZeit: '12:60' }))).toContain('auto_zeit');
+		expect(await fehlertext(neu({ ort: '' }))).toContain('auto_ort');
+		expect(await fehlertext(neu({ ort: 'x'.repeat(201) }))).toContain('auto_ort');
+		expect(await fehlertext(neu({ notiz: '' }))).toContain('auto_notiz');
+		expect(await fehlertext(neu({ notiz: 'x'.repeat(201) }))).toContain('auto_notiz');
+
+		const klein = await neu({ plaetze: 1 });
+		expect(klein).toMatchObject({ abfahrtTag: null, abfahrtZeit: null, ort: null, notiz: null });
+		await neu({
+			plaetze: 8,
+			abfahrtTag: new Date('2026-11-07'),
+			abfahrtZeit: '23:59',
+			ort: 'x'.repeat(200),
+			notiz: 'x'.repeat(200),
+		});
+		await neu({ abfahrtZeit: '00:00' });
+	});
+
+	it('ein Fahrer bietet je Richtung ein Auto an, in der anderen Richtung ein weiteres', async () => {
+		const a = await verein();
+		const sandra = await erwachsener(a.id);
+		const claudia = await erwachsener(a.id, 'Claudia');
+		const t = await thread(a.id, sandra.id);
+		const f = await fahrt(a.id, t.id);
+		await auto(a.id, f.id, sandra.id);
+
+		expect(await fehlercode(auto(a.id, f.id, sandra.id))).toBe('P2002');
+		await auto(a.id, f.id, sandra.id, { richtung: 'RUECK' });
+		await auto(a.id, f.id, claudia.id);
+	});
+
+	it('Auto: gleiche clientId im Verein abgelehnt, in einem anderen Verein erlaubt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const sa = await erwachsener(a.id);
+		const ca = await erwachsener(a.id, 'Claudia');
+		const sb = await erwachsener(b.id);
+		const fa = await fahrt(a.id, (await thread(a.id, sa.id)).id);
+		const fb = await fahrt(b.id, (await thread(b.id, sb.id)).id);
+
+		await auto(a.id, fa.id, sa.id, { clientId: 'gleich' });
+		expect(await fehlercode(auto(a.id, fa.id, ca.id, { clientId: 'gleich' }))).toBe('P2002');
+		await auto(b.id, fb.id, sb.id, { clientId: 'gleich' });
+	});
+
+	it('Auto mit Fahrer oder Modul aus fremdem Verein abgelehnt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const sa = await erwachsener(a.id);
+		const sb = await erwachsener(b.id);
+		const f = await fahrt(a.id, (await thread(a.id, sa.id)).id);
+
+		expect(await fehlercode(auto(a.id, f.id, sb.id))).toBe('P2003');
+		expect(await fehlercode(auto(b.id, f.id, sb.id))).toBe('P2003');
+		expect(await fehlercode(auto(a.id, 'gibt-es-nicht', sa.id))).toBe('P2003');
+	});
+
+	it('Mitfahrt: je Richtung hoechstens eine je Kind, in der anderen Richtung eine weitere', async () => {
+		const a = await verein();
+		const sandra = await erwachsener(a.id);
+		const lena = await jungfischer(a.id);
+		const max = await jungfischer(a.id, 'Max');
+		const f = await fahrt(a.id, (await thread(a.id, sandra.id)).id);
+		const hin = await auto(a.id, f.id, sandra.id);
+		await mitfahrt(a.id, f.id, lena.id, sandra.id, { autoId: hin.id });
+
+		expect(await fehlercode(mitfahrt(a.id, f.id, lena.id, sandra.id))).toBe('P2002');
+		expect(await fehlercode(mitfahrt(a.id, f.id, lena.id, sandra.id, { autoId: hin.id }))).toBe('P2002');
+		await mitfahrt(a.id, f.id, lena.id, sandra.id, { richtung: 'RUECK' });
+		await mitfahrt(a.id, f.id, max.id, sandra.id);
+	});
+
+	it('Mitfahrt mit einem Auto der anderen Richtung oder eines anderen Moduls abgelehnt, ohne Auto erlaubt', async () => {
+		const a = await verein();
+		const sandra = await erwachsener(a.id);
+		const lena = await jungfischer(a.id);
+		const t = await thread(a.id, sandra.id);
+		const f = await fahrt(a.id, t.id);
+		const f2 = await fahrt(a.id, (await thread(a.id, sandra.id)).id);
+		const hin = await auto(a.id, f.id, sandra.id);
+		const fremdes = await auto(a.id, f2.id, sandra.id);
+
+		expect(await fehlercode(mitfahrt(a.id, f.id, lena.id, sandra.id, { richtung: 'RUECK', autoId: hin.id }))).toBe(
+			'P2003',
+		);
+		expect(await fehlercode(mitfahrt(a.id, f.id, lena.id, sandra.id, { autoId: fremdes.id }))).toBe('P2003');
+		expect(await fehlercode(mitfahrt(a.id, f.id, lena.id, sandra.id, { autoId: 'gibt-es-nicht' }))).toBe('P2003');
+
+		// autoId = null ("kommt selbst") prueft Postgres nicht (MATCH SIMPLE).
+		const selbst = await mitfahrt(a.id, f.id, lena.id, sandra.id, { richtung: 'RUECK', autoId: null });
+		expect(selbst.autoId).toBeNull();
+		await mitfahrt(a.id, f.id, lena.id, sandra.id, { autoId: hin.id });
+	});
+
+	it('Mitfahrt mit Kind, Eintragendem oder Modul aus fremdem Verein abgelehnt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const sa = await erwachsener(a.id);
+		const sb = await erwachsener(b.id);
+		const lena = await jungfischer(a.id);
+		const lenaB = await jungfischer(b.id);
+		const f = await fahrt(a.id, (await thread(a.id, sa.id)).id);
+
+		expect(await fehlercode(mitfahrt(a.id, f.id, lenaB.id, sa.id))).toBe('P2003');
+		expect(await fehlercode(mitfahrt(a.id, f.id, lena.id, sb.id))).toBe('P2003');
+		expect(await fehlercode(mitfahrt(b.id, f.id, lenaB.id, sb.id))).toBe('P2003');
+	});
+
+	it('Mitfahrt: gleiche clientId im Verein abgelehnt, in einem anderen Verein erlaubt', async () => {
+		const a = await verein();
+		const b = await verein();
+		const sa = await erwachsener(a.id);
+		const sb = await erwachsener(b.id);
+		const lena = await jungfischer(a.id);
+		const max = await jungfischer(a.id, 'Max');
+		const lenaB = await jungfischer(b.id);
+		const fa = await fahrt(a.id, (await thread(a.id, sa.id)).id);
+		const fb = await fahrt(b.id, (await thread(b.id, sb.id)).id);
+
+		await mitfahrt(a.id, fa.id, lena.id, sa.id, { clientId: 'gleich' });
+		expect(await fehlercode(mitfahrt(a.id, fa.id, max.id, sa.id, { clientId: 'gleich' }))).toBe('P2002');
+		await mitfahrt(b.id, fb.id, lenaB.id, sb.id, { clientId: 'gleich' });
+	});
+
+	it('Fahrgemeinschaft ohne Eintraege loeschen nimmt die Kopfzeile mit', async () => {
+		const a = await verein();
+		const t = await thread(a.id, (await erwachsener(a.id)).id);
+		const f = await fahrt(a.id, t.id);
+
+		await prisma.threadModul.delete({ where: { id: f.id } });
+
+		expect(await prisma.fahrtModul.count({ where: { id: f.id } })).toBe(0);
+	});
+
+	it('Fahrgemeinschaft mit Auto oder Mitfahrt laesst sich weder als Modul, Kopfzeile noch als Thread loeschen', async () => {
+		const a = await verein();
+		const sandra = await erwachsener(a.id);
+		const lena = await jungfischer(a.id);
+		const t = await thread(a.id, sandra.id);
+		const f = await fahrt(a.id, t.id);
+		const wagen = await auto(a.id, f.id, sandra.id);
+
+		expect(await fehlercode(prisma.threadModul.delete({ where: { id: f.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.fahrtModul.delete({ where: { id: f.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
+		expect(await prisma.auto.count({ where: { id: wagen.id } })).toBe(1);
+
+		// Auch eine Mitfahrt "kommt selbst" haelt die Fahrgemeinschaft fest.
+		await prisma.auto.delete({ where: { id: wagen.id } });
+		const selbst = await mitfahrt(a.id, f.id, lena.id, sandra.id);
+		expect(await fehlercode(prisma.threadModul.delete({ where: { id: f.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
+
+		await prisma.mitfahrt.delete({ where: { id: selbst.id } });
+		await prisma.thread.delete({ where: { id: t.id } });
+		expect(await prisma.fahrtModul.count({ where: { id: f.id } })).toBe(0);
+	});
+
+	it('Auto mit Mitfahrt laesst sich nicht loeschen', async () => {
+		const a = await verein();
+		const sandra = await erwachsener(a.id);
+		const lena = await jungfischer(a.id);
+		const f = await fahrt(a.id, (await thread(a.id, sandra.id)).id);
+		const wagen = await auto(a.id, f.id, sandra.id);
+		const fahrtDazu = await mitfahrt(a.id, f.id, lena.id, sandra.id, { autoId: wagen.id });
+
+		expect(await fehlercode(prisma.auto.delete({ where: { id: wagen.id } }))).toBe('P2003');
+
+		await prisma.mitfahrt.delete({ where: { id: fahrtDazu.id } });
+		await prisma.auto.delete({ where: { id: wagen.id } });
+	});
+
+	it('Person mit Auto oder Mitfahrt laesst sich nicht hart loeschen', async () => {
+		const a = await verein();
+		const sandra = await erwachsener(a.id);
+		const claudia = await erwachsener(a.id, 'Claudia');
+		const lena = await jungfischer(a.id);
+		const f = await fahrt(a.id, (await thread(a.id, sandra.id)).id);
+		await auto(a.id, f.id, claudia.id);
+		await mitfahrt(a.id, f.id, lena.id, sandra.id);
+
+		expect(await fehlercode(prisma.person.delete({ where: { id: claudia.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.person.delete({ where: { id: lena.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.person.delete({ where: { id: sandra.id } }))).toBe('P2003');
+	});
+
+	it('Verein loeschen mit Fahrgemeinschaft, Autos und Mitfahrten geht durch', async () => {
+		const a = await verein('weg-fahrt');
+		const vereinId = a.id;
+		const sandra = await erwachsener(vereinId);
+		const lena = await jungfischer(vereinId);
+		const max = await jungfischer(vereinId, 'Max');
+		const f = await fahrt(vereinId, (await thread(vereinId, sandra.id)).id);
+		const wagen = await auto(vereinId, f.id, sandra.id, { ort: 'Vereinsheim' });
+		await mitfahrt(vereinId, f.id, lena.id, sandra.id, { autoId: wagen.id });
+		await mitfahrt(vereinId, f.id, max.id, sandra.id);
+
+		await prisma.verein.delete({ where: { id: vereinId } });
+
+		const uebrig = {
+			threadModul: await prisma.threadModul.count({ where: { vereinId } }),
+			fahrtModul: await prisma.fahrtModul.count({ where: { vereinId } }),
+			auto: await prisma.auto.count({ where: { vereinId } }),
+			mitfahrt: await prisma.mitfahrt.count({ where: { vereinId } }),
 		};
 		expect(uebrig).toEqual(Object.fromEntries(Object.keys(uebrig).map((k) => [k, 0])));
 	});

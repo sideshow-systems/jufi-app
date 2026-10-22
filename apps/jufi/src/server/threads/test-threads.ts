@@ -6,6 +6,7 @@ import {
 	type Beziehung,
 	type ErgebnisSicht,
 	type FotoHochladen,
+	type Richtung,
 	type Rollenfilter,
 	type TerminDaten,
 	type ThreadArt,
@@ -42,7 +43,9 @@ export type TestModul =
 			einheit?: AntwortEinheit;
 			frist?: Date | null;
 			positionen: { text: string; anzahl: number }[];
-	  };
+	  }
+	/** Ohne Autos und Mitfahrten; die schreiben bieteAutoTest und setzeEinTest. Ohne Angabe beide Richtungen. */
+	| { typ: 'FAHRT'; hin?: boolean; rueck?: boolean };
 
 /**
  * Schluessel einer freien Option oder Position aus ihrem Text: "Pizza essen" wird "pizza-essen"
@@ -180,6 +183,10 @@ export async function legeThreadAn(
 						});
 						positionIds[schluessel] = position.id;
 					}
+				} else if (modul.typ === 'FAHRT') {
+					await tx.fahrtModul.create({
+						data: { id: zeile.id, threadId: thread.id, hin: modul.hin ?? true, rueck: modul.rueck ?? true },
+					});
 				} else if (modul.typ === 'TERMIN') {
 					const t = modul.termin;
 					await tx.terminModul.create({
@@ -255,6 +262,73 @@ export async function trageEinTest(
 		select: { id: true },
 	});
 	return eintrag.id;
+}
+
+/**
+ * Bietet ein Auto an, direkt in der Datenbank, ohne Route und ohne Aenderung (wie trageEinTest);
+ * liefert die ID des Autos. `angelegtAm` ungesetzt ist ein spaeterer Zeitpunkt als beim Aufruf
+ * davor, damit die Autos in der Reihenfolge der Aufrufe stehen.
+ */
+export async function bieteAutoTest(
+	db: VereinDb,
+	modulId: string,
+	fahrerId: string,
+	richtung: Richtung,
+	plaetze: number,
+	felder: {
+		abfahrtTag?: string | null;
+		abfahrtZeit?: string | null;
+		ort?: string | null;
+		notiz?: string | null;
+		angelegtAm?: Date;
+	} = {},
+): Promise<string> {
+	letzterEintrag = Math.max(Date.now(), letzterEintrag + 1);
+	const auto = await db.auto.create({
+		data: {
+			modulId,
+			fahrerId,
+			richtung,
+			plaetze,
+			abfahrtTag: felder.abfahrtTag ? new Date(felder.abfahrtTag) : null,
+			abfahrtZeit: felder.abfahrtZeit ?? null,
+			ort: felder.ort ?? null,
+			notiz: felder.notiz ?? null,
+			angelegtAm: felder.angelegtAm ?? new Date(letzterEintrag),
+			clientId: randomUUID(),
+		},
+		select: { id: true },
+	});
+	return auto.id;
+}
+
+/**
+ * Setzt ein Kind in ein Auto (`autoId`) oder auf "kommt selbst" (null), direkt in der Datenbank.
+ * Die Zeit wie bei bieteAutoTest; liefert die ID der Mitfahrt.
+ */
+export async function setzeEinTest(
+	db: VereinDb,
+	modulId: string,
+	richtung: Richtung,
+	kindId: string,
+	autoId: string | null,
+	vonId: string,
+): Promise<string> {
+	letzterEintrag = Math.max(Date.now(), letzterEintrag + 1);
+	const mitfahrt = await db.mitfahrt.create({
+		data: {
+			modulId,
+			richtung,
+			kindId,
+			// Die unchecked-Form: autoId null ist hier "kommt selbst", kein Abwaehlen einer Relation.
+			autoId,
+			vonId,
+			eingetragenAm: new Date(letzterEintrag),
+			clientId: randomUUID(),
+		},
+		select: { id: true },
+	});
+	return mitfahrt.id;
 }
 
 /** Ordnet einem Erwachsenen ein Kind zu (erziehungsberechtigt, wie es der haeufigste Fall ist). */

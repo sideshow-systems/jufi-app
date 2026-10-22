@@ -1,7 +1,10 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import type {
+	AutoEingabe,
+	FahrtModulAnsicht,
 	HelferModulAnsicht,
+	Richtung,
 	StartAnsicht,
 	SyncAntwort,
 	TerminZeile,
@@ -129,6 +132,51 @@ export class ThreadApi {
 	trageAus(slug: string, positionId: string, fuerId: string): Observable<{ modul: HelferModulAnsicht; stand: number }> {
 		return this.senden('DELETE', slug, helferPfad(positionId, fuerId));
 	}
+
+	/** Antwortet 201, bei einer Wiederholung mit derselben clientId 200 und der vorhandenen Ansicht. */
+	bieteAuto(
+		slug: string,
+		modulId: string,
+		koerper: AutoEingabe & { richtung: Richtung; clientId: string },
+	): Observable<FahrtAntwort> {
+		return this.senden('POST', slug, `/fahrten/${encodeURIComponent(modulId)}/autos`, koerper);
+	}
+
+	/** Ohne clientId: Die Route setzt Werte, und eine Wiederholung setzt dieselben (Plan-Entscheidung 2). */
+	aendereAuto(slug: string, autoId: string, koerper: AutoEingabe): Observable<FahrtAntwort> {
+		return this.senden('PUT', slug, autoPfad(autoId), koerper);
+	}
+
+	zieheAutoZurueck(slug: string, autoId: string): Observable<FahrtAntwort> {
+		return this.senden('DELETE', slug, autoPfad(autoId));
+	}
+
+	/** Ein Upsert je Richtung und Kind; autoId null heisst "kommt selbst" (Plan-Entscheidung 5). */
+	setzeEin(
+		slug: string,
+		modulId: string,
+		richtung: Richtung,
+		kindId: string,
+		koerper: { autoId: string | null; clientId: string },
+	): Observable<FahrtAntwort> {
+		return this.senden('PUT', slug, mitfahrtPfad(modulId, richtung, kindId), koerper);
+	}
+
+	/** Ohne Koerper und ohne clientId, denn die Route ist idempotent (Plan-Entscheidung 6). */
+	nimmHeraus(slug: string, modulId: string, richtung: Richtung, kindId: string): Observable<FahrtAntwort> {
+		return this.senden('DELETE', slug, mitfahrtPfad(modulId, richtung, kindId));
+	}
+}
+
+type FahrtAntwort = { modul: FahrtModulAnsicht; stand: number };
+
+function autoPfad(autoId: string): string {
+	return `/autos/${encodeURIComponent(autoId)}`;
+}
+
+// Die Richtung geht klein in die Adresse (hin, rueck), im Koerper steht sie gross wie in der Datenbank.
+function mitfahrtPfad(modulId: string, richtung: Richtung, kindId: string): string {
+	return `/fahrten/${encodeURIComponent(modulId)}/${richtung === 'HIN' ? 'hin' : 'rueck'}/${encodeURIComponent(kindId)}`;
 }
 
 function helferPfad(positionId: string, fuerId: string): string {

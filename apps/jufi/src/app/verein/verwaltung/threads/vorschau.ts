@@ -1,7 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
-import type { ModulAnsicht, ThreadEntwurf } from '@jufi/domain';
+import { type ModulAnsicht, RICHTUNGEN, type ThreadEntwurf } from '@jufi/domain';
 import { DateienModulComponent } from '../../threads/dateien-modul';
 import { FotosModulComponent } from '../../threads/fotos-modul';
+import { FahrtModul } from '../../threads/fahrt-modul';
 import { HelferModul } from '../../threads/helfer-modul';
 import { InfoModul } from '../../threads/info-modul';
 import { TerminModul } from '../../threads/termin-modul';
@@ -53,6 +54,24 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 				zeilen: [],
 			};
 		}
+		// Ohne Autos und Kinder wie die Umfrage ohne Zeilen: Die Vorschau bietet nichts an, was die API
+		// riefe; die Karte zeigt die gewaehlten Richtungen mit leerer Liste.
+		if (m.typ === 'FAHRT') {
+			return {
+				typ: 'FAHRT',
+				id,
+				titel: m.titel,
+				richtungen: RICHTUNGEN.filter((richtung) => (richtung === 'HIN' ? m.hin : m.rueck)).map((richtung) => ({
+					richtung,
+					vorschlagTag: null,
+					darfAnbieten: false,
+					autos: [],
+					brauchtMitfahrt: [],
+					kommtSelbst: [],
+				})),
+				kinder: [],
+			};
+		}
 		return {
 			typ: 'UMFRAGE',
 			id,
@@ -83,7 +102,7 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
  */
 @Component({
 	selector: 'jf-thread-vorschau',
-	imports: [DateienModulComponent, FotosModulComponent, HelferModul, InfoModul, TerminModul, UmfrageModul],
+	imports: [DateienModulComponent, FahrtModul, FotosModulComponent, HelferModul, InfoModul, TerminModul, UmfrageModul],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<div class="rahmen" role="region" aria-label="Vorschau am Handy">
@@ -117,6 +136,9 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 							}
 							@case ('HELFER') {
 								<jf-helfer-modul [modul]="m" slug="" [vorschau]="true" />
+							}
+							@case ('FAHRT') {
+								<jf-fahrt-modul [modul]="m" slug="" [vorschau]="true" />
 							}
 							<!-- Leere Listen ohne Rechte: kein Upload, kein Hinweis, und slug leer wie beim Termin. -->
 							@case ('DATEIEN') {

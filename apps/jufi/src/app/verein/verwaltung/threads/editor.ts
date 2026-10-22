@@ -13,6 +13,7 @@ import { type Navigation, Router, RouterLink } from '@angular/router';
 import {
 	einheitenFuer,
 	entwurfFehler,
+	type FahrtSperre,
 	type Feldfehler,
 	GRENZEN,
 	type HelferSperre,
@@ -39,6 +40,7 @@ import { IconComponent } from '../../../gestaltung/icon';
 import { KarteComponent, PilleComponent } from '../../../gestaltung/ui';
 import { beiAbgelaufenerSitzung } from '../../sitzung-abgelaufen';
 import { DateienFelderComponent } from './dateien-felder';
+import { FahrtFelderComponent } from './fahrt-felder';
 import { FotosFelderComponent } from './fotos-felder';
 import { HelferFelderComponent } from './helfer-felder';
 import { ModulFelderComponent, zeigtModulFeld } from './modul-felder';
@@ -56,6 +58,7 @@ const TYPEN: readonly { typ: ModulTyp; text: string }[] = [
 	{ typ: 'DATEIEN', text: 'Dateien' },
 	{ typ: 'FOTOS', text: 'Fotos' },
 	{ typ: 'HELFER', text: 'Helferliste' },
+	{ typ: 'FAHRT', text: 'Fahrgemeinschaft' },
 ];
 
 /** Gleiche Grenze wie die Media Query in den Stilen: darunter Umschalter statt zwei Spalten (Spec 6.6). */
@@ -169,6 +172,7 @@ interface ServerFehler {
 	imports: [
 		BestaetigungComponent,
 		DateienFelderComponent,
+		FahrtFelderComponent,
 		FotosFelderComponent,
 		HelferFelderComponent,
 		IconComponent,
@@ -360,7 +364,7 @@ interface ServerFehler {
 								}
 								<div class="hinzufuegen" role="group" aria-label="Modul hinzufügen">
 									<span class="gedaempft klein" aria-hidden="true">Modul hinzufügen:</span>
-									@for (t of typen; track t.typ) {
+									@for (t of angebote(); track t.typ) {
 										<button
 											type="button"
 											class="knopf klein"
@@ -404,6 +408,15 @@ interface ServerFehler {
 												[index]="a.index"
 												[rollenfilter]="kopf().rollenfilter"
 												[sperre]="helferSperreFuer(m)"
+												[fehler]="modulFehler(a.index)"
+												(aendern)="modulGeaendert(a.eintrag.schluessel, $event)"
+											/>
+										}
+										@case ('FAHRT') {
+											<jf-fahrt-felder
+												[modul]="m"
+												[index]="a.index"
+												[sperre]="fahrtSperreFuer(m)"
 												[fehler]="modulFehler(a.index)"
 												(aendern)="modulGeaendert(a.eintrag.schluessel, $event)"
 											/>
@@ -703,7 +716,12 @@ export class ThreadEditorComponent {
 	private readonly api = inject(VerwaltungThreadsApi);
 	private readonly router = inject(Router);
 
-	protected readonly typen = TYPEN;
+	// Die zweite Fahrgemeinschaft gibt es nicht (Plan-Entscheidung 9): Sobald der Entwurf eine hat,
+	// gespeichert oder nicht, bietet die Liste den Typ nicht mehr an. Verworfen: ihn anzubieten und
+	// den Konflikt erst beim Speichern zu melden, denn das Angebot liesse sich gar nicht umsetzen.
+	protected readonly angebote = computed(() =>
+		this.arbeit().module.some((e) => e.modul.typ === 'FAHRT') ? TYPEN.filter((t) => t.typ !== 'FAHRT') : TYPEN,
+	);
 	protected readonly grenzen = GRENZEN;
 	protected readonly wert = wertVon;
 	protected readonly modi = (Object.keys(MODUS_TEXT) as ThreadModus[]).map((wert) => ({
@@ -763,11 +781,17 @@ export class ThreadEditorComponent {
 	protected readonly veroeffentlicht = computed(() => this.bearbeitung()?.veroeffentlicht ?? false);
 	protected readonly austausch = computed(() => this.bearbeitung()?.art === 'JUGENDSPRECHER_AUSTAUSCH');
 	/**
-	 * Der Link "Antworten" fuehrt in die Uebersicht gespeicherter Umfragen und Helferlisten, nicht
-	 * ungespeicherter; dieselbe Regel wie hatAntwortModul der Verwaltungsliste (Plan-Entscheidung 13).
+	 * Der Link "Antworten" fuehrt in die Uebersicht gespeicherter Umfragen, Helferlisten und
+	 * Fahrgemeinschaften, nicht ungespeicherter; dieselbe Regel wie hatAntwortModul der
+	 * Verwaltungsliste (Plan-Entscheidung 13). Die Fahrgemeinschaft zaehlt, obwohl sie "Antworten"
+	 * nur im weiten Sinn hat: Die Uebersicht zeigt sie mit der Ansicht der Leitung samt Umsetzen
+	 * (Plan-Entscheidung 17, Spec 12), und ohne den Link kaeme die Leitung nur ueber die
+	 * Thread-Seite dorthin. Verworfen: sie auszunehmen, denn dann wiche der Editor von der Liste ab.
 	 */
 	protected readonly hatAntwortModul = computed(
-		() => this.bearbeitung()?.entwurf.module.some((m) => m.typ === 'UMFRAGE' || m.typ === 'HELFER') ?? false,
+		() =>
+			this.bearbeitung()?.entwurf.module.some((m) => m.typ === 'UMFRAGE' || m.typ === 'HELFER' || m.typ === 'FAHRT') ??
+			false,
 	);
 	protected readonly listeLink = computed(() => ['/', this.slug(), 'verwaltung', 'threads']);
 
@@ -999,6 +1023,7 @@ export class ThreadEditorComponent {
 	private einheitFest(m: ModulEntwurf): boolean {
 		if (m.typ === 'UMFRAGE') return (this.sperreFuer(m)?.schluessel.length ?? 0) > 0;
 		if (m.typ === 'HELFER') return this.helferSperreFuer(m)?.eingetragen ?? false;
+		// Die Fahrgemeinschaft hat keine Einheit: Sie ist in jedem Rollenfilter erlaubt (Plan-Entscheidung 14).
 		return false;
 	}
 
@@ -1100,6 +1125,7 @@ export class ThreadEditorComponent {
 		if (m.typ === 'DATEIEN') return 'Dateien';
 		if (m.typ === 'FOTOS') return 'Fotos';
 		if (m.typ === 'HELFER') return 'Helferliste';
+		if (m.typ === 'FAHRT') return 'Fahrgemeinschaft';
 		return m.frage.trim() || 'Noch ohne Frage';
 	}
 
@@ -1139,17 +1165,27 @@ export class ThreadEditorComponent {
 		return this.bearbeitung()?.helferSperren[m.id] ?? null;
 	}
 
+	/** Nur eine gespeicherte Fahrgemeinschaft hat Autos und Mitfahrten und damit eine Sperre. */
+	protected fahrtSperreFuer(m: ModulEntwurf): FahrtSperre | null {
+		if (m.typ !== 'FAHRT' || m.id === null) return null;
+		return this.bearbeitung()?.fahrtSperre ?? null;
+	}
+
 	// Jede Antwortzeile zaehlt, auch eine ohne Option: Die Datenbank verweigerte das Loeschen sonst
 	// (UmfrageSperre). Bei der Helferliste jeder Eintrag, auch der einer nicht mehr gefragten Person
-	// (Plan-Entscheidung 1); der Server antwortete sonst mit 409.
+	// (Plan-Entscheidung 1); der Server antwortete sonst mit 409. Bei der Fahrgemeinschaft jedes Auto
+	// und jede Mitfahrt, auch "kommt selbst" (Plan-Entscheidung 10).
 	protected entfernenGesperrt(m: ModulEntwurf): boolean {
 		if (m.typ === 'HELFER') return this.helferSperreFuer(m)?.eingetragen ?? false;
+		if (m.typ === 'FAHRT') return this.fahrtSperreFuer(m)?.eingetragen ?? false;
 		return this.sperreFuer(m)?.beantwortet ?? false;
 	}
 
-	// Eine Helferliste hat Eintraege, keine Antworten (wie HELFER_EINHEIT_GESPERRT in vergleich.ts).
+	// Helferliste und Fahrgemeinschaft haben Eintraege, keine Antworten (wie HELFER_EINHEIT_GESPERRT in vergleich.ts).
 	protected gesperrtText(m: ModulEntwurf): string {
-		return m.typ === 'HELFER' ? 'Gesperrt, weil schon Einträge da sind' : 'Gesperrt, weil schon Antworten da sind';
+		return m.typ === 'HELFER' || m.typ === 'FAHRT'
+			? 'Gesperrt, weil schon Einträge da sind'
+			: 'Gesperrt, weil schon Antworten da sind';
 	}
 
 	// ---- Speichern ---------------------------------------------------------------------
