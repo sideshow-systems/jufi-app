@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
+import { legeThreadAn } from '../threads/test-threads.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { raeumeDateienAuf } from './aufraeumen.js';
 import { dateiSchluessel, VerzeichnisSpeicher, type DateiSpeicher } from './speicher.js';
@@ -88,7 +89,15 @@ describe('raeumeDateienAuf', () => {
 				},
 			});
 		};
-		return { verein, db, dateiMitZeile };
+		/** Ein Foto mit Zeile an einem Foto-Modul; Bytes legt der Test selbst ab. */
+		const fotoMitZeile = async () => {
+			const { dateiIds } = await legeThreadAn(prisma, verein, new Date(), {
+				erstelltVonId: person.personId,
+				module: [{ typ: 'FOTOS', fotos: [{}] }],
+			});
+			return dateiIds[0] as string;
+		};
+		return { verein, db, dateiMitZeile, fotoMitZeile };
 	}
 
 	it('loescht Eintraege der Loeschliste erst nach 24 Stunden, samt Zeile', async () => {
@@ -177,6 +186,24 @@ describe('raeumeDateienAuf', () => {
 		expect(await prisma.datei.count({ where: { id: datei.id } })).toBe(1);
 		const log = fehler.mock.calls.flat().join(' ');
 		expect(log).toContain('1 Dateien ohne Bytes');
+	});
+
+	it('meldet ein Foto als fehlend, dem nur die Vorschau fehlt; einer Datei fehlt ohne Vorschau nichts', async () => {
+		const fehler = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const s = await szenario();
+		const datei = await s.dateiMitZeile();
+		await lege(dateiSchluessel(s.verein.id, datei.id), vor(1));
+		const foto = await s.fotoMitZeile();
+		await lege(dateiSchluessel(s.verein.id, foto), vor(1));
+
+		const bilanz = await raeumeDateienAuf(nur(s.verein.id), speicher, JETZT);
+
+		expect(bilanz.fehlend).toBe(1);
+		expect(fehler.mock.calls.flat().join(' ')).toContain('1 Dateien ohne Bytes');
+
+		// Mit der Vorschau ist das Foto vollstaendig.
+		await lege(dateiSchluessel(s.verein.id, foto, true), vor(1));
+		expect((await raeumeDateienAuf(nur(s.verein.id), speicher, JETZT)).fehlend).toBe(0);
 	});
 
 	/** Ein Speicher, dessen loesche fuer genau diesen Schluessel wirft; alles andere geht an den echten. */

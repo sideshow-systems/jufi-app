@@ -120,9 +120,15 @@ export async function raeumeDateienAuf(
 	// 3. Temp-Dateien
 	bilanz.temp = await speicher.raeumeTempAuf(new Date(jetzt.getTime() - TEMP_FRIST_MS));
 
-	// 4. Zeilen ohne Bytes
-	const zeilen = await prisma.datei.findMany({ select: { id: true, vereinId: true } });
-	bilanz.fehlend = zeilen.filter((z) => !vorhanden.has(dateiSchluessel(z.vereinId, z.id))).length;
+	// 4. Zeilen ohne Bytes. Ein Foto braucht beide Fassungen: Fehlt nur die Vorschau (etwa nach einer
+	// teilweisen Wiederherstellung), zeigt das Raster ein kaputtes Bild, obwohl die Hauptfassung da ist.
+	// Gezaehlt wird je Zeile, nicht je Schluessel, damit die Zahl zur Meldung "Dateien ohne Bytes" passt.
+	const zeilen = await prisma.datei.findMany({ select: { id: true, vereinId: true, art: true } });
+	bilanz.fehlend = zeilen.filter(
+		(z) =>
+			!vorhanden.has(dateiSchluessel(z.vereinId, z.id)) ||
+			(z.art === 'FOTO' && !vorhanden.has(dateiSchluessel(z.vereinId, z.id, true))),
+	).length;
 	if (bilanz.fehlend > 0) {
 		console.error(`Aufraeumen: ${bilanz.fehlend} Dateien ohne Bytes im Speicher (Restore pruefen)`);
 	}
