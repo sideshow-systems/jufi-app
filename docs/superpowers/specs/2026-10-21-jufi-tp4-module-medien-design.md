@@ -127,18 +127,23 @@ Mit `sharp`, aus der Temp-Datei, nicht aus einem Puffer:
 - **Immer nur eine Verarbeitung gleichzeitig** je Prozess (`sharp.concurrency(1)`, Cache aus, eigene Warteschlange). Bis zu 8 Fotos warten; darüber **503 `BESCHAEFTIGT` mit `Retry-After: 2`** (Plan zu Etappe 2, Entscheidung 16). Der Client wiederholt bis zu dreimal von selbst und zeigt erst dann „Nochmal“: Voll ist die Schlange meist nur kurz, wenn mehrere zugleich hochladen, und ein Tippen je Foto wäre dafür zu viel.
 - **`foto.ts` importiert nur `sharp` und `node:*` und nutzt nur löschbare TypeScript-Syntax** (keine `enum`, keine Parameter-Properties; Plan zu Etappe 2, Entscheidung 2). Nur so läuft genau diese Datei im gebauten Image ohne Bau (Abnahme unten): Node 22 entfernt die Typen beim Laden. Die Pixelprüfung steht deshalb dort noch einmal, statt aus `verein/logo.ts` zu kommen.
 
-**Abnahme von Etappe 2:** Ein 48-Megapixel-JPEG und ein 20-MB-PNG werden im gebauten Image unter `mem_limit: 256m` verarbeitet, ohne dass der Kernel die App beendet; der Spitzenverbrauch steht im Bericht. Reicht der Speicher nicht, wird das Limit angehoben, nicht die Fotogrenze gesenkt.
+**Abnahme von Etappe 2:** Die teuersten Fotos, die die Upload-Route annimmt, werden im gebauten Image unter dem `mem_limit` von `jufi` verarbeitet, ohne dass der Kernel die App beendet; der Spitzenverbrauch steht im Bericht. Die Probe deckt ab: ein 48-MP-JPEG baseline (der Fall, den Handys liefern), dasselbe progressiv mit 4:2:0 und mit 4:4:4 (der Dekoder hält alle Koeffizienten), ein interlaced PNG (Adam7) mit knapp 50 MP und Alphakanal (wird ganz entpackt), ein 48-MP-WebP und ein knapp 20 MB großes PNG (Bytegrenze). Reicht der Speicher nicht, wird das Limit angehoben, nicht die Fotogrenze gesenkt.
 
 **Die Abnahme ist ein dauerhaftes Tor im Rauchtest** (`tools/deploy.sh`, Tor 4; Plan zu Etappe 2, Entscheidung 1), keine einmalige Messung:
 
 - Der Rauchtest-Container läuft mit derselben Speichergrenze wie `jufi` in `deploy/jufi-services.yml` (`--memory` und `--memory-swap` gleich, also ohne Swap wie auf dem Server). Fehlt dort `mem_limit`, bricht der Rauchtest ab.
-- `tools/erzeuge-testbilder.mjs` erzeugt die beiden Bilder auf dem Entwicklungsrechner. Im laufenden Container verarbeitet `tools/fotoprobe.mjs` sie mit genau der Datei `foto.ts` der App. Danach liest das Tor `memory.peak` der cgroup und gibt „Fotoprobe: 48 MP und 20-MB-PNG verarbeitet, Spitze <MiB> von 256m“ aus; die App muss danach weiter auf `/healthz` antworten.
+- `tools/erzeuge-testbilder.mjs` erzeugt die Bilder auf dem Entwicklungsrechner und prüft, dass jedes unter 20 MB und 50 MP liegt. Im laufenden Container verarbeitet `tools/fotoprobe.mjs` sie mit genau der Datei `foto.ts` der App: erst jedes Bild in einem eigenen Prozess (Spitze je Bild), dann alle nacheinander in einem Prozess (wie im Betrieb). Danach liest das Tor `memory.peak` der cgroup und gibt „Fotoprobe: 6 Bilder bis 50 MP verarbeitet, Spitze <MiB> von <mem_limit>“ aus; die App muss danach weiter auf `/healthz` antworten.
 - Gemessen werden App im Leerlauf und Probe zusammen. Das liegt über dem Betrieb, wo nur ein Node-Prozess läuft, und ist damit die vorsichtige Seite.
 - Exit 137 oder ein beendeter App-Container brechen ab: „Speicher reicht nicht; mem_limit anheben“. Dann legt man dem Eigentümer die gemessenen Werte für einen neuen `mem_limit` vor.
+- **Auch das Vereinslogo (`verein/logo.ts`) stellt sich in der Fotoschlange an** und bekommt bei voller Schlange dasselbe 503 `BESCHAEFTIGT`. sharp dekodiert es genauso, und das `mem_limit` deckt nur eine teure Verarbeitung zur Zeit.
+- Verworfen: die Verarbeitung in einen Kindprozess auslagern. Er liefe in derselben cgroup, bräuchte also dieselbe Grenze und dazu eine zweite Node-Laufzeit, und machte nur die Folgen eines Abbruchs kleiner, nicht den Bedarf.
+- Verworfen: eine kleinere Pixelgrenze je Kodierung (etwa für progressive JPEGs). Sie wiese Fotos ab, die Bildbearbeitungen so speichern, und senkte damit die Fotogrenze, statt das Limit anzuheben.
 - Verworfen: die Messung über die echte Upload-Route. Sie bräuchte eine Mitgliedssitzung im Wegwerf-Verein, und Demo-Personen haben kein Passwort.
 - Verworfen: einmal von Hand messen. Die nächste `sharp`-Version kann es kippen, ohne dass es jemand merkt.
 
-Erste Messung (Probelauf vom 22.10.2026, `sharp` 0.35): „Fotoprobe: 48 MP und 20-MB-PNG verarbeitet, Spitze 170 MiB von 256m“, die App allein im Leerlauf rund 79 MiB. Das JPEG dekodiert `sharp` beim Verkleinern gleich in geringerer Auflösung, das PNG liest es zeilenweise (`sequentialRead`); daher bleibt die Spitze weit unter dem, was ein ganz entpacktes 48-MP-Bild (rund 144 MB) allein bräuchte.
+Erste Messung (Probelauf vom 22.10.2026, `sharp` 0.35) nur mit dem baseline-JPEG und dem 20-MB-PNG: Spitze 170 MiB von 256m, die App allein im Leerlauf rund 79 MiB. Das baseline-JPEG dekodiert `sharp` beim Verkleinern gleich in geringerer Auflösung, das PNG liest es zeilenweise (`sequentialRead`). Das Gesamtreview hat gezeigt, dass das die günstigen Fälle sind.
+
+Messung mit der erweiterten Probe (22.10.2026, `sharp` 0.35, Probe allein im Image, Spitze der cgroup): baseline-JPEG 79 MiB, 20-MB-PNG 86 MiB, WebP 96 MiB, progressives JPEG 4:2:0 218 MiB, Adam7-PNG 282 MiB, progressives JPEG 4:4:4 356 MiB, alle nacheinander in einem Prozess 362 MiB. Unter 256m beendete der Kernel die Probe am 4:4:4-JPEG. Im Rauchtest (App und Probe zusammen, `pnpm run deploy:app --dry-run`) lag die Spitze bei 471 MiB; der Probe-Prozess mit allen Bildern nacheinander erreichte 421 MiB maxRSS. Das `mem_limit` von `jufi` steht deshalb auf **640m**: 471 MiB plus rund 25 % Reserve (589 MiB), auf 64m aufgerundet.
 
 ### 2.5 Ausliefern
 
@@ -460,7 +465,7 @@ Das Zeltlager-Szenario (1.1) mit erzeugten Testbildern; dazu die Leiste mit fün
 
 `pnpm run demo` baut das Zeltlager mit allen Modulen auf: erzeugte Fotos, zwei Dateien, Helfer-Einträge, zwei Autos, Kostenposten in allen drei Zuständen und eine Befreiung; Tim ohne Foto-Einwilligung; Dokumente in den drei Kategorien.
 
-**Demo-Fotos kommen mit Etappe 6** (Plan zu Etappe 2, Entscheidung 15). Für die lokale Abnahme von Etappe 2 erzeugt `node tools/erzeuge-testbilder.mjs <verzeichnis> --bunt <n>` bunte Testbilder aus Kreisen und Rechtecken (1600 × 1200, mit Nummer); dasselbe Skript erzeugt die beiden Bilder der Fotoprobe (2.4).
+**Demo-Fotos kommen mit Etappe 6** (Plan zu Etappe 2, Entscheidung 15). Für die lokale Abnahme von Etappe 2 erzeugt `node tools/erzeuge-testbilder.mjs <verzeichnis> --bunt <n>` bunte Testbilder aus Kreisen und Rechtecken (1600 × 1200, mit Nummer); dasselbe Skript erzeugt die sechs Bilder der Fotoprobe (2.4).
 
 ---
 
