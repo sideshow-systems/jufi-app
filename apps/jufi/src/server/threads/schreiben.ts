@@ -65,6 +65,11 @@ function liesEntwurf(wert: unknown): { entwurf: ThreadEntwurf } | { feld: string
 	const gelesen = entwurfAus(wert);
 	if ('fehler' in gelesen) return { feld: gelesen.fehler.feld };
 	const e = gelesen.entwurf;
+	// Fuer Datei- und Foto-Module gibt es noch keine Tabellen, in die schreibeModul sie legen
+	// koennte. Verworfen: sie still zu ueberspringen -- der Editor meldete "gespeichert", und das
+	// Modul waere beim naechsten Laden weg.
+	const ungespeichert = e.module.findIndex((m) => m.typ === 'DATEIEN' || m.typ === 'FOTOS');
+	if (ungespeichert >= 0) return { feld: `module.${ungespeichert}.typ` };
 	return { entwurf: { ...e, untergruppenIds: [...new Set(e.untergruppenIds)] } };
 }
 
@@ -208,6 +213,10 @@ async function schreibeModul(
 	neu: ModulEntwurf,
 	id: string | null,
 ): Promise<string> {
+	if (neu.typ === 'DATEIEN' || neu.typ === 'FOTOS') {
+		// liesEntwurf hat sie schon abgewiesen; der Zweig engt den Typ fuer die Spalte typ ein.
+		throw new Error(`Modultyp ${neu.typ} wird noch nicht gespeichert`);
+	}
 	const kopf = { position, titel: neu.titel };
 	let modulId: string;
 	if (id === null) {
@@ -236,6 +245,7 @@ async function schreibeModul(
 		};
 		await tx.terminModul.upsert({ where: { id: modulId }, create: { id: modulId, ...daten }, update: daten });
 	} else {
+		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN und FOTOS sind oben behandelt).
 		const daten = {
 			frage: neu.frage,
 			einheit: neu.einheit,

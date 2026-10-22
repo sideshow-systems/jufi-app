@@ -191,6 +191,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				'darfLoeschen',
 				'entwurf',
 				'id',
+				'medien',
 				'segment',
 				'sperren',
 				'untergruppen',
@@ -207,6 +208,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				darfArchivieren: true,
 				darfLoeschen: false,
 			});
+			expect(b.medien).toEqual({ gesamt: { fotos: 0, dateien: 0, personen: 0 }, module: {} });
 			expect(b.segment).toMatch(new RegExp(`^${t.threadId}-zeltlager$`));
 			expect(b.entwurf).toMatchObject({
 				titel: 'Zeltlager',

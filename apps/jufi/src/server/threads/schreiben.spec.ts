@@ -330,6 +330,17 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(await s.stand()).toBe(vorher);
 		});
 
+		it('weist Datei- und Foto-Module ab, solange es keine Tabellen dafuer gibt', async () => {
+			const s = await szenario();
+			const e = s.bowling();
+			e.module.push({ typ: 'FOTOS', id: null, titel: null, hochladen: 'JUGENDLEITER' });
+			const vorher = await s.stand();
+			const r = await s.lege(e, s.thomas.cookie);
+			expect(r.status).toBe(400);
+			expect(await r.json()).toEqual({ fehler: 'Ungültige Anfrage', feld: 'module.3.typ' });
+			expect(await s.stand()).toBe(vorher);
+		});
+
 		it('meldet eine zweite Teilnahme-Umfrage als 409 DOPPELTE_TEILNAHME', async () => {
 			const s = await szenario();
 			const e = s.bowling();

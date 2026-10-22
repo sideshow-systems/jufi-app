@@ -74,6 +74,7 @@ function bearbeitung(rest: Partial<ThreadBearbeitung> = {}): ThreadBearbeitung {
 		darfArchivieren: true,
 		entwurf: bowling(),
 		sperren: {},
+		medien: { gesamt: { fotos: 0, dateien: 0, personen: 0 }, module: {} },
 		untergruppen: UNTERGRUPPEN,
 		...rest,
 	};

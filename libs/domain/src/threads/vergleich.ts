@@ -125,6 +125,10 @@ function vergleicheBestehendes(alt: ModulDaten, neu: ModulEntwurf, i: number): B
 		if (zeit) eintrag(ergebnis, 'TERMIN_GEAENDERT', { termin: { modulId: alt.id, ...n } });
 	} else if (alt.typ === 'UMFRAGE' && neu.typ === 'UMFRAGE') {
 		umfrage(ergebnis, alt, neu, i);
+	} else if (alt.typ === 'FOTOS' && neu.typ === 'FOTOS') {
+		// Wer hochladen darf, ist eine Einstellung des Moduls und keine Nachricht an die Gruppe:
+		// kein Systemeintrag. Die Dateien selbst zaehlen nie, sie haben eigene Routen.
+		ergebnis.geaendert ||= alt.hochladen !== neu.hochladen;
 	}
 	return ergebnis;
 }

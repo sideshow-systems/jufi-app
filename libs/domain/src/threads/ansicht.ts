@@ -1,8 +1,18 @@
+import type { DateienModulAnsicht, DateiZeile, FotosModulAnsicht, FotoZeile } from '../dateien/module.js';
+import type { EinwilligungZeile } from '../einwilligung.js';
 import type { TerminDaten } from '../module/termin/termin.js';
 import { antwortZeilen, auswertung, darfAntworten, type Auswertung } from './antworten.js';
 import { istArchiviert } from './archiv.js';
-import { eingetragenVon } from './namen.js';
-import { darfArchivieren, darfBearbeiten, schreibSperre, type SchreibSperre } from './rechte.js';
+import { absenderName, dabeiKinder, eingetragenVon, fotoHinweis, ohneFotoEinwilligung } from './namen.js';
+import {
+	darfArchivieren,
+	darfBearbeiten,
+	darfFotoLoeschen,
+	darfFotosHochladen,
+	schreibSperre,
+	type FotoHochladen,
+	type SchreibSperre,
+} from './rechte.js';
 import { siehtThread } from './sichtbarkeit.js';
 import { ungeleseneNachrichten, type NachrichtenEingabe } from './start.js';
 import type {
@@ -17,12 +27,33 @@ import type {
 	UmfrageDaten,
 } from './typen.js';
 
+// Beide Listen kommen nach hochgeladenAm aufsteigend sortiert an (der Server sortiert beim
+// Laden); die Ansicht gibt die Reihenfolge unveraendert weiter.
+export interface DateiDaten {
+	id: string;
+	name: string;
+	typ: string;
+	groesse: number;
+	vonId: string;
+	hochgeladenAm: Date;
+}
+
+export interface FotoDaten {
+	id: string;
+	breite: number;
+	hoehe: number;
+	vonId: string;
+	hochgeladenAm: Date;
+}
+
 // Spec 3.1. Die Module eines Threads in der Reihenfolge, die der Ersteller gewaehlt hat;
 // der Typ haelt je Modul genau die Daten, die seine Karte braucht.
 export type ModulDaten =
 	| { typ: 'INFO'; id: string; titel: string | null; text: string }
 	| { typ: 'TERMIN'; id: string; titel: string | null; termin: TerminDaten }
-	| { typ: 'UMFRAGE'; id: string; titel: string | null; umfrage: UmfrageDaten };
+	| { typ: 'UMFRAGE'; id: string; titel: string | null; umfrage: UmfrageDaten }
+	| { typ: 'DATEIEN'; id: string; titel: string | null; dateien: readonly DateiDaten[] }
+	| { typ: 'FOTOS'; id: string; titel: string | null; hochladen: FotoHochladen; fotos: readonly FotoDaten[] };
 
 // Archivregel und Schreibsperre brauchen die Termine, die Zeilen die Umfragen; beide
 // liegen sonst nur verstreut in den Modulen.
@@ -61,7 +92,11 @@ export interface UmfrageAnsicht {
 	ergebnis: Auswertung | null;
 }
 
-export type ModulAnsicht = Exclude<ModulDaten, { typ: 'UMFRAGE' }> | UmfrageAnsicht;
+export type ModulAnsicht =
+	| Exclude<ModulDaten, { typ: 'UMFRAGE' | 'DATEIEN' | 'FOTOS' }>
+	| UmfrageAnsicht
+	| DateienModulAnsicht
+	| FotosModulAnsicht;
 
 export interface ThreadAnsicht {
 	id: string;
@@ -95,6 +130,12 @@ export interface AnsichtEingabe {
 	nachrichten: NachrichtenEingabe['nachrichten'];
 	zugangSeit: Date;
 	verlaufGelesenBis: number | null;
+	/**
+	 * Foto-Einwilligungen je Jungfischer (Zeilen der Art FOTO). Der Server fuellt sie nur, wenn
+	 * der Thread ein Foto-Modul hat, sonst bleibt die Map leer; Pflichtfeld statt optional,
+	 * damit kein Aufrufer sie vergisst und der Hinweis dann "alle duerfen" sagt.
+	 */
+	fotoEinwilligungen: ReadonlyMap<string, readonly EinwilligungZeile[]>;
 	jetzt: Date;
 }
 
@@ -142,6 +183,85 @@ export function umfrageAnsicht(
 	};
 }
 
+function dateienAnsicht(
+	ich: ThreadPerson,
+	modul: Extract<ModulDaten, { typ: 'DATEIEN' }>,
+	kopf: ThreadKopf,
+): DateienModulAnsicht {
+	return {
+		typ: 'DATEIEN',
+		id: modul.id,
+		titel: modul.titel,
+		dateien: modul.dateien.map((d): DateiZeile => ({
+			id: d.id,
+			name: d.name,
+			typ: d.typ,
+			groesse: d.groesse,
+			hochgeladenAm: d.hochgeladenAm.toISOString(),
+		})),
+		darfAendern: darfBearbeiten(ich, kopf),
+	};
+}
+
+// Der Hinweis gilt dem Hochladenden: Er entscheidet, welche Bilder er hineinlaedt. Wer nur
+// schaut, bekommt ihn nicht -- fuer ihn waere er eine Namensliste ohne Handlungsmoeglichkeit.
+// Verworfen: ihn allen zu zeigen, weil er dann Kinder ohne Einwilligung vor der ganzen
+// Familienliste nennte.
+function fotosAnsicht(modul: Extract<ModulDaten, { typ: 'FOTOS' }>, e: AnsichtEingabe): FotosModulAnsicht {
+	const daten = threadDatenAus(e.kopf, e.module);
+	const darfHochladen = darfFotosHochladen(e.ich, e.kopf, modul.hochladen, {
+		umfeld: e.umfeld,
+		termine: daten.termine,
+		jetzt: e.jetzt,
+	});
+	const hinweis = darfHochladen
+		? fotoHinweis(
+				ohneFotoEinwilligung(
+					e.kopf,
+					e.umfeld,
+					{ fotoEinwilligungen: e.fotoEinwilligungen, dabei: dabeiKinder(daten) },
+					e.jetzt,
+				),
+			)
+		: null;
+	return {
+		typ: 'FOTOS',
+		id: modul.id,
+		titel: modul.titel,
+		hochladen: modul.hochladen,
+		fotos: modul.fotos.map((f): FotoZeile => ({
+			id: f.id,
+			breite: f.breite,
+			hoehe: f.hoehe,
+			von: absenderName(f.vonId, e.umfeld),
+			hochgeladenAm: f.hochgeladenAm.toISOString(),
+			darfLoeschen: darfFotoLoeschen(e.ich, e.kopf, f.vonId),
+		})),
+		darfHochladen,
+		hinweis,
+	};
+}
+
+// Erschoepfend ueber typ: Ein neuer Modultyp bricht hier den Bau, statt still als Umfrage
+// oder gar nicht gezeigt zu werden.
+function modulAnsicht(m: ModulDaten, e: AnsichtEingabe): ModulAnsicht {
+	switch (m.typ) {
+		case 'INFO':
+		case 'TERMIN':
+			return m;
+		case 'UMFRAGE':
+			return umfrageAnsicht(e.ich, m, e.kopf, e.umfeld, e.jetzt);
+		case 'DATEIEN':
+			return dateienAnsicht(e.ich, m, e.kopf);
+		case 'FOTOS':
+			return fotosAnsicht(m, e);
+		default: {
+			const unerreichbar: never = m;
+			return unerreichbar;
+		}
+	}
+}
+
 /**
  * Alles, was die Oberflaeche eines Threads braucht, als reine Funktion: Zeilen,
  * Antwortrechte, Ergebnisse, Schreibsperre und Zaehler entscheiden sich hier und
@@ -174,6 +294,6 @@ export function threadAnsicht(e: AnsichtEingabe): ThreadAnsicht | null {
 				nachrichten: e.nachrichten,
 			}),
 		},
-		module: e.module.map((m) => (m.typ === 'UMFRAGE' ? umfrageAnsicht(e.ich, m, e.kopf, e.umfeld, e.jetzt) : m)),
+		module: e.module.map((m) => modulAnsicht(m, e)),
 	};
 }

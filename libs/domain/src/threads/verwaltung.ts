@@ -1,3 +1,4 @@
+import type { MedienZahl } from '../dateien/medien.js';
 import type { TerminDaten } from '../module/termin/termin.js';
 import { naechsteTermine, terminZeit } from '../module/termin/termin.js';
 import { hatRecht } from '../rechte.js';
@@ -79,6 +80,11 @@ export interface ThreadBearbeitung {
 	entwurf: ThreadEntwurf;
 	/** Je Umfrage-Modul-ID, was Antworten festlegen (umfrageSperre). */
 	sperren: Record<string, UmfrageSperre>;
+	/**
+	 * Was am Thread an Fotos und Dateien haengt, gesamt und je Modul-ID: Der Editor fragt damit
+	 * vor dem Entfernen eines Moduls oder dem Loeschen des Threads zurück (Plan-Entscheidung 11).
+	 */
+	medien: { gesamt: MedienZahl; module: Record<string, MedienZahl> };
 	untergruppen: { id: string; name: string }[];
 }
 

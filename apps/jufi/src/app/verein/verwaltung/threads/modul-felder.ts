@@ -57,6 +57,10 @@ const FEHLERFELDER = {
 	INFO: ['titel', 'text'],
 	TERMIN: ['titel', 'termin', 'ort', 'treffpunkt'],
 	TEILNAHME: ['titel', 'frage', 'teilnahme', 'optionen', 'einheit', 'frist'],
+	// Die Felder der Datei- und Foto-Module kommen mit ihren Bauteilen; bis dahin zeigt das
+	// Formular nichts, und ein Fehler an ihnen gehoert unter die Knoepfe.
+	DATEIEN: [],
+	FOTOS: [],
 	UMFRAGE: ['titel', 'frage', 'teilnahme', 'optionen', 'mehrfach', 'einheit', 'frist'],
 } as const satisfies Record<string, readonly string[]>;
 

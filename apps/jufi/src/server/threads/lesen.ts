@@ -120,6 +120,9 @@ export async function ladeThreadAnsicht(
 		nachrichten,
 		zugangSeit,
 		verlaufGelesenBis: gelesen?.verlaufGelesenBis ?? null,
+		// Foto-Einwilligungen braucht nur der Hinweis eines Foto-Moduls; geladene Threads haben
+		// noch keines, also gibt es nichts zu lesen.
+		fotoEinwilligungen: new Map(),
 		jetzt,
 	});
 }

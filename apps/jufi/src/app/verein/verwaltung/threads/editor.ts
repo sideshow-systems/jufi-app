@@ -986,6 +986,8 @@ export class ThreadEditorComponent {
 		if (m.typ === 'TERMIN') {
 			return m.termin.startDatum ? terminZeit({ modulId: '', ...m.termin }) : 'Noch ohne Datum';
 		}
+		if (m.typ === 'DATEIEN') return 'Dateien';
+		if (m.typ === 'FOTOS') return 'Fotos';
 		return m.frage.trim() || 'Noch ohne Frage';
 	}
 

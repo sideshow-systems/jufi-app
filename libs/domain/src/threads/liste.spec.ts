@@ -106,6 +106,19 @@ describe('passtZuSuche', () => {
 		expect(passtZuSuche(kopf({ titel: 'Ohne Strich' }), [], '_')).toBe(false);
 	});
 
+	it('findet einen Dateinamen in einem Datei-Modul', () => {
+		const dateien: ModulDaten = {
+			typ: 'DATEIEN',
+			id: 'm-dateien',
+			titel: null,
+			dateien: [
+				{ id: 'd1', name: 'Packliste.pdf', typ: 'application/pdf', groesse: 1, vonId: 'thomas', hochgeladenAm: JETZT },
+			],
+		};
+		expect(passtZuSuche(bowling, [dateien], 'packliste')).toBe(true);
+		expect(passtZuSuche(bowling, [dateien], 'Zeltplan')).toBe(false);
+	});
+
 	it('sucht nicht in der Frage einer Umfrage', () => {
 		expect(passtZuSuche(bowling, [umfrageModul], 'pizza')).toBe(false);
 	});

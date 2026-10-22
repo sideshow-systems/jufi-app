@@ -639,3 +639,80 @@ describe('entwurfAusThread', () => {
 		expect(threadDatenAus(k, module).umfragen).toHaveLength(1);
 	});
 });
+
+describe('Datei- und Foto-Module im Entwurf', () => {
+	const mitMedien = (): ThreadEntwurf => {
+		const e = bowling();
+		e.module.push(
+			{ typ: 'DATEIEN', id: null, titel: 'Packliste' },
+			{ typ: 'FOTOS', id: null, titel: null, hochladen: 'ALLE' },
+		);
+		return e;
+	};
+	const body = () => JSON.parse(JSON.stringify(mitMedien())) as Record<string, unknown>;
+	const module = (k: Record<string, unknown>) => k['module'] as Record<string, unknown>[];
+
+	it('liest beide Typen unveraendert', () => {
+		expect(entwurfAus(body())).toEqual({ entwurf: mitMedien() });
+	});
+
+	it('weist ein unbekanntes hochladen mit dem Feld des Moduls ab', () => {
+		const k = body();
+		module(k)[4]['hochladen'] = 'X';
+		expect(entwurfAus(k)).toEqual({ fehler: { feld: 'module.4.hochladen', text: 'Ungültige Anfrage' } });
+		const k2 = body();
+		delete module(k2)[4]['hochladen'];
+		expect(entwurfAus(k2)).toEqual({ fehler: { feld: 'module.4.hochladen', text: 'Ungültige Anfrage' } });
+	});
+
+	it('macht aus Titeln von Datei- und Foto-Modulen null, wenn sie leer sind', () => {
+		const k = body();
+		module(k)[3]['titel'] = '  ';
+		const r = entwurfAus(k);
+		expect('entwurf' in r && r.entwurf.module[3].titel).toBeNull();
+	});
+
+	it('prueft die Laenge des Titels wie bei jedem Modul', () => {
+		const e = mitMedien();
+		e.module[3] = { typ: 'DATEIEN', id: null, titel: zeichen(GRENZEN.modulTitel + 1) };
+		expect(entwurfFehler(e, GRUPPEN)).toEqual([
+			{ feld: 'module.3.titel', text: `Höchstens ${GRENZEN.modulTitel} Zeichen.` },
+		]);
+		expect(entwurfFehler(mitMedien(), GRUPPEN)).toEqual([]);
+	});
+
+	it('legt ein neues Datei-Modul leer und ein neues Foto-Modul fuer Jugendleiter an', () => {
+		expect(neuesModul('DATEIEN', [], JETZT)).toEqual({ typ: 'DATEIEN', id: null, titel: null });
+		expect(neuesModul('FOTOS', [], JETZT)).toEqual({
+			typ: 'FOTOS',
+			id: null,
+			titel: null,
+			hochladen: 'JUGENDLEITER',
+		});
+	});
+
+	it('uebernimmt hochladen aus dem Thread und ignoriert die Dateien', () => {
+		const dateien: ModulDaten = {
+			typ: 'DATEIEN',
+			id: 'd1',
+			titel: 'Packliste',
+			dateien: [
+				{
+					id: 'x',
+					name: 'Packliste.pdf',
+					typ: 'application/pdf',
+					groesse: 10,
+					vonId: 'thomas',
+					hochgeladenAm: JETZT,
+				},
+			],
+		};
+		const fotos: ModulDaten = { typ: 'FOTOS', id: 'f1', titel: null, hochladen: 'ALLE', fotos: [] };
+		const e = entwurfAusThread(kopf(), [dateien, fotos]);
+		expect(e.module).toEqual([
+			{ typ: 'DATEIEN', id: 'd1', titel: 'Packliste' },
+			{ typ: 'FOTOS', id: 'f1', titel: null, hochladen: 'ALLE' },
+		]);
+		expect(entwurfAus(JSON.parse(JSON.stringify(e)))).toEqual({ entwurf: e });
+	});
+});

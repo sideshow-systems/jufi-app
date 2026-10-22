@@ -97,6 +97,8 @@ export async function ladeBearbeitung(
 		darfArchivieren: darfArchivieren(ich, kopf),
 		entwurf: entwurfAusThread(kopf, module),
 		sperren: Object.fromEntries(daten.umfragen.map((u) => [u.modulId, umfrageSperre(u)])),
+		// Dateien und Fotos werden noch nicht geladen, die ehrliche Zahl ist also null.
+		medien: { gesamt: { fotos: 0, dateien: 0, personen: 0 }, module: {} },
 		untergruppen,
 	};
 }

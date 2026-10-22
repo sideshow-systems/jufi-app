@@ -16,6 +16,20 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 		const id = `vorschau-${i}`;
 		if (m.typ === 'INFO') return { typ: 'INFO', id, titel: m.titel, text: m.text };
 		if (m.typ === 'TERMIN') return { typ: 'TERMIN', id, titel: m.titel, termin: { modulId: id, ...m.termin } };
+		// Ohne Dateien und Fotos, ohne Rechte: Die Vorschau hat nichts hochgeladen, und die
+		// Bauteile fuer diese Module kennt sie noch nicht.
+		if (m.typ === 'DATEIEN') return { typ: 'DATEIEN', id, titel: m.titel, dateien: [], darfAendern: false };
+		if (m.typ === 'FOTOS') {
+			return {
+				typ: 'FOTOS',
+				id,
+				titel: m.titel,
+				hochladen: m.hochladen,
+				fotos: [],
+				darfHochladen: false,
+				hinweis: null,
+			};
+		}
 		return {
 			typ: 'UMFRAGE',
 			id,
