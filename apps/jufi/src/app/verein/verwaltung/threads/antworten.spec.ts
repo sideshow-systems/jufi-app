@@ -1,9 +1,18 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { type AntwortenUebersicht, fristText, type UmfrageUebersicht } from '@jufi/domain';
+import { type AntwortenUebersicht, fristText, type HelferUebersicht, type UmfrageUebersicht } from '@jufi/domain';
 import { adminTestAnbieter, knopf } from '../../../admin/test-hilfen';
-import { API, ichMit, oeffneAbgelaufen, oeffneSeite, stabil } from '../test-hilfen';
+import {
+	antworteAbgelaufen,
+	API,
+	erwarteAnmeldung,
+	ichMit,
+	oeffneAbgelaufen,
+	oeffneSeite,
+	stabil,
+	waehle,
+} from '../test-hilfen';
 
 const UUID = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
@@ -26,6 +35,38 @@ const BOWLING: UmfrageUebersicht = {
 		{ fuerId: 'k-tom', name: 'Tom', optionIds: [], eingetragenVon: null },
 	],
 	offen: 1,
+};
+
+// Kuchen mit einem von vier Plaetzen (Sandra, von Thomas eingetragen), Fahrer voll (Hans). Gefragt sind
+// vier; Peter und Eva haben noch keinen Eintrag.
+const FISCHERFEST: HelferUebersicht = {
+	modulId: 'm-helfer',
+	titel: 'Fischerfest',
+	frist: '2099-10-22T16:00:00.000Z',
+	fristAbgelaufen: false,
+	positionen: [
+		{
+			id: 'p-kuchen',
+			text: 'Kuchen',
+			anzahl: 4,
+			belegt: 1,
+			eintraege: [{ fuerId: 'k-sandra', name: 'Sandra', notiz: 'Marmorkuchen', eingetragenVon: 'Thomas' }],
+		},
+		{
+			id: 'p-fahrer',
+			text: 'Fahrer',
+			anzahl: 1,
+			belegt: 1,
+			eintraege: [{ fuerId: 'k-hans', name: 'Hans', notiz: null, eingetragenVon: null }],
+		},
+	],
+	gefragte: [
+		{ fuerId: 'k-eva', name: 'Eva' },
+		{ fuerId: 'k-hans', name: 'Hans' },
+		{ fuerId: 'k-peter', name: 'Peter' },
+		{ fuerId: 'k-sandra', name: 'Sandra' },
+	],
+	ohneEintrag: 2,
 };
 
 function uebersicht(rest: Partial<AntwortenUebersicht> = {}): AntwortenUebersicht {
@@ -267,6 +308,192 @@ describe('Antworten-Uebersicht der Verwaltung', () => {
 		await stabil(harness);
 		expect(seite.querySelector('[role="alert"]')?.textContent).toContain('Nicht gefunden oder keine Berechtigung');
 		expect(zeile('Tom')?.querySelector('.optionen')).not.toBeNull();
+	});
+
+	describe('Helferliste', () => {
+		async function oeffneHelfer(h: HelferUebersicht = FISCHERFEST, rest: Partial<AntwortenUebersicht> = {}) {
+			const r = await oeffne(uebersicht({ umfragen: [], helfer: [h], ...rest }));
+			const block = () => r.seite.querySelector<HTMLElement>('[data-helfer="m-helfer"]')!;
+			const position = (id: string) => block().querySelector<HTMLElement>(`[data-position="${id}"]`)!;
+			return { ...r, block, position };
+		}
+
+		it('zeigt Titel, Frist und wie viele noch ohne Eintrag sind', async () => {
+			const { block } = await oeffneHelfer();
+			expect(block().querySelector('h2')?.textContent?.trim()).toBe('Fischerfest');
+			expect(block().textContent).toContain(fristText(new Date(FISCHERFEST.frist!), new Date()));
+			expect(block().querySelector('.ohne')?.textContent?.trim()).toBe('2 ohne Eintrag');
+		});
+
+		it('nennt eine Liste ohne Titel Helferliste und eine abgelaufene Frist so', async () => {
+			const { block } = await oeffneHelfer({ ...FISCHERFEST, titel: null, fristAbgelaufen: true });
+			expect(block().querySelector('h2')?.textContent?.trim()).toBe('Helferliste');
+			expect(block().textContent).toContain('Frist abgelaufen');
+		});
+
+		it('zeigt je Position den Fuellstand, Name, Notiz und wer eingetragen hat', async () => {
+			const { position } = await oeffneHelfer();
+			const kuchen = position('p-kuchen');
+			expect(kuchen.querySelector('h3')?.textContent?.trim()).toBe('Kuchen');
+			expect(kuchen.querySelector('.fuell')?.textContent?.trim()).toBe('1/4');
+			expect(kuchen.querySelector('li .name')?.textContent?.trim()).toBe('Sandra');
+			expect(kuchen.querySelector('li')?.textContent).toContain('Marmorkuchen');
+			expect(kuchen.querySelector('li')?.textContent).toContain('eingetragen von Thomas');
+			const fahrer = position('p-fahrer');
+			expect(fahrer.querySelector('.fuell')?.textContent).toContain('1/1');
+			expect(fahrer.querySelector('li')?.textContent).not.toContain('eingetragen von');
+		});
+
+		it('sagt bei einer leeren Position, dass noch niemand eingetragen ist', async () => {
+			const leer = {
+				...FISCHERFEST,
+				positionen: [{ id: 'p-kuchen', text: 'Kuchen', anzahl: 4, belegt: 0, eintraege: [] }],
+			};
+			const { position } = await oeffneHelfer(leer);
+			expect(position('p-kuchen').textContent).toContain('Noch niemand eingetragen.');
+		});
+
+		it('bietet je nicht volle Position ein Formular mit den Gefragten ohne Eintrag dort', async () => {
+			const { position } = await oeffneHelfer();
+			const person = position('p-kuchen').querySelectorAll<HTMLOptionElement>('select[name="person"] option');
+			// Sandra steht schon im Kuchen; Hans im Fahrer, nicht im Kuchen.
+			expect([...person].map((o) => o.textContent?.trim())).toEqual(['Person wählen', 'Eva', 'Hans', 'Peter']);
+			expect(position('p-kuchen').textContent).toContain('Notiz (optional)');
+			// Fahrer ist voll: kein Formular.
+			expect(position('p-fahrer').querySelector('form')).toBeNull();
+		});
+
+		it('traegt mit der gewaehlten Person und neuer clientId nach und laedt danach neu', async () => {
+			vi.spyOn(crypto, 'randomUUID').mockReturnValue(UUID);
+			const { harness, http, position, block } = await oeffneHelfer();
+			waehle(position('p-kuchen'), 'select[name="person"]', 'k-peter');
+			const notiz = position('p-kuchen').querySelector<HTMLInputElement>('input[name="notiz"]')!;
+			notiz.value = '  Salat ';
+			notiz.dispatchEvent(new Event('input', { bubbles: true }));
+			await stabil(harness);
+			knopf(position('p-kuchen'), 'Eintragen').click();
+
+			const anfrage = await vi.waitFor(() => http.expectOne(`${API}/helfer/p-kuchen/eintraege/k-peter`));
+			expect(anfrage.request.method).toBe('PUT');
+			expect(anfrage.request.body).toEqual({ notiz: 'Salat', clientId: UUID });
+			const neu: HelferUebersicht = {
+				...FISCHERFEST,
+				ohneEintrag: 1,
+				positionen: [
+					{
+						...FISCHERFEST.positionen[0]!,
+						belegt: 2,
+						eintraege: [
+							...FISCHERFEST.positionen[0]!.eintraege,
+							{ fuerId: 'k-peter', name: 'Peter', notiz: 'Salat', eingetragenVon: 'Thomas' },
+						],
+					},
+					FISCHERFEST.positionen[1]!,
+				],
+			};
+			anfrage.flush({ modul: {}, stand: 7 });
+			await vi.waitFor(() =>
+				http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [], helfer: [neu] })),
+			);
+			await stabil(harness);
+			expect(position('p-kuchen').querySelector('.fuell')?.textContent?.trim()).toBe('2/4');
+			expect(block().querySelector('.ohne')?.textContent?.trim()).toBe('1 ohne Eintrag');
+			// Das Formular ist zurueckgesetzt und bietet Peter nicht mehr an.
+			expect(position('p-kuchen').querySelector<HTMLInputElement>('input[name="notiz"]')?.value).toBe('');
+			expect(
+				[...position('p-kuchen').querySelectorAll('select[name="person"] option')].map((o) => o.textContent?.trim()),
+			).toEqual(['Person wählen', 'Eva', 'Hans']);
+		});
+
+		it('schickt ohne Notiz null und braucht eine gewaehlte Person', async () => {
+			const { harness, http, position } = await oeffneHelfer();
+			const eintragen = () => knopf(position('p-kuchen'), 'Eintragen');
+			expect(eintragen().disabled).toBe(true);
+			waehle(position('p-kuchen'), 'select[name="person"]', 'k-eva');
+			await stabil(harness);
+			expect(eintragen().disabled).toBe(false);
+			eintragen().click();
+			const anfrage = await vi.waitFor(() => http.expectOne(`${API}/helfer/p-kuchen/eintraege/k-eva`));
+			expect(anfrage.request.body).toMatchObject({ notiz: null });
+			anfrage.flush({ modul: {}, stand: 7 });
+			await vi.waitFor(() => http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [] })));
+			await stabil(harness);
+		});
+
+		it('traegt mit Austragen aus und laedt danach neu', async () => {
+			const { harness, http, position } = await oeffneHelfer();
+			knopf(position('p-kuchen').querySelector<HTMLElement>('li')!, 'Austragen').click();
+			const anfrage = await vi.waitFor(() => http.expectOne(`${API}/helfer/p-kuchen/eintraege/k-sandra`));
+			expect(anfrage.request.method).toBe('DELETE');
+			anfrage.flush({ modul: {}, stand: 7 });
+			await vi.waitFor(() => http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [] })));
+			await stabil(harness);
+		});
+
+		it('loest bei zwei schnellen Tipps nur eine Anfrage aus', async () => {
+			const { harness, http, position } = await oeffneHelfer();
+			const austragen = knopf(position('p-kuchen').querySelector<HTMLElement>('li')!, 'Austragen');
+			austragen.click();
+			austragen.click();
+			await vi.waitFor(() =>
+				http.expectOne(`${API}/helfer/p-kuchen/eintraege/k-sandra`).flush({ modul: {}, stand: 7 }),
+			);
+			await vi.waitFor(() => http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [] })));
+			await stabil(harness);
+		});
+
+		it('hat ohne darfNachtragen weder Austragen noch ein Formular, zeigt aber die Eintraege', async () => {
+			const { block } = await oeffneHelfer(FISCHERFEST, { darfNachtragen: false });
+			expect(block().textContent).toContain('Sandra');
+			expect(block().querySelector('button')).toBeNull();
+			expect(block().querySelector('form')).toBeNull();
+		});
+
+		it('zeigt VOLL am Block, laesst die Auswahl stehen und laedt neu', async () => {
+			const { harness, http, position, block } = await oeffneHelfer();
+			waehle(position('p-kuchen'), 'select[name="person"]', 'k-peter');
+			await stabil(harness);
+			knopf(position('p-kuchen'), 'Eintragen').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne(`${API}/helfer/p-kuchen/eintraege/k-peter`)
+					.flush(
+						{ fehler: 'Hier sind schon alle Plätze vergeben.', code: 'VOLL' },
+						{ status: 409, statusText: 'Conflict' },
+					),
+			);
+			await vi.waitFor(() =>
+				http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ umfragen: [], helfer: [FISCHERFEST] })),
+			);
+			await stabil(harness);
+			expect(block().querySelector('[role="alert"]')?.textContent).toContain('Hier sind schon alle Plätze vergeben.');
+			expect(position('p-kuchen').querySelector<HTMLSelectElement>('select[name="person"]')?.value).toBe('k-peter');
+		});
+
+		it('zeigt andere Fehler am Block und laedt nicht neu', async () => {
+			const { harness, http, position, block } = await oeffneHelfer();
+			knopf(position('p-kuchen').querySelector<HTMLElement>('li')!, 'Austragen').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne(`${API}/helfer/p-kuchen/eintraege/k-sandra`)
+					.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' }),
+			);
+			await stabil(harness);
+			expect(block().querySelector('[role="alert"]')?.textContent).toContain('Nicht gefunden oder keine Berechtigung');
+			// afterEach prueft per verify(), dass keine weitere Anfrage offen ist.
+		});
+
+		it('ein abgelaufenes Login beim Nachtragen fuehrt zur Anmeldung', async () => {
+			const { http, position } = await oeffneHelfer();
+			knopf(position('p-kuchen').querySelector<HTMLElement>('li')!, 'Austragen').click();
+			await antworteAbgelaufen(http, '/helfer/p-kuchen/eintraege/k-sandra');
+			await erwarteAnmeldung(http, '/demo/verwaltung/threads/t1/antworten');
+		});
+
+		it('ohne Umfrage und ohne Helferliste sagt die Seite, dass es nichts zu sehen gibt', async () => {
+			const { seite } = await oeffne(uebersicht({ umfragen: [], helfer: [] }));
+			expect(seite.textContent).toContain('keine Umfrage oder Helferliste');
+		});
 	});
 
 	it('sagt bei einem Thread ohne Umfrage, dass es nichts zu sehen gibt', async () => {
