@@ -22,7 +22,7 @@ export type AutoStart = Record<AutoFeld, string>;
 
 // Die Saetze zu den Feldern kennt nur der Client: Der Server nennt bei 400 nur das Feld, und die
 // Vorpruefung mit pruefeAuto meldet dasselbe Feld, damit beide Wege denselben Satz zeigen.
-const FELD_TEXT: Readonly<Record<AutoFeld, string>> = {
+export const FELD_TEXT: Readonly<Record<AutoFeld, string>> = {
 	plaetze: `Bitte 1 bis ${GRENZEN.plaetze} Plätze angeben.`,
 	abfahrtTag: 'Bitte einen gültigen Tag angeben.',
 	abfahrtZeit: 'Bitte die Uhrzeit als HH:MM angeben.',

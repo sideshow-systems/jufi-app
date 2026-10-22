@@ -28,7 +28,7 @@ import { firstValueFrom, type Observable } from 'rxjs';
 import { type ApiFehler, alsApiFehler, fehlertext } from '../../gemeinsam/api-fehler';
 import { BestaetigungComponent } from '../../admin/bestaetigung';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
-import { AUTO_FELDER, type AutoFeld, FahrtAutoFormular, type AutoStart } from './fahrt-auto-formular';
+import { AUTO_FELDER, type AutoFeld, FahrtAutoFormular, FELD_TEXT, type AutoStart } from './fahrt-auto-formular';
 import { ThreadApi } from './thread-api';
 
 /** Eine Zeile mit einem Kind: im Auto, unter "Braucht noch Mitfahrt" oder unter "Kommt selbst". */
@@ -487,6 +487,8 @@ export class FahrtModul {
 	protected readonly rueckfrage = signal<Rueckfrage | null>(null);
 	protected readonly ziel = signal('');
 	private readonly gewaehlt = signal<Richtung | null>(null);
+	/** Das Formular, aus dem die laufende Anfrage stammt. */
+	private gesendetAus: Formular | null = null;
 	/** Eine Antwort, die erst nach dem Verlassen der Seite eintrifft, soll nichts mehr ausloesen. */
 	private weg = false;
 
@@ -676,6 +678,7 @@ export class FahrtModul {
 	protected async sendeAuto(auto: AutoEingabe, autoId: string | null): Promise<void> {
 		const r = this.aktuell();
 		if (r === null) return;
+		this.gesendetAus = this.formular();
 		await this.fuehreAus(() =>
 			autoId === null
 				? this.api.bieteAuto(this.slug(), this.modul().id, {
@@ -726,6 +729,21 @@ export class FahrtModul {
 	}
 
 	/**
+	 * Der Satz zu einem Feld gehoert an das Formular, das die Anfrage geschickt hat. Ist es nicht mehr
+	 * offen (die Reiter sind waehrend des Sendens nicht gesperrt, ein Richtungswechsel schliesst es),
+	 * steht der Satz oben am Modul: Verworfen: ihn zu verwerfen, denn dann bliebe das Auto unveraendert
+	 * und niemand sagte es. Ein inzwischen geoeffnetes anderes Formular bekommt ihn nicht.
+	 */
+	private zeigeFeldfehler(feld: AutoFeld, text: string): void {
+		const formular = this.formular();
+		if (formular !== null && formular === this.gesendetAus) {
+			this.autoFormular()?.zeigeFehler(feld, text);
+			return;
+		}
+		this.fehler.set(text);
+	}
+
+	/**
 	 * 404 heisst, dass Fahrt oder Recht in der Zwischenzeit weg sind. 409 heisst, dass die Ansicht
 	 * veraltet ist (voll, archiviert, nicht dabei, schon ein Auto): Der Satz steht am Modul, das
 	 * Formular schliesst, und die Seite laedt neu. PLAETZE ist dagegen eine Fehleingabe: Der Satz
@@ -735,7 +753,8 @@ export class FahrtModul {
 	 */
 	private zeigeFehler(f: ApiFehler): void {
 		if (f.status === 400 && AUTO_FELDER.includes(f.feld as AutoFeld)) {
-			this.autoFormular()?.zeigeFehler(f.feld as AutoFeld);
+			const feld = f.feld as AutoFeld;
+			this.zeigeFeldfehler(feld, FELD_TEXT[feld]);
 			return;
 		}
 		if (f.status === 404) {
@@ -746,7 +765,7 @@ export class FahrtModul {
 			return;
 		}
 		if (f.status === 409 && f.code === 'PLAETZE') {
-			this.autoFormular()?.zeigeFehler('plaetze', f.fehler);
+			this.zeigeFeldfehler('plaetze', f.fehler);
 			return;
 		}
 		if (f.status === 409 && f.code !== 'CLIENT_ID_VERGEBEN') {

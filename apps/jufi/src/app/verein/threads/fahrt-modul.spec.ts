@@ -939,6 +939,30 @@ describe('Fahrgemeinschaft-Modul', () => {
 			},
 		);
 
+		it.each([
+			['409 PLAETZE', 409, { fehler: 'Es fährt schon 1 Kind mit.', code: 'PLAETZE' }, 'Es fährt schon 1 Kind mit.'],
+			['400 plaetze', 400, { fehler: 'Ungültige Anfrage', feld: 'plaetze' }, 'Bitte 1 bis 8 Plätze angeben.'],
+		])(
+			'%s nach einem Richtungswechsel waehrend des Sendens steht am Modul statt verloren zu gehen',
+			async (_name, status, koerper, satz) => {
+				zeige(fahrt({ richtungen: [hin(), rueck()] }));
+				knopf(karte('a1'), 'Auto ändern').click();
+				aktualisiere();
+				tippe('plaetze', '1');
+				knopf(formular(), 'Speichern').click();
+				el.querySelectorAll<HTMLElement>('[role="tab"]')[1]?.click();
+				aktualisiere();
+				http.expectOne('/demo/api/v1/autos/a1').flush(koerper, { status, statusText: 'Fehler' });
+				// Ohne Fokus-Zeichnung wartet whenStable nicht auf die Fehlerbehandlung nach dem Sitzungscheck.
+				await new Promise((r) => setTimeout(r));
+				await fertig();
+
+				expect(el.querySelector('jf-fahrt-modul > [role="alert"]')?.textContent?.trim()).toBe(satz);
+				expect(el.querySelector('form')).toBeNull();
+				expect(fixture.componentInstance.veraltet).toBe(0);
+			},
+		);
+
 		it('404 zeigt den Satz am Modul und meldet veraltet', async () => {
 			zeige(fahrt({ richtungen: [hin({ autos: [auto('a1', { eigenes: true, darfAendern: true })] })] }));
 			knopf(karte('a1'), 'Auto zurückziehen').click();
