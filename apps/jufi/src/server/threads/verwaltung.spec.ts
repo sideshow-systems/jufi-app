@@ -1,5 +1,11 @@
 import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
-import type { AntwortenUebersicht, ThreadAnsicht, ThreadBearbeitung, VerwaltungListe } from '@jufi/domain';
+import {
+	KEINE_MEDIEN,
+	type AntwortenUebersicht,
+	type ThreadAnsicht,
+	type ThreadBearbeitung,
+	type VerwaltungListe,
+} from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
@@ -208,7 +214,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				darfArchivieren: true,
 				darfLoeschen: false,
 			});
-			expect(b.medien).toEqual({ gesamt: { fotos: 0, dateien: 0, personen: 0 }, module: {} });
+			expect(b.medien).toEqual({ gesamt: KEINE_MEDIEN, module: {} });
 			expect(b.segment).toMatch(new RegExp(`^${t.threadId}-zeltlager$`));
 			expect(b.entwurf).toMatchObject({
 				titel: 'Zeltlager',
@@ -266,6 +272,31 @@ describe('Lesende Routen der Verwaltung', () => {
 			}
 			expect(JSON.parse(texte[0] as string)).toEqual(NICHT_GEFUNDEN);
 			expect(new Set(texte).size).toBe(1);
+		});
+
+		it('medien zaehlt Fotos, Dateien und die Hochladenden der Fotos, gesamt und je Modul', async () => {
+			const s = await szenario();
+			const t = await legeThreadAn(prisma, s.verein, JETZT, {
+				titel: 'Zeltlager',
+				erstelltVonId: s.thomas.personId,
+				module: [
+					{ typ: 'INFO', text: 'Bringt Schlafsack mit.' },
+					{ typ: 'DATEIEN', dateien: [{}, {}] },
+					{ typ: 'FOTOS', hochladen: 'ALLE', fotos: [{}, { vonId: s.sandra.personId }, { vonId: s.sandra.personId }] },
+					{ typ: 'FOTOS', fotos: [{ vonId: s.tina.personId }] },
+				],
+			});
+			const r = await s.hole(`/threads/${t.threadId}/bearbeitung`, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const b = (await r.json()) as ThreadBearbeitung;
+			expect(b.medien).toEqual({
+				gesamt: { fotos: 4, dateien: 2, personen: 3 },
+				module: {
+					[t.modulIds[1] as string]: { fotos: 0, dateien: 2, personen: 0 },
+					[t.modulIds[2] as string]: { fotos: 3, dateien: 0, personen: 2 },
+					[t.modulIds[3] as string]: { fotos: 1, dateien: 0, personen: 1 },
+				},
+			});
 		});
 
 		it('ohne Anmeldung 401', async () => {

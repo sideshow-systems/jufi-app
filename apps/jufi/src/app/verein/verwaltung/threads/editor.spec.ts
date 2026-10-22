@@ -2,7 +2,13 @@ import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import type { ModulEntwurf, ThreadBearbeitung, ThreadEntwurf, VerwaltungListe } from '@jufi/domain';
+import {
+	KEINE_MEDIEN,
+	type ModulEntwurf,
+	type ThreadBearbeitung,
+	type ThreadEntwurf,
+	type VerwaltungListe,
+} from '@jufi/domain';
 import { adminTestAnbieter, knopf, tippe } from '../../../admin/test-hilfen';
 import { antworteAbgelaufen, API, erwarteAnmeldung, hake, ichMit, oeffneSeite, stabil, waehle } from '../test-hilfen';
 
@@ -74,7 +80,7 @@ function bearbeitung(rest: Partial<ThreadBearbeitung> = {}): ThreadBearbeitung {
 		darfArchivieren: true,
 		entwurf: bowling(),
 		sperren: {},
-		medien: { gesamt: { fotos: 0, dateien: 0, personen: 0 }, module: {} },
+		medien: { gesamt: KEINE_MEDIEN, module: {} },
 		untergruppen: UNTERGRUPPEN,
 		...rest,
 	};

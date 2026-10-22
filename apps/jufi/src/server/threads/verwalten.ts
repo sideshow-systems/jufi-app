@@ -12,6 +12,7 @@ import {
 import type { Request, Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
+import { loescheDateien } from '../dateien/loeschen.js';
 import { brauchtMitglied, mitgliedKontext } from '../mitglieder/sitzung.js';
 import { vereinsKontext } from '../verein.js';
 import { ladeBearbeitung, ladeUntergruppen, loeschZaehler } from './bearbeitung.js';
@@ -32,6 +33,7 @@ import { ichUnterSperre } from './schreiben.js';
 /** Was die Arbeit unter der Sperre sieht: die Person und den Thread, beide erst nach der Sperre geladen. */
 interface Lage {
 	tx: VereinTx;
+	vereinId: string;
 	ich: ThreadPerson;
 	alt: GeladenerThread;
 	stand: number;
@@ -90,7 +92,10 @@ function verwalte(deps: VolleAppDeps, req: Request, res: Response, arbeit: Arbei
 					const [ichJetzt, alt] = await Promise.all([ichUnterSperre(tx, person.id), ladeThread(tx, threadId)]);
 					if (!ichJetzt || !alt || !darfBearbeiten(ichJetzt, alt.kopf)) throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
 					try {
-						return { ergebnis: ichJetzt, aenderungen: await arbeit({ tx, ich: ichJetzt, alt, stand, zeit }) };
+						return {
+							ergebnis: ichJetzt,
+							aenderungen: await arbeit({ tx, vereinId: verein.id, ich: ichJetzt, alt, stand, zeit }),
+						};
 					} catch (error) {
 						// Die Wiederholung braucht die Person fuer die Antwort; sie reist im Fehler mit.
 						if (error instanceof Wiederholung) throw new Wiederholung(ichJetzt);
@@ -211,7 +216,7 @@ export function verwaltenRouten(router: Router, deps: VolleAppDeps): void {
 				deps,
 				req,
 				res,
-				async ({ tx, ich, alt }) => {
+				async ({ tx, vereinId, ich, alt, zeit }) => {
 					const threadId = alt.kopf.id;
 					if (alt.kopf.art === 'JUGENDSPRECHER_AUSTAUSCH') throw new ThreadAbbruch(409, AUSTAUSCH);
 					// Gezaehlt nach der Sperre (Entscheidung 3): Eine Antwort oder Nachricht, die zwischen
@@ -219,6 +224,15 @@ export function verwaltenRouten(router: Router, deps: VolleAppDeps): void {
 					// Kaskade haetten sie sonst erst als P2003 und damit als 404 gemeldet.
 					const zaehler = await loeschZaehler(tx, threadDatenAus(alt.kopf, alt.module));
 					if (!darfLoeschen(ich, alt.kopf, zaehler)) throw new ThreadAbbruch(409, NICHT_LOESCHBAR);
+					// Erst die Dateien der Module, dann der Thread: Datei.modul haengt ohne Kaskade am Modul
+					// (NoAction), das Loeschen des Threads scheiterte sonst am Fremdschluessel und endete als
+					// 404. Ueber loescheDateien, damit die Bytes auf der Loeschliste stehen. Unter der Sperre
+					// gelesen: Ein Foto, das zwischen Vorpruefung und Sperre hochgeladen wurde, ist hier dabei.
+					const dateien = await tx.datei.findMany({
+						where: { modul: { threadId } },
+						select: { id: true, art: true },
+					});
+					await loescheDateien(tx, vereinId, dateien, zeit);
 					await tx.thread.delete({ where: { id: threadId } });
 					// GELOESCHT mit der ID des Threads, der nach dieser Transaktion nicht mehr existiert:
 					// threadId und objektId sind absichtlich keine Fremdschluessel (Spec 2.6), und

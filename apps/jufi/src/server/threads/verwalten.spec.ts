@@ -487,6 +487,23 @@ describe('Veroeffentlichen, Archiv, Anpinnen und Loeschen', () => {
 			expect(a[0]).toMatchObject({ art: 'GELOESCHT', threadId: t.threadId, objektId: t.threadId });
 		});
 
+		it('loescht einen Thread mit 2 Dateien und 3 Fotos: 204, keine Zeilen mehr, 2 + 6 Schluessel auf der Loeschliste', async () => {
+			const s = await szenario();
+			const t = await s.thread({
+				module: [...MODULE, { typ: 'DATEIEN', dateien: [{}, {}] }, { typ: 'FOTOS', fotos: [{}, {}, {}] }],
+			});
+			expect(t.dateiIds).toHaveLength(5);
+			const r = await s.loesche(t.threadId, s.thomas.cookie);
+			expect(r.status).toBe(204);
+			expect(await prisma.thread.count({ where: { id: t.threadId } })).toBe(0);
+			expect(await prisma.datei.count({ where: { id: { in: t.dateiIds } } })).toBe(0);
+			const dateien = t.dateiIds.slice(0, 2).map((id) => `${s.verein.id}/${id}`);
+			const fotos = t.dateiIds.slice(2).flatMap((id) => [`${s.verein.id}/${id}`, `${s.verein.id}/${id}.vorschau`]);
+			const liste = await prisma.dateiLoeschung.findMany({ where: { vereinId: s.verein.id } });
+			expect(liste).toHaveLength(8);
+			expect(liste.map((l) => l.schluessel).sort()).toEqual([...dateien, ...fotos].sort());
+		});
+
 		it('ein weiteres DELETE desselben Threads ist 404', async () => {
 			const s = await szenario();
 			const t = await s.thread({ veroeffentlicht: false });

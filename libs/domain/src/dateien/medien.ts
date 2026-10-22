@@ -8,6 +8,10 @@ export function undListe(teile: readonly string[]): string {
 
 export type MedienZahl = { fotos: number; dateien: number; personen: number };
 
+// Der Stand "nichts da": ein Thread oder Modul ohne Fotos und Dateien. Eine Konstante statt des
+// Literals an jeder Stelle, damit die Zahlen nicht auseinanderlaufen, wenn ein Feld dazukommt.
+export const KEINE_MEDIEN: MedienZahl = { fotos: 0, dateien: 0, personen: 0 };
+
 const mal = (n: number, einzahl: string, mehrzahl: string): string => `${n} ${n === 1 ? einzahl : mehrzahl}`;
 
 // Die Zahlen fuer die Rueckfrage im Editor ("Beim Speichern loescht das ..."). null, wenn

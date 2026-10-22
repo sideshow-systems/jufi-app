@@ -6,7 +6,7 @@ import { asynchron } from '../admin/asynchron.js';
 import { brauchtMitglied, mitgliedKontext } from '../mitglieder/sitzung.js';
 import { vereinsKontext } from '../verein.js';
 import { NICHT_GEFUNDEN } from './fehler.js';
-import { ladeThread, ladeThreadUmfeld, ladeVereinsstand } from './laden.js';
+import { ladeFotoEinwilligungen, ladeThread, ladeThreadUmfeld, ladeVereinsstand } from './laden.js';
 
 export type GelesenBereich = 'uebersicht' | 'verlauf';
 
@@ -110,6 +110,9 @@ export async function ladeThreadAnsicht(
 		select: { art: true, stand: true, autorId: true, angelegtAm: true, geloeschtAm: true },
 	});
 
+	// Nach dem Umfeld, weil die Kinder des Threads daraus kommen; ohne Foto-Modul bleibt die Map leer.
+	const fotoEinwilligungen = await ladeFotoEinwilligungen(db, geladen.kopf, geladen.module, umfeld);
+
 	return threadAnsicht({
 		ich: mich,
 		kopf: geladen.kopf,
@@ -120,9 +123,7 @@ export async function ladeThreadAnsicht(
 		nachrichten,
 		zugangSeit,
 		verlaufGelesenBis: gelesen?.verlaufGelesenBis ?? null,
-		// Foto-Einwilligungen braucht nur der Hinweis eines Foto-Moduls; geladene Threads haben
-		// noch keines, also gibt es nichts zu lesen.
-		fotoEinwilligungen: new Map(),
+		fotoEinwilligungen,
 		jetzt,
 	});
 }

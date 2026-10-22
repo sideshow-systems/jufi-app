@@ -1,7 +1,11 @@
 import type { ModulTyp, VereinDb, VereinTx } from '@jufi/db';
 import {
 	baueUmfeld,
+	kinderImThread,
 	type AntwortDaten,
+	type DateiDaten,
+	type EinwilligungZeile,
+	type FotoDaten,
 	type ModulDaten,
 	type NachrichtenEingabe,
 	type NeuAenderung,
@@ -29,6 +33,37 @@ export async function ladeThreadUmfeld(db: VereinDb | VereinTx): Promise<Umfeld>
 		db.untergruppeMitglied.findMany({ select: { personId: true, untergruppeId: true } }),
 	]);
 	return baueUmfeld(personen, zuordnungen, mitgliedschaften);
+}
+
+/**
+ * Die Foto-Einwilligungen der Kinder, die der Thread anspricht (kinderImThread), je Jungfischer.
+ * Leer, wenn der Thread kein Foto-Modul hat: Nur der Hinweis dieses Moduls liest sie, und die
+ * Abfrage soll nicht bei jedem Thread laufen. Widerrufene Zeilen fehlen schon hier; ob eine
+ * Zeile heute noch gilt (Erteiler darf noch, Kind noch minderjaehrig), entscheidet allein
+ * fotoEinwilligungGilt gegen `jetzt`. Verworfen: die Zeilen hier schon nach "gilt heute" zu
+ * filtern -- die Regel stuende an zwei Stellen, und "volljaehrig ueber Nacht" lebte nur in einer.
+ * Nur die Art FOTOS: Die DSGVO-Einwilligung oeffnet den Zugang und erlaubt keine Fotos.
+ */
+export async function ladeFotoEinwilligungen(
+	db: VereinDb | VereinTx,
+	kopf: ThreadKopf,
+	module: readonly ModulDaten[],
+	umfeld: Umfeld,
+): Promise<Map<string, EinwilligungZeile[]>> {
+	const ergebnis = new Map<string, EinwilligungZeile[]>();
+	if (!module.some((m) => m.typ === 'FOTOS')) return ergebnis;
+	const kinder = kinderImThread(kopf, umfeld).map((k) => k.id);
+	if (kinder.length === 0) return ergebnis;
+	const zeilen = await db.einwilligung.findMany({
+		where: { art: 'FOTOS', widerrufenAm: null, jungfischerId: { in: kinder } },
+		select: { jungfischerId: true, erteiltVon: true, widerrufenAm: true },
+	});
+	for (const z of zeilen) {
+		const liste = ergebnis.get(z.jungfischerId) ?? [];
+		liste.push({ erteiltVon: z.erteiltVon, widerrufenAm: z.widerrufenAm });
+		ergebnis.set(z.jungfischerId, liste);
+	}
+	return ergebnis;
 }
 
 /**
@@ -128,10 +163,29 @@ export async function ladeThreads(
 		orderBy: [{ position: 'asc' }, { id: 'asc' }],
 	});
 	const ids = moduleZeilen.map((m) => m.id);
-	const [infos, termine, umfragen] = await Promise.all([
+	const [infos, termine, umfragen, dateienModule, fotosModule, dateiZeilen] = await Promise.all([
 		db.infoModul.findMany({ where: { id: { in: ids } } }),
 		db.terminModul.findMany({ where: { id: { in: ids } } }),
 		db.umfrageModul.findMany({ where: { id: { in: ids } } }),
+		db.dateienModul.findMany({ where: { id: { in: ids } }, select: { id: true } }),
+		db.fotosModul.findMany({ where: { id: { in: ids } }, select: { id: true, hochladen: true } }),
+		// Eine Abfrage fuer alle Module, nicht je Modul. Ohne sha256: die Hash-Spalte braucht kein
+		// Leser. Aeltestes zuerst, bei gleicher Zeit nach ID, damit die Reihenfolge nicht vom Zufall abhaengt.
+		db.datei.findMany({
+			where: { modulId: { in: ids } },
+			select: {
+				id: true,
+				modulId: true,
+				name: true,
+				typ: true,
+				groesse: true,
+				breite: true,
+				hoehe: true,
+				vonId: true,
+				hochgeladenAm: true,
+			},
+			orderBy: [{ hochgeladenAm: 'asc' }, { id: 'asc' }],
+		}),
 	]);
 	const umfrageIds = umfragen.map((u) => u.id);
 	const [optionen, antworten] = await Promise.all([
@@ -151,6 +205,15 @@ export async function ladeThreads(
 	const infoVon = new Map(infos.map((i) => [i.id, i]));
 	const terminVon = new Map(termine.map((t) => [t.id, t]));
 	const umfrageVon = new Map(umfragen.map((u) => [u.id, u]));
+	const dateienModulIds = new Set(dateienModule.map((d) => d.id));
+	const fotosVon = new Map(fotosModule.map((f) => [f.id, f]));
+	const dateiVon = new Map<string, typeof dateiZeilen>();
+	for (const d of dateiZeilen) {
+		if (d.modulId === null) continue;
+		const liste = dateiVon.get(d.modulId) ?? [];
+		liste.push(d);
+		dateiVon.set(d.modulId, liste);
+	}
 	const rang = new Map(optionen.map((o, i) => [o.id, i]));
 	// Einmal nach Umfrage gruppiert statt je Umfrage die ganze Liste zu filtern: Der Aufwand waechst so
 	// mit der Zahl der Antworten, nicht mit Umfragen mal Antworten. Die Reihenfolge der Abfrage bleibt erhalten.
@@ -186,6 +249,41 @@ export async function ladeThreads(
 				treffpunkt: t.treffpunkt,
 			};
 			return { typ: 'TERMIN', id: m.id, titel, termin };
+		}
+		if (m.typ === 'DATEIEN') {
+			if (!dateienModulIds.has(m.id)) return null;
+			return {
+				typ: 'DATEIEN',
+				id: m.id,
+				titel,
+				dateien: (dateiVon.get(m.id) ?? []).map((d): DateiDaten => ({
+					id: d.id,
+					name: d.name,
+					typ: d.typ,
+					groesse: d.groesse,
+					vonId: d.vonId,
+					hochgeladenAm: d.hochgeladenAm,
+				})),
+			};
+		}
+		if (m.typ === 'FOTOS') {
+			const f = fotosVon.get(m.id);
+			if (!f) return null;
+			return {
+				typ: 'FOTOS',
+				id: m.id,
+				titel,
+				hochladen: f.hochladen,
+				// Breite und Hoehe stehen bei Fotos immer (Spec 2.1); fehlen sie in einer kaputten Zeile,
+				// zaehlt 0 statt eines Fehlers, damit ein Thread nicht an einem Foto haengt.
+				fotos: (dateiVon.get(m.id) ?? []).map((d): FotoDaten => ({
+					id: d.id,
+					breite: d.breite ?? 0,
+					hoehe: d.hoehe ?? 0,
+					vonId: d.vonId,
+					hochgeladenAm: d.hochgeladenAm,
+				})),
+			};
 		}
 		const u = umfrageVon.get(m.id);
 		if (!u) return null;
