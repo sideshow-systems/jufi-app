@@ -89,6 +89,7 @@ enum AdminAktion {
   SLUG_KORRIGIERT
   NOTFALL_LINK
   ERSTE_EINLADUNG_ERNEUERT
+  SPEICHERGRENZE
 }
 
 /// Der Jugendsprecher-Austausch ist der eine Thread je Verein, den das System
@@ -162,27 +163,27 @@ enum AenderungArt {
 // --- Verein -------------------------------------------------------------------
 
 model Verein {
-  id              String       @id @default(cuid())
+  id               String       @id @default(cuid())
   /// Kleinbuchstaben, Ziffern, Bindestriche, 3–30 Zeichen (CHECK verein_slug).
   /// Reservierte Slugs prueft libs/domain; die Liste waechst mit den Routen und
   /// gehoert deshalb nicht in einen CHECK.
-  slug            String       @unique
+  slug             String       @unique
   /// Offizieller Name, z.B. fuer Einwilligungstext, Kontakt, Fusszeile der Mails.
-  name            String
+  name             String
   /// Hoechstens 24 Zeichen (CHECK verein_anzeigename): Kopfzeile, Passkey-Name,
   /// Home-Bildschirm, Betreff der Mails.
-  anzeigename     String
+  anzeigename      String
   /// Vereinsfarbe als Hex-Wert; alles Weitere wird daraus abgeleitet.
-  farbe           String
+  farbe            String
   /// Freitext. Optional, weil "Verein anlegen" (Spec 7.3) ihn nicht abfragt.
-  kontakt         String?
-  status          VereinStatus @default(AKTIV)
-  angelegtAm      DateTime     @default(now())
+  kontakt          String?
+  status           VereinStatus @default(AKTIV)
+  angelegtAm       DateTime     @default(now())
   /// Zaehler nur zum Sperren: Wer ihn erhoeht, haelt die Vereinszeile bis zum Ende
   /// seiner Transaktion; parallele Anmeldungen und Einloesungen im selben Verein
   /// laufen dadurch nacheinander. Gewaehlt statt SELECT ... FOR UPDATE (Roh-SQL ist in
   /// vereinDb gesperrt) und statt Advisory Locks (haengen an Verbindungen, nicht an Zeilen).
-  sperrzaehler    Int          @default(0)
+  sperrzaehler     Int          @default(0)
   /// Zaehler der Aenderungen im Verein (TP3-Spec 2.6). Jede schreibende
   /// Transaktion erhoeht ihn genau einmal und haelt dadurch die Vereinszeile bis
   /// zum Ende: Gleichzeitige Schreiber vergeben nacheinander lueckenlose Staende,
@@ -191,7 +192,12 @@ model Verein {
   /// Thread-Aktivitaet) einen gemeinsamen Stand traegt. Int statt BigInt: 2,1
   /// Milliarden Aenderungen je Verein werden nie erreicht, und BigInt braeche
   /// JSON.stringify an jeder API-Grenze.
-  aenderungsstand Int          @default(0)
+  aenderungsstand  Int          @default(0)
+  /// Speichergrenze der Dateien in MB (CHECK verein_speichergrenze, 100 bis 1048576); der
+  /// Plattform-Admin aendert sie. Int statt BigInt aus demselben Grund wie
+  /// aenderungsstand: BigInt braeche JSON.stringify an der API-Grenze, und selbst die
+  /// Obergrenze von 1 TB passt in MB in 32 Bit.
+  speicherGrenzeMb Int          @default(5120)
 
   logo                   VereinLogo?
   personen               Person[]
@@ -218,6 +224,9 @@ model Verein {
   verlauf                VerlaufEintrag[]
   gelesenStaende         GelesenStand[]
   aenderungen            Aenderung[]
+  dateien                Datei[]
+  kategorien             DokumentKategorie[]
+  dokumente              Dokument[]
 }
 
 /// Eigene Tabelle, damit nicht jede Vereinsabfrage das Bild mitlaedt. Verworfen:
@@ -290,6 +299,7 @@ model Person {
   verlaufAlsAutor              VerlaufEintrag[]      @relation("VerlaufAutor")
   verlaufGeloescht             VerlaufEintrag[]      @relation("VerlaufGeloeschtVon")
   gelesenStaende               GelesenStand[]
+  hochgeladeneDateien          Datei[]               @relation("DateiVon")
 
   /// Ziel der zusammengesetzten Fremdschluessel (Spec 3.1).
   @@unique([vereinId, id])
@@ -659,6 +669,7 @@ model ThreadModul {
   info    InfoModul?
   termin  TerminModul?
   umfrage UmfrageModul?
+  dateien Datei[]
 
   @@unique([vereinId, id])
   /// Ziel des Fremdschluessels von UmfrageModul: So stimmt dessen threadId immer
@@ -990,4 +1001,86 @@ model AdminProtokoll {
   betroffenePersonId String?
 
   @@index([vereinId, zeitpunkt])
+}
+
+// --- Dateien und Dokumente (TP4) ------------------------------------------------
+
+enum DateiArt {
+  FOTO
+  DATEI
+}
+
+/// Metadaten einer abgelegten Datei; die Bytes liegen im Volume, der Schluessel dort
+/// haengt an der id und nie am Namen. Gehoert entweder zu einem Modul oder zu einem
+/// Dokument, nie zu beidem und nie zu keinem (CHECK datei_ein_verweis).
+///
+/// NoAction statt Cascade zu Modul und Dokument: Ein Kaskadenloeschen umginge die
+/// Loeschliste (DateiLoeschung), und die Bytes blieben bis zum Waisen-Schritt liegen.
+/// So muss jeder Loeschpfad die Dateien ausdruecklich freigeben.
+model Datei {
+  id            String       @id @default(cuid())
+  vereinId      String
+  /// Kaskade ist hier Absicht und die einzige Ausnahme von "Dateien nie per Kaskade loeschen": Wird ein
+  /// ganzer Verein geloescht, fallen die Zeilen mit; die Bytes ohne Zeile raeumt der Waisen-Schritt des
+  /// Aufraeumers weg, sobald sie aelter als 24 Stunden sind (TP4-Spec 2.7). Eine Wiederherstellung braucht dann auch das Volume.
+  verein        Verein       @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  art           DateiArt
+  modulId       String?
+  modul         ThreadModul? @relation(fields: [vereinId, modulId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  dokumentId    String?
+  dokument      Dokument?    @relation(fields: [vereinId, dokumentId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  /// Urspruenglicher Dateiname, bereinigt (CHECK datei_name). Bei Fotos darf er leer sein.
+  name          String       @default("")
+  /// Am Inhalt erkannter Typ, nie der vom Absender behauptete.
+  typ           String
+  groesse       Int
+  /// Nur Fotos.
+  breite        Int?
+  hoehe         Int?
+  sha256        String
+  vonId         String
+  von           Person       @relation("DateiVon", fields: [vereinId, vonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  hochgeladenAm DateTime
+
+  @@unique([vereinId, id])
+  @@index([vereinId])
+}
+
+model DokumentKategorie {
+  id       String @id @default(cuid())
+  vereinId String
+  verein   Verein @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  name     String
+  /// Handreihenfolge, mindestens 0 (CHECK kategorie_position).
+  position Int
+
+  dokumente Dokument[]
+
+  @@unique([vereinId, name])
+  @@unique([vereinId, id])
+}
+
+model Dokument {
+  id          String            @id @default(cuid())
+  vereinId    String
+  verein      Verein            @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  kategorieId String
+  kategorie   DokumentKategorie @relation(fields: [vereinId, kategorieId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
+  titel       String
+  angelegtAm  DateTime
+
+  dateien Datei[]
+
+  @@unique([vereinId, id])
+}
+
+/// Liste der Bytes, die nach dem Loeschen einer Datei noch auf der Platte liegen und
+/// nach 24 Stunden verschwinden (Spec 2.7). Ohne Relation: Die Zeile ueberlebt Datei
+/// und Verein. Mit vereinId, damit ein Vereins-Pfad sie ueber vereinDb schreiben darf.
+model DateiLoeschung {
+  schluessel  String   @id
+  vereinId    String
+  geloeschtAm DateTime
+
+  @@index([geloeschtAm])
 }

@@ -25,12 +25,21 @@ export interface Umgebung {
 	 * Plan-Entscheidung 12). Im Betrieb haengt der Hub am Server aus app.listen und braucht keinen.
 	 */
 	wsDevPort: number;
+	/**
+	 * Verzeichnis der hochgeladenen Dateien (Volume jufi-dateien unter /daten im Betrieb). Pflicht und ohne
+	 * Vorgabe: Ein Pfad, der still ins Arbeitsverzeichnis des Containers fiele, liesse Uploads
+	 * mit dem Container verschwinden, ohne dass jemand es merkt. Verworfen: Vorgabe unter dem
+	 * Arbeitsverzeichnis wie bei JUFI_WS_DEV_PORT -- dort ist ein Fehlwert harmlos, hier nicht.
+	 */
+	dateienPfad: string;
 }
 
 /** Steht so auch in apps/jufi/proxy.conf.json; wer ihn aendert, aendert beide. */
 export const WS_DEV_PORT_VORGABE = 4201;
 
 const MAIL_PFLICHT = ['SMTP_HOST', 'SMTP_PORT', 'MAIL_ABSENDER', 'MAIL_ANTWORT'] as const;
+
+const PFAD_PFLICHT = ['DATEIEN_PFAD'] as const;
 
 /**
  * Wirft mit allen Beanstandungen auf einmal (assertSecrets), nie mit den Werten.
@@ -42,7 +51,7 @@ export function umgebungAusEnv(env: Record<string, string | undefined>): Umgebun
 	// Eigene Pruefung statt assertSecrets zu erweitern: das sind keine Geheimnisse
 	// und gehoeren nicht in die Bibliothek fuer die Anmeldung. Wie dort nennt die
 	// Meldung nur die Namen, nie Werte.
-	const beanstandet: string[] = MAIL_PFLICHT.filter((name) => !env[name]);
+	const beanstandet: string[] = [...MAIL_PFLICHT, ...PFAD_PFLICHT].filter((name) => !env[name]);
 	const port = Number(env['SMTP_PORT']);
 	if (env['SMTP_PORT'] && !istPort(port)) {
 		beanstandet.push('SMTP_PORT (keine Portnummer)');
@@ -72,6 +81,7 @@ export function umgebungAusEnv(env: Record<string, string | undefined>): Umgebun
 		mailAntwort: env['MAIL_ANTWORT'] ?? '',
 		mailBetreffPraefix: env['MAIL_BETREFF_PRAEFIX'] ?? '',
 		wsDevPort,
+		dateienPfad: env['DATEIEN_PFAD'] ?? '',
 	};
 }
 

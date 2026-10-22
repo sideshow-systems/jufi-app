@@ -98,6 +98,10 @@ export const routes: Routes = [
 							import('./verein/verwaltung/threads/antworten').then((m) => m.ThreadAntwortenComponent),
 					},
 					{
+						path: 'dokumente',
+						loadComponent: () => import('./verein/verwaltung/dokumente').then((m) => m.DokumenteVerwaltungComponent),
+					},
+					{
 						path: 'untergruppen',
 						loadComponent: () => import('./verein/verwaltung/untergruppen').then((m) => m.UntergruppenComponent),
 					},
@@ -136,6 +140,10 @@ export const routes: Routes = [
 					{
 						path: 'termine',
 						loadComponent: () => import('./verein/termine').then((m) => m.TermineComponent),
+					},
+					{
+						path: 'medien',
+						loadComponent: () => import('./verein/medien').then((m) => m.MedienComponent),
 					},
 					{
 						path: 'profil',

@@ -1,7 +1,8 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
-import type { EchtzeitSignal } from '@jufi/domain';
+import type { DokumenteAntwort, EchtzeitSignal, SpeicherAntwort } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';
@@ -9,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
+import { dateiSchluessel, VerzeichnisSpeicher } from './dateien/speicher.js';
 import { Bus } from './echtzeit/bus.js';
 import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
@@ -29,8 +31,8 @@ interface Kontext {
 	/** Cookie einer Person aus dem Verein eigen. */
 	eigenesCookie: string;
 	/**
-	 * Cookie einer Person aus eigen mit Verwaltungs-, Rechte-, Einstellungs-, Thread-erstellen-
-	 * und Antworten-im-Detail-Recht: sieht in eigen alles, in fremd nichts.
+	 * Cookie einer Person aus eigen mit Verwaltungs-, Rechte-, Einstellungs-, Thread-erstellen-,
+	 * Antworten-im-Detail- und Dokumente-Recht: sieht in eigen alles, in fremd nichts.
 	 */
 	eigenerLeiter: string;
 	/** Die Person hinter eigenerLeiter, damit ein Fall einen Thread anlegen kann, den sie bearbeiten darf. */
@@ -162,6 +164,62 @@ async function fremdeThreads(k: Kontext) {
 		zuordnungen: await k.prisma.threadUntergruppe.count({ where: { vereinId: k.fremd.id } }),
 		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
 	};
+}
+
+/** Ein Dokument mit Datei in dem Verein; die Bytes fehlen, die Zeilen genuegen den Routen. */
+async function legeDokumentAn(k: Kontext, verein: { id: string }, vonId: string, titel: string) {
+	const db = vereinDb(k.prisma, verein.id);
+	const kategorie = await db.dokumentKategorie.findFirstOrThrow({ orderBy: { position: 'asc' } });
+	const dokument = await db.dokument.create({
+		data: { kategorieId: kategorie.id, titel, angelegtAm: new Date() },
+	});
+	const datei = await db.datei.create({
+		data: {
+			art: 'DATEI',
+			dokumentId: dokument.id,
+			name: 'mandant.pdf',
+			typ: 'application/pdf',
+			groesse: 7,
+			sha256: 'x',
+			vonId,
+			hochgeladenAm: new Date(),
+		},
+	});
+	return { kategorie, dokument, datei };
+}
+
+/** Alles, was eine Dokumente-Route in fremd veraendern koennte: Kategorien, Dokumente, Dateien und die Loeschliste. */
+async function fremdeDokumente(k: Kontext) {
+	const where = { vereinId: k.fremd.id };
+	return {
+		kategorien: await k.prisma.dokumentKategorie.findMany({ where, orderBy: { id: 'asc' } }),
+		dokumente: await k.prisma.dokument.findMany({ where, orderBy: { id: 'asc' } }),
+		dateien: await k.prisma.datei.findMany({ where, orderBy: { id: 'asc' } }),
+		loeschliste: await k.prisma.dateiLoeschung.count({ where }),
+	};
+}
+
+/**
+ * Eine Dokumente-Route mit der Id aus fremd: im gesperrten Verein 404, das Cookie aus eigen gilt in
+ * fremd nicht (401), in eigen ist die Id unbekannt (404), und in fremd ist danach nichts anders.
+ * Die Koerper sind leer oder JSON, weil jede dieser Antworten vor dem Lesen eines Upload-Koerpers kommt.
+ */
+async function dokumenteMitFremderId(
+	k: Kontext,
+	e: { methode: string; pfad: (id: string) => string; id: string; body?: object },
+): Promise<void> {
+	const vorher = await fremdeDokumente(k);
+	const sendeAn = (slug: string, cookie?: string) =>
+		sende(k.url, `/${slug}/api/v1${e.pfad(e.id)}`, {
+			methode: e.methode,
+			body: e.body,
+			cookie,
+			kopf: { 'Content-Type': e.body ? 'application/json' : 'application/octet-stream' },
+		});
+	expect((await sendeAn(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+	expect((await sendeAn(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+	expect((await sendeAn(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+	expect(await fremdeDokumente(k)).toEqual(vorher);
 }
 
 /**
@@ -1039,6 +1097,149 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 			{ am: expect.any(String), vorname: null, nachname: null },
 		]);
 	},
+	'GET /dateien/:id': async (k) => {
+		// Die Bytes liegen wirklich im Speicher der App: Das 404 aus eigen kommt von der Vereinsgrenze
+		// und nicht davon, dass es nichts auszuliefern gaebe.
+		const db = vereinDb(k.prisma, k.fremd.id);
+		const kategorie = await db.dokumentKategorie.findFirstOrThrow();
+		const dokument = await db.dokument.create({
+			data: { kategorieId: kategorie.id, titel: 'Fremdes Dokument', angelegtAm: new Date() },
+		});
+		const datei = await db.datei.create({
+			data: {
+				art: 'DATEI',
+				dokumentId: dokument.id,
+				name: 'fremd.pdf',
+				typ: 'application/pdf',
+				groesse: 5,
+				sha256: 'x',
+				vonId: k.fremdePersonId,
+				hochgeladenAm: new Date(),
+			},
+		});
+		const speicher = new VerzeichnisSpeicher(TEST_UMGEBUNG.dateienPfad);
+		const temp = await speicher.neueTempDatei();
+		await writeFile(temp, '%PDF-');
+		await speicher.uebernimm(temp, dateiSchluessel(k.fremd.id, datei.id));
+
+		const hole = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/dateien/${datei.id}`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenesCookie)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenesCookie)).status).toBe(401);
+		expect((await hole(k.eigen.slug, k.eigenesCookie)).status).toBe(404);
+		expect((await hole(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		// Gegenprobe: In fremd selbst kommt dieselbe Datei an.
+		const fremdesMitglied = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
+		expect((await hole(k.fremd.slug, fremdesMitglied.cookie)).status).toBe(200);
+	},
+	'GET /dokumente': async (k) => {
+		const fremd = await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');
+		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/dokumente`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}/api/v1/dokumente`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/dokumente`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const eigen = (await r.json()) as DokumenteAntwort;
+		const titel = eigen.kategorien.flatMap((kat) => kat.dokumente.map((d) => d.titel));
+		expect(titel).not.toContain('Fremdes Dokument');
+		expect(eigen.kategorien.flatMap((kat) => [kat.id, ...kat.dokumente.map((d) => d.id)])).not.toContain(
+			fremd.dokument.id,
+		);
+		// Gegenprobe: In fremd selbst steht das Dokument in der Liste.
+		const nachbar = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
+		const dort = (await (
+			await sende(k.url, `/${k.fremd.slug}/api/v1/dokumente`, { cookie: nachbar.cookie })
+		).json()) as DokumenteAntwort;
+		expect(dort.kategorien.flatMap((kat) => kat.dokumente.map((d) => d.id))).toContain(fremd.dokument.id);
+	},
+	'POST /dokumente': async (k) => {
+		const { kategorie } = await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');
+		await dokumenteMitFremderId(k, { methode: 'POST', pfad: (id) => `/dokumente?kategorie=${id}`, id: kategorie.id });
+	},
+	'PUT /dokumente/:id': async (k) => {
+		const { dokument } = await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');
+		await dokumenteMitFremderId(k, {
+			methode: 'PUT',
+			pfad: (id) => `/dokumente/${id}`,
+			id: dokument.id,
+			body: { titel: 'Uebernommen' },
+		});
+		// Auch ein eigenes Dokument laesst sich nicht in eine Kategorie aus fremd verschieben.
+		const eigenes = await legeDokumentAn(k, k.eigen, k.eigenerLeiterId, 'Eigenes Dokument');
+		const fremdeKategorie = await vereinDb(k.prisma, k.fremd.id).dokumentKategorie.findFirstOrThrow();
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/dokumente/${eigenes.dokument.id}`, {
+			methode: 'PUT',
+			body: { kategorieId: fremdeKategorie.id },
+			cookie: k.eigenerLeiter,
+		});
+		expect(r.status).toBe(404);
+		expect(
+			(await vereinDb(k.prisma, k.eigen.id).dokument.findUniqueOrThrow({ where: { id: eigenes.dokument.id } }))
+				.kategorieId,
+		).toBe(eigenes.kategorie.id);
+	},
+	'PUT /dokumente/:id/datei': async (k) => {
+		const { dokument } = await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');
+		await dokumenteMitFremderId(k, { methode: 'PUT', pfad: (id) => `/dokumente/${id}/datei`, id: dokument.id });
+	},
+	'DELETE /dokumente/:id': async (k) => {
+		const { dokument } = await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');
+		await dokumenteMitFremderId(k, { methode: 'DELETE', pfad: (id) => `/dokumente/${id}`, id: dokument.id });
+	},
+	'POST /dokument-kategorien': async (k) => {
+		const vorher = await fremdeDokumente(k);
+		const anlegen = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/dokument-kategorien`, { methode: 'POST', body: { name: 'Mandant-Neu' }, cookie });
+		expect((await anlegen(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await anlegen(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		// Gegenprobe: In eigen entsteht sie, in fremd nicht.
+		const r = await anlegen(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(201);
+		expect(await fremdeDokumente(k)).toEqual(vorher);
+		// Aufgeraeumt, damit spaetere Faelle dieselben drei Kategorien in eigen vorfinden.
+		await vereinDb(k.prisma, k.eigen.id).dokumentKategorie.deleteMany({ where: { name: 'Mandant-Neu' } });
+	},
+	'PUT /dokument-kategorien/:id': async (k) => {
+		const kategorie = await vereinDb(k.prisma, k.fremd.id).dokumentKategorie.findFirstOrThrow();
+		await dokumenteMitFremderId(k, {
+			methode: 'PUT',
+			pfad: (id) => `/dokument-kategorien/${id}`,
+			id: kategorie.id,
+			body: { name: 'Uebernommen' },
+		});
+	},
+	'PUT /dokument-kategorien/reihenfolge': async (k) => {
+		const vorher = await fremdeDokumente(k);
+		const eigene = (await vereinDb(k.prisma, k.eigen.id).dokumentKategorie.findMany()).map((kat) => kat.id);
+		const fremde = vorher.kategorien.map((kat) => kat.id);
+		const ordne = (slug: string, ids: string[], cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/dokument-kategorien/reihenfolge`, { methode: 'PUT', body: { ids }, cookie });
+		expect((await ordne(k.gesperrt.slug, fremde, k.eigenerLeiter)).status).toBe(404);
+		expect((await ordne(k.fremd.slug, fremde, k.eigenerLeiter)).status).toBe(401);
+		// Die Ids aus fremd sind in eigen keine Kategorien, ob allein oder zwischen eigenen.
+		expect((await ordne(k.eigen.slug, fremde, k.eigenerLeiter)).status).toBe(400);
+		expect((await ordne(k.eigen.slug, [...eigene.slice(1), fremde[0] as string], k.eigenerLeiter)).status).toBe(400);
+		expect(await fremdeDokumente(k)).toEqual(vorher);
+	},
+	'DELETE /dokument-kategorien/:id': async (k) => {
+		const leer = await vereinDb(k.prisma, k.fremd.id).dokumentKategorie.create({
+			data: { name: `Leer ${randomUUID().slice(0, 8)}`, position: 99 },
+		});
+		await dokumenteMitFremderId(k, { methode: 'DELETE', pfad: (id) => `/dokument-kategorien/${id}`, id: leer.id });
+	},
+	'GET /speicher': async (k) => {
+		// In fremd liegt mindestens eine Datei: Der Verbrauch von eigen darf sie nicht mitzaehlen.
+		await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');
+		const holeSpeicher = (slug: string, cookie?: string) => sende(k.url, `/${slug}/api/v1/speicher`, { cookie });
+		expect((await holeSpeicher(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await holeSpeicher(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		const r = await holeSpeicher(k.eigen.slug, k.eigenerLeiter);
+		expect(r.status).toBe(200);
+		const eigeneSumme = await k.prisma.datei.aggregate({ where: { vereinId: k.eigen.id }, _sum: { groesse: true } });
+		const fremdeSumme = await k.prisma.datei.aggregate({ where: { vereinId: k.fremd.id }, _sum: { groesse: true } });
+		const antwort = (await r.json()) as SpeicherAntwort;
+		expect(antwort.verbrauchBytes).toBe(eigeneSumme._sum.groesse ?? 0);
+		expect(fremdeSumme._sum.groesse ?? 0).toBeGreaterThan(0);
+		expect(antwort.verbrauchBytes).not.toBe((eigeneSumme._sum.groesse ?? 0) + (fremdeSumme._sum.groesse ?? 0));
+	},
 	'POST /abmelden/alle': async (k) => {
 		expect((await sende(k.url, `/${k.gesperrt.slug}/api/v1/abmelden/alle`, { methode: 'POST' })).status).toBe(404);
 		expect(
@@ -1085,7 +1286,14 @@ describe('Mandanten-Test', () => {
 		const nachbar = await legeMitgliedAn(prisma, fremd, { art: 'ERWACHSENER', passwort: 'gruene-forelle-am-see' });
 		const leiter = await legeMitgliedAn(prisma, eigen, {
 			art: 'ERWACHSENER',
-			rechte: ['MITGLIEDER', 'JUGENDLEITER_RECHTE', 'EINSTELLUNGEN', 'THREADS_ERSTELLEN', 'ANTWORTEN_DETAIL'],
+			rechte: [
+				'MITGLIEDER',
+				'JUGENDLEITER_RECHTE',
+				'EINSTELLUNGEN',
+				'THREADS_ERSTELLEN',
+				'ANTWORTEN_DETAIL',
+				'DOKUMENTE',
+			],
 		});
 		const fremderPasskey = await prisma.passkey.create({
 			data: {

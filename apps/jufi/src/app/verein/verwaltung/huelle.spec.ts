@@ -44,12 +44,13 @@ describe('Verwaltungs-Huelle', () => {
 		);
 	}
 
-	it('zeigt der Leitung fünf Punkte und Zur App', async () => {
+	it('zeigt der Leitung sechs Punkte und Zur App', async () => {
 		const { seite } = await oeffneSeite('/demo/verwaltung', ichMit(LEITUNG), LISTE);
 
 		expect(punkte(seite)).toEqual([
 			'Mitglieder',
 			'Threads',
+			'Dokumente',
 			'Untergruppen',
 			'Jugendleiter & Rechte',
 			'Vereinseinstellungen',
@@ -59,6 +60,7 @@ describe('Verwaltungs-Huelle', () => {
 			[...seite.querySelectorAll('nav a')].find((a) => a.textContent?.includes(text))?.getAttribute('href');
 		expect(href('Mitglieder')).toBe('/demo/verwaltung');
 		expect(href('Threads')).toBe('/demo/verwaltung/threads');
+		expect(href('Dokumente')).toBe('/demo/verwaltung/dokumente');
 		expect(href('Untergruppen')).toBe('/demo/verwaltung/untergruppen');
 		expect(href('Jugendleiter & Rechte')).toBe('/demo/verwaltung/rechte');
 		expect(href('Vereinseinstellungen')).toBe('/demo/verwaltung/einstellungen');
@@ -79,6 +81,11 @@ describe('Verwaltungs-Huelle', () => {
 
 		expect(punkte(seite)).toEqual(['Mitglieder', 'Threads', 'Zur App']);
 		http.expectNone(`${API}/verwaltung/hinweise`);
+	});
+
+	it('zeigt den Punkt Dokumente nur mit dem Recht DOKUMENTE', async () => {
+		const mit = await oeffneSeite('/demo/verwaltung', ichMit(['DOKUMENTE']), LISTE);
+		expect(punkte(mit.seite)).toEqual(['Mitglieder', 'Threads', 'Dokumente', 'Zur App']);
 	});
 
 	it('zeigt einem Jugendleiter ohne Einstellungen keinen Punkt dafuer', async () => {
@@ -292,6 +299,16 @@ describe('Verwaltungs-Huelle', () => {
 		expect(seite.textContent).not.toContain('Zur Mitgliederliste');
 	});
 
+	it('macht auf dokumente den Punkt Dokumente aktiv', async () => {
+		const { seite } = await oeffneSeite('/demo/verwaltung/dokumente', ichMit(['DOKUMENTE']), [
+			['/dokumente', { kategorien: [], darfPflegen: true }],
+			['/speicher', { verbrauchBytes: 0, grenzeMb: 5120 }],
+		]);
+
+		const aktiv = [...seite.querySelectorAll('nav a[aria-current="page"]')].map((a) => a.textContent?.trim());
+		expect(aktiv).toEqual(['Dokumente']);
+	});
+
 	it('macht auf threads/:id/antworten den Punkt Threads aktiv', async () => {
 		const { seite } = await oeffneSeite('/demo/verwaltung/threads/t1/antworten', ichMit(['MITGLIEDER']), [
 			['/threads/t1/antworten', { threadId: 't1', segment: 't1-x', titel: 'X', darfNachtragen: false, umfragen: [] }],
@@ -312,6 +329,14 @@ describe('Verwaltungs-Huelle', () => {
 			[['/verwaltung/threads', { threads: [], untergruppen: [], darfErstellen: true }]],
 		],
 		['/demo/verwaltung/rechte', 'Jugendleiter & Rechte', [['/personen', { personen: [] }]]],
+		[
+			'/demo/verwaltung/dokumente',
+			'Dokumente',
+			[
+				['/dokumente', { kategorien: [], darfPflegen: true }],
+				['/speicher', { verbrauchBytes: 0, grenzeMb: 5120 }],
+			],
+		],
 	] as [string, string, [string, object][]][])('hat auf %s genau die Ueberschrift %s', async (url, titel, daten) => {
 		const { seite } = await oeffneSeite(url, ichMit(LEITUNG), daten);
 

@@ -1,5 +1,7 @@
 import type { Express } from 'express';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Umgebung } from './umgebung.js';
 
@@ -26,6 +28,9 @@ export const TEST_UMGEBUNG: Umgebung = {
 	mailBetreffPraefix: '',
 	// Gleichgueltig: Kein Test startet die App unter ng serve.
 	wsDevPort: 4201,
+	// Je Prozess ein eigenes Verzeichnis: Testdateien laufen parallel in eigenen Prozessen und
+	// sollen einander nichts wegraeumen. Angelegt wird es erst vom Speicher beim ersten Schreiben.
+	dateienPfad: join(tmpdir(), `jufi-test-dateien-${process.pid}`),
 };
 
 const LESENDE_METHODEN = ['GET', 'HEAD', 'OPTIONS'];

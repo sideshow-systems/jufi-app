@@ -144,6 +144,9 @@ SMOKE_ENV=(
 	-e "DATABASE_URL=postgresql://jufi:rauchtest@jufi-db:5432/jufi?schema=public"
 	-e "SESSION_SECRET=$(openssl rand -base64 32)"
 	-e "TOTP_ENC_KEY=$(openssl rand -base64 32)"
+	# Ohne Volume: /daten gehoert im Image node (Dockerfile), der Rauchtest prueft damit
+	# zugleich, dass die App dort schreiben kann.
+	-e 'DATEIEN_PFAD=/daten'
 	-e "BASIS_URL=$APP_URL"
 	-e "WEBAUTHN_RP_ID=${APP_URL#https://}"
 	-e "WEBAUTHN_ORIGIN=$APP_URL"
@@ -216,6 +219,9 @@ done
 APP_LOG="$(docker logs "$SMOKE_APP" 2>&1)"
 grep -q 'Mail-Arbeiter gestartet' <<<"$APP_LOG" || fail 'Der Mail-Arbeiter ist nicht gestartet.'
 [[ "$(docker exec "$SMOKE_APP" id -u)" != '0' ]] || fail 'Der Container laeuft als root.'
+# Ein leeres Volume erbt Besitzer und Rechte von /daten im Image; gehoerte das Verzeichnis
+# dort root, scheiterte jeder Upload erst auf dem Server mit EACCES und kein Test sah es.
+docker exec "$SMOKE_APP" test -w /daten || fail '/daten ist fuer den App-Benutzer nicht beschreibbar (Dockerfile: chown node).'
 note "Docker-Healthcheck: healthy; Mail-Arbeiter gestartet; laeuft nicht als root; $(docker stats --no-stream --format '{{.MemUsage}}' "$SMOKE_APP" | cut -d/ -f1)im Leerlauf"
 
 # Schrift und Initialen-Icon. Lokal liefert macOS eine Schrift, im Image fehlte
@@ -282,11 +288,47 @@ FEHLT="$(jufi_ssh "cd $REMOTE_DIR && for v in JUFI_POSTGRES_USER JUFI_POSTGRES_P
 	|| fail "Die .env in $REMOTE_DIR ist nicht lesbar."
 [[ -z "$FEHLT" ]] || fail "In $REMOTE_DIR/.env fehlen oder sind leer: $(tr '\n' ' ' <<<"$FEHLT")(Vorlage: deploy/env.jufi.example)"
 note "Dienste $DB_SERVICE, $MIGRATE_SERVICE, $MAIL_SERVICE, $APP_SERVICE und alle JUFI_-Variablen vorhanden"
+# Dateien-Etappe (TP4): Die App startet ohne DATEIEN_PFAD gar nicht -- das faellt laut
+# auf. Still ist nur die halbe Uebernahme des Blocks: DATEIEN_PFAD gesetzt, das Volume
+# aber nicht eingehaengt oder ohne den festen Namen. Dann schreibt die App in die
+# beschreibbare Schicht des Containers, der naechste Ausrollen verliert die Dateien, und
+# backup.sh findet kein Volume jufi-dateien und warnt nur. Geprueft wird die aufgeloeste
+# Konfiguration (config --format json) statt der Datei per grep, damit auch Anker und
+# Interpolation zaehlen. Verworfen: jq -- steht nicht ueberall, node steht hier ohnehin.
+# Die JSON-Ausgabe enthaelt Geheimnisse; sie geht nur in die Pipe, ausgegeben werden Texte.
+KONFIG="$(remote_compose 'config --format json' 2>/dev/null)" \
+	|| fail "docker compose config --format json scheitert in $REMOTE_DIR/$REMOTE_COMPOSE."
+DATEIEN_PROBLEME="$(printf '%s' "$KONFIG" | node -e '
+let s = "";
+process.stdin.on("data", (d) => (s += d)).on("end", () => {
+	const konfig = JSON.parse(s);
+	const dienst = konfig.services?.[process.argv[1]] ?? {};
+	const pfad = dienst.environment?.DATEIEN_PFAD;
+	const probleme = [];
+	if (!pfad) probleme.push("Am Dienst " + process.argv[1] + " fehlt DATEIEN_PFAD (/daten).");
+	const einhaengung = (dienst.volumes ?? []).find((v) => v.type === "volume" && v.source === "jufi-dateien");
+	if (!einhaengung) probleme.push("Das Volume jufi-dateien ist am Dienst " + process.argv[1] + " nicht eingehaengt.");
+	else if (pfad && einhaengung.target !== pfad)
+		probleme.push("jufi-dateien haengt unter " + einhaengung.target + ", DATEIEN_PFAD ist " + pfad + ".");
+	if (konfig.volumes?.["jufi-dateien"]?.name !== "jufi-dateien")
+		probleme.push("Das Volume jufi-dateien fehlt oder hat keinen festen Namen (name: jufi-dateien).");
+	console.log(probleme.join("\n"));
+});
+' "$APP_SERVICE")" \
+	|| fail "Die Compose-Konfiguration in $REMOTE_DIR/$REMOTE_COMPOSE ist nicht lesbar."
+[[ -z "$DATEIEN_PROBLEME" ]] || fail "$DATEIEN_PROBLEME
+Den Block jufi-dateien (Volume und DATEIEN_PFAD am Dienst $APP_SERVICE) aus deploy/jufi-services.yml in $REMOTE_DIR/$REMOTE_COMPOSE uebernehmen, sonst gehen die Dateien beim naechsten Ausrollen verloren."
+note "Dateien: DATEIEN_PFAD gesetzt, Volume jufi-dateien am Dienst $APP_SERVICE eingehaengt"
 # Ohne Sicherungsskript auf dem Server gaebe es gleich keinen Dump vor der
 # Migration. Das faellt hier auf, vor dem Uebertragen, und nicht mittendrin.
 jufi_ssh "test -x $REMOTE_TOOLS/backup.sh" \
 	|| fail 'Kein Deploy ohne Sicherung: tools/install-backup.sh ausfuehren.'
 note "Sicherungsskript $REMOTE_TOOLS/backup.sh ausfuehrbar"
+# Ein altes backup.sh kennt das Volume nicht und sicherte nur die Datenbank, ohne Warnung.
+# Das Skript wird auf dem Server gelesen, nicht das lokale: install-backup.sh kopiert es erst.
+jufi_ssh "grep -q jufi-dateien $REMOTE_TOOLS/backup.sh" \
+	|| fail 'Das installierte backup.sh auf dem Server kennt jufi-dateien nicht: tools/install-backup.sh erneut ausfuehren.'
+note 'backup.sh sichert das Volume jufi-dateien'
 
 # --- Tor 5b: Dump vor der Migration --------------------------------------------
 # Spec 8.2. Bewusst **vor** dem Uebertragen und nicht danach: ein gescheiterter

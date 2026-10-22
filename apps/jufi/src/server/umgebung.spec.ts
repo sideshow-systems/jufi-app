@@ -10,6 +10,7 @@ const GUELTIG = {
 	SMTP_PORT: '587',
 	MAIL_ABSENDER: 'app@jufi.test',
 	MAIL_ANTWORT: 'kontakt@jufi.test',
+	DATEIEN_PFAD: '/daten/dateien',
 };
 
 describe('umgebungAusEnv', () => {
@@ -24,7 +25,17 @@ describe('umgebungAusEnv', () => {
 			mailAntwort: 'kontakt@jufi.test',
 			mailBetreffPraefix: '',
 			wsDevPort: 4201,
+			dateienPfad: '/daten/dateien',
 		});
+	});
+
+	it('liest DATEIEN_PFAD', () => {
+		expect(umgebungAusEnv({ ...GUELTIG, DATEIEN_PFAD: './.daten/dateien' }).dateienPfad).toBe('./.daten/dateien');
+	});
+
+	it.each([undefined, ''])('wirft ohne DATEIEN_PFAD (%j) und nennt den Namen', (wert) => {
+		const env = { ...GUELTIG, DATEIEN_PFAD: wert };
+		expect(() => umgebungAusEnv(env)).toThrow(/DATEIEN_PFAD/);
 	});
 
 	it('liest JUFI_WS_DEV_PORT; leer gilt als nicht gesetzt', () => {

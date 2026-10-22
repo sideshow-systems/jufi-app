@@ -1,6 +1,7 @@
 import { createPrismaClientFromEnv, type PrismaClient } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import type { DateiSpeicher } from '../dateien/speicher.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { AENDERUNG_AUFBEWAHRUNG_MS, raeumeAenderungenAuf, starteAufraeumen } from './aufraeumen.js';
 
@@ -126,5 +127,57 @@ describe('starteAufraeumen', () => {
 		} finally {
 			fehler.mockRestore();
 		}
+	});
+
+	describe('mit Dateispeicher', () => {
+		/** Kein Zugriff auf Postgres noetig: jede Tabelle, die der Dateien-Aufraeumer liest, ist leer. */
+		function leererClient() {
+			const deleteMany = vi.fn(async (_: unknown) => ({ count: 0 }));
+			const dateiLoeschung = { findMany: vi.fn(async () => []), delete: vi.fn(), deleteMany };
+			const datei = { findMany: vi.fn(async () => []) };
+			const prisma = { aenderung: { deleteMany }, dateiLoeschung, datei } as unknown as PrismaClient;
+			return { prisma, dateiLoeschung, datei };
+		}
+		function leererSpeicher() {
+			const raeumeTempAuf = vi.fn(async (_: Date) => 0);
+			async function* liste() {
+				// leer
+			}
+			const speicher = { liste, raeumeTempAuf, loesche: vi.fn() } as unknown as DateiSpeicher;
+			return { speicher, raeumeTempAuf };
+		}
+
+		it('ruft im ersten Durchlauf zusaetzlich die Dateien auf', async () => {
+			const c = leererClient();
+			const s = leererSpeicher();
+			const a = starteAufraeumen({ prisma: c.prisma, jetzt: () => JETZT, speicher: s.speicher });
+			await a.stoppe();
+			expect(c.dateiLoeschung.findMany).toHaveBeenCalledTimes(1);
+			expect(s.raeumeTempAuf).toHaveBeenCalledWith(new Date(JETZT.getTime() - 60 * 60 * 1000));
+		});
+
+		it('ohne Speicher bleiben die Dateien unberuehrt', async () => {
+			const c = leererClient();
+			const a = starteAufraeumen({ prisma: c.prisma, jetzt: () => JETZT });
+			await a.stoppe();
+			expect(c.dateiLoeschung.findMany).not.toHaveBeenCalled();
+		});
+
+		it('scheitern die Dateien, laufen die Aenderungen trotzdem und nur der Name wird geloggt', async () => {
+			const fehler = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+			try {
+				const c = leererClient();
+				c.dateiLoeschung.findMany.mockRejectedValue(
+					Object.assign(new Error('geheime Verbindungszeile'), { name: 'Verbindungsfehler' }),
+				);
+				const s = leererSpeicher();
+				const a = starteAufraeumen({ prisma: c.prisma, jetzt: () => JETZT, speicher: s.speicher });
+				await a.stoppe();
+				expect(fehler.mock.calls.flat().join(' ')).toContain('Verbindungsfehler');
+				expect(fehler.mock.calls.flat().join(' ')).not.toContain('geheime');
+			} finally {
+				fehler.mockRestore();
+			}
+		});
 	});
 });

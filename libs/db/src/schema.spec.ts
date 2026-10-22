@@ -9,7 +9,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { austauschAnlegen, AUSTAUSCH_TITEL, createPrismaClient, Prisma } from './index.js';
+import { austauschAnlegen, AUSTAUSCH_TITEL, createPrismaClient, Prisma, standardKategorien } from './index.js';
 
 const prisma = createPrismaClient();
 
@@ -977,5 +977,208 @@ describe('Threads (TP3)', () => {
 			aenderung: await prisma.aenderung.count({ where: { vereinId } }),
 		};
 		expect(uebrig).toEqual(Object.fromEntries(Object.keys(uebrig).map((k) => [k, 0])));
+	});
+});
+
+describe('Dateien und Dokumente (TP4)', () => {
+	async function vereinMitKategorien() {
+		return prisma.verein.create({
+			data: {
+				slug: `dateien-${eindeutig()}`,
+				name: 'Erfundener Fischereiverein 1900 e.V.',
+				anzeigename: 'Jungfischer Test',
+				farbe: '#1f6f8b',
+				kategorien: { create: standardKategorien() },
+			},
+			include: { kategorien: { orderBy: { position: 'asc' } } },
+		});
+	}
+
+	async function dokument(vereinId: string, kategorieId: string) {
+		return prisma.dokument.create({
+			data: { vereinId, kategorieId, titel: 'Gewaesserordnung', angelegtAm: new Date('2026-10-21T10:00:00Z') },
+		});
+	}
+
+	/** Eine gueltige Dokument-Datei; `daten` ueberschreibt, auch die Verweise. */
+	function datei(vereinId: string, vonId: string, daten: Partial<Prisma.DateiUncheckedCreateInput> = {}) {
+		return prisma.datei.create({
+			data: {
+				vereinId,
+				art: 'DATEI',
+				name: 'ordnung.pdf',
+				typ: 'application/pdf',
+				groesse: 1234,
+				sha256: 'a'.repeat(64),
+				vonId,
+				hochgeladenAm: new Date('2026-10-21T10:00:00Z'),
+				...daten,
+			},
+		});
+	}
+
+	async function thread(vereinId: string, erstelltVonId: string) {
+		return prisma.thread.create({
+			data: { vereinId, erstelltVonId, titel: 'Sommerfest', modus: 'KOMMENTARE', rollenfilter: 'JUNGFISCHER_FAMILIE' },
+		});
+	}
+
+	it('standardKategorien ergibt die drei Kategorien in dieser Reihenfolge', async () => {
+		const v = await vereinMitKategorien();
+
+		expect(v.kategorien.map((k) => [k.name, k.position])).toEqual([
+			['Ordnungen', 0],
+			['Merkblätter', 1],
+			['Formulare', 2],
+		]);
+	});
+
+	it('Datei mit Modul- und Dokumentverweis zugleich oder ohne Verweis scheitert (CHECK)', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const t = await thread(v.id, p.id);
+		const m = await prisma.threadModul.create({ data: { vereinId: v.id, threadId: t.id, typ: 'INFO', position: 0 } });
+		const d = await dokument(v.id, v.kategorien[0].id);
+
+		expect(await fehlertext(datei(v.id, p.id, { modulId: m.id, dokumentId: d.id }))).toContain('datei_ein_verweis');
+		expect(await fehlertext(datei(v.id, p.id))).toContain('datei_ein_verweis');
+		await datei(v.id, p.id, { dokumentId: d.id });
+		await datei(v.id, p.id, { modulId: m.id });
+	});
+
+	it('zwei Dateien zum selben Dokument scheitern, zwei zum selben Modul nicht', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const t = await thread(v.id, p.id);
+		const m = await prisma.threadModul.create({ data: { vereinId: v.id, threadId: t.id, typ: 'INFO', position: 0 } });
+		const d = await dokument(v.id, v.kategorien[0].id);
+		await datei(v.id, p.id, { dokumentId: d.id });
+
+		expect(await fehlercode(datei(v.id, p.id, { dokumentId: d.id }))).toBe('P2002');
+		await datei(v.id, p.id, { modulId: m.id });
+		await datei(v.id, p.id, { modulId: m.id });
+	});
+
+	it('Dateigroesse und Dateiname unterliegen den CHECKs', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const d = await dokument(v.id, v.kategorien[0].id);
+		const t = await thread(v.id, p.id);
+		const m = await prisma.threadModul.create({ data: { vereinId: v.id, threadId: t.id, typ: 'INFO', position: 0 } });
+
+		expect(await fehlertext(datei(v.id, p.id, { dokumentId: d.id, groesse: 0 }))).toContain('datei_groesse');
+		expect(await fehlertext(datei(v.id, p.id, { dokumentId: d.id, groesse: 31457281 }))).toContain('datei_groesse');
+		expect(await fehlertext(datei(v.id, p.id, { dokumentId: d.id, name: '' }))).toContain('datei_name');
+		expect(await fehlertext(datei(v.id, p.id, { modulId: m.id, name: 'x'.repeat(121) }))).toContain('datei_name');
+		// Ein Foto darf ohne Namen sein, eine Datei nicht.
+		await datei(v.id, p.id, { modulId: m.id, art: 'FOTO', name: '' });
+	});
+
+	it('Datei mit Dokument oder Person eines fremden Vereins scheitert', async () => {
+		const a = await vereinMitKategorien();
+		const b = await vereinMitKategorien();
+		const pa = await erwachsener(a.id);
+		const pb = await erwachsener(b.id);
+		const dokumentB = await dokument(b.id, b.kategorien[0].id);
+
+		expect(await fehlercode(datei(a.id, pa.id, { dokumentId: dokumentB.id }))).toBe('P2003');
+		const dokumentA = await dokument(a.id, a.kategorien[0].id);
+		expect(await fehlercode(datei(a.id, pb.id, { dokumentId: dokumentA.id }))).toBe('P2003');
+	});
+
+	it('ein Dokument mit Datei laesst sich nicht loeschen, eine Kategorie mit Dokument auch nicht', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const kategorie = v.kategorien[0];
+		const d = await dokument(v.id, kategorie.id);
+		await datei(v.id, p.id, { dokumentId: d.id });
+
+		expect(await fehlercode(prisma.dokument.delete({ where: { id: d.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.dokumentKategorie.delete({ where: { id: kategorie.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.person.delete({ where: { id: p.id } }))).toBe('P2003');
+
+		await prisma.datei.deleteMany({ where: { dokumentId: d.id } });
+		await prisma.dokument.delete({ where: { id: d.id } });
+		await prisma.dokumentKategorie.delete({ where: { id: kategorie.id } });
+	});
+
+	it('ein Thread mit Datei am Modul laesst sich nicht loeschen', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const t = await thread(v.id, p.id);
+		const m = await prisma.threadModul.create({ data: { vereinId: v.id, threadId: t.id, typ: 'INFO', position: 0 } });
+		await datei(v.id, p.id, { modulId: m.id });
+
+		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
+	});
+
+	it('Kategorienamen sind je Verein eindeutig, ohne Rand und hoechstens 40 Zeichen lang', async () => {
+		const v = await vereinMitKategorien();
+		const andere = await vereinMitKategorien();
+		const neu = (name: string, position = 9) =>
+			prisma.dokumentKategorie.create({ data: { vereinId: v.id, name, position } });
+
+		expect(await fehlercode(neu('Ordnungen'))).toBe('P2002');
+		expect(await fehlertext(neu('Formulare '))).toContain('kategorie_name');
+		expect(await fehlertext(neu(''))).toContain('kategorie_name');
+		expect(await fehlertext(neu('x'.repeat(41)))).toContain('kategorie_name');
+		expect(await fehlertext(neu('Satzungen', -1))).toContain('kategorie_position');
+		await neu('Satzungen');
+		await prisma.dokumentKategorie.create({ data: { vereinId: andere.id, name: 'Satzungen', position: 9 } });
+	});
+
+	it('Dokumenttitel sind 1 bis 120 Zeichen ohne Rand', async () => {
+		const v = await vereinMitKategorien();
+		const neu = (titel: string) =>
+			prisma.dokument.create({
+				data: { vereinId: v.id, kategorieId: v.kategorien[0].id, titel, angelegtAm: new Date() },
+			});
+
+		expect(await fehlertext(neu(''))).toContain('dokument_titel');
+		expect(await fehlertext(neu(' Ordnung'))).toContain('dokument_titel');
+		expect(await fehlertext(neu('x'.repeat(121)))).toContain('dokument_titel');
+		await neu('x'.repeat(120));
+	});
+
+	it('speicherGrenzeMb hat die Vorgabe 5120 und liegt zwischen 100 und 1048576', async () => {
+		const v = await vereinMitKategorien();
+		expect(v.speicherGrenzeMb).toBe(5120);
+
+		const setze = (speicherGrenzeMb: number) =>
+			prisma.verein.update({ where: { id: v.id }, data: { speicherGrenzeMb } });
+		expect(await fehlertext(setze(99))).toContain('verein_speichergrenze');
+		expect(await fehlertext(setze(1048577))).toContain('verein_speichergrenze');
+		await setze(100);
+		await setze(1048576);
+	});
+
+	it('DateiLoeschung traegt Verein und Schluessel ohne Fremdschluessel und ueberlebt den Verein', async () => {
+		const v = await vereinMitKategorien();
+		await prisma.dateiLoeschung.create({
+			data: { schluessel: `schluessel-${eindeutig()}`, vereinId: v.id, geloeschtAm: new Date() },
+		});
+
+		await prisma.verein.delete({ where: { id: v.id } });
+
+		expect(await prisma.dateiLoeschung.count({ where: { vereinId: v.id } })).toBe(1);
+	});
+
+	it('Loeschen des Vereins nimmt Kategorien, Dokumente und Dateien mit', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const t = await thread(v.id, p.id);
+		const m = await prisma.threadModul.create({ data: { vereinId: v.id, threadId: t.id, typ: 'INFO', position: 0 } });
+		const d = await dokument(v.id, v.kategorien[0].id);
+		await datei(v.id, p.id, { dokumentId: d.id });
+		await datei(v.id, p.id, { modulId: m.id });
+
+		await prisma.verein.delete({ where: { id: v.id } });
+
+		const uebrig = {
+			datei: await prisma.datei.count({ where: { vereinId: v.id } }),
+			dokument: await prisma.dokument.count({ where: { vereinId: v.id } }),
+			dokumentKategorie: await prisma.dokumentKategorie.count({ where: { vereinId: v.id } }),
+		};
+		expect(uebrig).toEqual({ datei: 0, dokument: 0, dokumentKategorie: 0 });
 	});
 });

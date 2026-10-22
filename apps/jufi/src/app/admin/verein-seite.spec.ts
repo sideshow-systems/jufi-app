@@ -19,7 +19,15 @@ function verein(ueberschreibe: Partial<VereinDetails> = {}): VereinDetails {
 		farbe: '#0f766e',
 		status: 'AKTIV',
 		angelegtAm: '2026-10-01T08:00:00.000Z',
-		kennzahlen: { jungfischer: 12, erwachsene: 20, zugaenge: 0, offeneEinladungen: 1, letzteAnmeldung: null },
+		kennzahlen: {
+			jungfischer: 12,
+			erwachsene: 20,
+			zugaenge: 0,
+			offeneEinladungen: 1,
+			letzteAnmeldung: null,
+			speicherBytes: 1288490189,
+			speicherGrenzeMb: 5120,
+		},
 		ansprechpartner: [{ personId: 'p1', vorname: 'Thomas', nachname: 'Beispiel', email: 'thomas@example.org' }],
 		ersteLeitung: { personId: 'p1', vorname: 'Thomas', nachname: 'Beispiel' },
 		slugAenderbar: true,
@@ -193,6 +201,77 @@ describe('Vereinsseite', () => {
 		await stabil(harness);
 		expect(absenden.disabled).toBe(true);
 		expect(seite.querySelector('#fehler-slug')?.textContent).toContain('Dieser Slug ist reserviert');
+	});
+
+	it('zeigt den Speicher als Verbrauch von der Grenze', async () => {
+		const { seite } = await oeffne();
+
+		expect(seite.textContent).toContain('1,2 GB von 5,0 GB');
+		expect(seite.querySelector<HTMLInputElement>('input[name=grenzeMb]')?.value).toBe('5120');
+	});
+
+	it('Speichergrenze speichern sendet die Zahl und laedt neu', async () => {
+		const o = await oeffne();
+		const { seite, http, harness } = o;
+
+		tippe(seite, 'input[name=grenzeMb]', '2048');
+		await stabil(harness);
+		knopf(seite, 'Speichern').click();
+
+		await vi.waitFor(() => {
+			const anfrage = http.expectOne(`${API}/vereine/v1/speichergrenze`);
+			expect(anfrage.request.method).toBe('PUT');
+			expect(anfrage.request.body).toEqual({ grenzeMb: 2048 });
+			anfrage.flush(null, { status: 204, statusText: 'No Content' });
+		});
+		await laedtNeu(o, verein({ kennzahlen: { ...verein().kennzahlen, speicherGrenzeMb: 2048 } }));
+
+		expect(seite.textContent).toContain('1,2 GB von 2,0 GB');
+		expect(seite.querySelector<HTMLInputElement>('input[name=grenzeMb]')?.value).toBe('2048');
+	});
+
+	it('bei einem Fehler zeigt die Speichergrenze die Meldung des Servers', async () => {
+		const { seite, http, harness } = await oeffne();
+
+		tippe(seite, 'input[name=grenzeMb]', '2048');
+		await stabil(harness);
+		knopf(seite, 'Speichern').click();
+		await vi.waitFor(() =>
+			http
+				.expectOne(`${API}/vereine/v1/speichergrenze`)
+				.flush(
+					{ fehler: 'Die Speichergrenze liegt zwischen 100 und 1048576 MB', feld: 'grenzeMb' },
+					{ status: 400, statusText: 'Bad Request' },
+				),
+		);
+		await stabil(harness);
+
+		expect(seite.querySelector('[role=alert]')?.textContent).toContain(
+			'Die Speichergrenze liegt zwischen 100 und 1048576 MB',
+		);
+	});
+
+	it('eine unveraenderte oder unzulaessige Grenze laesst sich nicht absenden', async () => {
+		const { seite, harness } = await oeffne();
+		const speichern = knopf(seite, 'Speichern');
+		expect(speichern.disabled).toBe(true);
+
+		for (const wert of ['99', '1048577', '100,5', '']) {
+			tippe(seite, 'input[name=grenzeMb]', wert);
+			await stabil(harness);
+			expect(speichern.disabled).toBe(true);
+		}
+		tippe(seite, 'input[name=grenzeMb]', '100');
+		await stabil(harness);
+		expect(speichern.disabled).toBe(false);
+	});
+
+	it('das Protokoll nennt die Speichergrenze', async () => {
+		const { seite } = await oeffne(
+			verein({ protokoll: [{ zeitpunkt: '2026-10-01T12:05:00.000Z', aktion: 'SPEICHERGRENZE', admin: 'flo' }] }),
+		);
+
+		expect(seite.querySelector('tbody tr')?.textContent).toContain('Speichergrenze geändert');
 	});
 
 	it('Einladung erneuern zeigt den neuen Text', async () => {

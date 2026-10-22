@@ -50,5 +50,8 @@ apps/jufi-e2e/.zustand/
 test-results/
 playwright-report/
 
+# Lokale Uploads (DATEIEN_PFAD in der .env.example).
+.daten/
+
 # Dumps, die tools/backup.sh vom Server holt.
 /backups/

@@ -28,6 +28,8 @@ describe('Vereinsliste', () => {
 						zugaenge: 8,
 						offeneEinladungen: 3,
 						letzteAnmeldung: '2026-10-12',
+						speicherBytes: 1288490189,
+						speicherGrenzeMb: 5120,
 					},
 				},
 				{
@@ -35,7 +37,15 @@ describe('Vereinsliste', () => {
 					slug: 'angelfreunde',
 					anzeigename: 'Angelfreunde',
 					status: 'GESPERRT',
-					kennzahlen: { jungfischer: 0, erwachsene: 1, zugaenge: 0, offeneEinladungen: 1, letzteAnmeldung: null },
+					kennzahlen: {
+						jungfischer: 0,
+						erwachsene: 1,
+						zugaenge: 0,
+						offeneEinladungen: 1,
+						letzteAnmeldung: null,
+						speicherBytes: 0,
+						speicherGrenzeMb: 200,
+					},
 				},
 			],
 		});
@@ -51,9 +61,20 @@ describe('Vereinsliste', () => {
 			'20',
 			'8',
 			'3',
+			'1,2 GB von 5,0 GB',
 			'12.10.2026',
 		]);
-		expect(zellen(zeilen[1])).toEqual(['Angelfreunde', 'angelfreunde', 'Gesperrt', '0', '1', '0', '1', '—']);
+		expect(zellen(zeilen[1])).toEqual([
+			'Angelfreunde',
+			'angelfreunde',
+			'Gesperrt',
+			'0',
+			'1',
+			'0',
+			'1',
+			'0 MB von 200,0 MB',
+			'—',
+		]);
 		expect(zeilen[0].querySelector('a')?.getAttribute('href')).toBe('/admin/vereine/v1');
 		expect(
 			[...seite.querySelectorAll('a')].find((a) => a.textContent?.includes('Verein anlegen'))?.getAttribute('href'),

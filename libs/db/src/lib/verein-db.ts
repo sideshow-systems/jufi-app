@@ -37,6 +37,9 @@ export class VereinDbFehler extends Error {
  * `WebauthnChallenge` und `MailWarteschlange` haben `vereinId` optional: Ueber
  * vereinDb sieht und schreibt man nur Zeilen des eigenen Vereins; Admin-Challenges
  * und Admin-Mails laufen nie hierueber. `VereinLogo` hat `vereinId` als Schluessel.
+ * `DateiLoeschung` hat `vereinId` ohne Fremdschluessel und gehoert trotzdem hierher: Nur
+ * so darf ein Vereins-Pfad die Loeschliste ueber vereinDb fuellen (Plan TP4 Etappe 1,
+ * Entscheidung 6); der Aufraeumer liest sie plattformweit ueber den schlichten Client.
  */
 export const VEREINS_MODELLE = [
 	'VereinLogo',
@@ -64,6 +67,10 @@ export const VEREINS_MODELLE = [
 	'VerlaufEintrag',
 	'GelesenStand',
 	'Aenderung',
+	'Datei',
+	'DokumentKategorie',
+	'Dokument',
+	'DateiLoeschung',
 ] as const satisfies readonly Prisma.ModelName[];
 
 type VereinsModell = (typeof VEREINS_MODELLE)[number];

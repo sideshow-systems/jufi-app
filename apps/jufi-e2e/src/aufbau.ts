@@ -98,6 +98,8 @@ function serverUmgebung(datenbankUrl: string): NodeJS.ProcessEnv {
 		MAIL_ABSENDER: 'e2e@example.test',
 		MAIL_ANTWORT: 'e2e@example.test',
 		MAIL_BETREFF_PRAEFIX: '[E2E] ',
+		// Im Zustandsordner des Laufs: Er wird zu Beginn jedes Laufs geleert und ist ignoriert.
+		DATEIEN_PFAD: join(ZUSTAND, 'dateien'),
 	};
 }
 

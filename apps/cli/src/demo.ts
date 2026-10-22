@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { austauschAnlegen, Recht, type Beziehung, type PrismaClient } from '@jufi/db';
+import { austauschAnlegen, Recht, standardKategorien, type Beziehung, type PrismaClient } from '@jufi/db';
 import {
 	berlinerTag,
 	berlinZeitpunkt,
@@ -176,6 +176,8 @@ export async function demoEinspielen(
 				// Das Loeschen oben nimmt den alten Austausch per Cascade mit, ein zweites Einspielen
 				// findet also keinen vor und legt ihn neu an (sonst griffe thread_ein_austausch).
 				threads: { create: austauschAnlegen(jetzt) },
+				// Wie beim Austausch: Das Loeschen oben nimmt die alten Kategorien per Cascade mit.
+				kategorien: { create: standardKategorien() },
 			},
 		});
 		const vereinId = verein.id;

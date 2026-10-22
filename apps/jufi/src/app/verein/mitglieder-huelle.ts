@@ -20,13 +20,14 @@ interface Eintrag {
 }
 
 /**
- * Vier Eintraege seit TP3 (Spec 6.2). Medien kommt mit TP4 dazu; bis dahin waere jeder
- * weitere Eintrag ein Link ins Leere. Einzelne Threads (t/...) gehoeren zu Threads.
+ * Fuenf Eintraege seit TP4 (Spec 6.2): Medien steht vor Mehr, weil Mehr der Sammelplatz am Ende ist.
+ * Einzelne Threads (t/...) gehoeren zu Threads.
  */
 const EINTRAEGE: Eintrag[] = [
 	{ pfad: '', text: 'Start', icon: 'start', auch: [] },
 	{ pfad: 'threads', text: 'Threads', icon: 'threads', auch: ['t'] },
 	{ pfad: 'termine', text: 'Termine', icon: 'termine', auch: [] },
+	{ pfad: 'medien', text: 'Medien', icon: 'medien', auch: [] },
 	{ pfad: 'mehr', text: 'Mehr', icon: 'mehr', auch: ['profil', 'meine-jungfischer'] },
 ];
 
@@ -134,7 +135,7 @@ const EINTRAEGE: Eintrag[] = [
 			right: 0;
 			bottom: 0;
 			display: grid;
-			grid-template-columns: repeat(4, 1fr);
+			grid-template-columns: repeat(5, 1fr);
 			max-width: 480px;
 			margin: 0 auto;
 			padding-bottom: var(--sicher-unten);

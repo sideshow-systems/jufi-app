@@ -60,6 +60,9 @@ let naechsteId = 0;
 			inset: 0;
 			z-index: 50;
 			display: grid;
+			/* Eine feste Spalte mit Obergrenze: Mit auto richtete sich die Spalte nach dem breitesten Wort der Frage,
+			   und ein langer Titel ohne Leerzeichen schob den Dialog aus dem Fenster (gemessen bei 375 px). */
+			grid-template-columns: minmax(0, 1fr);
 			place-items: center;
 			padding: var(--a4);
 			background: rgb(0 0 0 / 0.45);
@@ -81,6 +84,7 @@ let naechsteId = 0;
 		}
 		p {
 			margin: 0 0 var(--a4);
+			overflow-wrap: anywhere;
 		}
 		.knoepfe {
 			display: flex;

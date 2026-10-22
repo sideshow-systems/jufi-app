@@ -12,7 +12,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { berlinerTag, MONATSNAMEN, tagPlus, threadSegment } from '@jufi/domain';
 import { BASIS_URL, passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
-import { leisteHatVierEintraege, punktUeberdecktTextNicht } from './messen';
+import { leisteHatFuenfEintraege, punktUeberdecktTextNicht } from './messen';
 import { beendeFrist, fuelleAustausch, legeKindAn, leseFrist, personIdMitMail, setzeFrist } from './threads';
 
 /**
@@ -39,6 +39,12 @@ let bowlingId = '';
 let austausch = '';
 /** Der Tag des Bowling-Termins (der Editor legt ihn sieben Berliner Tage nach jetzt an); sein Monat ist der, in dem der Kalender Bowling zeigt. */
 let terminTag = '';
+
+/** Ein erzeugtes PDF-Geruest: Der Server erkennt den Typ am Anfang der Bytes, und die Bytes kommen unveraendert zurueck. */
+const PDF_BYTES = Buffer.from(
+	'%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n',
+	'latin1',
+);
 
 /** Ein neuer Kontext mit eigenem virtuellen Authenticator und seiner ersten Seite. */
 async function person(browser: Browser): Promise<{ kontext: BrowserContext; seite: Page }> {
@@ -380,8 +386,8 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await expect(seite.getByRole('heading', { name: 'Hallo Mara' })).toBeVisible();
 
 		const leiste = hauptnavigation(seite);
-		await expect(leiste.getByRole('link')).toHaveCount(4);
-		for (const name of ['Start', 'Threads', 'Termine', 'Mehr']) {
+		await expect(leiste.getByRole('link')).toHaveCount(5);
+		for (const name of ['Start', 'Threads', 'Termine', 'Medien', 'Mehr']) {
 			await expect(leiste.getByRole('link', { name: new RegExp(`^${name}`) })).toBeVisible();
 		}
 
@@ -402,7 +408,7 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await expect(punkt).toBeVisible();
 		for (const schema of ['dark', 'light'] as const) {
 			await seite.emulateMedia({ colorScheme: schema });
-			await leisteHatVierEintraege(seite);
+			await leisteHatFuenfEintraege(seite);
 			await punktUeberdecktTextNicht(seite);
 		}
 
@@ -733,6 +739,65 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		expect(text).toContain('❌ Abgesagt (1): Mats M.');
 		expect(text.endsWith(`👉 Antworten: ${BASIS_URL}/${SLUG}/t/${bowling}`), `Linkzeile:\n${text}`).toBe(true);
 		await kontext.close();
+	});
+
+	test('Leitung laedt eine Ordnung hoch, die Mutter oeffnet sie in Medien', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'leitung', { viewport: { width: 1280, height: 800 } });
+		await seite.goto(`/${SLUG}/verwaltung/dokumente`);
+		await expect(seite.getByRole('heading', { name: 'Dokumente', level: 1 })).toBeVisible();
+
+		const ordnungen = seite.locator('section[data-kategorie]').filter({
+			has: seite.getByRole('heading', { name: 'Ordnungen', exact: true }),
+		});
+		// Erzeugt, nicht aus dem Repo: Der Typ zaehlt am Inhalt, und %PDF- am Anfang genuegt dem Server.
+		await ordnungen.locator('input[data-hochladen]').setInputFiles({
+			name: 'Jugendfischereiordnung.pdf',
+			mimeType: 'application/pdf',
+			buffer: PDF_BYTES,
+		});
+		// Der Titel ist der bereinigte Name ohne Endung (Plan, Entscheidung 9); die Zeile erscheint erst mit der Antwort des Servers.
+		await expect(ordnungen.locator('li[data-dokument]')).toContainText('Jugendfischereiordnung');
+		await expect(ordnungen.locator('li[data-hochladung]')).toHaveCount(0);
+		await kontext.close();
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/medien`);
+		await expect(mutter.seite.getByRole('heading', { name: 'Medien', level: 1 })).toBeVisible();
+		await expect(mutter.seite.getByRole('heading', { name: 'Ordnungen', level: 2 })).toBeVisible();
+		// Leere Kategorien (Merkblaetter, Formulare) zeigt die Mitgliederseite nicht.
+		await expect(mutter.seite.getByRole('heading', { level: 2 })).toHaveCount(1);
+		const link = mutter.seite.getByRole('link', { name: /Jugendfischereiordnung/ });
+		await expect(link).toBeVisible();
+		const href = await link.getAttribute('href');
+		expect(href, 'Adresse des Dokuments').toBeTruthy();
+
+		// Mit der Sitzung der Mutter, wie ihr Browser den Link oeffnete; die Bytes muessen die hochgeladenen sein.
+		const antwort = await mutter.kontext.request.get(new URL(href ?? '', BASIS_URL).toString());
+		expect(antwort.status()).toBe(200);
+		expect(antwort.headers()['content-type']).toContain('application/pdf');
+		expect((await antwort.body()).equals(PDF_BYTES), 'ausgelieferte Bytes gleich den hochgeladenen').toBe(true);
+		await mutter.kontext.close();
+	});
+
+	test('Leitung loescht das Dokument, die Mutter sieht Medien wieder leer', async ({ browser }) => {
+		const leitung = await ausSitzung(browser, 'leitung', { viewport: { width: 1280, height: 800 } });
+		await leitung.seite.goto(`/${SLUG}/verwaltung/dokumente`);
+		await expect(leitung.seite.getByRole('heading', { name: 'Dokumente', level: 1 })).toBeVisible();
+		await leitung.seite.getByRole('button', { name: '„Jugendfischereiordnung“ löschen' }).click();
+		const dialog = leitung.seite.getByRole('dialog');
+		await expect(dialog).toContainText('‚Jugendfischereiordnung‘ löschen?');
+		await dialog.getByRole('button', { name: 'Löschen', exact: true }).click();
+		await expect(leitung.seite.locator('li[data-dokument]')).toHaveCount(0);
+		// Die Leitung sieht ihre leeren Kategorien hier weiter, sonst koennte sie keine mehr befuellen.
+		await expect(leitung.seite.getByRole('heading', { name: 'Ordnungen', level: 2 })).toBeVisible();
+		await leitung.kontext.close();
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/medien`);
+		await expect(mutter.seite.getByText('Noch keine Dokumente.')).toBeVisible();
+		await expect(mutter.seite.getByRole('heading', { level: 2 })).toHaveCount(0);
+		await expect(mutter.seite.getByRole('link', { name: /Jugendfischereiordnung/ })).toHaveCount(0);
+		await mutter.kontext.close();
 	});
 
 	test('Nach Fristende gibt es keinen Antwortknopf mehr, die Leitung traegt weiter nach', async ({ browser }) => {
