@@ -1,4 +1,14 @@
-import { ChangeDetectionStrategy, Component, inject, input, output, signal } from '@angular/core';
+import {
+	afterNextRender,
+	ChangeDetectionStrategy,
+	Component,
+	ElementRef,
+	Injector,
+	inject,
+	input,
+	output,
+	signal,
+} from '@angular/core';
 import type { FotosModulAnsicht } from '@jufi/domain';
 import { IconComponent } from '../../gestaltung/icon';
 import { DateienApi } from '../dateien-api';
@@ -22,6 +32,8 @@ import { FotoGrossansichtComponent } from './foto-grossansicht';
 	selector: 'jf-fotos-modul',
 	imports: [FotoGrossansichtComponent, HochladenFeldComponent, IconComponent],
 	changeDetection: ChangeDetectionStrategy.OnPush,
+	// Das Modul selbst nimmt den Fokus, wenn es keine Kachel mehr gibt und keinen Upload (letztes Foto geloescht).
+	host: { tabindex: '-1' },
 	template: `
 		@if (modul().titel; as titel) {
 			<h2>{{ titel }}</h2>
@@ -60,8 +72,8 @@ import { FotoGrossansichtComponent } from './foto-grossansicht';
 				[slug]="slug()"
 				[fotos]="modul().fotos"
 				[index]="o.wert"
-				(schliessen)="offen.set(null)"
-				(geloescht)="nachLoeschen()"
+				(schliessen)="schliesse($event)"
+				(geloescht)="nachLoeschen($event)"
 			/>
 		}
 	`,
@@ -69,6 +81,9 @@ import { FotoGrossansichtComponent } from './foto-grossansicht';
 		:host {
 			display: grid;
 			gap: var(--a3);
+		}
+		:host(:focus) {
+			outline: none;
 		}
 		h2 {
 			margin: 0;
@@ -133,6 +148,8 @@ export class FotosModulComponent {
 	readonly geaendert = output<void>();
 
 	protected readonly api = inject(DateienApi);
+	private readonly wirt = inject<ElementRef<HTMLElement>>(ElementRef);
+	private readonly injector = inject(Injector);
 
 	/**
 	 * Das angetippte Foto, in einem Objekt: Index 0 ist falsy, und ein @if (offen(); as index) schlosse
@@ -150,11 +167,45 @@ export class FotosModulComponent {
 	}
 
 	/**
-	 * Die Grossansicht schliesst nach dem Loeschen, statt zum naechsten Foto zu springen: Die Liste ist
-	 * bis zum Neuladen noch die alte, und ein Sprung zeigte eben das Foto, das gerade weg ist.
+	 * Der Fokus geht auf die Kachel des Fotos zurueck, das zuletzt zu sehen war, nicht auf die
+	 * angetippte: Wer geblaettert hat, will dort weitermachen. Das Modul merkt es sich selbst, statt die
+	 * Grossansicht document.activeElement festhalten zu lassen: Safari und Firefox (auch iOS) fokussieren
+	 * einen Knopf beim Klick nicht, dort lag der Fokus dann auf body.
 	 */
-	protected nachLoeschen(): void {
+	protected schliesse(id: string | null): void {
 		this.offen.set(null);
+		this.fokussiere(id);
+	}
+
+	/**
+	 * Die Grossansicht schliesst nach dem Loeschen, statt zum naechsten Foto zu springen: Die Liste ist
+	 * bis zum Neuladen noch die alte, und ein Sprung zeigte eben das Foto, das gerade weg ist. Der
+	 * Fokus geht auf die Nachbarkachel (die naechste, sonst die vorige); die Zeile bleibt beim
+	 * Neuladen stehen (track nach Id), der Fokus also auch. Ohne Nachbarn nimmt ihn das Upload-Feld
+	 * oder das Modul.
+	 */
+	protected nachLoeschen(id: string): void {
+		const fotos = this.modul().fotos;
+		const i = fotos.findIndex((f) => f.id === id);
+		const nachbar = fotos[i + 1] ?? fotos[i - 1];
+		this.offen.set(null);
+		this.fokussiere(nachbar && i >= 0 ? nachbar.id : null);
 		this.geaendert.emit();
+	}
+
+	/** Nach dem naechsten Rendern: Die Kachel gibt es erst, wenn die Grossansicht weg ist und das Raster wieder steht. */
+	private fokussiere(id: string | null): void {
+		afterNextRender(
+			() => {
+				const wurzel = this.wirt.nativeElement;
+				const kachel =
+					id === null
+						? undefined
+						: [...wurzel.querySelectorAll<HTMLElement>('button[data-foto]')].find((k) => k.dataset['foto'] === id);
+				const ziel = kachel ?? wurzel.querySelector<HTMLElement>('input[type="file"]') ?? wurzel;
+				ziel.focus();
+			},
+			{ injector: this.injector },
+		);
 	}
 }

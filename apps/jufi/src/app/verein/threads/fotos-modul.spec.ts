@@ -26,6 +26,7 @@ function modul(ueberschreibe: Partial<FotosModulAnsicht> = {}): FotosModulAnsich
 
 describe('jf-fotos-modul', () => {
 	let http: HttpTestingController;
+	const angehaengt: HTMLElement[] = [];
 
 	beforeEach(() => {
 		TestBed.configureTestingModule({
@@ -33,14 +34,20 @@ describe('jf-fotos-modul', () => {
 		});
 		http = TestBed.inject(HttpTestingController);
 	});
-	afterEach(() => http.match(() => true));
+	afterEach(() => {
+		for (const e of angehaengt.splice(0)) e.remove();
+		http.match(() => true);
+	});
 
 	function zeige(m: FotosModulAnsicht) {
 		const fixture = TestBed.createComponent(FotosModulComponent);
 		fixture.componentRef.setInput('slug', 'demo');
 		fixture.componentRef.setInput('modul', m);
-		fixture.detectChanges();
+		// Im Dokument, damit der Fokus echt wandert (jsdom fokussiert nur, was im Dokument haengt).
 		const el = fixture.nativeElement as HTMLElement;
+		document.body.append(el);
+		angehaengt.push(el);
+		fixture.detectChanges();
 		const geaendert = vi.fn();
 		fixture.componentInstance.geaendert.subscribe(geaendert);
 		const text = (e: Element | null | undefined) => (e?.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -127,20 +134,70 @@ describe('jf-fotos-modul', () => {
 		expect(f.el.querySelector('.gross')?.getAttribute('src')).toBe(`${API}/dateien/f2`);
 	});
 
-	it('schliesst die Grossansicht und gibt dem Vorschaubild den Fokus zurueck', () => {
+	it('gibt dem Vorschaubild den Fokus zurueck, auch wenn der Klick ihn nicht gesetzt hat', async () => {
 		const f = zeige(modul());
-		document.body.append(f.el);
-		const kachel = f.kacheln()[2];
-		kachel?.focus();
-		kachel?.click();
+		// Kein kachel.focus(): Safari und Firefox fokussieren Knoepfe beim Klick nicht.
+		f.kacheln()[2]?.click();
 		f.an();
 
 		document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		f.an();
+		await f.fixture.whenStable();
 
 		expect(f.el.querySelector('jf-foto-grossansicht')).toBeNull();
-		expect(document.activeElement).toBe(kachel);
-		f.el.remove();
+		expect(document.activeElement).toBe(f.kacheln()[2]);
+	});
+
+	it('gibt den Fokus an das Foto, bei dem man zuletzt war', async () => {
+		const f = zeige(modul());
+		f.kacheln()[0]?.click();
+		f.an();
+
+		document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+		f.an();
+		document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		f.an();
+		await f.fixture.whenStable();
+
+		expect(document.activeElement).toBe(f.kacheln()[1]);
+	});
+
+	it('gibt den Fokus an die Nachbarkachel, wenn das Foto geloescht wurde', async () => {
+		const f = zeige(modul({ fotos: [foto('f1', 'Mia', true), foto('f2', 'Ben'), foto('f3', 'Lea')] }));
+		f.kacheln()[0]?.click();
+		f.an();
+		(f.el.querySelector('jf-foto-grossansicht') as HTMLElement)
+			.querySelectorAll('button')
+			.forEach((b) => b.textContent?.trim() === 'Löschen' && b.click());
+		f.an();
+		(f.el.querySelector('jf-bestaetigung') as HTMLElement)
+			.querySelectorAll('button')
+			.forEach((b) => b.textContent?.trim() === 'Löschen' && b.click());
+		http.expectOne({ method: 'DELETE', url: `${API}/dateien/f1` }).flush(null);
+		await f.fixture.whenStable();
+		f.an();
+		await f.fixture.whenStable();
+
+		expect(document.activeElement).toBe(f.kacheln()[1]);
+	});
+
+	it('gibt den Fokus an das Upload-Feld, wenn das letzte Foto weg ist', async () => {
+		const f = zeige(modul({ fotos: [foto('f1', 'Mia', true)], darfHochladen: true }));
+		f.kacheln()[0]?.click();
+		f.an();
+		(f.el.querySelector('jf-foto-grossansicht') as HTMLElement)
+			.querySelectorAll('button')
+			.forEach((b) => b.textContent?.trim() === 'Löschen' && b.click());
+		f.an();
+		(f.el.querySelector('jf-bestaetigung') as HTMLElement)
+			.querySelectorAll('button')
+			.forEach((b) => b.textContent?.trim() === 'Löschen' && b.click());
+		http.expectOne({ method: 'DELETE', url: `${API}/dateien/f1` }).flush(null);
+		await f.fixture.whenStable();
+		f.an();
+		await f.fixture.whenStable();
+
+		expect(document.activeElement).toBe(f.el.querySelector('input[type="file"]'));
 	});
 
 	it('meldet nach dem Loeschen geaendert und schliesst die Grossansicht', async () => {

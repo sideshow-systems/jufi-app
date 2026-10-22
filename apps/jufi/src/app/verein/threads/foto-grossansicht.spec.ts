@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import type { FotoZeile } from '@jufi/domain';
 import { FotoGrossansichtComponent } from './foto-grossansicht';
 
@@ -15,6 +15,7 @@ const FOTOS = [foto('aaaaaaaa-1', 'Mia', true), foto('bbbbbbbb-2', 'Ben'), foto(
 
 describe('jf-foto-grossansicht', () => {
 	let http: HttpTestingController;
+	const angehaengt: HTMLElement[] = [];
 	const navigatorVorher = { canShare: navigator.canShare, share: navigator.share };
 
 	beforeEach(() => {
@@ -24,6 +25,7 @@ describe('jf-foto-grossansicht', () => {
 		http = TestBed.inject(HttpTestingController);
 	});
 	afterEach(() => {
+		for (const e of angehaengt.splice(0)) e.remove();
 		http.match(() => true);
 		Object.assign(navigator, navigatorVorher);
 		vi.unstubAllGlobals();
@@ -38,6 +40,7 @@ describe('jf-foto-grossansicht', () => {
 		// Im Dokument, bevor es das erste Mal zeichnet: Der Fokus beim Oeffnen setzt sich nach dem ersten Rendern.
 		const el = fixture.nativeElement as HTMLElement;
 		document.body.append(el);
+		angehaengt.push(el);
 		fixture.detectChanges();
 		const schliessen = vi.fn();
 		const geloescht = vi.fn();
@@ -46,12 +49,26 @@ describe('jf-foto-grossansicht', () => {
 		const text = (e: Element | null | undefined) => (e?.textContent ?? '').replace(/\s+/g, ' ').trim();
 		const knopf = (wurzel: Element, t: string) =>
 			[...wurzel.querySelectorAll('button')].find((b) => b.textContent?.trim() === t) as HTMLButtonElement | undefined;
-		const taste = (key: string) => {
-			document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+		const taste = (key: string, zusatz: KeyboardEventInit = {}) => {
+			const ereignis = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...zusatz });
+			document.dispatchEvent(ereignis);
 			fixture.detectChanges();
+			return ereignis;
 		};
+		const beschriftet = (t: string) => el.querySelector<HTMLButtonElement>(`button[aria-label="${t}"]`);
 		const bild = () => el.querySelector('.gross')?.getAttribute('src');
-		return { fixture, el, schliessen, geloescht, text, knopf, taste, bild, an: () => fixture.detectChanges() };
+		return {
+			fixture,
+			el,
+			schliessen,
+			geloescht,
+			text,
+			knopf,
+			beschriftet,
+			taste,
+			bild,
+			an: () => fixture.detectChanges(),
+		};
 	}
 
 	// jsdom kennt PointerEvent nicht in allen Fassungen; der Handler liest nur clientX und clientY.
@@ -66,6 +83,7 @@ describe('jf-foto-grossansicht', () => {
 		expect(dialog?.getAttribute('aria-modal')).toBe('true');
 		expect(f.bild()).toBe(`${API}/dateien/bbbbbbbb-2`);
 		expect(f.text(dialog)).toContain('Foto von Ben');
+		expect(f.el.querySelector('.gross')?.getAttribute('alt')).toBe('');
 		expect(f.knopf(f.el, 'Speichern')).toBeDefined();
 		expect(f.knopf(f.el, 'Schließen')).toBeDefined();
 	});
@@ -84,6 +102,7 @@ describe('jf-foto-grossansicht', () => {
 		f.knopf(f.el, 'Schließen')?.click();
 
 		expect(f.schliessen).toHaveBeenCalledTimes(2);
+		expect(f.schliessen).toHaveBeenCalledWith('aaaaaaaa-1');
 	});
 
 	it('blaettert mit den Pfeilen und haelt an den Enden', () => {
@@ -128,6 +147,76 @@ describe('jf-foto-grossansicht', () => {
 		expect(f.text(f.el)).toContain('Foto von Ben');
 	});
 
+	it('schliesst von selbst, wenn die Liste leer wird', () => {
+		const f = zeige(0, [FOTOS[0] as FotoZeile]);
+
+		f.fixture.componentRef.setInput('fotos', []);
+		f.an();
+
+		expect(f.schliessen).toHaveBeenCalledWith('aaaaaaaa-1');
+		expect(f.el.querySelector('[role="dialog"]')).toBeNull();
+	});
+
+	it('sperrt die Seite dahinter und gibt sie beim Schliessen wieder frei', () => {
+		document.body.style.overflow = 'auto';
+		const f = zeige();
+
+		expect(document.body.style.overflow).toBe('hidden');
+		f.fixture.destroy();
+
+		expect(document.body.style.overflow).toBe('auto');
+		document.body.style.overflow = '';
+	});
+
+	it('blaettert mit den Knoepfen, nennt die Stelle und sperrt sie an den Enden', () => {
+		const f = zeige(0);
+		const zurueck = f.beschriftet('Vorheriges Foto') as HTMLButtonElement;
+		const vor = f.beschriftet('Nächstes Foto') as HTMLButtonElement;
+		const stelle = f.el.querySelector('.stelle');
+
+		expect(stelle?.getAttribute('aria-live')).toBe('polite');
+		expect(f.text(stelle)).toBe('1 von 3');
+		expect(zurueck.disabled).toBe(true);
+		expect(vor.disabled).toBe(false);
+
+		vor.click();
+		f.an();
+		expect(f.text(stelle)).toBe('2 von 3');
+		expect(f.text(f.el)).toContain('Foto von Ben');
+		vor.click();
+		f.an();
+		expect(f.text(stelle)).toBe('3 von 3');
+		expect(vor.disabled).toBe(true);
+		expect(zurueck.disabled).toBe(false);
+		zurueck.click();
+		f.an();
+		expect(f.text(f.el)).toContain('Foto von Ben');
+	});
+
+	it('gibt den Fokus an den Gegenknopf, wenn der eigene am Ende gesperrt wird', () => {
+		const f = zeige(1);
+		const zurueck = f.beschriftet('Vorheriges Foto') as HTMLButtonElement;
+		const vor = f.beschriftet('Nächstes Foto') as HTMLButtonElement;
+		vor.focus();
+
+		vor.click();
+		f.an();
+
+		expect(vor.disabled).toBe(true);
+		expect(document.activeElement).toBe(zurueck);
+	});
+
+	it('ueberlaesst Tasten mit Alt, Strg oder Meta dem Browser', () => {
+		const f = zeige(1);
+
+		f.taste('ArrowRight', { altKey: true });
+		f.taste('ArrowLeft', { ctrlKey: true });
+		f.taste('Escape', { metaKey: true });
+
+		expect(f.text(f.el)).toContain('Foto von Ben');
+		expect(f.schliessen).not.toHaveBeenCalled();
+	});
+
 	it('zeigt Loeschen nur, wenn die Person es darf', () => {
 		const darf = zeige(0);
 		expect(darf.knopf(darf.el, 'Löschen')).toBeDefined();
@@ -146,7 +235,7 @@ describe('jf-foto-grossansicht', () => {
 		http.expectOne({ method: 'DELETE', url: `${API}/dateien/aaaaaaaa-1` }).flush(null);
 		await f.fixture.whenStable();
 
-		expect(f.geloescht).toHaveBeenCalledTimes(1);
+		expect(f.geloescht).toHaveBeenCalledWith('aaaaaaaa-1');
 		expect(f.schliessen).not.toHaveBeenCalled();
 	});
 
@@ -170,17 +259,74 @@ describe('jf-foto-grossansicht', () => {
 		expect(f.text(f.el)).toContain('Foto von Ben');
 	});
 
-	it('haelt Tab im Dialog', () => {
-		const f = zeige(0);
-		const knoepfe = [...f.el.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
+	it('haelt Tab im Dialog: vom letzten Knopf zum ersten und mit Umschalt zurueck', () => {
+		const f = zeige(1);
+		const knoepfe = [...f.el.querySelectorAll<HTMLButtonElement>('[role="dialog"] button:not(:disabled)')];
+		const erster = knoepfe[0] as HTMLButtonElement;
 		const letzter = knoepfe[knoepfe.length - 1] as HTMLButtonElement;
 		letzter.focus();
 
-		const ereignis = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
-		letzter.dispatchEvent(ereignis);
+		const vor = f.taste('Tab');
+		expect(vor.defaultPrevented).toBe(true);
+		expect(document.activeElement).toBe(erster);
 
-		expect(ereignis.defaultPrevented).toBe(true);
+		const zurueck = f.taste('Tab', { shiftKey: true });
+		expect(zurueck.defaultPrevented).toBe(true);
+		expect(document.activeElement).toBe(letzter);
+	});
+
+	it('holt den Fokus in den Dialog, wenn er auf body liegt', () => {
+		const f = zeige(0);
+		const knoepfe = [...f.el.querySelectorAll<HTMLButtonElement>('[role="dialog"] button:not(:disabled)')];
+		(document.activeElement as HTMLElement).blur();
+		expect(document.activeElement).toBe(document.body);
+
+		f.taste('Tab');
 		expect(document.activeElement).toBe(knoepfe[0]);
+
+		(document.activeElement as HTMLElement).blur();
+		f.taste('Tab', { shiftKey: true });
+		expect(document.activeElement).toBe(knoepfe[knoepfe.length - 1]);
+	});
+
+	it('laesst Tab innerhalb des Dialogs in Ruhe', () => {
+		const f = zeige(1);
+		const knoepfe = [...f.el.querySelectorAll<HTMLButtonElement>('[role="dialog"] button:not(:disabled)')];
+		knoepfe[1]?.focus();
+
+		expect(f.taste('Tab').defaultPrevented).toBe(false);
+	});
+
+	it('zeigt einen Fehler, wenn das Loeschen scheitert, und meldet nichts', async () => {
+		const f = zeige(0);
+		f.knopf(f.el, 'Löschen')?.click();
+		f.an();
+		f.knopf(f.el.querySelector('jf-bestaetigung') as Element, 'Löschen')?.click();
+
+		http
+			.expectOne({ method: 'DELETE', url: `${API}/dateien/aaaaaaaa-1` })
+			.flush({ fehler: 'Das ging schief' }, { status: 500, statusText: 'Server Error' });
+		await f.fixture.whenStable();
+		f.an();
+
+		expect(f.text(f.el.querySelector('[role="alert"]'))).toBe('Das ging schief');
+		expect(f.geloescht).not.toHaveBeenCalled();
+		expect(f.el.querySelector('jf-bestaetigung')).toBeNull();
+	});
+
+	it('meldet geloescht auch bei 404: Das Foto ist schon weg', async () => {
+		const f = zeige(0);
+		f.knopf(f.el, 'Löschen')?.click();
+		f.an();
+		f.knopf(f.el.querySelector('jf-bestaetigung') as Element, 'Löschen')?.click();
+
+		http
+			.expectOne({ method: 'DELETE', url: `${API}/dateien/aaaaaaaa-1` })
+			.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+		await f.fixture.whenStable();
+
+		expect(f.geloescht).toHaveBeenCalledWith('aaaaaaaa-1');
+		expect(f.el.querySelector('[role="alert"]')).toBeNull();
 	});
 
 	describe('Speichern', () => {
@@ -257,6 +403,60 @@ describe('jf-foto-grossansicht', () => {
 
 			expect(navigator.share).not.toHaveBeenCalled();
 			expect(angeklickt[0]?.getAttribute('href')).toContain('herunterladen=1');
+		});
+
+		it('faellt auf den Download zurueck, wenn das Teilen mit einem anderen Fehler scheitert', async () => {
+			vi.stubGlobal('fetch', antwort());
+			const teilen = vi.fn(async () => {
+				throw Object.assign(new Error('nicht erlaubt'), { name: 'NotAllowedError' });
+			});
+			Object.assign(navigator, { canShare: vi.fn(() => true), share: teilen });
+			const angeklickt: HTMLAnchorElement[] = [];
+			vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+				angeklickt.push(this);
+			});
+			const f = zeige(0);
+
+			f.knopf(f.el, 'Speichern')?.click();
+			await vi.waitFor(() => expect(angeklickt).toHaveLength(1));
+
+			expect(teilen).toHaveBeenCalledTimes(1);
+			expect(angeklickt[0]?.getAttribute('href')).toBe(`${API}/dateien/aaaaaaaa-1?herunterladen=1`);
+		});
+
+		it('tut nach dem Schliessen nichts mehr, wenn der Abruf erst dann fertig wird', async () => {
+			let fertig: (r: Response) => void = () => undefined;
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(() => new Promise<Response>((aufloesen) => (fertig = aufloesen))),
+			);
+			const teilen = vi.fn();
+			Object.assign(navigator, { canShare: vi.fn(() => true), share: teilen });
+			const f = zeige(0);
+
+			f.knopf(f.el, 'Speichern')?.click();
+			f.fixture.destroy();
+			fertig(new Response(new Uint8Array([1]), { status: 200 }));
+			await new Promise((r) => setTimeout(r, 0));
+
+			expect(teilen).not.toHaveBeenCalled();
+		});
+
+		it('geht bei abgelaufener Sitzung zur Anmeldung', async () => {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async () => Response.json({ fehler: 'nicht angemeldet' }, { status: 401 })),
+			);
+			Object.assign(navigator, { canShare: vi.fn(() => true), share: vi.fn() });
+			const navigiere = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+			const f = zeige(0);
+
+			f.knopf(f.el, 'Speichern')?.click();
+			await vi.waitFor(() => expect(navigiere).toHaveBeenCalledTimes(1));
+			f.an();
+
+			expect(String(navigiere.mock.calls[0]?.[0])).toContain('/demo/anmelden');
+			expect(f.el.querySelector('[role="alert"]')).toBeNull();
 		});
 
 		it('sagt, wenn das Foto sich nicht holen laesst', async () => {
