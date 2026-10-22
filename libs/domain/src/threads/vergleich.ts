@@ -115,7 +115,9 @@ const KONFLIKT_TEXT = {
 } as const;
 
 // Eigener Satz statt KONFLIKT_TEXT.einheit: Eine Helferliste hat Eintraege, keine Antworten.
-const HELFER_EINHEIT_GESPERRT = 'Die Einheit lässt sich nach den ersten Einträgen nicht mehr ändern.';
+// Exportiert, weil der Editor denselben Satz als Hinweis an der gesperrten Einheit zeigt, bevor
+// der Server ihn als 409 schicken muesste.
+export const HELFER_EINHEIT_GESPERRT = 'Die Einheit lässt sich nach den ersten Einträgen nicht mehr ändern.';
 
 interface Bestehendes {
 	geaendert: boolean;
