@@ -795,7 +795,7 @@ describe('Thread-Editor', () => {
 
 			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[4]?.click();
 			await stabil(harness);
-			expect(seite.querySelector('jf-dateien-felder')?.textContent).toContain('Noch keine Dateien hochgeladen.');
+			expect(seite.querySelector('jf-dateien-felder')?.textContent).toContain('Noch keine Dateien.');
 			expect(hochladeFeld(harness).ziel()).toBe(`${API}/module/m-dateien/dateien`);
 		});
 

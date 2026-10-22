@@ -70,7 +70,7 @@ describe('jf-dateien-felder', () => {
 	it('nennt eine einzelne Datei in der Einzahl und leer noch keine', () => {
 		expect(zeige(modul(), { fotos: 0, dateien: 1, personen: 0 }).text()).toContain('1 Datei');
 		expect(zeige(modul(), { fotos: 0, dateien: 1, personen: 0 }).text()).not.toContain('1 Dateien');
-		expect(zeige(modul(), { fotos: 0, dateien: 0, personen: 0 }).text()).toContain('Noch keine Dateien hochgeladen.');
+		expect(zeige(modul(), { fotos: 0, dateien: 0, personen: 0 }).text()).toContain('Noch keine Dateien.');
 	});
 
 	it('meldet hochgeladen, wenn das Upload-Feld einen Stapel fertig hat', () => {

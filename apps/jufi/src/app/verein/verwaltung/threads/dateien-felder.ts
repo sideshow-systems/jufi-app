@@ -96,9 +96,7 @@ export class DateienFelderComponent {
 	protected readonly zahlText = computed(() => {
 		const z = this.zahl();
 		if (z === null) return null;
-		return z.dateien === 0
-			? 'Noch keine Dateien hochgeladen.'
-			: `${z.dateien} ${z.dateien === 1 ? 'Datei' : 'Dateien'}`;
+		return z.dateien === 0 ? 'Noch keine Dateien.' : `${z.dateien} ${z.dateien === 1 ? 'Datei' : 'Dateien'}`;
 	});
 
 	protected titelSetzen(titel: string): void {

@@ -101,7 +101,7 @@ describe('jf-fotos-felder', () => {
 	it('nennt ein einzelnes Foto in der Einzahl und leer noch keine', () => {
 		expect(zeige(modul(), { fotos: 1, dateien: 0, personen: 1 }).text()).toContain('1 Foto');
 		expect(zeige(modul(), { fotos: 1, dateien: 0, personen: 1 }).text()).not.toContain('1 Fotos');
-		expect(zeige(modul(), { fotos: 0, dateien: 0, personen: 0 }).text()).toContain('Noch keine Fotos hochgeladen.');
+		expect(zeige(modul(), { fotos: 0, dateien: 0, personen: 0 }).text()).toContain('Noch keine Fotos.');
 	});
 
 	it('ohne bekannte Zahl steht keine Zahl da, der Upload aber schon', () => {

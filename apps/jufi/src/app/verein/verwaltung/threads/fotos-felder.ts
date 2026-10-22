@@ -106,7 +106,7 @@ export class FotosFelderComponent {
 	protected readonly zahlText = computed(() => {
 		const z = this.zahl();
 		if (z === null) return null;
-		return z.fotos === 0 ? 'Noch keine Fotos hochgeladen.' : `${z.fotos} ${z.fotos === 1 ? 'Foto' : 'Fotos'}`;
+		return z.fotos === 0 ? 'Noch keine Fotos.' : `${z.fotos} ${z.fotos === 1 ? 'Foto' : 'Fotos'}`;
 	});
 
 	protected titelSetzen(titel: string): void {
