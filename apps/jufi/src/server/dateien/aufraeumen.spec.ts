@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { legeVereinAn } from '../test-vereine.js';
 import { raeumeDateienAuf } from './aufraeumen.js';
-import { dateiSchluessel, VerzeichnisSpeicher } from './speicher.js';
+import { dateiSchluessel, VerzeichnisSpeicher, type DateiSpeicher } from './speicher.js';
 
 const STUNDE_MS = 60 * 60 * 1000;
 /**
@@ -42,9 +42,9 @@ describe('raeumeDateienAuf', () => {
 		await utimes(join(wurzel, schluessel), geaendertAm, geaendertAm);
 	}
 	async function gibtEs(schluessel: string): Promise<boolean> {
-		const strom = await speicher.lies(schluessel);
-		strom?.destroy();
-		return strom !== null;
+		const gelesen = await speicher.lies(schluessel);
+		gelesen?.strom.destroy();
+		return gelesen !== null;
 	}
 
 	/**
@@ -177,6 +177,69 @@ describe('raeumeDateienAuf', () => {
 		expect(await prisma.datei.count({ where: { id: datei.id } })).toBe(1);
 		const log = fehler.mock.calls.flat().join(' ');
 		expect(log).toContain('1 Dateien ohne Bytes');
+	});
+
+	/** Ein Speicher, dessen loesche fuer genau diesen Schluessel wirft; alles andere geht an den echten. */
+	function zerbrechlich(kaputt: string): DateiSpeicher {
+		return new Proxy<DateiSpeicher>(speicher, {
+			get: (ziel, name, empfaenger) => {
+				if (name !== 'loesche') return Reflect.get(ziel, name, empfaenger) as unknown;
+				return async (schluessel: string) => {
+					if (schluessel === kaputt) throw Object.assign(new Error('EACCES: geheimer Pfad'), { name: 'Fehler' });
+					return ziel.loesche(schluessel);
+				};
+			},
+		});
+	}
+
+	it('ein Schluessel der Loeschliste, der nicht geht, bricht den Lauf nicht ab', async () => {
+		const fehler = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const s = await szenario();
+		const kaputt = dateiSchluessel(s.verein.id, randomUUID());
+		const heil = dateiSchluessel(s.verein.id, randomUUID());
+		await lege(kaputt, vor(1));
+		await lege(heil, vor(1));
+		await prisma.dateiLoeschung.createMany({
+			data: [
+				{ schluessel: kaputt, vereinId: s.verein.id, geloeschtAm: vor(30) },
+				{ schluessel: heil, vereinId: s.verein.id, geloeschtAm: vor(30) },
+			],
+		});
+
+		const bilanz = await raeumeDateienAuf(nur(s.verein.id), zerbrechlich(kaputt), JETZT);
+
+		expect(bilanz).toMatchObject({ geloescht: 1, fehler: 1 });
+		expect(await gibtEs(heil)).toBe(false);
+		expect(await gibtEs(kaputt)).toBe(true);
+		// Der Eintrag bleibt: Der naechste Lauf versucht es wieder.
+		expect(await prisma.dateiLoeschung.count({ where: { schluessel: kaputt } })).toBe(1);
+		const log = fehler.mock.calls.flat().join(' ');
+		expect(log).toContain(kaputt);
+		expect(log).not.toContain('geheimer Pfad');
+	});
+
+	it('eine Waise, die nicht geht, bricht den Lauf nicht ab: die anderen fallen weg, fehler zaehlt', async () => {
+		const fehler = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const s = await szenario();
+		const kaputt = dateiSchluessel(s.verein.id, randomUUID());
+		const heil = dateiSchluessel(s.verein.id, randomUUID());
+		await lege(kaputt, vor(30));
+		await lege(heil, vor(30));
+		const temp = await speicher.neueTempDatei();
+		await writeFile(temp, 'x');
+		await utimes(temp, vor(2), vor(2));
+
+		const bilanz = await raeumeDateienAuf(nur(s.verein.id), zerbrechlich(kaputt), JETZT);
+
+		expect(bilanz).toMatchObject({ waisen: 1, fehler: 1, temp: 1 });
+		expect(await gibtEs(heil)).toBe(false);
+		expect(await gibtEs(kaputt)).toBe(true);
+		expect(fehler.mock.calls.flat().join(' ')).toContain(kaputt);
+	});
+
+	it('meldet fehler: 0, wenn alles geht', async () => {
+		const s = await szenario();
+		expect((await raeumeDateienAuf(nur(s.verein.id), speicher, JETZT)).fehler).toBe(0);
 	});
 
 	it('raeumt Temp-Dateien nach einer Stunde auf', async () => {

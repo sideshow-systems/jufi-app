@@ -16,6 +16,8 @@ export interface DateienBilanz {
 	waisen: number;
 	temp: number;
 	fehlend: number;
+	/** Schluessel, an denen das Loeschen scheiterte; der naechste Lauf versucht sie wieder. */
+	fehler: number;
 }
 
 function fehlerName(fehler: unknown): string {
@@ -52,7 +54,7 @@ export async function raeumeDateienAuf(
 	speicher: DateiSpeicher,
 	jetzt: Date,
 ): Promise<DateienBilanz> {
-	const bilanz: DateienBilanz = { geloescht: 0, waisen: 0, temp: 0, fehlend: 0 };
+	const bilanz: DateienBilanz = { geloescht: 0, waisen: 0, temp: 0, fehlend: 0, fehler: 0 };
 
 	// 1. Loeschliste
 	const faellig = await prisma.dateiLoeschung.findMany({
@@ -66,6 +68,7 @@ export async function raeumeDateienAuf(
 			bilanz.geloescht++;
 		} catch (fehler) {
 			// Ein Eintrag, der nicht geht, soll die anderen und die Schritte danach nicht blockieren.
+			bilanz.fehler++;
 			console.error(`Aufraeumen: Loeschliste ${schluessel} gescheitert (${fehlerName(fehler)})`);
 		}
 	}
@@ -101,8 +104,16 @@ export async function raeumeDateienAuf(
 			// nur, was er als seine Waise erkennt.
 			if (!teile) continue;
 			if (gebraucht.has(dateiSchluessel(teile.vereinId, teile.dateiId)) || gemerkt.has(schluessel)) continue;
-			await speicher.loesche(schluessel);
-			bilanz.waisen++;
+			// Wie bei der Loeschliste: Ein einzelner Schluessel (Rechte, volles Volume) darf den Lauf
+			// nicht beenden, sonst blieben Temp-Dateien und die Meldung fehlender Bytes fuer immer aus.
+			// Verworfen: den Lauf abbrechen -- ein Schluessel, der nie geht, hielte jede Nacht alle auf.
+			try {
+				await speicher.loesche(schluessel);
+				bilanz.waisen++;
+			} catch (fehler) {
+				bilanz.fehler++;
+				console.error(`Aufraeumen: Waise ${schluessel} gescheitert (${fehlerName(fehler)})`);
+			}
 		}
 	}
 

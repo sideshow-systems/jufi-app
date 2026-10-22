@@ -11,6 +11,7 @@ import { WebSocket } from 'ws';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
 import { dateiSchluessel, VerzeichnisSpeicher } from './dateien/speicher.js';
+import { erzeugeBild } from './dateien/test-bilder.js';
 import { Bus } from './echtzeit/bus.js';
 import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
@@ -1187,6 +1188,23 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Gegenprobe: In fremd selbst kommt dieselbe Datei an.
 		const fremdesMitglied = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
 		expect((await hole(k.fremd.slug, fremdesMitglied.cookie)).status).toBe(200);
+	},
+	'GET /dateien/:id/vorschau': async (k) => {
+		// Wie bei GET /dateien/:id: Die Bytes der Vorschau liegen wirklich im Speicher von fremd.
+		const { foto } = await fremdeMedien(k);
+		const speicher = new VerzeichnisSpeicher(TEST_UMGEBUNG.dateienPfad);
+		const temp = await speicher.neueTempDatei();
+		await writeFile(temp, await erzeugeBild({ breite: 64, hoehe: 48, format: 'jpeg' }));
+		await speicher.uebernimm(temp, dateiSchluessel(k.fremd.id, foto, true));
+
+		const hole = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/dateien/${foto}/vorschau`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await hole(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		// Gegenprobe: Ein Jugendleiter von fremd bekommt dasselbe Foto.
+		const fremderLeiter = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER', rechte: ['ALLE_THREADS'] });
+		expect((await hole(k.fremd.slug, fremderLeiter.cookie)).status).toBe(200);
 	},
 	'POST /module/:modulId/dateien': async (k) => {
 		const { dateienModul } = await fremdeMedien(k);
