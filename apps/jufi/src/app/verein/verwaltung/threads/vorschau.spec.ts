@@ -229,6 +229,13 @@ describe('Thread-Vorschau', () => {
 		expect(modul?.querySelectorAll('button:not([role="tab"])')).toHaveLength(0);
 	});
 
+	it('zeigt von der Fahrgemeinschaft nur die gewaehlten Richtungen', () => {
+		const e = bowling();
+		e.module = [{ typ: 'FAHRT', id: null, titel: null, hin: false, rueck: true }];
+		const [modul] = vorschauModule(e, new Date('2026-10-22T10:00:00Z'));
+		expect(modul).toMatchObject({ typ: 'FAHRT', richtungen: [{ richtung: 'RUECK', autos: [] }], kinder: [] });
+	});
+
 	it('macht den Inhalt der Karten inert, damit Tippen nur waehlt', async () => {
 		const { karten } = await zeige();
 		expect(karten().every((k) => k.querySelector(':scope > .inhalt')?.hasAttribute('inert'))).toBe(true);

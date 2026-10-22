@@ -1100,6 +1100,163 @@ describe('Thread-Editor', () => {
 		});
 	});
 
+	describe('Fahrgemeinschaft', () => {
+		type Fahrt = Extract<ModulEntwurf, { typ: 'FAHRT' }>;
+		const ANREISE: Fahrt = { typ: 'FAHRT', id: 'm-fahrt', titel: 'Anreise', hin: true, rueck: true };
+		const GRUND = 'Hat schon Autos oder Mitfahrten.';
+
+		// Der Bowling-Thread mit der Fahrgemeinschaft als viertem Modul.
+		function mitFahrt(rest: Partial<ThreadBearbeitung> = {}, modul: Fahrt = ANREISE) {
+			return bearbeitung({ entwurf: { ...bowling(), module: [...bowling().module, modul] }, ...rest });
+		}
+
+		const fahrtFelder = (seite: HTMLElement) => seite.querySelector<HTMLElement>('jf-fahrt-felder');
+		const angebote = (seite: HTMLElement) =>
+			[...seite.querySelectorAll('[role="group"][aria-label="Modul hinzufügen"] button')].map((b) =>
+				b.textContent?.trim(),
+			);
+		const waehleViertes = async (harness: RouterTestingHarness, seite: HTMLElement) => {
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[3]?.click();
+			await stabil(harness);
+		};
+
+		it('Modul hinzufügen: Fahrgemeinschaft mit beiden Richtungen, in eigenen Feldern und der Vorschau', async () => {
+			const { harness, hinzufuegen, seite, listenTexte, karten, modulFelder } = await oeffneNeu();
+			expect(angebote(seite)).toContain('Fahrgemeinschaft');
+			hinzufuegen('Fahrgemeinschaft');
+			await stabil(harness);
+
+			expect(listenTexte()).toEqual(['Fahrgemeinschaft']);
+			const felder = fahrtFelder(seite)!;
+			expect(felder).toBeTruthy();
+			expect(modulFelder()).toBeNull();
+			expect(felder.querySelector<HTMLInputElement>('input[name="hin"]')?.checked).toBe(true);
+			expect(felder.querySelector<HTMLInputElement>('input[name="rueck"]')?.checked).toBe(true);
+			expect(karten()[0]?.querySelector('jf-fahrt-modul')?.textContent).toContain('Hinfahrt');
+		});
+
+		it('danach fehlt die Fahrgemeinschaft in "Modul hinzufügen"', async () => {
+			const { harness, hinzufuegen, seite } = await oeffneNeu();
+			hinzufuegen('Fahrgemeinschaft');
+			await stabil(harness);
+			expect(angebote(seite)).toEqual(['Info-Text', 'Termin', 'Umfrage', 'Dateien', 'Fotos', 'Helferliste']);
+		});
+
+		it('auch eine gespeicherte Fahrgemeinschaft nimmt den Eintrag weg, und mit dem Entfernen kommt er wieder', async () => {
+			const { harness, seite, nachLabel } = await oeffneBestehend(mitFahrt());
+			expect(angebote(seite)).not.toContain('Fahrgemeinschaft');
+			nachLabel('Entfernen: Modul 4').click();
+			await stabil(harness);
+			expect(angebote(seite)).toContain('Fahrgemeinschaft');
+		});
+
+		it('beide Kästchen ab: "Bitte mindestens eine Richtung." steht am Feld, nichts geht an den Server', async () => {
+			const { harness, seite, hinzufuegen } = await oeffneNeu();
+			tippe(seite, '#thread-titel', 'Zeltlager');
+			hinzufuegen('Fahrgemeinschaft');
+			await stabil(harness);
+			const felder = fahrtFelder(seite)!;
+			felder.querySelector<HTMLInputElement>('input[name="hin"]')!.click();
+			await stabil(harness);
+			felder.querySelector<HTMLInputElement>('input[name="rueck"]')!.click();
+			await stabil(harness);
+			knopf(seite, 'Entwurf speichern').click();
+			await stabil(harness);
+
+			expect(felder.querySelector('p.fehler[role="alert"]')?.textContent).toContain('Bitte mindestens eine Richtung.');
+			expect(felder.querySelector('input[name="hin"]')?.getAttribute('aria-invalid')).toBe('true');
+		});
+
+		it('die Eingaben gehen in den Entwurf, der an den Server geht', async () => {
+			const { harness, hinzufuegen, seite, http } = await oeffneNeu();
+			tippe(seite, '#thread-titel', 'Zeltlager');
+			hinzufuegen('Fahrgemeinschaft');
+			await stabil(harness);
+			fahrtFelder(seite)!.querySelector<HTMLInputElement>('input[name="rueck"]')!.click();
+			await stabil(harness);
+			knopf(seite, 'Entwurf speichern').click();
+
+			await vi.waitFor(() => {
+				const anfrage = http.expectOne({ method: 'POST', url: `${API}/threads` });
+				expect((anfrage.request.body as { entwurf: ThreadEntwurf }).entwurf.module).toEqual([
+					{ typ: 'FAHRT', id: null, titel: null, hin: true, rueck: false },
+				]);
+				anfrage.flush(bearbeitung({ entwurf: { ...bowling(), module: [] } }));
+			});
+		});
+
+		it('die Vorschau zeigt nur die gewählten Richtungen', async () => {
+			const { harness, seite, karten } = await oeffneBestehend(mitFahrt());
+			expect(karten()[3]?.querySelectorAll('jf-fahrt-modul [role="tab"]')).toHaveLength(2);
+			await waehleViertes(harness, seite);
+			fahrtFelder(seite)!.querySelector<HTMLInputElement>('input[name="rueck"]')!.click();
+			await stabil(harness);
+			expect(karten()[3]?.querySelectorAll('jf-fahrt-modul [role="tab"]')).toHaveLength(0);
+			expect(karten()[3]?.querySelector('jf-fahrt-modul')?.textContent).toContain('Hinfahrt');
+			expect(karten()[3]?.querySelector('jf-fahrt-modul')?.textContent).not.toContain('Rückfahrt');
+		});
+
+		it('mit Eintraegen in der Hinfahrt: Hinfahrt gesperrt mit Satz, Rueckfahrt frei, Modul nicht entfernbar', async () => {
+			const { harness, seite, nachLabel } = await oeffneBestehend(
+				mitFahrt({ fahrtSperre: { eingetragen: true, HIN: true, RUECK: false } }),
+			);
+			expect(nachLabel('Entfernen: Modul 4').disabled).toBe(true);
+			expect(seite.querySelectorAll('ol.module > li')[3]?.textContent).toContain(
+				'Gesperrt, weil schon Einträge da sind',
+			);
+			await waehleViertes(harness, seite);
+
+			const felder = fahrtFelder(seite)!;
+			expect(felder.querySelector<HTMLInputElement>('input[name="hin"]')?.disabled).toBe(true);
+			expect(felder.querySelector<HTMLInputElement>('input[name="rueck"]')?.disabled).toBe(false);
+			expect(felder.textContent).toContain(GRUND);
+		});
+
+		it('ohne Eintraege ist nichts gesperrt', async () => {
+			const { harness, seite, nachLabel } = await oeffneBestehend(
+				mitFahrt({ fahrtSperre: { eingetragen: false, HIN: false, RUECK: false } }),
+			);
+			expect(nachLabel('Entfernen: Modul 4').disabled).toBe(false);
+			await waehleViertes(harness, seite);
+			expect(fahrtFelder(seite)!.textContent).not.toContain(GRUND);
+		});
+
+		it('ein ungespeichertes Modul ist nie gesperrt, auch wenn der Thread schon eine Sperre meldet', async () => {
+			const { harness, seite, hinzufuegen } = await oeffneBestehend(
+				bearbeitung({ fahrtSperre: { eingetragen: true, HIN: true, RUECK: true } }),
+			);
+			hinzufuegen('Fahrgemeinschaft');
+			await stabil(harness);
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[3]?.click();
+			await stabil(harness);
+			expect(fahrtFelder(seite)!.querySelector<HTMLInputElement>('input[name="hin"]')?.disabled).toBe(false);
+		});
+
+		it('409 an module.3.hin wählt die Fahrgemeinschaft und steht am Hin-Kästchen', async () => {
+			const text = 'Für die Hinfahrt gibt es schon Autos oder Mitfahrten.';
+			const { harness, seite, http } = await oeffneBestehend(mitFahrt());
+			knopf(seite, 'Entwurf speichern').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne({ method: 'PUT', url: `${API}/threads/t1` })
+					.flush({ fehler: text, code: 'BEANTWORTET', feld: 'module.3.hin' }, { status: 409, statusText: 'Conflict' }),
+			);
+			await stabil(harness);
+
+			const felder = fahrtFelder(seite)!;
+			expect(felder.querySelector('p.fehler[role="alert"]')?.textContent).toContain(text);
+			expect(felder.querySelector('input[name="hin"]')?.getAttribute('aria-invalid')).toBe('true');
+			expect(seite.querySelector('.meldung')).toBeNull();
+		});
+
+		it('zeigt den Link zur Antworten-Übersicht auch bei einem Thread nur mit Fahrgemeinschaft', async () => {
+			const { seite } = await oeffneBestehend(bearbeitung({ entwurf: { ...bowling(), module: [ANREISE] } }));
+			expect(seite.querySelector('a[href="/demo/verwaltung/threads/t1/antworten"]')?.textContent).toContain(
+				'Antworten',
+			);
+		});
+	});
+
 	describe('Ungespeichertes', () => {
 		it('fragt beim Verlassen mit Aenderung und bleibt bei Abbruch', async () => {
 			const { harness, seite } = await oeffneBestehend();

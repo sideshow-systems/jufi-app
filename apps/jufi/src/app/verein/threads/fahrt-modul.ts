@@ -20,6 +20,7 @@ import {
 	type FahrtModulAnsicht,
 	type FahrtRichtungAnsicht,
 	RICHTUNG_TEXT,
+	RICHTUNGEN,
 	type Richtung,
 	tagKurz,
 	undListe,
@@ -72,7 +73,6 @@ type FahrtAntwort = { modul: FahrtModulAnsicht };
 // Der Wert der Auswahl fuer "Kommt selbst"; Auto-IDs sind Kennungen und kollidieren damit nicht.
 const SELBST = 'selbst';
 
-const REICHTUNGEN: readonly Richtung[] = ['HIN', 'RUECK'];
 const REITER_TEXT: Readonly<Record<Richtung, string>> = { HIN: 'Hin', RUECK: 'Rück' };
 
 /** Je Karte eine Nummer fuer die ids, falls mehrere Fahrgemeinschaften auf einer Seite stuenden. */
@@ -572,18 +572,18 @@ export class FahrtModul {
 	 * ersten und letzten (Muster der Medien-Reiter, WAI-ARIA).
 	 */
 	protected taste(ereignis: KeyboardEvent, aktuell: Richtung): void {
-		const i = REICHTUNGEN.indexOf(aktuell);
+		const i = RICHTUNGEN.indexOf(aktuell);
 		const index =
 			ereignis.key === 'ArrowRight'
-				? (i + 1) % REICHTUNGEN.length
+				? (i + 1) % RICHTUNGEN.length
 				: ereignis.key === 'ArrowLeft'
-					? (i - 1 + REICHTUNGEN.length) % REICHTUNGEN.length
+					? (i - 1 + RICHTUNGEN.length) % RICHTUNGEN.length
 					: ereignis.key === 'Home'
 						? 0
 						: ereignis.key === 'End'
-							? REICHTUNGEN.length - 1
+							? RICHTUNGEN.length - 1
 							: -1;
-		const richtung = REICHTUNGEN[index];
+		const richtung = RICHTUNGEN[index];
 		if (richtung === undefined) return;
 		ereignis.preventDefault();
 		this.host.nativeElement.querySelector<HTMLElement>(`#${this.reiterId(richtung)}`)?.focus();

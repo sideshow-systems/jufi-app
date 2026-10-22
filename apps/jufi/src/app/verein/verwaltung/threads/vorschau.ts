@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
-import type { ModulAnsicht, ThreadEntwurf } from '@jufi/domain';
+import { type ModulAnsicht, RICHTUNGEN, type ThreadEntwurf } from '@jufi/domain';
 import { DateienModulComponent } from '../../threads/dateien-modul';
 import { FotosModulComponent } from '../../threads/fotos-modul';
 import { FahrtModul } from '../../threads/fahrt-modul';
@@ -57,18 +57,12 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 		// Ohne Autos und Kinder wie die Umfrage ohne Zeilen: Die Vorschau bietet nichts an, was die API
 		// riefe; die Karte zeigt die gewaehlten Richtungen mit leerer Liste.
 		if (m.typ === 'FAHRT') {
-			const richtungen = (
-				[
-					['HIN', m.hin],
-					['RUECK', m.rueck],
-				] as const
-			).filter(([, an]) => an);
 			return {
 				typ: 'FAHRT',
 				id,
 				titel: m.titel,
 				leitung: false,
-				richtungen: richtungen.map(([richtung]) => ({
+				richtungen: RICHTUNGEN.filter((richtung) => (richtung === 'HIN' ? m.hin : m.rueck)).map((richtung) => ({
 					richtung,
 					vorschlagTag: null,
 					darfAnbieten: false,

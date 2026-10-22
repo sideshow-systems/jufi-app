@@ -21,8 +21,10 @@ import { letzterTag, UHRZEIT, type TerminDaten } from '../termin/termin.js';
 
 export const RICHTUNG_TEXT: Readonly<Record<Richtung, string>> = { HIN: 'Hinfahrt', RUECK: 'Rückfahrt' };
 
-// Hinfahrt vor Rueckfahrt: die Reihenfolge der Ansicht und der Konflikte.
-const RICHTUNGEN: readonly Richtung[] = ['HIN', 'RUECK'];
+// Hinfahrt vor Rueckfahrt: die Reihenfolge der Ansicht und der Konflikte. Exportiert, damit
+// Vorschau, Editor und Thread-Seite nicht je ihre eigene Liste fuehren, die beim Erweitern
+// (eine dritte Richtung) still auseinanderliefe.
+export const RICHTUNGEN: readonly Richtung[] = ['HIN', 'RUECK'];
 
 // Der Server macht aus NICHT_GEFUNDEN 404 und aus den anderen vier die 409 mit dem
 // gleichnamigen Code.
