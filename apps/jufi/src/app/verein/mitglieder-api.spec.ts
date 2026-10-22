@@ -126,6 +126,13 @@ describe('MitgliederApi', () => {
 				'/v/api/v1/meine-jungfischer/k1/einwilligung',
 				{ erteilen: false },
 			],
+			[
+				() => api.setzeFotoEinwilligung('v', 'k1', true),
+				'POST',
+				'/v/api/v1/meine-jungfischer/k1/einwilligung',
+				{ erteilen: true, art: 'FOTOS' },
+			],
+			[() => api.setzeEigeneFotoEinwilligung('v', false), 'POST', '/v/api/v1/ich/einwilligung', { erteilen: false }],
 			[() => api.ansprechpartner('v'), 'GET', '/v/api/v1/ansprechpartner'],
 			[() => api.verwaltungsHinweise('v'), 'GET', '/v/api/v1/verwaltung/hinweise'],
 		];

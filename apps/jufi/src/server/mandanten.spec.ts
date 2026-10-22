@@ -542,7 +542,20 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	},
 	'POST /meine-jungfischer/:kindId/einwilligung': async (k) => {
 		await meineJungfischerSchreibfall(k, 'einwilligung', { erteilen: true });
+		// Auch die Foto-Einwilligung eines fremden Kindes ist in eigen unbekannt.
+		await meineJungfischerSchreibfall(k, 'einwilligung', { erteilen: true, art: 'FOTOS' });
 		expect(await k.prisma.einwilligung.count({ where: { jungfischerId: k.fremdesKindId } })).toBe(0);
+	},
+	'POST /ich/einwilligung': async (k) => {
+		await profilOhneId(k, 'POST', '/ich/einwilligung');
+		// In eigen ist die Person der Sitzung kein volljaehriger Jungfischer: 404, und in fremd entsteht nichts.
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/ich/einwilligung`, {
+			methode: 'POST',
+			body: { erteilen: true },
+			cookie: k.eigenesCookie,
+		});
+		expect(r.status).toBe(404);
+		expect(await k.prisma.einwilligung.count({ where: { art: 'FOTOS', vereinId: k.fremd.id } })).toBe(0);
 	},
 	'POST /personen/:id/zugang': async (k) => {
 		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });

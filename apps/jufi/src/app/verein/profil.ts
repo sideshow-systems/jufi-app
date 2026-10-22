@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, type OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
+import { FOTO_EINWILLIGUNG_TEXT_SELBST, PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
 import { firstValueFrom, map } from 'rxjs';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
 import { wertVon } from '../gemeinsam/formular';
@@ -50,6 +50,52 @@ const nameGueltig = (name: string): boolean => name.length >= 1 && name.length <
 						<dd>{{ i.kennung ?? '–' }}</dd>
 					</dl>
 				</jf-karte>
+
+				<!-- Nur volljaehrige Jungfischer: fuer Minderjaehrige entscheiden die Eltern unter Meine Jungfischer. -->
+				@if (i.fotoEinwilligung; as fotos) {
+					<jf-karte>
+						<div data-fotos>
+							<h2>Fotos</h2>
+							<p>Fotos: {{ fotos.erlaubt ? 'erlaubt' : 'nicht erlaubt' }}</p>
+							@if (fotoFrage()) {
+								<div
+									class="frage"
+									role="alertdialog"
+									[attr.aria-label]="fotos.erlaubt ? 'Fotoerlaubnis zurückziehen' : 'Fotos erlauben'"
+								>
+									@if (fotos.erlaubt) {
+										<p>
+											Willst du die Erlaubnis wirklich zurückziehen? Fotos von dir sind dann für die Mitglieder nicht
+											mehr sichtbar.
+										</p>
+									} @else {
+										<p>{{ fotoText }}</p>
+									}
+									<div class="reihe">
+										<button
+											type="button"
+											class="knopf primaer"
+											[disabled]="laeuft()"
+											(click)="setzeFotos(fotos.erlaubt)"
+										>
+											{{ fotos.erlaubt ? 'Ja, zurückziehen' : 'Ja, Fotos erlauben' }}
+										</button>
+										<button type="button" class="knopf" [disabled]="laeuft()" (click)="fotoFrage.set(false)">
+											Abbrechen
+										</button>
+									</div>
+								</div>
+							} @else {
+								<button type="button" class="knopf" [disabled]="laeuft()" (click)="fotoFrage.set(true)">
+									{{ fotos.erlaubt ? 'Erlaubnis zurückziehen' : 'Fotos erlauben' }}
+								</button>
+							}
+							@if (fotoFehler(); as text) {
+								<p class="fehler" role="alert">{{ text }}</p>
+							}
+						</div>
+					</jf-karte>
+				}
 
 				<jf-karte>
 					<h2>Passkeys</h2>
@@ -338,6 +384,10 @@ export class ProfilComponent implements OnInit {
 	protected readonly passwortErfolg = signal(false);
 
 	protected readonly totpOffen = signal(false);
+	/** Ob die Bestaetigung zu den Fotos offen ist (Erlauben mit Wortlaut, Zurueckziehen). */
+	protected readonly fotoFrage = signal(false);
+	protected readonly fotoFehler = signal<string | null>(null);
+	protected readonly fotoText = FOTO_EINWILLIGUNG_TEXT_SELBST;
 	protected readonly abmeldefehler = signal<string | null>(null);
 
 	protected readonly wert = wertVon;
@@ -455,6 +505,21 @@ export class ProfilComponent implements OnInit {
 				this.neuesPasswort.set('');
 				this.passwortErfolg.set(true);
 				await this.lade();
+			},
+		);
+	}
+
+	/** erlaubt ist der Stand vor dem Klick: Wer erlaubt hat, zieht zurueck, und umgekehrt. */
+	protected async setzeFotos(erlaubt: boolean): Promise<void> {
+		await this.versuche(
+			(text) => this.fotoFehler.set(text),
+			async () => {
+				try {
+					await firstValueFrom(this.api.setzeEigeneFotoEinwilligung(this.slug(), !erlaubt));
+					await this.lade();
+				} finally {
+					this.fotoFrage.set(false);
+				}
 			},
 		);
 	}

@@ -25,7 +25,7 @@ import { MAIL_MAX_VERSUCHE } from '../mail/arbeiter.js';
 import { vereinsKontext } from '../verein.js';
 import { brauchtMitglied, mitgliedKontext } from './sitzung.js';
 import { alsSicht, ladeUmfeld, statt404 } from './verwaltung.js';
-import { entferne, entzieheZugangWennUngueltig } from './zugang.js';
+import { entferne, entzieheZugangWennUngueltig, hatFotoEinwilligung } from './zugang.js';
 
 export interface PersonListe {
 	id: string;
@@ -601,6 +601,7 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 				familie?: ReturnType<typeof familieVon>;
 				einladung?: { offen: boolean; ablauf: string | null; mailNichtZugestellt: boolean } | null;
 				zugang?: { vorhanden: boolean; letzteAnmeldungAm: string | null; erlaubt: boolean } | null;
+				fotoEinwilligung?: boolean | null;
 			} = baueListe(betrachter, p, einsicht, a, u.hinweiseFuer(p));
 
 			if (einsicht !== 'NAME') {
@@ -620,6 +621,9 @@ export function personenRouten(router: Router, deps: VolleAppDeps): void {
 					letzteAnmeldungAm: zugang?.letzteAnmeldungAm ? zugang.letzteAnmeldungAm.toISOString() : null,
 					erlaubt: p.zugangErlaubt,
 				};
+				// Neben dem Einwilligungshinweis, aber getrennt davon: der Hinweis meint die DSGVO-Einwilligung,
+				// dies die Erlaubnis, die Person auf Fotos zu zeigen. null bei Erwachsenen, die es nicht betrifft.
+				antwort.fotoEinwilligung = p.art === 'JUNGFISCHER' ? await hatFotoEinwilligung(db, p, u.jetztWert) : null;
 			}
 			res.json(antwort);
 		}),

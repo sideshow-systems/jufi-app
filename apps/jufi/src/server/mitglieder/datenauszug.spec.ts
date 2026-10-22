@@ -239,6 +239,45 @@ describe('Meine Daten herunterladen', () => {
 		expect(auszug.einwilligungen[0].widerrufenAm).toBe('2026-10-02T12:00:00.000Z');
 	});
 
+	it('eine Foto-Einwilligung steht mit ihrer Art neben der DSGVO-Einwilligung, bei Mutter und Kind', async () => {
+		const f = await neueFamilie();
+		await prisma.einwilligung.create({
+			data: {
+				vereinId: f.verein.id,
+				jungfischerId: f.kind.personId,
+				erteiltVon: f.mutter.personId,
+				art: 'FOTOS',
+				textVersion: '1',
+				erteiltAm: new Date('2026-09-20T09:00:00.000Z'),
+				widerrufenAm: new Date('2026-10-03T09:00:00.000Z'),
+			},
+		});
+		const alsMutter = await (await f.hole(f.mutter.cookie)).json();
+		expect(alsMutter.einwilligungen).toEqual([
+			{
+				kind: 'Kai Muster',
+				art: 'DSGVO_ART8',
+				textVersion: 'v1',
+				erteiltAm: '2026-09-15T09:00:00.000Z',
+				widerrufenAm: null,
+				erteiltVon: 'ich',
+			},
+			{
+				kind: 'Kai Muster',
+				art: 'FOTOS',
+				textVersion: '1',
+				erteiltAm: '2026-09-20T09:00:00.000Z',
+				widerrufenAm: '2026-10-03T09:00:00.000Z',
+				erteiltVon: 'ich',
+			},
+		]);
+		const alsKind = await (await f.hole(f.kind.cookie)).json();
+		expect(alsKind.einwilligungen.map((e: { art: string; erteiltVon: string }) => [e.art, e.erteiltVon])).toEqual([
+			['DSGVO_ART8', 'Mara Muster'],
+			['FOTOS', 'Mara Muster'],
+		]);
+	});
+
 	it('enthaelt keine Geheimnisse und keinen Hash aus der Datenbank', async () => {
 		const f = await neueFamilie();
 		const zeile = await prisma.zugang.findUniqueOrThrow({

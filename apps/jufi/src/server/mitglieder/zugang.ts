@@ -1,5 +1,19 @@
-import { sperreVereinszeile, vermerkeUmfeld, type EinladungArt, type Person, type VereinDb } from '@jufi/db';
-import { darfEinladen, einladungsAblauf, hatGueltigeEinwilligung, hatRecht, istVolljaehrig } from '@jufi/domain';
+import {
+	sperreVereinszeile,
+	vermerkeUmfeld,
+	type EinladungArt,
+	type Person,
+	type VereinDb,
+	type VereinTx,
+} from '@jufi/db';
+import {
+	darfEinladen,
+	einladungsAblauf,
+	fotoEinwilligungGilt,
+	hatGueltigeEinwilligung,
+	hatRecht,
+	istVolljaehrig,
+} from '@jufi/domain';
 import type { Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
@@ -86,6 +100,28 @@ export async function hatEinwilligung(tx: Transaktion, kind: Person, jetzt: Date
 		(await tx.person.findMany({ where: { id: { in: erteilerIds } } })).map((p) => [p.id, p]),
 	);
 	return hatGueltigeEinwilligung(kind, einwilligungen, erteiler, zuordnungen, jetzt);
+}
+
+/**
+ * Ob die Person heute auf Fotos gezeigt werden darf. Die Regel steht in fotoEinwilligungGilt
+ * (Volljaehrige nur mit eigener Zeile, sonst wie die DSGVO-Einwilligung); hier wird nur
+ * gelesen, was sie braucht, und zwar frisch und nur die FOTOS-Zeilen: eine DSGVO-Zeile
+ * erlaubt keine Fotos (Rahmen, Entscheidung 8). Eine Stelle fuer "Meine Jungfischer", GET /ich,
+ * die Personenansicht und die Schreibrouten, damit sie nicht auseinanderlaufen.
+ */
+export async function hatFotoEinwilligung(db: VereinDb | VereinTx, kind: Person, jetzt: Date): Promise<boolean> {
+	const [zeilen, zuordnungen] = await Promise.all([
+		db.einwilligung.findMany({
+			where: { jungfischerId: kind.id, art: 'FOTOS', widerrufenAm: null },
+			select: { erteiltVon: true, widerrufenAm: true },
+		}),
+		db.bezugsperson.findMany({ where: { jungfischerId: kind.id } }),
+	]);
+	const erteilerIds = [...new Set(zeilen.map((w) => w.erteiltVon))];
+	const erteiler = new Map<string, Person>(
+		(await db.person.findMany({ where: { id: { in: erteilerIds } } })).map((p) => [p.id, p]),
+	);
+	return fotoEinwilligungGilt(kind, zeilen, erteiler, zuordnungen, jetzt);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, input, type OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
+import { FOTO_EINWILLIGUNG_TEXT } from '@jufi/domain';
 import { firstValueFrom } from 'rxjs';
 import { EinladungAnzeigeComponent } from '../admin/einladung-anzeige';
 import { alsApiFehler, fehlertext } from '../gemeinsam/api-fehler';
@@ -53,6 +54,43 @@ import { beziehungText } from './verwaltung/texte';
 								<dd>{{ zugangstext(k) }}</dd>
 							</dl>
 
+							<!-- Eigener Block: Fotos sind eine eigene Einwilligung und haengen weder am Zugang noch an dessen Knoepfen. -->
+							<div class="fotos" data-fotos>
+								<p>Fotos: {{ k.fotos.erlaubt ? 'erlaubt' : 'nicht erlaubt' }}</p>
+								@if (k.fotos.darfAendern) {
+									@if (fotoFrageId() === k.id) {
+										<div
+											class="frage"
+											role="alertdialog"
+											[attr.aria-label]="k.fotos.erlaubt ? 'Fotoerlaubnis zurückziehen' : 'Fotos erlauben'"
+										>
+											@if (k.fotos.erlaubt) {
+												<p>
+													Willst du die Erlaubnis wirklich zurückziehen? Fotos von {{ k.vorname }} sind dann für die
+													Mitglieder nicht mehr sichtbar.
+												</p>
+											} @else {
+												<p>{{ fotoText }}</p>
+											}
+											<div class="reihe">
+												<button type="button" class="knopf primaer" [disabled]="laeuft()" (click)="setzeFotos(k)">
+													{{ k.fotos.erlaubt ? 'Ja, zurückziehen' : 'Ja, Fotos erlauben' }}
+												</button>
+												<button type="button" class="knopf" [disabled]="laeuft()" (click)="fotoFrageId.set(null)">
+													Abbrechen
+												</button>
+											</div>
+										</div>
+									} @else {
+										<button type="button" class="knopf" [disabled]="laeuft()" (click)="fragFotos(k)">
+											{{ k.fotos.erlaubt ? 'Erlaubnis zurückziehen' : 'Fotos erlauben' }}
+										</button>
+									}
+								} @else if (k.volljaehrig) {
+									<p class="gedaempft klein">Pflegt {{ k.vorname }} selbst im Profil.</p>
+								}
+							</div>
+
 							@if (k.volljaehrig) {
 								<p class="gedaempft klein">
 									{{ k.vorname }} ist volljährig und entscheidet über den eigenen Zugang selbst. Du kannst hier nichts
@@ -88,7 +126,7 @@ import { beziehungText } from './verwaltung/texte';
 											Neuen Link erzeugen
 										</button>
 										@if (k.zugang.einwilligungGueltig) {
-											<button type="button" class="knopf" [disabled]="laeuft()" (click)="widerrufId.set(k.id)">
+											<button type="button" class="knopf" [disabled]="laeuft()" (click)="fragWiderruf(k)">
 												Einwilligung widerrufen
 											</button>
 										} @else {
@@ -166,6 +204,12 @@ import { beziehungText } from './verwaltung/texte';
 		.frage p {
 			margin-bottom: var(--a3);
 		}
+		.fotos {
+			margin: 0 0 var(--a3);
+		}
+		.fotos > p:first-child {
+			margin-bottom: var(--a2);
+		}
 		.fehler {
 			margin: var(--a3) 0 0;
 			color: var(--fehler);
@@ -190,6 +234,9 @@ export class JungfischerComponent implements OnInit {
 	protected readonly links = signal<Record<string, EinladungsLink>>({});
 	/** Das Kind, bei dem gerade die Rueckfrage zum Widerruf offen ist. */
 	protected readonly widerrufId = signal<string | null>(null);
+	/** Das Kind, bei dem gerade die Bestaetigung zu den Fotos offen ist (Erlauben mit Wortlaut, Zurueckziehen). */
+	protected readonly fotoFrageId = signal<string | null>(null);
+	protected readonly fotoText = FOTO_EINWILLIGUNG_TEXT;
 
 	ngOnInit(): void {
 		void this.lade();
@@ -233,6 +280,21 @@ export class JungfischerComponent implements OnInit {
 		return this.fuehreAus(k, () => firstValueFrom(this.api.kindEinwilligung(this.slug(), k.id, true)));
 	}
 
+	/** Hoechstens eine Rueckfrage zur Zeit: zwei offene Dialoge beim selben Kind lesen sich wie ein Widerspruch. */
+	protected fragWiderruf(k: KindAnsicht): void {
+		this.fotoFrageId.set(null);
+		this.widerrufId.set(k.id);
+	}
+
+	protected fragFotos(k: KindAnsicht): void {
+		this.widerrufId.set(null);
+		this.fotoFrageId.set(k.id);
+	}
+
+	protected setzeFotos(k: KindAnsicht): Promise<void> {
+		return this.fuehreAus(k, () => firstValueFrom(this.api.setzeFotoEinwilligung(this.slug(), k.id, !k.fotos.erlaubt)));
+	}
+
 	protected widerrufe(k: KindAnsicht): Promise<void> {
 		return this.fuehreAus(k, () => firstValueFrom(this.api.kindEinwilligung(this.slug(), k.id, false)), true);
 	}
@@ -262,9 +324,11 @@ export class JungfischerComponent implements OnInit {
 				});
 			}
 			this.widerrufId.set(null);
+			this.fotoFrageId.set(null);
 			await this.lade();
 		} catch (ursache) {
 			this.widerrufId.set(null);
+			this.fotoFrageId.set(null);
 			this.fehler.update((alt) => ({ ...alt, [k.id]: fehlertext(alsApiFehler(ursache)) }));
 		} finally {
 			this.laeuft.set(false);

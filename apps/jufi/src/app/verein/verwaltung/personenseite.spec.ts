@@ -93,6 +93,26 @@ describe('Personenseite', () => {
 		expect((seite.querySelector('input[name="vorname"]') as HTMLInputElement).value).toBe('Lena');
 	});
 
+	it('zeigt bei Jungfischern den Foto-Stand neben den Hinweisen, bei Erwachsenen und ohne Angabe nichts', async () => {
+		const { seite: erlaubt } = await oeffneVerwaltung(kind({ fotoEinwilligung: true }));
+		expect(erlaubt.querySelector('[data-fotos]')?.textContent).toContain('Fotos: erlaubt');
+		expect(erlaubt.querySelector('[data-fotos]')?.textContent).not.toContain('nicht erlaubt');
+	});
+
+	it('Foto-Stand false heisst Fotos: nicht erlaubt', async () => {
+		const { seite } = await oeffneVerwaltung(
+			kind({ fotoEinwilligung: false, warnhinweise: [{ art: 'EINWILLIGUNG_FEHLT' }] }),
+		);
+		expect(seite.querySelector('[data-fotos]')?.textContent).toContain('Fotos: nicht erlaubt');
+		expect(seite.textContent).toContain('Einwilligung fehlt');
+	});
+
+	it('Foto-Stand null (Erwachsene) oder fehlend (ohne Verwaltungsrecht) zeigt keine Zeile', async () => {
+		const erw: PersonDetail = { ...kind(), id: 'e2', art: 'ERWACHSENER', familie: [], fotoEinwilligung: null };
+		const { seite: erwachsen } = await oeffneVerwaltung(erw);
+		expect(erwachsen.querySelector('[data-fotos]')).toBeNull();
+	});
+
 	it('Betreuer sieht die Person ohne Bearbeiten-Knöpfe und ohne Zugangsstand', async () => {
 		const gelesen = kind({ einladung: undefined, zugang: undefined, warnhinweise: [{ art: 'OHNE_FAMILIE' }] });
 		const { seite } = await oeffneSeite('/demo/verwaltung/personen/k1', ichMit(['ANTWORTEN_DETAIL']), [
