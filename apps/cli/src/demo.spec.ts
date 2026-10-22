@@ -321,7 +321,7 @@ describe('demoEinspielen', () => {
 			richtung: 'HIN',
 			plaetze: 3,
 			abfahrtTag: new Date('2026-10-24T00:00:00Z'),
-			abfahrtZeit: '15:30',
+			abfahrtZeit: '13:00',
 			ort: 'Vereinsheim',
 			notiz: null,
 			angelegtAm: BEZUGSTAG,

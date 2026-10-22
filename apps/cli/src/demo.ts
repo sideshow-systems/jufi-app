@@ -597,7 +597,8 @@ export async function demoEinspielen(
 				richtung: 'HIN',
 				plaetze: 3,
 				abfahrtTag: datumSpalte(bowlingTag),
-				abfahrtZeit: '15:30',
+				// Vor dem Treffpunkt (13:30): Spec 1.1 nennt 15:30, das laege nach dem Beginn um 14:00.
+				abfahrtZeit: '13:00',
 				ort: 'Vereinsheim',
 				angelegtAm: jetzt,
 				clientId: `demo-auto-${stand}`,

@@ -542,7 +542,7 @@ Das Zeltlager-Szenario (1.1) mit erzeugten Testbildern; dazu die Leiste mit fün
 
 **Bis dahin hat Bowling eine Helferliste** (Plan zu Etappe 3, Entscheidung 14), damit es zur lokalen Abnahme von Etappe 3 etwas gibt: als letztes Modul „Mitbringen und fahren“, pro Erwachsener, Frist fünf Tage nach dem Einspielen um 18:00, Positionen „Fahrer“ (2) und „Snacks“ (3); Sandra ist bei „Snacks“ eingetragen, mit der Notiz „Gemüsesticks“. Das Zeltlager mit allen Modulen bleibt in Etappe 6.
 
-**Dazu bekommt Bowling eine Fahrgemeinschaft** (Plan zu Etappe 4, Entscheidung 18), hin und rück, nach der Helferliste. Sandra bietet die Hinfahrt an (3 Plätze, Abfahrt am Tag des Termins um 15:30, Treffpunkt Vereinsheim), Lena sitzt darin. Lena und Max haben in der Teilnahme-Umfrage zugesagt (für Max die Mutter); ohne Zusage zeigte die Karte Lena als „nicht mehr dabei“. Max hat keine Mitfahrt und steht unter „Braucht noch Mitfahrt“.
+**Dazu bekommt Bowling eine Fahrgemeinschaft** (Plan zu Etappe 4, Entscheidung 18), hin und rück, nach der Helferliste. Sandra bietet die Hinfahrt an (3 Plätze, Abfahrt am Tag des Termins um 13:00, vor dem Treffpunkt um 13:30; Treffpunkt der Fahrt Vereinsheim), Lena sitzt darin. Lena und Max haben in der Teilnahme-Umfrage zugesagt (für Max die Mutter); ohne Zusage zeigte die Karte Lena als „nicht mehr dabei“. Max hat keine Mitfahrt und steht unter „Braucht noch Mitfahrt“.
 
 **Demo-Fotos kommen mit Etappe 6** (Plan zu Etappe 2, Entscheidung 15). Für die lokale Abnahme von Etappe 2 erzeugt `node tools/erzeuge-testbilder.mjs <verzeichnis> --bunt <n>` bunte Testbilder aus Kreisen und Rechtecken (1600 × 1200, mit Nummer); dasselbe Skript erzeugt die acht Bilder der Fotoprobe (2.4).
 
