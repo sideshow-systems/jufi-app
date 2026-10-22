@@ -50,7 +50,7 @@ belegt, meldet der Start „JuFi-Hub (Entwicklung) nicht gestartet“ und die Ap
 `JUFI_WS_DEV_PORT` in der `.env` **und** das Ziel in `proxy.conf.json` ändern, die Datei ist statisch. Im Betrieb hängt
 der Hub am Server der App selbst, dort gibt es keinen zweiten Port.
 
-Der Demo-Verein enthält zwei Untergruppen, vier Jungfischer (zwei ohne Einwilligung, davon Tim ohne Familie, und einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Dazu kommen fünf Threads: „Wichtige Infos“, „Bowling“ (mit Helferliste, in die sich Sandra eingetragen hat), „Zeltlager <Jahr>“ (das Folgejahr, nur für die Älteren), „🎣 Fischerfest“ (von selbst archiviert) und der Jugendsprecher-Austausch; `pnpm run demo` gibt ihre Adressen aus. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
+Der Demo-Verein enthält zwei Untergruppen, vier Jungfischer (zwei ohne Einwilligung, davon Tim ohne Familie, und einer, der morgen volljährig wird und Jugendsprecher ist), zwei Familien und einen Betreuer, alles erfunden. Dazu kommen fünf Threads: „Wichtige Infos“, „Bowling“ (mit Helferliste, in die sich Sandra eingetragen hat, und Fahrgemeinschaft: Sandra fährt Lena hin, Max braucht noch eine Mitfahrt), „Zeltlager <Jahr>“ (das Folgejahr, nur für die Älteren), „🎣 Fischerfest“ (von selbst archiviert) und der Jugendsprecher-Austausch; `pnpm run demo` gibt ihre Adressen aus. Die Leitung hat alle Rechte, auch die Vereinseinstellungen, und der Verein einen erfundenen Kontakttext (`jugend@example.org`). Er hat bewusst kein Logo, damit das Initialen-Icon zu sehen ist. Er legt keine Zugänge an; die entstehen erst durch Einladung.
 
 **Link-Vorschau lokal prüfen:** Wer einen Thread-Link in einen Messenger einfügt, lässt die Seite ohne Cookie abrufen und liest nur den Kopf. Die Tags setzt der Server in die Seite, die Angular sonst ausliefert (`apps/jufi/src/server/verein/vorschau.ts`); ob sie ankommen, zeigt `curl`: Ein Messenger führt kein JavaScript aus, der Browser zeigt also mehr, als er sieht.
 
@@ -369,6 +369,29 @@ die Routen unter `PUT`/`DELETE /<slug>/api/v1/helfer/:positionId/eintraege/:fuer
   Eintrag im Modul hat.
 - **Nachtragen:** In der Antworten-Übersicht der Verwaltung trägt Gefragte ein und aus, wer den Thread bearbeiten darf,
   auch nach der Frist. Wer die Zeile angeht, sieht darunter „eingetragen von …“.
+
+## Fahrgemeinschaft
+
+Das Modul „Fahrgemeinschaft“ (TP4 Etappe 4) ordnet Kinder Autos zu, je Thread höchstens eines. Die Regeln stehen in
+`libs/domain/src/module/fahrt/`, die Routen unter `/<slug>/api/v1`: Autos über `POST /fahrten/:modulId/autos` und
+`PUT`/`DELETE /autos/:id`, Mitfahrten über `PUT`/`DELETE /fahrten/:modulId/:richtung/:kindId` (`hin` oder `rueck`).
+
+- **Richtungen:** Hinfahrt, Rückfahrt oder beide (Umschalter „Hin“/„Rück“). Eine Richtung mit Autos oder Mitfahrten lässt
+  sich im Editor nicht abschalten, eine Fahrgemeinschaft mit Einträgen nicht entfernen.
+- **Autos:** Jeder Erwachsene bietet je Richtung ein Auto für sich selbst an (1–8 Plätze für Kinder, Abfahrt, Treffpunkt,
+  Notiz; höchstens 30 je Richtung). Der Abfahrtstag ist mit dem Termin vorbelegt. Die Plätze lassen sich nicht unter die
+  Zahl der Mitfahrer setzen (409 `PLAETZE`); ein volles Auto antwortet mit 409 `VOLL`.
+- **Kommt selbst:** Eine Mitfahrt ohne Auto. Das Kind braucht dann keine Mitfahrt mehr und belegt keinen Platz.
+- **Braucht noch Mitfahrt:** Kinder der Zielgruppe ohne Eintrag in dieser Richtung, bei einer Teilnahme-Umfrage nur die
+  mit „Dabei“. Nur sie lassen sich einsetzen (sonst 409 `NICHT_DABEI`), Herausnehmen geht immer. Ein Kind, das später
+  absagt, bleibt im Auto und steht dort mit „nicht mehr dabei“. Die Fahrgemeinschaft zählt nicht zu „Braucht deine
+  Antwort“.
+- **Umsetzen:** Die Leitung (wer den Thread bearbeiten darf) setzt jedes zugesagte Kind in ein Auto mit freiem Platz oder
+  auf „kommt selbst“, auf der Thread-Seite und in der Antworten-Übersicht. Wer einem Kind zugeordnet ist, setzt es selbst
+  ein, Kinder sich selbst.
+- **Zurückziehen:** Fahrer oder Leitung ziehen ein Auto zurück, auch mit Kindern darin; die Route löscht deren
+  Mitfahrten, und die Kinder stehen wieder unter „Braucht noch Mitfahrt“. Saßen Kinder darin, steht im Verlauf der
+  Systemsatz `AUTO_ZURUECKGEZOGEN`: „Auto von Sandra H. (Hinfahrt) zurückgezogen – Lena H. braucht wieder eine Mitfahrt.“
 
 ## Sicherung
 

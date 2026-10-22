@@ -458,10 +458,11 @@ test.describe('Thread-Editor', () => {
 
 					// Die Felder stehen nur fuer das gewaehlte Modul. Bowling hat Info-Text, Termin und Umfrage, dazu
 					// seit den Foto-Schritten des Ablaufs Dateien und Fotos, beide gespeichert, also mit Zahl und Upload,
-					// und seit den Helfer-Schritten eine Helferliste mit Eintraegen (gesperrtes Entfernen).
+					// seit den Helfer-Schritten eine Helferliste mit Eintraegen (gesperrtes Entfernen) und seit den
+					// Fahrt-Schritten eine Fahrgemeinschaft nur fuer die Hinfahrt, nach dem Zurueckziehen ohne Autos.
 					const module = page.locator('ol.module button.waehlen');
-					await expect(module).toHaveCount(6);
-					for (let i = 0; i < 6; i++) {
+					await expect(module).toHaveCount(7);
+					for (let i = 0; i < 7; i++) {
 						await module.nth(i).click();
 						await expect(page.getByRole('heading', { name: `(Modul ${i + 1})` })).toBeVisible();
 						await pruefe(`Modul ${i + 1}`);

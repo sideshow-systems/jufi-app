@@ -379,10 +379,14 @@ export async function demoEinspielen(
 		// Der uebernaechste Samstag, damit zwischen Einspielen und Frist immer Tage liegen; die Frist
 		// ist der Donnerstag davor, 18:00 Berliner Wandzeit (berlinZeitpunkt kennt die Zeitumstellung).
 		const bowlingTag = tagPlus(naechsterWochentag(jetzt, SAMSTAG), 7);
-		// Die Helferliste von Bowling, damit die Etappe lokal etwas zum Abnehmen hat (Plan zu TP4 Etappe 3,
-		// Entscheidung 14); das Zeltlager mit allen Modulen folgt in Etappe 6.
+		// Die Helferliste und die Fahrgemeinschaft von Bowling, damit die Etappen lokal etwas zum Abnehmen
+		// haben (Plan zu TP4 Etappe 3, Entscheidung 14, und Etappe 4, Entscheidung 18); das Zeltlager mit allen
+		// Modulen folgt in Etappe 6.
 		let helferModulId = '';
 		const helferPositionen = new Map<string, string>();
+		let teilnahmeId = '';
+		let dabeiId = '';
+		let fahrtModulId = '';
 		const bowling = await thread({ titel: '🎳 Bowling', modus: 'KOMMENTARE', angepinnt: false }, async (threadId) => {
 			await infoModul(threadId, 0, INFO_TEXT_BOWLING);
 			await terminModul(threadId, 1, 'Bowling', {
@@ -393,6 +397,7 @@ export async function demoEinspielen(
 				treffpunkt: '13:30 am Vereinsheim',
 			});
 			const modul = await tx.threadModul.create({ data: { vereinId, threadId, typ: 'UMFRAGE', position: 2 } });
+			teilnahmeId = modul.id;
 			await tx.umfrageModul.create({
 				data: {
 					vereinId,
@@ -406,10 +411,12 @@ export async function demoEinspielen(
 					ergebnisse: 'ALLE',
 				},
 			});
-			// Ohne Antworten: Die Demo soll das Antworten selbst vorfuehren.
+			// Antworten nur fuer Lena und Max (unten), die die Fahrgemeinschaft braucht: Tim und Jonas bleiben offen,
+			// damit die Demo das Antworten selbst vorfuehrt.
 			await tx.umfrageOption.createMany({
 				data: teilnahmeOptionen(true).map((o, position) => ({ vereinId, umfrageId: modul.id, position, ...o })),
 			});
+			dabeiId = (await tx.umfrageOption.findFirstOrThrow({ where: { umfrageId: modul.id, schluessel: 'dabei' } })).id;
 
 			// Als letztes Modul, pro Erwachsener wie die Vorgabe des Editors. Die Frist fuenf Berliner Tage nach
 			// dem Einspielen um 18:00, wie der Editor sie vorbelegt; der Termin liegt mindestens acht Tage voraus,
@@ -438,6 +445,12 @@ export async function demoEinspielen(
 				});
 				helferPositionen.set(text, zeile.id);
 			}
+
+			// Hin und zurueck, ohne eigene Ueberschrift, wie der Editor sie anlegt: Die Seite zeigt dann
+			// "Fahrgemeinschaft". Nach der Helferliste, damit deren Position (3) bleibt, was sie war.
+			const fahrt = await tx.threadModul.create({ data: { vereinId, threadId, typ: 'FAHRT', position: 4 } });
+			fahrtModulId = fahrt.id;
+			await tx.fahrtModul.create({ data: { vereinId, id: fahrt.id, threadId, hin: true, rueck: true } });
 		});
 
 		// Das Zeltlager des Folgejahres, nur fuer die Aelteren, als Chat mit Umfrage. Der Titel traegt das Jahr
@@ -508,20 +521,27 @@ export async function demoEinspielen(
 
 		// Antworten und Nachrichten, je mit eigenem Stand; die Zeile der Antwort ist das Objekt der
 		// Aenderung wie in schreibeAntwort, die der Nachricht wie in schreibeNachricht.
-		const antwort = async (threadId: string, umfrageId: string, person: { id: string }, optionId: string) => {
+		// von: wer die Antwort eingetragen hat, ohne Angabe die Person selbst.
+		const antwort = async (
+			threadId: string,
+			umfrageId: string,
+			person: { id: string },
+			optionId: string,
+			von: { id: string } = person,
+		) => {
 			stand += 1;
 			const zeile = await tx.umfrageAntwort.create({
 				data: {
 					vereinId,
 					umfrageId,
 					fuerId: person.id,
-					vonId: person.id,
+					vonId: von.id,
 					abgegebenAm: jetzt,
 					clientId: `demo-antwort-${stand}`,
 				},
 			});
 			await tx.umfrageAntwortOption.create({ data: { vereinId, umfrageId, antwortId: zeile.id, optionId } });
-			aenderungen.push({ stand, threadId, art: 'ANTWORT', objektId: zeile.id, urheberId: person.id });
+			aenderungen.push({ stand, threadId, art: 'ANTWORT', objektId: zeile.id, urheberId: von.id });
 		};
 		// Ein Helfer-Eintrag hat das Modul als Objekt seiner Aenderung, nicht die Eintragszeile (TP4-Spec 8,
 		// wie schreibeEintrag): Die Ansicht der Liste haengt an allen Eintraegen zugleich.
@@ -559,6 +579,45 @@ export async function demoEinspielen(
 		// Ein einziger Eintrag, damit Fuellstand, Name und Notiz zu sehen sind und die Liste fuer die uebrigen
 		// Erwachsenen (Hans, Gerda, Petra, die Leitung) weiter unter "Braucht deine Antwort" steht.
 		await helferEintrag(bowling.id, helferModulId, helferPositionen.get('Snacks')!, sandra, 'Gemüsesticks');
+
+		// Die Fahrgemeinschaft betrachtet nur Kinder mit "Dabei" (Spec 6.2): Ohne Zusage zeigte die Karte Lena im
+		// Auto als "nicht mehr dabei", und "Braucht noch Mitfahrt" bliebe leer. Lena sagt selbst zu; fuer Max, der
+		// ohne Einwilligung keinen Zugang hat, sagt die Mutter zu. Er bleibt ohne Mitfahrt, damit die Liste
+		// "Braucht noch Mitfahrt" nicht leer ist und Sandra ihn in ihr Auto setzen kann.
+		await antwort(bowling.id, teilnahmeId, lena, dabeiId);
+		await antwort(bowling.id, teilnahmeId, max, dabeiId, sandra);
+		// Auto und Mitfahrt haben das Modul als Objekt ihrer Aenderung (TP4-Spec 8, wie der Helfer-Eintrag). Der
+		// Abfahrtstag ist der Tag des Termins, wie ihn das Formular vorbelegt (Plan-Entscheidung 15).
+		stand += 1;
+		const auto = await tx.auto.create({
+			data: {
+				vereinId,
+				modulId: fahrtModulId,
+				fahrerId: sandra.id,
+				richtung: 'HIN',
+				plaetze: 3,
+				abfahrtTag: datumSpalte(bowlingTag),
+				abfahrtZeit: '15:30',
+				ort: 'Vereinsheim',
+				angelegtAm: jetzt,
+				clientId: `demo-auto-${stand}`,
+			},
+		});
+		aenderungen.push({ stand, threadId: bowling.id, art: 'ANTWORT', objektId: fahrtModulId, urheberId: sandra.id });
+		stand += 1;
+		await tx.mitfahrt.create({
+			data: {
+				vereinId,
+				modulId: fahrtModulId,
+				richtung: 'HIN',
+				kindId: lena.id,
+				autoId: auto.id,
+				vonId: sandra.id,
+				eingetragenAm: jetzt,
+				clientId: `demo-mitfahrt-${stand}`,
+			},
+		});
+		aenderungen.push({ stand, threadId: bowling.id, art: 'ANTWORT', objektId: fahrtModulId, urheberId: sandra.id });
 		await aktivitaet(bowling.id);
 
 		await antwort(zeltlager.id, pizzaUmfrageId, lena, pizzaOptionen.get('Salami')!);
