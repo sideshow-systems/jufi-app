@@ -355,4 +355,8 @@ describe('VEREINS_MODELLE', () => {
 	it('kennt die Modelle der Helferliste', () => {
 		expect(VEREINS_MODELLE).toEqual(expect.arrayContaining(['HelferModul', 'HelferPosition', 'HelferEintrag']));
 	});
+
+	it('kennt die Modelle der Fahrgemeinschaft', () => {
+		expect(VEREINS_MODELLE).toEqual(expect.arrayContaining(['FahrtModul', 'Auto', 'Mitfahrt']));
+	});
 });
