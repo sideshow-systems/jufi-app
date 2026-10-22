@@ -246,6 +246,8 @@ describe('Dokumente-API', () => {
 			const s = await szenario();
 			const d = await s.neu('x.pdf', PNG);
 			expect(d.typ).toBe('image/png');
+			// Plan-Entscheidung 9: Der Name folgt dem erkannten Typ, auch bei Dokumenten.
+			expect(d.name).toBe('x.png');
 		});
 
 		it('weist Text als x.pdf mit 415 TYP ab und hinterlaesst nichts', async () => {
@@ -255,7 +257,7 @@ describe('Dokumente-API', () => {
 				body: Buffer.from('Das ist kein PDF, nur Text.'),
 			});
 			expect(r.status).toBe(415);
-			expect(await r.json()).toEqual({ fehler: FEHLER_TEXT.TYP, code: 'TYP' });
+			expect(await r.json()).toEqual({ fehler: FEHLER_TEXT.TYP.DATEI, code: 'TYP' });
 			expect(await tempInhalt()).toEqual([]);
 			expect(await s.db.dokument.count()).toBe(0);
 		});
@@ -280,7 +282,7 @@ describe('Dokumente-API', () => {
 				body: Buffer.alloc(26 * MB, 0x20),
 			});
 			expect(r.status).toBe(413);
-			expect(await r.json()).toEqual({ fehler: FEHLER_TEXT.GROESSE, code: 'GROESSE' });
+			expect(await r.json()).toEqual({ fehler: FEHLER_TEXT.GROESSE.DATEI, code: 'GROESSE' });
 			expect(await tempInhalt()).toEqual([]);
 		});
 

@@ -111,11 +111,26 @@ SMOKE_MAIL="jufi-rauchtest-mail-$$"
 SMOKE_APP="jufi-rauchtest-app-$$"
 SMOKE_NET="jufi-rauchtest-net-$$"
 SMOKE_PORT="${SMOKE_PORT:-4198}"
+PROBE_DIR="$(mktemp -d)"
 smoke_cleanup() {
 	docker rm -f "$SMOKE_APP" "$SMOKE_DB" "$SMOKE_MAIL" >/dev/null 2>&1 || true
 	docker network rm "$SMOKE_NET" >/dev/null 2>&1 || true
+	rm -rf "$PROBE_DIR"
 }
 trap smoke_cleanup EXIT INT TERM
+
+# Die App laeuft hier mit derselben Speichergrenze wie auf dem Server, sonst beweist
+# die Fotoprobe unten nichts (Plan, Entscheidung 1). Gelesen aus deploy/jufi-services.yml,
+# damit es nur eine Stelle gibt, an der die Grenze steht. Verworfen: docker compose config
+# -- das braeuchte alle JUFI_-Variablen der Server-.env, die es hier nicht gibt. Gelesen
+# wird darum zeilenweise: der Block des Dienstes jufi (zwei Leerzeichen eingerueckt) bis
+# zum naechsten Dienst, darin mem_limit (vier Leerzeichen).
+APP_MEM="$(awk '
+	/^  [A-Za-z0-9_-]+:[[:space:]]*$/ { dienst = $1 }
+	dienst == "jufi:" && /^    mem_limit:/ { gsub(/["'\'']/, "", $2); print $2; exit }
+' deploy/jufi-services.yml)"
+[[ "$APP_MEM" =~ ^[0-9]+[bkmg]?$ ]] \
+	|| fail "Kein mem_limit am Dienst jufi in deploy/jufi-services.yml (gelesen: '${APP_MEM}'). Ohne Grenze misst die Fotoprobe nichts."
 
 docker network create "$SMOKE_NET" >/dev/null
 docker run -d --name "$SMOKE_DB" --network "$SMOKE_NET" --network-alias jufi-db \
@@ -165,7 +180,9 @@ docker run --rm --network "$SMOKE_NET" "${SMOKE_ENV[@]}" "$IMAGE:$SHA" \
 rm -f "$LOG"
 note 'migrate deploy im Image: alle Migrationen angewendet'
 
-docker run -d --name "$SMOKE_APP" --network "$SMOKE_NET" \
+# --memory-swap gleich --memory: kein Swap, wie auf dem Server (3,7 GB RAM ohne Swap).
+# Sonst wiche der Container beim Speicherengpass auf Swap aus, statt beendet zu werden.
+docker run -d --name "$SMOKE_APP" --network "$SMOKE_NET" --memory "$APP_MEM" --memory-swap "$APP_MEM" \
 	-p "127.0.0.1:$SMOKE_PORT:4000" "${SMOKE_ENV[@]}" "$IMAGE:$SHA" >/dev/null
 BASIS="http://127.0.0.1:$SMOKE_PORT"
 HEALTH=''
@@ -246,6 +263,78 @@ for GROESSE in 192 512; do
 		|| fail "Das Initialen-Icon ($GROESSE px) aus dem Image ist kaputt (Schrift? sharp?)."
 done
 note 'Initialen-Icon: DejaVu Sans Bold, 192 und 512 px, Buchstaben gezeichnet'
+
+# Fotoprobe (TP4-Spec 2.4, Plan Entscheidung 1): Die teuersten Fotos, die die Upload-Route
+# annimmt (Liste und Begruendung in tools/erzeuge-testbilder.mjs: progressive JPEGs in
+# 4:2:0, 4:4:4 und CMYK, interlaced PNG mit 50 MP in 8 und 16 Bit, WebP, dazu die beiden
+# bisherigen Bilder), gehen durch genau die foto.ts, die im Betrieb laeuft, im laufenden
+# App-Container und unter seiner Speichergrenze. Danach zaehlt der Spitzenwert der cgroup: App im Leerlauf und Probe
+# zusammen, also mehr als im Betrieb, wo nur ein Node-Prozess arbeitet -- die vorsichtige
+# Seite. Ein dauerhaftes Tor statt einer einmaligen Messung, weil die naechste sharp-Version
+# den Speicherbedarf aendern kann, ohne dass es jemand merkt. Verworfen: ueber die echte
+# Upload-Route messen -- das braeuchte eine Mitgliedssitzung im Wegwerf-Verein, und
+# Demo-Personen haben kein Passwort.
+# Die Bilder entstehen hier (sharp auf dem Entwicklungsrechner), nie echte Fotos.
+# Die Liste steht hier ausdruecklich und nicht als Glob ueber das Verzeichnis: Erzeugte das
+# Skript ein Bild nicht mehr, fiele die Probe mit "fehlt" um, statt still weniger zu messen.
+PROBE_BILDER=(gross.jpg gross.png gross-progressiv.jpg gross-progressiv-444.jpg gross-cmyk.jpg gross-adam7.png gross-adam7-16bit.png gross.webp)
+LOG="$(mktemp)"
+node tools/erzeuge-testbilder.mjs "$PROBE_DIR" >"$LOG" 2>&1 \
+	|| { cat "$LOG" >&2; fail 'Die Testbilder der Fotoprobe liessen sich nicht erzeugen.'; }
+rm -f "$LOG"
+for BILD in "${PROBE_BILDER[@]}"; do
+	[[ -f "$PROBE_DIR/$BILD" ]] || fail "Testbild $BILD fehlt; tools/erzeuge-testbilder.mjs und PROBE_BILDER passen nicht zusammen."
+done
+# Als .mts, damit Node den Modultyp nicht aus einer package.json raten muss
+# (Begruendung in tools/fotoprobe.mjs). Das ganze Verzeichnis auf einmal: docker cp
+# legt /app/probe dann selbst an, als einzelne Dateien braeuchte es das Verzeichnis
+# schon, und /app ist fuer den App-Benutzer nicht beschreibbar.
+# docker cp uebernimmt die Rechte: mktemp -d legt 700 an, und der App-Benutzer node
+# koennte /app/probe dann nicht lesen (MODULE_NOT_FOUND statt einer Messung).
+chmod 755 "$PROBE_DIR"
+cp apps/jufi/src/server/dateien/foto.ts "$PROBE_DIR/foto.mts"
+cp tools/fotoprobe.mjs "$PROBE_DIR/fotoprobe.mjs"
+docker cp "$PROBE_DIR/." "$SMOKE_APP:/app/probe" >/dev/null || fail 'Die Fotoprobe liess sich nicht in den Container kopieren.'
+
+# Ein Lauf der Probe; $1 beschreibt ihn fuer die Meldungen, der Rest sind die Bilder.
+# 137 ist SIGKILL, also der OOM-Killer an der Probe; stirbt stattdessen die App, steht
+# der Container. Beides heisst: Die Grenze reicht nicht. Nicht die Fotogrenze senken,
+# sondern mem_limit anheben -- die gemessenen Werte sind die Grundlage (Spec 2.4).
+fotoprobe() {
+	local lauf="$1"
+	shift
+	local pfade=() rc=0 bild laeuft spitze
+	for bild in "$@"; do pfade+=("/app/probe/$bild"); done
+	PROBE_OUT="$(docker exec "$SMOKE_APP" node /app/probe/fotoprobe.mjs "${pfade[@]}" 2>&1)" || rc=$?
+	laeuft="$(docker inspect "$SMOKE_APP" --format '{{.State.Running}}' 2>/dev/null || echo false)"
+	if [[ "$rc" -eq 137 || "$laeuft" != 'true' ]]; then
+		printf '%s\n' "$PROBE_OUT" >&2
+		spitze="$(docker exec "$SMOKE_APP" cat /sys/fs/cgroup/memory.peak 2>/dev/null || true)"
+		[[ "$spitze" =~ ^[0-9]+$ ]] && note "Spitze bis zum Abbruch: $((spitze / 1024 / 1024)) MiB von $APP_MEM"
+		fail "Speicher reicht nicht ($lauf); mem_limit anheben (Spec 2.4). Exit $rc, Container laeuft: $laeuft."
+	fi
+	[[ "$rc" -eq 0 ]] || { printf '%s\n' "$PROBE_OUT" >&2; fail "Die Fotoprobe ist gescheitert ($lauf, Exit $rc)."; }
+}
+# Erst jedes Bild in einem eigenen Prozess: maxRSS sinkt nie, nur so steht die Spitze je
+# Bild da, und bei einem Abbruch ist klar, an welchem Bild es lag. Dann alle in einem
+# Prozess, wie im Betrieb, wo ein langlebiger Prozess Foto um Foto verarbeitet: Gibt der
+# Allokator den Speicher eines Bildes nicht zurueck, waechst die Spitze dort von Bild zu Bild.
+for BILD in "${PROBE_BILDER[@]}"; do
+	fotoprobe "$BILD" "$BILD"
+	# Nur die Zeile des Bildes; "Probe-Prozess" sagt hier dasselbe noch einmal.
+	note "  $(grep -v '^Probe-Prozess' <<<"$PROBE_OUT")"
+done
+fotoprobe 'alle in einem Prozess' "${PROBE_BILDER[@]}"
+note "  alle nacheinander: $(grep '^Probe-Prozess' <<<"$PROBE_OUT")"
+SPITZE_ROH="$(docker exec "$SMOKE_APP" cat /sys/fs/cgroup/memory.peak 2>/dev/null || true)"
+[[ "$SPITZE_ROH" =~ ^[0-9]+$ ]] || fail "memory.peak der cgroup nicht lesbar ('$SPITZE_ROH'); ohne Spitzenwert keine Abnahme (Spec 2.4)."
+# Und die App lebt danach noch: Ein Kill im Hintergrund, den docker exec nicht sah, fiele hier auf.
+# Erst in eine Variable, dann pruefen: curl | grep -q unter pipefail kann an SIGPIPE
+# scheitern, sobald grep frueh aufhoert (wie bei docker logs oben).
+HEALTH="$(curl -fsS "$BASIS/healthz" 2>/dev/null || true)"
+grep -q '"status":"ok"' <<<"$HEALTH" \
+	|| fail 'Nach der Fotoprobe antwortet die App nicht mehr mit ok auf /healthz. Speicher reicht nicht; mem_limit anheben (Spec 2.4).'
+note "Fotoprobe: ${#PROBE_BILDER[@]} Bilder bis 50 MP verarbeitet, Spitze $((SPITZE_ROH / 1024 / 1024)) MiB von $APP_MEM"
 
 # Und die CLI, die im selben Image daneben liegt. Sie ist ein eigenes Buendel mit
 # eigenen externen Paketen (tools/runtime-package.mjs) -- in HWYD ist genau das

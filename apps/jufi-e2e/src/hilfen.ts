@@ -1,5 +1,6 @@
 import type { BrowserContext } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
+import sharp from 'sharp';
 
 /**
  * Port des E2E-Servers. Nicht 4200 (pnpm run dev) und nicht 4000 (Vorgabe von
@@ -58,4 +59,36 @@ export async function passkeyGeraet(context: BrowserContext): Promise<void> {
 			automaticPresenceSimulation: true,
 		},
 	});
+}
+
+/**
+ * Ein erzeugtes JPEG fuer die Foto-Schritte: Farbverlauf, auf Wunsch mit erfundenem GPS im EXIF.
+ * Erzeugt statt aus dem Repo, weil im Ablauf nie ein echtes Foto liegen darf (TP4-Spec 1.2), und
+ * mit GPS, weil der Ablauf beweisen soll, dass der Server es entfernt. Dieselbe Bauart wie
+ * erzeugeBild in apps/jufi/src/server/dateien/test-bilder.ts; verworfen: jenes zu importieren --
+ * es haengt an den Serverquellen der App, und das E2E-Projekt kennt sie nur ueber den Bau.
+ */
+export async function erzeugeJpeg(breite: number, hoehe: number, gps = false): Promise<Buffer> {
+	const roh = Buffer.alloc(breite * hoehe * 3);
+	for (let y = 0; y < hoehe; y++) {
+		for (let x = 0; x < breite; x++) {
+			const i = (y * breite + x) * 3;
+			roh[i] = Math.round((x / breite) * 255);
+			roh[i + 1] = Math.round((y / hoehe) * 255);
+			roh[i + 2] = 128;
+		}
+	}
+	let bild = sharp(roh, { raw: { width: breite, height: hoehe, channels: 3 } });
+	if (gps) {
+		bild = bild.withExif({
+			IFD0: { Make: 'Erfunden' },
+			IFD3: {
+				GPSLatitudeRef: 'N',
+				GPSLatitude: '52/1 30/1 0/1',
+				GPSLongitudeRef: 'E',
+				GPSLongitude: '13/1 24/1 0/1',
+			},
+		});
+	}
+	return bild.jpeg({ quality: 85 }).toBuffer();
 }

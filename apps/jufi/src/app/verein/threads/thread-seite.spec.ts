@@ -575,6 +575,76 @@ describe('Thread-Seite', () => {
 			expect(seite.querySelector('jf-karte#modul-m3 jf-umfrage-modul')?.textContent).toContain('Kommst du mit?');
 		});
 
+		const DATEIEN: ModulAnsicht = {
+			typ: 'DATEIEN',
+			id: 'm4',
+			titel: 'Material',
+			darfAendern: true,
+			dateien: [
+				{
+					id: 'd1',
+					name: 'Packliste.pdf',
+					typ: 'application/pdf',
+					groesse: 2048,
+					hochgeladenAm: '2026-10-01T10:00:00.000Z',
+				},
+			],
+		};
+
+		it('legt ein Datei-Modul in seine Karte', async () => {
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ module: [DATEIEN] }) });
+
+			expect(seite.querySelector('jf-karte#modul-m4 jf-dateien-modul')?.textContent).toContain('Packliste.pdf');
+		});
+
+		it('laedt nach einer Aenderung im Datei-Modul still neu', async () => {
+			const { harness, seite } = await oeffne('/demo/t/ck1-bowling', {
+				id: 'ck1',
+				koerper: thread({ module: [DATEIEN] }),
+			});
+			const knopf = (wurzel: Element, t: string) =>
+				Array.from(wurzel.querySelectorAll('button')).find((b) => b.textContent?.trim() === t) as HTMLButtonElement;
+			knopf(seite.querySelector('#modul-m4') as HTMLElement, 'Löschen').click();
+			harness.detectChanges();
+			knopf(seite.querySelector('jf-bestaetigung') as HTMLElement, 'Löschen').click();
+
+			const loeschen = await vi.waitFor(() => http.expectOne('/demo/api/v1/dateien/d1'));
+			expect(loeschen.request.method).toBe('DELETE');
+			loeschen.flush(null, { status: 204, statusText: 'No Content' });
+			const still = await vi.waitFor(() => http.expectOne('/demo/api/v1/threads/ck1'));
+			expect(text(seite)).not.toContain('Wird geladen');
+			still.flush(thread({ stand: 43, module: [{ ...DATEIEN, dateien: [] } as ModulAnsicht] }));
+			expect(await quittiereGelesen()).toEqual({ bereich: 'uebersicht', bis: 43 });
+			await beendeSeite(harness);
+
+			expect(text(seite.querySelector('#modul-m4') as HTMLElement)).toContain('Noch keine Dateien.');
+		});
+
+		it('legt ein Foto-Modul in seine Karte statt des Platzhalters', async () => {
+			const fotos: ModulAnsicht = {
+				typ: 'FOTOS',
+				id: 'm5',
+				titel: 'Zeltlager',
+				hochladen: 'ALLE',
+				darfHochladen: false,
+				hinweis: null,
+				fotos: [
+					{
+						id: 'f1',
+						breite: 1200,
+						hoehe: 800,
+						von: 'Mia',
+						hochgeladenAm: '2026-10-01T10:00:00.000Z',
+						darfLoeschen: false,
+					},
+				],
+			};
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ module: [fotos] }) });
+
+			expect(seite.querySelector('jf-karte#modul-m5 jf-fotos-modul')?.textContent).toContain('1 Foto');
+			expect(text(seite)).not.toContain('nicht anzeigen');
+		});
+
 		it('scrollt bei einem Deep Link die Karte in den Blick und hebt sie hervor', async () => {
 			const scrollen = vi.fn();
 			Element.prototype.scrollIntoView = scrollen;

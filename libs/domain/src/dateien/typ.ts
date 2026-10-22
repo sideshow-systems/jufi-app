@@ -4,21 +4,18 @@ export type DateiArt = 'FOTO' | 'DATEI';
 
 export const GRENZE_BYTES: Record<DateiArt, number> = { FOTO: 20 * MB, DATEI: 25 * MB };
 
+// Je Modul, nicht je Verein: Die Grenze haelt eine Seite lesbar und eine Wiederherstellung
+// uebersichtlich; der Speicher des Vereins ist durch sein Kontingent begrenzt.
+export const GRENZE_ANZAHL: Record<DateiArt, number> = { DATEI: 20, FOTO: 500 };
+
+// Pixel, nicht Bytes: Ein stark komprimiertes PNG bleibt weit unter 20 MB und wird beim
+// Dekodieren trotzdem zu hunderten MB Rohdaten (Dekompressionsbombe).
+export const FOTO_MAX_PIXEL = 50_000_000;
+
 // Soviel vom Anfang genuegt fuer jede Erkennung unten (laengste: 12 Bytes bei WebP und ftyp).
 export const KOPF_BYTES = 16;
 
 const MINDESTLAENGE = 12;
-
-// Ein Fehler hat neben dem Text einen Code (Plan, Entscheidung 2): Der Client zeigt den
-// Text an, Tests und Skripte pruefen den Code. KONTINGENT ist eine Funktion, weil Belegung
-// und Grenze erst zur Laufzeit feststehen.
-export const FEHLER_TEXT = {
-	GROESSE: 'Die Datei ist zu groß (höchstens 25 MB)',
-	KONTINGENT: (belegt: string, grenze: string) =>
-		`Der Speicher des Vereins ist voll (${belegt} von ${grenze} belegt). Bitte wende dich an den Betreiber der Plattform.`,
-	TYP: 'Diese Dateiart geht nicht. Erlaubt sind PDF, Word, Excel, PowerPoint, OpenDocument, JPEG und PNG.',
-	HEIC: 'HEIC-Bilder gehen nicht. Bitte als JPEG senden.',
-} as const;
 
 // Map statt Objekt-Literal: Die Endung kommt vom Absender, und ein Literal liesse
 // "constructor" oder "__proto__" als Schluessel durch.
@@ -28,6 +25,17 @@ const ZIP_TYPEN = new Map<string, string>([
 	['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
 	['odt', 'application/vnd.oasis.opendocument.text'],
 	['ods', 'application/vnd.oasis.opendocument.spreadsheet'],
+]);
+
+// Die Endungen, die zu einem erkannten Typ passen (passendeEndung in name.ts). Die erste
+// ist die, die angehaengt wird. JPEG hat zwei, weil beide ueblich sind und eine Person
+// "Foto.jpeg" nicht zu "Foto.jpg" umbenannt haben will.
+export const ENDUNGEN: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+	['image/jpeg', ['jpg', 'jpeg']],
+	['image/png', ['png']],
+	['image/webp', ['webp']],
+	['application/pdf', ['pdf']],
+	...Array.from(ZIP_TYPEN, ([endung, typ]): [string, readonly string[]] => [typ, [endung]]),
 ]);
 
 const HEIC_MARKEN = new Set(['heic', 'heix', 'hevc', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1']);

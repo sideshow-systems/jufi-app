@@ -13,6 +13,7 @@ export function ichMit(rechte: string[], id = 'ich-1'): MitgliedIch {
 		passkeys: [],
 		hatPasswort: true,
 		hatKinder: false,
+		fotoEinwilligung: null,
 		totp: { moeglich: true, aktiv: false, wiederherstellungscodesUebrig: 0 },
 	};
 }

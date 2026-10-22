@@ -1,6 +1,6 @@
 import { encryptSecret, generateTotpSecret } from '@jufi/auth';
 import { createPrismaClientFromEnv, vereinDb, type PrismaClient } from '@jufi/db';
-import type { DokumenteAntwort, EchtzeitSignal, SpeicherAntwort } from '@jufi/domain';
+import type { DokumenteAntwort, EchtzeitSignal, MedienAntwort, SpeicherAntwort } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
@@ -11,6 +11,7 @@ import { WebSocket } from 'ws';
 import { createApp } from './app.js';
 import { mitStandardwerten } from './abhaengigkeiten.js';
 import { dateiSchluessel, VerzeichnisSpeicher } from './dateien/speicher.js';
+import { erzeugeBild } from './dateien/test-bilder.js';
 import { Bus } from './echtzeit/bus.js';
 import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
@@ -220,6 +221,63 @@ async function dokumenteMitFremderId(
 	expect((await sendeAn(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
 	expect((await sendeAn(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
 	expect(await fremdeDokumente(k)).toEqual(vorher);
+}
+
+/** Ein Thread in fremd mit je einem Datei- und Foto-Modul, darin eine Datei und ein Foto (Zeilen ohne Bytes). */
+async function fremdeMedien(k: Kontext) {
+	const { modulIds, dateiIds } = await legeThreadAn(k.prisma, k.fremd, new Date(), {
+		titel: 'Fremde Medien',
+		erstelltVonId: k.fremdePersonId,
+		module: [
+			{ typ: 'DATEIEN', dateien: [{ name: 'fremd.pdf' }] },
+			{ typ: 'FOTOS', hochladen: 'ALLE', fotos: [{}] },
+		],
+	});
+	return {
+		dateienModul: modulIds[0] as string,
+		fotosModul: modulIds[1] as string,
+		datei: dateiIds[0] as string,
+		foto: dateiIds[1] as string,
+	};
+}
+
+/** Alles, was eine Route der Datei- und Foto-Module in fremd veraendern koennte. */
+async function fremdeModulDateien(k: Kontext) {
+	const where = { vereinId: k.fremd.id };
+	return {
+		dateien: await k.prisma.datei.findMany({ where, orderBy: { id: 'asc' } }),
+		loeschliste: await k.prisma.dateiLoeschung.count({ where }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/**
+ * Eine Route der Datei- und Foto-Module mit der Id aus fremd: gesperrt 404, das Cookie aus eigen gilt
+ * in fremd nicht (401), in eigen ist die Id unbekannt (404), und in fremd ist danach nichts anders.
+ * Uploads gehen als Koerper mit X-Dateiname wie aus der Oberflaeche.
+ */
+async function modulDateiMitFremderId(
+	k: Kontext,
+	e: { methode: 'POST' | 'PUT' | 'DELETE'; pfad: string; body?: object },
+): Promise<void> {
+	const vorher = await fremdeModulDateien(k);
+	const sendeAn = (slug: string, cookie: string) =>
+		e.methode === 'POST'
+			? fetch(`${k.url}/${slug}/api/v1${e.pfad}`, {
+					method: 'POST',
+					headers: {
+						Origin: TEST_UMGEBUNG.basisUrl,
+						'Content-Type': 'application/octet-stream',
+						'X-Dateiname': 'mandant.pdf',
+						Cookie: cookie,
+					},
+					body: new Uint8Array(Buffer.from('%PDF-1.7\n mandant')),
+				})
+			: sende(k.url, `/${slug}/api/v1${e.pfad}`, { methode: e.methode, body: e.body, cookie });
+	expect((await sendeAn(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+	expect((await sendeAn(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+	expect((await sendeAn(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+	expect(await fremdeModulDateien(k)).toEqual(vorher);
 }
 
 /**
@@ -484,7 +542,20 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 	},
 	'POST /meine-jungfischer/:kindId/einwilligung': async (k) => {
 		await meineJungfischerSchreibfall(k, 'einwilligung', { erteilen: true });
+		// Auch die Foto-Einwilligung eines fremden Kindes ist in eigen unbekannt.
+		await meineJungfischerSchreibfall(k, 'einwilligung', { erteilen: true, art: 'FOTOS' });
 		expect(await k.prisma.einwilligung.count({ where: { jungfischerId: k.fremdesKindId } })).toBe(0);
+	},
+	'POST /ich/einwilligung': async (k) => {
+		await profilOhneId(k, 'POST', '/ich/einwilligung');
+		// In eigen ist die Person der Sitzung kein volljaehriger Jungfischer: 404, und in fremd entsteht nichts.
+		const r = await sende(k.url, `/${k.eigen.slug}/api/v1/ich/einwilligung`, {
+			methode: 'POST',
+			body: { erteilen: true },
+			cookie: k.eigenesCookie,
+		});
+		expect(r.status).toBe(404);
+		expect(await k.prisma.einwilligung.count({ where: { art: 'FOTOS', vereinId: k.fremd.id } })).toBe(0);
 	},
 	'POST /personen/:id/zugang': async (k) => {
 		const vorher = await k.prisma.person.findUniqueOrThrow({ where: { id: k.fremdesKindId } });
@@ -586,6 +657,32 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Der Termin aus fremd steht nicht im Kalender von eigen; der eigene schon, er ist also nicht nur leer.
 		expect(titel).not.toContain('Fremder Termin');
 		expect(titel).toContain('Eigener Termin');
+	},
+	'GET /medien': async (k) => {
+		await legeThreadAn(k.prisma, k.fremd, new Date(), {
+			titel: 'Fremdes Lager',
+			erstelltVonId: k.fremdePersonId,
+			module: [
+				{ typ: 'FOTOS', fotos: [{}, {}] },
+				{ typ: 'DATEIEN', dateien: [{}] },
+			],
+		});
+		const eigener = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			titel: 'Eigenes Lager',
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'FOTOS', fotos: [{}] }],
+		});
+		const pfad = '/api/v1/medien';
+		expect((await sende(k.url, `/${k.gesperrt.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(404);
+		expect((await sende(k.url, `/${k.fremd.slug}${pfad}`, { cookie: k.eigenerLeiter })).status).toBe(401);
+		const r = await sende(k.url, `/${k.eigen.slug}${pfad}`, { cookie: k.eigenerLeiter });
+		expect(r.status).toBe(200);
+		const antwort = (await r.json()) as MedienAntwort;
+		// Weder der Thread noch seine Foto- und Dateizeilen aus fremd stehen in der Galerie von eigen.
+		expect(antwort.bloecke.map((b) => b.titel)).not.toContain('Fremdes Lager');
+		expect(JSON.stringify(antwort)).not.toContain(k.fremderThread.threadId);
+		// Positiv: Der eigene Thread steht da, die Antwort ist also nicht nur leer.
+		expect(antwort.bloecke.map((b) => b.threadId)).toContain(eigener.threadId);
 	},
 	'GET /sync': async (k) => {
 		// Der Stand vor dem Schreiben: seit=0 koennte vor einem aufgeraeumten Verlauf liegen und "vollstaendig" ohne Listen liefern.
@@ -1130,6 +1227,57 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		// Gegenprobe: In fremd selbst kommt dieselbe Datei an.
 		const fremdesMitglied = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER' });
 		expect((await hole(k.fremd.slug, fremdesMitglied.cookie)).status).toBe(200);
+	},
+	'GET /dateien/:id/vorschau': async (k) => {
+		// Wie bei GET /dateien/:id: Die Bytes der Vorschau liegen wirklich im Speicher von fremd.
+		const { foto } = await fremdeMedien(k);
+		const speicher = new VerzeichnisSpeicher(TEST_UMGEBUNG.dateienPfad);
+		const temp = await speicher.neueTempDatei();
+		await writeFile(temp, await erzeugeBild({ breite: 64, hoehe: 48, format: 'jpeg' }));
+		await speicher.uebernimm(temp, dateiSchluessel(k.fremd.id, foto, true));
+
+		const hole = (slug: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/dateien/${foto}/vorschau`, { cookie });
+		expect((await hole(k.gesperrt.slug, k.eigenerLeiter)).status).toBe(404);
+		expect((await hole(k.fremd.slug, k.eigenerLeiter)).status).toBe(401);
+		expect((await hole(k.eigen.slug, k.eigenerLeiter)).status).toBe(404);
+		// Gegenprobe: Ein Jugendleiter von fremd bekommt dasselbe Foto.
+		const fremderLeiter = await legeMitgliedAn(k.prisma, k.fremd, { art: 'ERWACHSENER', rechte: ['ALLE_THREADS'] });
+		expect((await hole(k.fremd.slug, fremderLeiter.cookie)).status).toBe(200);
+	},
+	'POST /module/:modulId/dateien': async (k) => {
+		const { dateienModul } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'POST', pfad: `/module/${dateienModul}/dateien` });
+		// Gegenprobe: In ein eigenes Datei-Modul laedt dieselbe Person hoch, das 404 oben kommt also
+		// von der Vereinsgrenze und nicht von fehlenden Rechten.
+		const eigen = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'DATEIEN' }],
+		});
+		const r = await fetch(`${k.url}/${k.eigen.slug}/api/v1/module/${eigen.modulIds[0]}/dateien`, {
+			method: 'POST',
+			headers: {
+				Origin: TEST_UMGEBUNG.basisUrl,
+				'Content-Type': 'application/octet-stream',
+				'X-Dateiname': 'eigen.pdf',
+				Cookie: k.eigenerLeiter,
+			},
+			body: new Uint8Array(Buffer.from('%PDF-1.7\n eigen')),
+		});
+		expect(r.status).toBe(201);
+	},
+	'POST /module/:modulId/fotos': async (k) => {
+		const { fotosModul } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'POST', pfad: `/module/${fotosModul}/fotos` });
+	},
+	'PUT /dateien/:id': async (k) => {
+		const { datei } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'PUT', pfad: `/dateien/${datei}`, body: { name: 'Uebernommen' } });
+	},
+	'DELETE /dateien/:id': async (k) => {
+		const { datei, foto } = await fremdeMedien(k);
+		await modulDateiMitFremderId(k, { methode: 'DELETE', pfad: `/dateien/${datei}` });
+		await modulDateiMitFremderId(k, { methode: 'DELETE', pfad: `/dateien/${foto}` });
 	},
 	'GET /dokumente': async (k) => {
 		const fremd = await legeDokumentAn(k, k.fremd, k.fremdePersonId, 'Fremdes Dokument');

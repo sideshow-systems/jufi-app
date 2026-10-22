@@ -5,6 +5,7 @@ import {
 	type ArchivModus,
 	type Beziehung,
 	type ErgebnisSicht,
+	type FotoHochladen,
 	type Rollenfilter,
 	type TerminDaten,
 	type ThreadArt,
@@ -30,7 +31,11 @@ export type TestModul =
 			ergebnisse?: ErgebnisSicht;
 			/** Texte freier Optionen; bei `teilnahme` gelten stattdessen die festen Teilnahme-Optionen. */
 			optionen?: string[];
-	  };
+	  }
+	/** Dateien als Zeilen ohne Bytes; `vonId` ungesetzt heisst der Ersteller des Threads. */
+	| { typ: 'DATEIEN'; dateien?: { name?: string; vonId?: string }[] }
+	/** Fotos als Zeilen ohne Bytes (Fassung und Vorschau gibt es nur im Speicher). */
+	| { typ: 'FOTOS'; hochladen?: FotoHochladen; fotos?: { vonId?: string }[] };
 
 /** Schluessel einer freien Option aus ihrem Text: "Pizza essen" wird "pizza-essen" (CHECK option_schluessel). */
 function schluesselAus(text: string, nummer: number): string {
@@ -72,7 +77,7 @@ export async function legeThreadAn(
 		archivModus?: ArchivModus;
 		module?: TestModul[];
 	} = {},
-): Promise<{ threadId: string; modulIds: string[]; optionIds: Record<string, string> }> {
+): Promise<{ threadId: string; modulIds: string[]; optionIds: Record<string, string>; dateiIds: string[] }> {
 	const db = vereinDb(prisma, verein.id);
 	const art = daten.art ?? 'NORMAL';
 	let erstelltVonId = daten.erstelltVonId;
@@ -112,11 +117,39 @@ export async function legeThreadAn(
 
 			const modulIds: string[] = [];
 			const optionIds: Record<string, string> = {};
+			const dateiIds: string[] = [];
 			for (const [position, modul] of (daten.module ?? []).entries()) {
 				const zeile = await tx.threadModul.create({ data: { threadId: thread.id, typ: modul.typ, position } });
 				modulIds.push(zeile.id);
 				if (modul.typ === 'INFO') {
 					await tx.infoModul.create({ data: { id: zeile.id, text: modul.text } });
+				} else if (modul.typ === 'DATEIEN' || modul.typ === 'FOTOS') {
+					const foto = modul.typ === 'FOTOS';
+					if (foto) {
+						await tx.fotosModul.create({ data: { id: zeile.id, hochladen: modul.hochladen ?? 'JUGENDLEITER' } });
+					} else {
+						await tx.dateienModul.create({ data: { id: zeile.id } });
+					}
+					const dateien = foto ? (modul.fotos ?? []) : (modul.dateien ?? []);
+					for (const [nummer, d] of dateien.entries()) {
+						const datei = await tx.datei.create({
+							data: {
+								art: foto ? 'FOTO' : 'DATEI',
+								modulId: zeile.id,
+								// Fotos haben keinen Namen (Plan-Entscheidung 12).
+								name: foto ? '' : ((d as { name?: string }).name ?? `datei-${nummer + 1}.pdf`),
+								typ: foto ? 'image/jpeg' : 'application/pdf',
+								groesse: 1000,
+								breite: foto ? 800 : null,
+								hoehe: foto ? 600 : null,
+								sha256: 'x',
+								vonId: d.vonId ?? (erstelltVonId as string),
+								hochgeladenAm: jetzt,
+							},
+							select: { id: true },
+						});
+						dateiIds.push(datei.id);
+					}
 				} else if (modul.typ === 'TERMIN') {
 					const t = modul.termin;
 					await tx.terminModul.create({
@@ -158,7 +191,7 @@ export async function legeThreadAn(
 				}
 			}
 			return {
-				ergebnis: { threadId: thread.id, modulIds, optionIds },
+				ergebnis: { threadId: thread.id, modulIds, optionIds, dateiIds },
 				aenderungen: [
 					{ threadId: thread.id, art: 'THREAD' as const, objektId: thread.id },
 					...modulIds.map((id) => ({ threadId: thread.id, art: 'MODUL' as const, objektId: id })),

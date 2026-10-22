@@ -182,7 +182,8 @@ export function datenauszugRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 					where: { personId: person.id },
 					select: { untergruppe: { select: { name: true } } },
 				}),
-				// Die erteilten und, bei Jungfischern, die fuer sie erteilten.
+				// Die erteilten und, bei Jungfischern, die fuer sie erteilten. Alle Arten, kein Filter: Der
+				// Auszug nennt jede Einwilligung samt ihrer Art (Foto-Einwilligungen kommen in Etappe 6 dazu).
 				db.einwilligung.findMany({
 					where: { OR: [{ erteiltVon: person.id }, { jungfischerId: person.id }] },
 					select: {

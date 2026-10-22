@@ -20,6 +20,7 @@ import { randomInt } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron } from '../admin/asynchron.js';
+import { loescheDateien } from '../dateien/loeschen.js';
 import { brauchtMitglied, mitgliedKontext } from '../mitglieder/sitzung.js';
 import { vereinsKontext } from '../verein.js';
 import { ladeBearbeitung } from './bearbeitung.js';
@@ -154,14 +155,23 @@ async function schreibeUntergruppen(tx: VereinTx, threadId: string, e: ThreadEnt
  * Erster Schreibschritt beim Ersetzen: wegfallende Optionen behaltener Umfragen und
  * wegfallende Module. vergleicheEntwurf laesst beides nur zu, wenn niemand darauf
  * geantwortet hat, die Fremdschluessel ohne Kaskade (UmfrageAntwort.umfrage,
- * UmfrageAntwortOption.option) halten also nicht. Info, Termin, Umfrage und deren Optionen
- * gehen per Kaskade mit dem ThreadModul.
+ * UmfrageAntwortOption.option) halten also nicht. Info, Termin, Umfrage, die Koepfe von Datei-
+ * und Foto-Modul und die Optionen gehen per Kaskade mit dem ThreadModul; die Dateien selbst nie.
  *
  * Geloescht wird vor allem anderen, weil die beiden eindeutigen Indizes nicht aufschiebbar
  * sind: Eine geloeschte Teilnahme-Umfrage gibt umfrage_eine_teilnahme fuer eine neue frei,
  * und eine geloeschte Option ihren Schluessel (UmfrageOption umfrageId+schluessel).
  */
-async function loescheModule(tx: VereinTx, plan: EntwurfVergleich): Promise<void> {
+async function loescheModule(tx: VereinTx, vereinId: string, plan: EntwurfVergleich, zeit: Date): Promise<void> {
+	// Die Dateien zuerst: Datei.modul haengt ohne Kaskade am ThreadModul (NoAction), das Loeschen des
+	// Moduls scheiterte sonst am Fremdschluessel und wuerde als 404 gemeldet. Ueber loescheDateien,
+	// damit die Bytes (bei Fotos beide Fassungen) auf der Loeschliste stehen. Verworfen: Kaskade in
+	// der Datenbank -- sie umginge die Liste, und nach einer Wiederherstellung fehlten Bytes.
+	const dateien = await tx.datei.findMany({
+		where: { modulId: { in: plan.loeschen } },
+		select: { id: true, art: true },
+	});
+	await loescheDateien(tx, vereinId, dateien, zeit);
 	for (const m of plan.behalten) {
 		if (m.optionenLoeschen.length === 0) continue;
 		await tx.umfrageOption.deleteMany({ where: { umfrageId: m.id, schluessel: { in: m.optionenLoeschen } } });
@@ -235,7 +245,18 @@ async function schreibeModul(
 			treffpunkt: t.treffpunkt,
 		};
 		await tx.terminModul.upsert({ where: { id: modulId }, create: { id: modulId, ...daten }, update: daten });
+	} else if (neu.typ === 'DATEIEN') {
+		// Das Modul hat keine eigenen Felder; die Zeile gibt es, damit modulOrt und die Ladeabfrage
+		// wie bei jedem Typ an einer Untertabelle haengen.
+		await tx.dateienModul.upsert({ where: { id: modulId }, create: { id: modulId }, update: {} });
+	} else if (neu.typ === 'FOTOS') {
+		await tx.fotosModul.upsert({
+			where: { id: modulId },
+			create: { id: modulId, hochladen: neu.hochladen },
+			update: { hochladen: neu.hochladen },
+		});
 	} else {
+		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN und FOTOS sind oben behandelt).
 		const daten = {
 			frage: neu.frage,
 			einheit: neu.einheit,
@@ -271,6 +292,7 @@ const istTeilnahme = (m: ModulEntwurf) => m.typ === 'UMFRAGE' && m.teilnahme;
  */
 async function ersetzeThread(
 	tx: VereinTx,
+	vereinId: string,
 	alt: GeladenerThread,
 	e: ThreadEntwurf,
 	plan: EntwurfVergleich,
@@ -279,7 +301,7 @@ async function ersetzeThread(
 	zeit: Date,
 ): Promise<AenderungEingabe[]> {
 	const threadId = alt.kopf.id;
-	await loescheModule(tx, plan);
+	await loescheModule(tx, vereinId, plan, zeit);
 	const geaendert = plan.behalten
 		.filter((m) => m.geaendert)
 		.sort((a, b) => Number(istTeilnahme(a.neu)) - Number(istTeilnahme(b.neu)));
@@ -448,7 +470,7 @@ export function schreibenRouten(router: Router, deps: VolleAppDeps): void {
 						pruefeAustausch(alt, e);
 						pruefeEntwurf(e, await untergruppenIds(tx));
 						const plan = planeAenderung(alt, e);
-						const aenderungen = await ersetzeThread(tx, alt, e, plan, ichJetzt, stand, zeit);
+						const aenderungen = await ersetzeThread(tx, verein.id, alt, e, plan, ichJetzt, stand, zeit);
 						return { ergebnis: ichJetzt, aenderungen };
 					}),
 				);

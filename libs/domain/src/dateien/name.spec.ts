@@ -1,4 +1,4 @@
-import { bereinigeDateiname, ohneEndung } from './name.js';
+import { bereinigeDateiname, ohneEndung, passendeEndung, pruefeDateiname } from './name.js';
 
 describe('bereinigeDateiname', () => {
 	it('behaelt nur den Teil nach dem letzten Schraegstrich', () => {
@@ -58,5 +58,64 @@ describe('ohneEndung', () => {
 		expect(ohneEndung('Satzung')).toBe('Satzung');
 		expect(ohneEndung('.gitignore')).toBe('.gitignore');
 		expect(ohneEndung('Version 1.2 Entwurf')).toBe('Version 1.2 Entwurf');
+	});
+});
+
+describe('unsichtbare Formatzeichen', () => {
+	it('fallen aus dem Dateinamen, auch das Umdrehen der Schreibrichtung', () => {
+		expect(bereinigeDateiname('a%E2%80%AEfdp.exe')).toBe('afdp.exe');
+	});
+});
+
+describe('pruefeDateiname', () => {
+	it('saeubert wie bereinigeDateiname, ohne zu dekodieren', () => {
+		expect(pruefeDateiname('  Pack\nliste.pdf ')).toEqual({ ok: true, name: 'Pack liste.pdf' });
+		expect(pruefeDateiname('100%.pdf')).toEqual({ ok: true, name: '100%.pdf' });
+		expect(pruefeDateiname('a\u202Eb.pdf')).toEqual({ ok: true, name: 'ab.pdf' });
+		expect(pruefeDateiname('../x/Plan.pdf')).toEqual({ ok: true, name: 'Plan.pdf' });
+	});
+
+	it('lehnt einen leeren Namen ab', () => {
+		expect(pruefeDateiname('')).toMatchObject({ ok: false });
+		expect(pruefeDateiname(' \u200B ')).toMatchObject({ ok: false });
+	});
+});
+
+describe('passendeEndung', () => {
+	it('ersetzt die Endung eines anderen bekannten Typs', () => {
+		expect(passendeEndung('x.pdf', 'image/png')).toBe('x.png');
+	});
+
+	it('haengt an, wenn keine Endung da ist oder sie unbekannt ist', () => {
+		expect(passendeEndung('Packliste', 'application/pdf')).toBe('Packliste.pdf');
+		expect(passendeEndung('Bericht.final', 'application/pdf')).toBe('Bericht.final.pdf');
+		expect(passendeEndung('Version 1.2 Entwurf', 'application/pdf')).toBe('Version 1.2 Entwurf.pdf');
+	});
+
+	it('laesst eine passende Endung stehen, auch in anderer Schreibweise', () => {
+		expect(passendeEndung('Foto.JPEG', 'image/jpeg')).toBe('Foto.JPEG');
+		expect(passendeEndung('Foto.jpg', 'image/jpeg')).toBe('Foto.jpg');
+		expect(passendeEndung('Foto.Png', 'image/png')).toBe('Foto.Png');
+	});
+
+	it('kennt die Office- und OpenDocument-Endungen', () => {
+		expect(
+			passendeEndung('Liste.xlsx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+		).toBe('Liste.docx');
+		expect(passendeEndung('Brief', 'application/vnd.oasis.opendocument.text')).toBe('Brief.odt');
+		expect(passendeEndung('Bild.webp', 'image/webp')).toBe('Bild.webp');
+	});
+
+	it('kuerzt den Stamm auf hoechstens 120 Zeichen', () => {
+		const r = passendeEndung('a'.repeat(118) + '.docx', 'application/pdf');
+		expect(r).toHaveLength(120);
+		expect(r.endsWith('.pdf')).toBe(true);
+		expect(r.startsWith('a'.repeat(116))).toBe(true);
+	});
+
+	it('kuerzt nach Codepoints', () => {
+		const r = passendeEndung('🎣'.repeat(118), 'application/pdf');
+		expect(Array.from(r)).toHaveLength(120);
+		expect(r.endsWith('.pdf')).toBe(true);
 	});
 });

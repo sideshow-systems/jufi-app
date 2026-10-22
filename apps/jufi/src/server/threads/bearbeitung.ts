@@ -5,6 +5,7 @@ import {
 	darfLoeschen,
 	entwurfAusThread,
 	istArchiviert,
+	medienZahlen,
 	siehtThread,
 	threadDatenAus,
 	threadSegment,
@@ -97,6 +98,7 @@ export async function ladeBearbeitung(
 		darfArchivieren: darfArchivieren(ich, kopf),
 		entwurf: entwurfAusThread(kopf, module),
 		sperren: Object.fromEntries(daten.umfragen.map((u) => [u.modulId, umfrageSperre(u)])),
+		medien: medienZahlen(module),
 		untergruppen,
 	};
 }

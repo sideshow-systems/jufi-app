@@ -502,3 +502,67 @@ describe('umfrageSperre', () => {
 		});
 	});
 });
+
+describe('vergleicheEntwurf: Datei- und Foto-Module', () => {
+	const datei = {
+		id: 'x',
+		name: 'Packliste.pdf',
+		typ: 'application/pdf',
+		groesse: 10,
+		vonId: 'thomas',
+		hochgeladenAm: new Date('2026-10-21T12:00:00Z'),
+	};
+	const medien = (): ModulDaten[] => [
+		{ typ: 'DATEIEN', id: 'd1', titel: 'Packliste', dateien: [datei] },
+		{ typ: 'FOTOS', id: 'f1', titel: null, hochladen: 'JUGENDLEITER', fotos: [] },
+	];
+	const gespeichert = { kopf: kopf(), module: medien() };
+	const neuerEntwurf = (aendern: (e: ThreadEntwurf) => void = () => {}) => {
+		const e = entwurfAusThread(kopf(), medien());
+		aendern(e);
+		return e;
+	};
+	const fotosIn = (e: ThreadEntwurf) => e.module[1] as Extract<ModulEntwurf, { typ: 'FOTOS' }>;
+
+	it('findet an unveraenderten Modulen nichts, auch wenn Dateien da sind', () => {
+		const v = vergleicheEntwurf(gespeichert, neuerEntwurf());
+		expect(v.behalten.map((b) => [b.id, b.geaendert])).toEqual([
+			['d1', false],
+			['f1', false],
+		]);
+		expect(v).toMatchObject({ fehler: null, konflikt: null, loeschen: [], anlegen: [], system: [] });
+	});
+
+	it('zaehlt eine Umstellung von hochladen als Aenderung des Moduls, ohne Systemeintrag', () => {
+		const v = vergleicheEntwurf(
+			gespeichert,
+			neuerEntwurf((e) => (fotosIn(e).hochladen = 'ALLE')),
+		);
+		expect(v.behalten.map((b) => [b.id, b.geaendert])).toEqual([
+			['d1', false],
+			['f1', true],
+		]);
+		expect(v.system).toEqual([]);
+	});
+
+	it('zaehlt den Titel beider Typen als Aenderung', () => {
+		const e = neuerEntwurf((e) => {
+			e.module[0] = { ...e.module[0], titel: 'Neu' };
+			e.module[1] = { ...e.module[1], titel: 'Bilder' };
+		});
+		expect(vergleicheEntwurf(gespeichert, e).behalten.map((b) => b.geaendert)).toEqual([true, true]);
+	});
+
+	it('loescht entfernte Module ohne Konflikt, auch mit Dateien', () => {
+		const v = vergleicheEntwurf(
+			gespeichert,
+			neuerEntwurf((e) => e.module.splice(0, 1)),
+		);
+		expect(v).toMatchObject({ konflikt: null, fehler: null, loeschen: ['d1'] });
+	});
+
+	it('lehnt einen Typwechsel unter derselben ID ab', () => {
+		const e = neuerEntwurf((e) => (e.module[0] = { typ: 'FOTOS', id: 'd1', titel: null, hochladen: 'ALLE' }));
+		expect(vergleicheEntwurf(gespeichert, e).fehler).toEqual({ feld: 'module.0', text: 'Ungültige Anfrage' });
+	});
+});

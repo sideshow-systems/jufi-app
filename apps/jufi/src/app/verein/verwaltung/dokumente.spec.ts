@@ -241,10 +241,8 @@ describe('Verwaltung Dokumente', () => {
 				expect(zweite.request.headers.get('X-Dateiname')).toBe('zwei.pdf');
 				zweite.flush({}, { status: 201, statusText: 'Created' });
 			});
-			// Je gelungene Datei laedt die Seite neu.
-			await vi.waitFor(() => http.match(`${API}/dokumente`).forEach((a) => a.flush(ANTWORT)));
-			http.match(`${API}/speicher`).forEach((a) => a.flush(SPEICHER));
-			await stabil(harness);
+			// Der Stapel laedt die Seite einmal neu, nicht je Datei.
+			await neuGeladen();
 		});
 
 		it('zeigt bei einem Fehler den Text der Zeile mit Nochmal, und Nochmal schickt dieselbe Datei erneut', async () => {
@@ -253,11 +251,11 @@ describe('Verwaltung Dokumente', () => {
 			await stabil(harness);
 			http
 				.expectOne(`${API}/dokumente?kategorie=k1`)
-				.flush({ fehler: FEHLER_TEXT.TYP, code: 'TYP' }, { status: 415, statusText: 'Unsupported Media Type' });
+				.flush({ fehler: FEHLER_TEXT.TYP.DATEI, code: 'TYP' }, { status: 415, statusText: 'Unsupported Media Type' });
 			await stabil(harness);
 
 			const z = abschnitt('Ordnungen').querySelector('li[data-hochladung]');
-			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.TYP);
+			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.TYP.DATEI);
 			knopf(z as HTMLElement, 'Nochmal').click();
 			await stabil(harness);
 
@@ -267,6 +265,41 @@ describe('Verwaltung Dokumente', () => {
 			await neuGeladen();
 		});
 
+		it('fuehrt bei 401 waehrend des Uploads zur Anmeldung, wie jede andere Anfrage', async () => {
+			await oeffne();
+			waehleDateien(feld('Ordnungen'), [datei('Bild.pdf')]);
+			await stabil(harness);
+
+			http
+				.expectOne(`${API}/dokumente?kategorie=k1`)
+				.flush({ fehler: 'nicht angemeldet' }, { status: 401, statusText: 'Unauthorized' });
+
+			await vi.waitFor(() =>
+				expect(TestBed.inject(Router).url).toBe('/demo/anmelden?weiter=%2Fdemo%2Fverwaltung%2Fdokumente'),
+			);
+			http.match(() => true);
+		});
+
+		it('benennt das Ersetzen-Feld am Feld selbst, mit dem Titel des Dokuments', async () => {
+			await oeffne();
+			const eingabe = zeile('Satzung').querySelector('input[type="file"]') as HTMLInputElement;
+
+			expect(eingabe.getAttribute('aria-label')).toBe('Datei von „Satzung“ ersetzen');
+			expect(eingabe.closest('label')?.hasAttribute('aria-label')).toBe(false);
+		});
+
+		it('zeigt eine wartende Datei ohne Balken', async () => {
+			await oeffne();
+			waehleDateien(feld('Formulare'), [datei('eins.pdf'), datei('zwei.pdf')]);
+			await stabil(harness);
+
+			const zeilen = [...abschnitt('Formulare').querySelectorAll('li[data-hochladung]')];
+			expect(zeilen[0]?.querySelector('progress')).not.toBeNull();
+			expect(zeilen[1]?.querySelector('progress')).toBeNull();
+			expect(text(zeilen[1])).toContain('Wartet');
+			http.expectOne(`${API}/dokumente?kategorie=k3`);
+		});
+
 		it('weist eine zu grosse Datei ohne Anfrage ab und laesst sich verwerfen', async () => {
 			await oeffne();
 			waehleDateien(feld('Ordnungen'), [datei('riesig.pdf', 25 * MB + 1)]);
@@ -274,7 +307,7 @@ describe('Verwaltung Dokumente', () => {
 
 			http.expectNone(`${API}/dokumente?kategorie=k1`);
 			const z = abschnitt('Ordnungen').querySelector<HTMLElement>('li[data-hochladung]');
-			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.GROESSE);
+			expect(text(z?.querySelector('[role="alert"]'))).toBe(FEHLER_TEXT.GROESSE.DATEI);
 			knopf(z as HTMLElement, 'Verwerfen').click();
 			await stabil(harness);
 			expect(abschnitt('Ordnungen').querySelector('li[data-hochladung]')).toBeNull();

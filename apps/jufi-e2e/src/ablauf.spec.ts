@@ -10,8 +10,9 @@ import {
 } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import sharp from 'sharp';
 import { berlinerTag, MONATSNAMEN, tagPlus, threadSegment } from '@jufi/domain';
-import { BASIS_URL, passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
+import { BASIS_URL, erzeugeJpeg, passkeyGeraet, TESTPASSWORT, ZUSTAND } from './hilfen';
 import { leisteHatFuenfEintraege, punktUeberdecktTextNicht } from './messen';
 import { beendeFrist, fuelleAustausch, legeKindAn, leseFrist, personIdMitMail, setzeFrist } from './threads';
 
@@ -761,8 +762,13 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await kontext.close();
 
 		const mutter = await ausSitzung(browser, 'mutter');
+		// Medien beginnt mit "Fotos & Dateien" (Plan, Entscheidung 13); die Dokumente liegen im zweiten
+		// Reiter, und der Wechsel muss in der Adresse stehen, damit "Zurueck" dorthin fuehrt.
 		await mutter.seite.goto(`/${SLUG}/medien`);
 		await expect(mutter.seite.getByRole('heading', { name: 'Medien', level: 1 })).toBeVisible();
+		await mutter.seite.getByRole('tab', { name: 'Dokumente' }).click();
+		await expect(mutter.seite).toHaveURL(/[?&]reiter=dokumente/);
+		await expect(mutter.seite.getByRole('tab', { name: 'Dokumente' })).toHaveAttribute('aria-selected', 'true');
 		await expect(mutter.seite.getByRole('heading', { name: 'Ordnungen', level: 2 })).toBeVisible();
 		// Leere Kategorien (Merkblaetter, Formulare) zeigt die Mitgliederseite nicht.
 		await expect(mutter.seite.getByRole('heading', { level: 2 })).toHaveCount(1);
@@ -793,11 +799,172 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await leitung.kontext.close();
 
 		const mutter = await ausSitzung(browser, 'mutter');
-		await mutter.seite.goto(`/${SLUG}/medien`);
+		// Hier ueber die Adresse mit Reiter: So oeffnet sie ein geteilter Link oder "Zurueck".
+		await mutter.seite.goto(`/${SLUG}/medien?reiter=dokumente`);
 		await expect(mutter.seite.getByText('Noch keine Dokumente.')).toBeVisible();
 		await expect(mutter.seite.getByRole('heading', { level: 2 })).toHaveCount(0);
 		await expect(mutter.seite.getByRole('link', { name: /Jugendfischereiordnung/ })).toHaveCount(0);
 		await mutter.kontext.close();
+	});
+
+	// Fotos und Dateien der Threads (TP4 Etappe 2). Auf Bowling, dem Thread des Ablaufs: Die Leitung baut
+	// ihn um, wie sie es in echt mit einem laufenden Thread taete, und Zielgruppe, Teilnahme-Umfrage und
+	// zwei Kinder der Mutter sind schon da. Alle Bilder sind erzeugt (TP4-Spec 1.2).
+
+	test('Leitung fuegt Bowling Dateien und Fotos hinzu und laedt im Editor eine Packliste hoch', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'leitung', { viewport: { width: 1280, height: 800 } });
+		await seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}`);
+		await expect(seite.getByRole('heading', { name: 'Thread bearbeiten', level: 1 })).toBeVisible();
+		const hinzufuegen = seite.getByRole('group', { name: 'Modul hinzufügen' });
+		const module = seite.locator('ol.module > li');
+		const vorher = await module.count();
+
+		await hinzufuegen.getByRole('button', { name: 'Dateien' }).click();
+		// Ungespeichert gibt es nichts hochzuladen: Das Modul hat noch keine ID (Plan, Entscheidung 10).
+		await expect(seite.getByText('Erst speichern, dann hochladen')).toBeVisible();
+		await hinzufuegen.getByRole('button', { name: 'Fotos' }).click();
+		await seite.getByRole('checkbox', { name: 'Alle Leser dürfen Fotos hochladen' }).check();
+		await expect(module).toHaveCount(vorher + 2);
+		await seite.getByRole('button', { name: 'Speichern', exact: true }).click();
+		await expect(seite.getByRole('status').filter({ hasText: 'Gespeichert' })).toBeVisible();
+
+		// Nach dem Speichern hat das Datei-Modul eine ID; gewaehlt wird es ueber seine Zeile in der Liste.
+		await module.nth(vorher).locator('button.waehlen').click();
+		await expect(seite.getByRole('heading', { name: `Dateien (Modul ${vorher + 1})` })).toBeVisible();
+		await seite.getByLabel('Dateien hochladen').setInputFiles({
+			name: 'Packliste.pdf',
+			mimeType: 'application/pdf',
+			buffer: PDF_BYTES,
+		});
+		// Die Zahl kommt erst, wenn der Server die Datei hat und der Editor die Zahlen neu geladen hat.
+		await expect(seite.getByText('1 Datei', { exact: true })).toBeVisible();
+		await kontext.close();
+	});
+
+	test('Mutter laedt zwei Fotos hoch, Mia sieht sie live, ausgeliefert ohne EXIF', async ({ browser }) => {
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		const fotosMutter = mutter.seite.locator('jf-fotos-modul');
+		await expect(fotosMutter.getByText('Noch keine Fotos.')).toBeVisible();
+
+		// Der Hinweis nennt nur Kinder der Zielgruppe, die laut Teilnahme-Umfrage dabei sind (namen.ts,
+		// ohneFotoEinwilligung). Mia steht in der Umfrage, gehoert also zur Zielgruppe; seit dem Nachtragen
+		// der Leitung ist sie "Vielleicht", Mats hat abgesagt, also nennt der Hinweis noch niemanden.
+		const zeileMia = mutter.seite.locator('jf-umfrage-modul .zeile').filter({ hasText: 'Mia' });
+		await expect(zeileMia).toContainText('? Vielleicht');
+		await expect(fotosMutter.locator('.hinweis')).toHaveCount(0);
+		await zeileMia.getByRole('button', { name: 'Antwort für Mia ändern' }).click();
+		await zeileMia.getByRole('button', { name: '✓ Dabei' }).click();
+		await expect(zeileMia).toContainText('✓ Dabei');
+		await expect(zeileMia).toContainText('von dir eingetragen');
+		await mutter.seite.reload();
+		await expect(fotosMutter.locator('.hinweis')).toHaveText('Von Mia M. dürfen keine Fotos gezeigt werden');
+
+		// Mia hat den Thread offen, bevor die Fotos kommen.
+		const kind = await ausSitzung(browser, 'kind');
+		const ws = await oeffneVerbunden(kind.seite, `/${SLUG}/t/${bowling}`);
+		const kacheln = kind.seite.locator('jf-fotos-modul button.kachel');
+		await expect(kind.seite.locator('jf-fotos-modul').getByText('Noch keine Fotos.')).toBeVisible();
+		const signal = ws.waitForEvent('framereceived', {
+			predicate: (f) => alsSignal(f.payload)?.threadId === bowlingId,
+		});
+
+		// Eines groesser als 2560 px und mit GPS, damit Verkleinern und Entfernen der Metadaten etwas zu tun haben.
+		const mitGps = await erzeugeJpeg(3000, 2000, true);
+		expect((await sharp(mitGps).metadata()).exif, 'das erzeugte Bild traegt EXIF').toBeDefined();
+		await fotosMutter.getByLabel('Fotos hochladen').setInputFiles([
+			{ name: 'see.jpg', mimeType: 'image/jpeg', buffer: mitGps },
+			{ name: 'steg.jpg', mimeType: 'image/jpeg', buffer: await erzeugeJpeg(1200, 900) },
+		]);
+		await expect(fotosMutter.locator('button.kachel')).toHaveCount(2);
+		await expect(fotosMutter.locator('li[data-hochladung]')).toHaveCount(0);
+
+		await expect(kacheln).toHaveCount(2, { timeout: 5000 });
+		await kamLive(ws, signal);
+		await kind.kontext.close();
+
+		// Mit der Sitzung der Mutter, wie ihr Browser die Grossansicht laedt: die 2560er-Fassung, nicht die Vorschau.
+		const breiten: number[] = [];
+		for (const bild of await fotosMutter.locator('button.kachel img').all()) {
+			const vorschau = await bild.getAttribute('src');
+			expect(vorschau, 'Adresse der Vorschau').toMatch(/\/vorschau$/);
+			const antwort = await mutter.kontext.request.get(
+				new URL((vorschau ?? '').replace(/\/vorschau$/, ''), BASIS_URL).toString(),
+			);
+			expect(antwort.status()).toBe(200);
+			expect(antwort.headers()['content-type']).toContain('image/jpeg');
+			const meta = await sharp(await antwort.body()).metadata();
+			expect(meta.exif, 'EXIF im ausgelieferten Foto').toBeUndefined();
+			expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBeLessThanOrEqual(2560);
+			breiten.push(meta.width ?? 0);
+		}
+		// Das grosse Foto ist auf die lange Seite verkleinert, das kleine nicht vergroessert.
+		expect(breiten.sort((a, b) => a - b)).toEqual([1200, 2560]);
+		await mutter.kontext.close();
+	});
+
+	test('Mutter erlaubt Fotos fuer Mia, der Hinweis im offenen Thread verschwindet live', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'mutter');
+		const ws = await oeffneVerbunden(seite, `/${SLUG}/t/${bowling}`);
+		const hinweis = seite.locator('jf-fotos-modul .hinweis');
+		await expect(hinweis).toContainText('Mia M.');
+		const signal = ws.waitForEvent('framereceived');
+
+		// Eine zweite Seite derselben Person: Der Thread bleibt offen, ohne neu geladen zu werden.
+		const verwaltung = await kontext.newPage();
+		await verwaltung.goto(`/${SLUG}/meine-jungfischer`);
+		const karte = verwaltung
+			.getByRole('article')
+			.filter({ has: verwaltung.getByRole('heading', { name: 'Mia Muster' }) });
+		await expect(karte).toContainText('Fotos: nicht erlaubt');
+		await karte.getByRole('button', { name: 'Fotos erlauben' }).click();
+		await karte.getByRole('button', { name: 'Ja, Fotos erlauben' }).click();
+		await expect(karte).toContainText('Fotos: erlaubt');
+
+		await expect(hinweis).toHaveCount(0, { timeout: 5000 });
+		await kamLive(ws, signal);
+		await kontext.close();
+	});
+
+	test('Leitung loescht ein Foto in der Grossansicht, die Mutter sieht noch eins', async ({ browser }) => {
+		const leitung = await ausSitzung(browser, 'leitung');
+		await leitung.seite.goto(`/${SLUG}/t/${bowling}`);
+		const kacheln = leitung.seite.locator('jf-fotos-modul button.kachel');
+		await expect(kacheln).toHaveCount(2);
+		await kacheln.first().click();
+		const grossansicht = leitung.seite.getByRole('dialog', { name: /^Foto von / });
+		await expect(grossansicht).toContainText('1 von 2');
+		await grossansicht.getByRole('button', { name: 'Löschen', exact: true }).click();
+		const frage = leitung.seite.getByRole('dialog', { name: 'Foto löschen' });
+		await frage.getByRole('button', { name: 'Löschen', exact: true }).click();
+		await expect(kacheln).toHaveCount(1);
+		await leitung.kontext.close();
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		await expect(mutter.seite.locator('jf-fotos-modul button.kachel')).toHaveCount(1);
+		await mutter.kontext.close();
+	});
+
+	test('Mutter sieht in Medien den Block von Bowling, die Dokumente im zweiten Reiter', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'mutter');
+		await seite.goto(`/${SLUG}/medien`);
+		await expect(seite.getByRole('heading', { name: 'Medien', level: 1 })).toBeVisible();
+		await expect(seite.getByRole('tab', { name: 'Fotos & Dateien' })).toHaveAttribute('aria-selected', 'true');
+		const block = seite.locator('[data-block]').filter({ has: seite.getByRole('heading', { name: /Bowling/ }) });
+		await expect(block).toHaveCount(1);
+		await expect(block.locator('.zahl')).toHaveText('1 Foto');
+		await expect(block.locator('ul.vorschau img')).toHaveCount(1);
+		await expect(block.getByRole('link', { name: /Packliste\.pdf/ })).toBeVisible();
+
+		// Der Dokumente-Reiter ist weiter leer, seit die Leitung die Ordnung geloescht hat.
+		await seite.getByRole('tab', { name: 'Dokumente' }).click();
+		await expect(seite).toHaveURL(/[?&]reiter=dokumente/);
+		await expect(seite.getByText('Noch keine Dokumente.')).toBeVisible();
+		await expect(seite.getByRole('link', { name: /Packliste/ })).toHaveCount(0);
+		await kontext.close();
 	});
 
 	test('Nach Fristende gibt es keinen Antwortknopf mehr, die Leitung traegt weiter nach', async ({ browser }) => {
@@ -825,8 +992,8 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 				leitung.seite
 					.locator('section[data-gruppe]')
 					.filter({ has: leitung.seite.getByRole('heading', { name: titel }) });
-			// Bearbeiter tragen auch nach der Frist nach: Mia bleibt eintragbar ...
-			await expect(gruppe('? Vielleicht').getByRole('button', { name: 'Eintragen für Mia M.' })).toBeVisible();
+			// Bearbeiter tragen auch nach der Frist nach: Mia (seit den Foto-Schritten "Dabei") bleibt eintragbar ...
+			await expect(gruppe('✓ Dabei').getByRole('button', { name: 'Eintragen für Mia M.' })).toBeVisible();
 			// ... und fuer Mats geht es von "Abgesagt" auf "Dabei".
 			await gruppe('✗ Abgesagt').getByRole('button', { name: 'Eintragen für Mats M.' }).click();
 			await leitung.seite

@@ -1,8 +1,9 @@
-import { sperreVereinszeile, vermerkeUmfeld } from '@jufi/db';
+import { sperreVereinszeile, vermerkeUmfeld, type Person } from '@jufi/db';
 import {
 	darfEinwilligen,
 	darfFuerKindHandeln,
 	EINWILLIGUNG_TEXT_VERSION,
+	FOTO_EINWILLIGUNG_TEXT_VERSION,
 	istErziehungsberechtigt,
 	istVolljaehrig,
 } from '@jufi/domain';
@@ -20,6 +21,7 @@ import {
 	entzieheZugangWennUngueltig,
 	erzeugeEinladungFuerKind,
 	hatEinwilligung,
+	hatFotoEinwilligung,
 	type Transaktion,
 } from './zugang.js';
 
@@ -49,6 +51,23 @@ async function ladeErziehungsberechtigt(tx: Transaktion, handelndenId: string, k
 	const zuordnungen = await tx.bezugsperson.findMany({ where: { jungfischerId: kind.id } });
 	if (!darfEinwilligen(alsSicht(ich), alsSicht(kind), zuordnungen, zeit)) throw new Abbruch(404, NICHT_GEFUNDEN);
 	return { ich, kind };
+}
+
+type Einwilligungsart = 'DSGVO_ART8' | 'FOTOS';
+
+/**
+ * Die Art der Einwilligung aus dem Body; ohne Angabe die DSGVO-Einwilligung (Plan zu Etappe 2,
+ * Entscheidung 7). Der Grund ist die Anfrage, nicht der Test: Der DSGVO-Weg des Clients schickt bis
+ * heute nur erteilen (mitglieder-api.ts), und eine Seite, die beim Ausrollen noch in der alten
+ * Fassung offen ist, ebenso. Verworfen: art zur Pflicht machen -- dann scheiterte jede solche
+ * Anfrage mit 400. Alles andere ist 400, auch null und eine andere Schreibweise: eine Art, die
+ * wir nicht kennen, soll nicht stillschweigend als DSGVO-Einwilligung gelten.
+ */
+function lesArt(body: unknown): Einwilligungsart {
+	const wert = ((body ?? {}) as Record<string, unknown>)['art'];
+	if (wert === undefined || wert === 'DSGVO_ART8') return 'DSGVO_ART8';
+	if (wert === 'FOTOS') return 'FOTOS';
+	throw new Abbruch(400, { fehler: 'Unbekannte Art der Einwilligung', feld: 'art' });
 }
 
 function lesBoolean(body: unknown, feld: string): boolean {
@@ -116,6 +135,8 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 				for (const z of eigene) {
 					const kind = z.jungfischer;
 					if (!darfFuerKindHandeln(alsSicht(ich), alsSicht(kind), [z])) continue;
+					const ichBinErziehungsberechtigt = istErziehungsberechtigt(z, alsSicht(kind), zeit);
+					const volljaehrig = istVolljaehrig(kind, zeit);
 					const [familie, gruppen] = await Promise.all([
 						tx.bezugsperson.findMany({
 							where: { jungfischerId: kind.id, erwachsener: { entferntAm: null } },
@@ -145,8 +166,14 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 							vorhanden: kind.zugang !== null,
 							einwilligungGueltig: await hatEinwilligung(tx, kind, zeit),
 						},
-						ichBinErziehungsberechtigt: istErziehungsberechtigt(z, alsSicht(kind), zeit),
-						volljaehrig: istVolljaehrig(kind, zeit),
+						ichBinErziehungsberechtigt,
+						volljaehrig,
+						// Eigene Frage an die Foto-Zeilen: die DSGVO-Einwilligung oben sagt nichts ueber Fotos.
+						// darfAendern ohne Volljaehrige: sie pflegt der Jungfischer selbst (POST /ich/einwilligung).
+						fotos: {
+							erlaubt: await hatFotoEinwilligung(tx, kind, zeit),
+							darfAendern: ichBinErziehungsberechtigt && !volljaehrig,
+						},
 					});
 				}
 				return ergebnis.sort(
@@ -208,10 +235,16 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 			const r = await unterSperre(res, handelnder.id, zeit, async (tx, _stand, vermerke) => {
 				const { ich, kind } = await ladeErziehungsberechtigt(tx, handelnder.id, kindId, zeit);
 				const erteilen = lesBoolean(req.body, 'erteilen');
+				const art = lesArt(req.body);
+				if (art === 'FOTOS') {
+					await aendereFotoEinwilligung(tx, vermerke, { kind, erteiler: ich, erteilen, zeit });
+					return { erteilt: erteilen };
+				}
 				if (erteilen) {
 					// Eine offene reicht: ein zweiter Klick soll keine zweite Zeile als Nachweis erzeugen.
+					// Nur DSGVO-Zeilen zaehlen: eine offene Foto-Einwilligung ersetzt sie nicht.
 					const offen = await tx.einwilligung.count({
-						where: { jungfischerId: kind.id, erteiltVon: ich.id, widerrufenAm: null },
+						where: { jungfischerId: kind.id, erteiltVon: ich.id, art: 'DSGVO_ART8', widerrufenAm: null },
 					});
 					if (offen === 0) {
 						await vermerke([kind.id]);
@@ -227,11 +260,12 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 					}
 				} else {
 					// Nur die eigenen: die Einwilligung des Vaters widerruft die Mutter nicht. Die Zeilen
-					// bleiben als Nachweis stehen, verworfen: sie zu loeschen.
+					// bleiben als Nachweis stehen, verworfen: sie zu loeschen. Die Foto-Einwilligung bleibt
+					// unberuehrt: Wer den Zugang widerruft, hat damit nichts ueber Fotos gesagt.
 					// Immer vermerkt, auch ohne offene Zeile: der Haken danach kann dem Kind den Zugang nehmen.
 					await vermerke([kind.id]);
 					await tx.einwilligung.updateMany({
-						where: { jungfischerId: kind.id, erteiltVon: ich.id, widerrufenAm: null },
+						where: { jungfischerId: kind.id, erteiltVon: ich.id, art: 'DSGVO_ART8', widerrufenAm: null },
 						data: { widerrufenAm: zeit },
 					});
 					await entzieheZugangWennUngueltig(tx, kind, zeit);
@@ -242,4 +276,75 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 			res.status(r.status).json(r.antwort);
 		}),
 	);
+
+	/**
+	 * Ein volljaehriger Jungfischer pflegt seine Foto-Einwilligung selbst (Plan zu Etappe 2,
+	 * Entscheidung 6): die der Eltern erloescht mit dem 18. Geburtstag, und ein Erwachsener
+	 * entscheidet ueber Fotos von sich. Unter derselben Sperre wie die Elternroute, denn
+	 * "angenommen oder nicht" haengt am Geburtsdatum und am Entfernt-Stand, die eine gleichzeitige
+	 * Anfrage aendern kann.
+	 * Alles andere ist "nicht gefunden": ein Minderjaehriger oder Erwachsener hat diese Route nicht.
+	 */
+	router.post(
+		'/ich/einwilligung',
+		brauchtMitglied,
+		asynchron(async (req, res) => {
+			const { person: handelnder } = mitgliedKontext(res);
+			const zeit = jetzt();
+			const r = await unterSperre(res, handelnder.id, zeit, async (tx, _stand, vermerke) => {
+				const ich = await tx.person.findFirst({ where: { id: handelnder.id, art: 'JUNGFISCHER', entferntAm: null } });
+				if (!ich || !istVolljaehrig(ich, zeit)) throw new Abbruch(404, NICHT_GEFUNDEN);
+				const erteilen = lesBoolean(req.body, 'erteilen');
+				await aendereFotoEinwilligung(tx, vermerke, { kind: ich, erteiler: ich, erteilen, zeit });
+				return { erteilt: erteilen };
+			});
+			if ('ok' in r) return void res.json(r.ok);
+			res.status(r.status).json(r.antwort);
+		}),
+	);
+}
+
+/**
+ * Legt die Foto-Einwilligung an oder zieht sie zurueck; die Aufrufer halten die Sperre und haben
+ * Recht und Volljaehrigkeit schon geprueft. Eine Stelle fuer Eltern- und Selbstroute, damit beide
+ * dieselbe Regel anwenden.
+ *
+ * Erteilen legt nur eine Zeile an, wenn heute noch keine gueltige gilt: Sieht die Mutter Fotos als
+ * erlaubt, soll ein Klick des Vaters keine zweite Zeile als Nachweis danebenlegen. Zurueckziehen
+ * nimmt alle offenen Foto-Zeilen des Kindes (bei Volljaehrigen die eigenen): ob Fotos gezeigt werden
+ * duerfen, ist eine Antwort der Familie, und ein Widerruf der Mutter soll nicht an der Zeile des
+ * Vaters scheitern. Verworfen: wie bei der DSGVO-Einwilligung nur die eigene Zeile, denn dann
+ * bliebe das Kind nach dem Widerruf der Mutter auf Fotos, und der Hinweis nennte es nicht.
+ * Die Zeilen bleiben als Nachweis stehen.
+ */
+async function aendereFotoEinwilligung(
+	tx: Transaktion,
+	vermerke: (objektIds: readonly string[]) => Promise<void>,
+	a: { kind: Person; erteiler: Person; erteilen: boolean; zeit: Date },
+): Promise<void> {
+	const { kind, erteiler, erteilen, zeit } = a;
+	if (erteilen) {
+		if (await hatFotoEinwilligung(tx, kind, zeit)) return;
+		await vermerke([kind.id]);
+		await tx.einwilligung.create({
+			data: {
+				jungfischerId: kind.id,
+				erteiltVon: erteiler.id,
+				art: 'FOTOS',
+				textVersion: FOTO_EINWILLIGUNG_TEXT_VERSION,
+				erteiltAm: zeit,
+			},
+		});
+		return;
+	}
+	// Ein Volljaehriger zieht nur seine eigenen Zeilen zurueck; die der Eltern gelten fuer ihn ohnehin nicht mehr.
+	const eigene = istVolljaehrig(kind, zeit) ? { erteiltVon: erteiler.id } : {};
+	const { count } = await tx.einwilligung.updateMany({
+		where: { jungfischerId: kind.id, art: 'FOTOS', widerrufenAm: null, ...eigene },
+		data: { widerrufenAm: zeit },
+	});
+	// Nur vermerkt, wenn sich etwas geaendert hat: an der Foto-Einwilligung haengt kein Zugang, anders
+	// als bei der DSGVO-Einwilligung, wo der Haken danach dem Kind den Zugang nehmen kann. Ein
+	// wiederholter Widerruf soll darum niemanden zum Neuladen bewegen.
+	if (count > 0) await vermerke([kind.id]);
 }

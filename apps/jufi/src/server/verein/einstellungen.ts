@@ -1,5 +1,6 @@
 import { sperreVereinszeile, type VereinDb } from '@jufi/db';
 import {
+	FEHLER_TEXT,
 	hatRecht,
 	LOGO_MAX_BYTES,
 	LOGO_ZU_GROSS,
@@ -19,6 +20,7 @@ import { verarbeiteLogo } from './logo.js';
 
 const FORMAT_FEHLER = { fehler: 'Bitte ein PNG- oder JPEG-Bild wählen' };
 const ZU_GROSS = { fehler: LOGO_ZU_GROSS };
+const BESCHAEFTIGT = { fehler: FEHLER_TEXT.BESCHAEFTIGT, code: 'BESCHAEFTIGT' };
 
 /** Alles, was sich ueber die Oberflaeche aendern laesst. Slug und Status gehoeren dem Plattform-Admin. */
 const FELDER = ['name', 'anzeigename', 'kontakt', 'farbe'] as const;
@@ -130,7 +132,7 @@ const parserFehler: ErrorRequestHandler = (error, _req, res, next) => {
 	next(error);
 };
 
-export function einstellungenRouten(router: Router, _deps: VolleAppDeps): void {
+export function einstellungenRouten(router: Router, deps: VolleAppDeps): void {
 	router.get(
 		'/einstellungen',
 		brauchtMitglied,
@@ -177,7 +179,16 @@ export function einstellungenRouten(router: Router, _deps: VolleAppDeps): void {
 			const eingabe: unknown = req.body;
 			if (!Buffer.isBuffer(eingabe) || eingabe.length === 0) return void res.status(415).json(FORMAT_FEHLER);
 
-			const logo = await verarbeiteLogo(eingabe);
+			// Durch dieselbe Schlange wie die Fotos (TP4-Spec 2.4): Ein Logo mit 25 MP dekodiert mit
+			// mehreren Hundert MB Spitze, und neben einem Foto liefe sonst ein zweites Bild zugleich
+			// durch sharp. Ist die Schlange voll, dieselbe Antwort wie beim Foto. Anders als dort erst
+			// nach dem Koerper: Er ist hoechstens 1 MB gross und schon gelesen, wenn die Route
+			// beginnt (express.raw); eine Pruefung davor kostete ein eigenes Middleware und spart kaum
+			// etwas. Verworfen: das Logo an der Schlange vorbei, weil es selten kommt -- selten heisst
+			// nicht nie, und die Speichergrenze (deploy/jufi-services.yml) rechnet mit einem Bild zur Zeit.
+			const lauf = deps.fotoSchlange.reihe(() => verarbeiteLogo(eingabe));
+			if (lauf === null) return void res.set('Retry-After', '2').status(503).json(BESCHAEFTIGT);
+			const logo = await lauf;
 			if (!logo.ok)
 				return void res
 					.status(logo.grund === 'zu-gross' ? 413 : 415)

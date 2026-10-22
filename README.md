@@ -213,13 +213,43 @@ Upgrade ohne eigene Regel durch. Ob er die App erreicht, prüft `tools/pruefe-be
 „Betrieb prüfen“). Beim Herunterfahren schließt die App die Sockets mit 1012, die Clients verbinden sich danach neu.
 Änderungen älter als 90 Tage räumt die App beim Start und dann täglich selbst auf.
 
-Die Tore im Einzelnen: 1 sauberer Stand, 2 Format, Tests und Typen, 3 Image bauen, 4 Rauchtest (dazu gehört das
+Die Tore im Einzelnen: 1 sauberer Stand, 2 Format, Tests und Typen, 3 Image bauen, 4 Rauchtest (dazu gehören das
 Initialen-Icon: `fc-match` muss DejaVu Sans Bold im Image finden, und das ausgelieferte Icon in 192 und 512 px muss
-Buchstaben zeigen, `tools/pruefe-icon.mjs`). Bis hier läuft auch `--dry-run`. Weiter: 5 Vorbedingungen auf dem Server
+Buchstaben zeigen, `tools/pruefe-icon.mjs`; und die Fotoprobe, siehe unten). Bis hier läuft auch `--dry-run`. Weiter: 5 Vorbedingungen auf dem Server
 (Dienste, `JUFI_`-Variablen, **Sicherungsskript `jufi-tools/backup.sh`**), 5b Dump vor der Migration (ohne restic, **vor**
 dem Übertragen, damit ein gescheiterter Dump den Server unberührt lässt; gibt es einen Container von `jufi-db`, der nicht
 läuft, bricht der Deploy ab, nur ohne Container gilt es als erstes Ausrollen), 6 Übertragen und Ausrollen, 7 Nachprüfen.
 Fehlt `jufi-tools` auf dem Server, bricht Tor 5 ab und verweist auf `tools/install-backup.sh`.
+
+**Fotoprobe** (Tor 4, TP4-Spec 2.4): Der Rauchtest-Container läuft mit dem `mem_limit` des Dienstes `jufi` aus
+`deploy/jufi-services.yml` (ohne Swap, wie auf dem Server; fehlt die Zeile, bricht der Rauchtest ab). Das Skript
+erzeugt mit `tools/erzeuge-testbilder.mjs` die teuersten bekannten Fotos, die die Upload-Route annimmt: ein 48-MP-JPEG
+baseline, dasselbe progressiv mit 4:2:0, mit 4:4:4 und in CMYK, ein interlaced PNG (Adam7) mit knapp 50 MP in 8 und in
+16 Bit je Kanal, ein 48-MP-WebP und ein knapp 20 MB großes PNG (Begründung im Kopf des Skripts). Es kopiert sie mit `foto.ts` (als `foto.mts`) und
+`tools/fotoprobe.mjs` nach `/app/probe/` und lässt sie im laufenden App-Container durch `verarbeiteFoto` gehen: erst
+jedes Bild in einem eigenen Prozess (Spitze je Bild), dann alle nacheinander in einem Prozess wie im Betrieb. Danach
+liest es `memory.peak` der cgroup (App im Leerlauf und Probe zusammen, also mehr als im Betrieb) und prüft, dass die App
+weiter auf `/healthz` antwortet. Die Ausgabe sieht so aus:
+
+```text
+  gross.jpg: 8000 x 6000 -> 2560 x 1920, … Bytes (beide Fassungen), … ms, Prozess bisher hoechstens … MiB
+  gross.png: 2980 x 2228 -> 2560 x 1914, … Bytes (beide Fassungen), … ms, Prozess bisher hoechstens … MiB
+  gross-progressiv.jpg: 8000 x 6000 -> 2560 x 1920, …
+  gross-progressiv-444.jpg: 8000 x 6000 -> 2560 x 1920, …
+  gross-cmyk.jpg: 8000 x 6000 -> 2560 x 1920, …
+  gross-adam7.png: 8160 x 6120 -> 2560 x 1920, …
+  gross-adam7-16bit.png: 8160 x 6120 -> 2560 x 1920, …
+  gross.webp: 8000 x 6000 -> 2560 x 1920, …
+  alle nacheinander: Probe-Prozess: hoechstens … MiB
+  Fotoprobe: 8 Bilder bis 50 MP verarbeitet, Spitze … MiB von 768m
+```
+
+**„Speicher reicht nicht; mem_limit anheben (Spec 2.4)“**: Der Kernel hat die Probe beendet (Exit 137) oder die App ist
+gestorben. Dann **nicht** die Fotogrenze senken, sondern dem Eigentümer die gemessenen Werte vorlegen (die Zeile
+„Spitze bis zum Abbruch“ und die Masse der Probe) und mit ihm einen neuen `mem_limit` für `jufi` in
+`deploy/jufi-services.yml` festlegen. Der neue Wert muss danach auch in die gemeinsame Compose-Datei auf dem Server und
+den Speicher der anderen Apps dort (3,7 GB ohne Swap) aushalten. Die Probe läuft bei jedem Deploy, weil eine neue
+`sharp`-Version den Bedarf ändern kann.
 
 **Erster Admin** — die CLI liegt im Image, `BASIS_URL` kommt aus der Umgebung des Dienstes:
 
@@ -230,11 +260,13 @@ docker compose run --rm --no-deps -T -l traefik.enable=false jufi node apps/cli/
 
 Der ausgegebene Link führt nach `https://test.jufi-app.de/admin/einrichten#…` und gilt 1 Stunde.
 
-**Warum `run` und nicht `exec`:** `jufi` hat ein Speicherlimit von 256 MiB. Die CLI als zweiter Node-Prozess im laufenden
-Container sprengt es, der Kernel beendet dann Prozesse (Exit 137, oft ohne Ausgabe) und startet dabei die App neu. `run`
-startet einen eigenen Wegwerf-Container mit demselben Image und derselben Umgebung; `--no-deps` lässt Datenbank und
-Migration in Ruhe, `-l traefik.enable=false` hält Traefik davon ab, Anfragen an den Wegwerf-Container zu schicken. Dasselbe
-gilt für jede CLI-Aufgabe, etwa den Demo-Verein: `… jufi node apps/cli/dist/main.js demo einspielen`.
+**Warum `run` und nicht `exec`:** Das Speicherlimit von `jufi` (`mem_limit` in `deploy/jufi-services.yml`) deckt die App
+und genau eine Fotoverarbeitung (Fotoprobe, oben). Die CLI als zweiter Node-Prozess im laufenden Container kann es
+sprengen, wenn gerade ein Foto verarbeitet wird; der Kernel beendet dann Prozesse (Exit 137, oft ohne Ausgabe) und
+startet dabei die App neu. `run` startet einen eigenen Wegwerf-Container mit demselben Image und derselben Umgebung;
+`--no-deps` lässt Datenbank und Migration in Ruhe, `-l traefik.enable=false` hält Traefik davon ab, Anfragen an den
+Wegwerf-Container zu schicken. Dasselbe gilt für jede CLI-Aufgabe, etwa den Demo-Verein:
+`… jufi node apps/cli/dist/main.js demo einspielen`.
 
 **Mails lesen** — Mailpit ist absichtlich nicht öffentlich (die Mails enthalten Einladungs- und Zurücksetzen-Links),
 sondern nur an `127.0.0.1` des Servers gebunden:
@@ -248,7 +280,7 @@ Dann im Browser <http://127.0.0.1:8025>. Läuft lokal schon Mailpit auf 8025, ei
 
 ## Dateien
 
-Hochgeladene Dateien (seit TP4 Etappe 1 die Dokumente unter Medien, später Fotos) liegen nicht in der Datenbank,
+Hochgeladene Dateien (seit TP4 Etappe 1 die Dokumente unter Medien, seit Etappe 2 Fotos und Dateien der Threads) liegen nicht in der Datenbank,
 sondern als Dateien in einem Verzeichnis: `<DATEIEN_PFAD>/<vereinId>/<dateiId>`, der Name ist nie Teil des Pfads. Die
 Datenbank hält nur die Zeile (Name, am Inhalt erkannter Typ, Größe, SHA-256).
 
@@ -292,6 +324,33 @@ Datenbank hält nur die Zeile (Name, am Inhalt erkannter Typ, Größe, SHA-256).
   Snapshots wieder her; entspricht die Nummer in `ls -ln` nicht der Ausgabe von `id` (uid und gid von `node`):
   `chown -R <uid>:<gid> "$MP"`. `tmp/` legt die App selbst neu an. Danach in der App ein Dokument öffnen und
   `jufi-tools/restore-test.sh --dateien` laufen lassen.
+
+## Fotos
+
+Fotos kommen über das Foto-Modul eines Threads (TP4 Etappe 2) und liegen wie Dateien im Volume (Abschnitt „Dateien“),
+aber nie im Original:
+
+- **Verarbeitung** (`apps/jufi/src/server/dateien/foto.ts`, TP4-Spec 2.4): höchstens 20 MB und 50 Megapixel; erlaubt
+  sind JPEG, PNG und WebP (HEIC wird mit eigener Meldung abgelehnt, das iPhone wandelt bei der Auswahl in JPEG um).
+  `sharp` dreht das Bild nach EXIF, verkleinert auf 2560 px lange Seite (JPEG 82) und macht daraus das Vorschaubild mit
+  480 px (JPEG 75). Neu kodiert, also ohne EXIF und GPS; Transparenz wird weiß. Das Original wird verworfen.
+- **`foto.ts` importiert nur `sharp` und `node:*`** und nutzt nur löschbare TypeScript-Syntax: Die Fotoprobe im
+  Rauchtest führt genau diese Datei im Image ohne Bau aus (Abschnitt „Deployment der echten App“).
+- **Warteschlange** (`foto-schlange.ts`): eine Verarbeitung gleichzeitig (`sharp.concurrency(1)`, Cache aus), bis zu 8
+  warten. Ist sie voll, antwortet der Server mit 503 `BESCHAEFTIGT` und `Retry-After: 2`; der Client wiederholt bis zu
+  dreimal von selbst, erst dann steht „Nochmal“ an der Zeile.
+- **Einwilligung:** Über dem Foto-Modul steht, von welchen Kindern der Zielgruppe (bei einer Teilnahme-Umfrage nur die
+  mit „Dabei“) keine Fotos gezeigt werden dürfen. Eltern erlauben Fotos unter „Meine Jungfischer“, Volljährige nur
+  selbst im Profil; die Einwilligung der Eltern erlischt mit dem 18. Geburtstag.
+- **Testbilder:** nie echte Fotos, auch nicht zum Ausprobieren. Bunte Bilder aus Formen erzeugt
+
+  ```bash
+  node tools/erzeuge-testbilder.mjs .daten/testbilder --bunt 12
+  ```
+
+  (`bunt-1.jpg` … `bunt-12.jpg`, 1600 × 1200, mit Nummer, damit man beim Blättern sieht, welches gerade da ist). Dazu
+  entstehen immer die acht Bilder der Fotoprobe (`gross.jpg`, `gross.png`, `gross-progressiv.jpg`,
+  `gross-progressiv-444.jpg`, `gross-cmyk.jpg`, `gross-adam7.png`, `gross-adam7-16bit.png`, `gross.webp`). Demo-Fotos kommen mit Etappe 6.
 
 ## Sicherung
 

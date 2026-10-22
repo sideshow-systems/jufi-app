@@ -1,3 +1,4 @@
+import type { EinwilligungZeile } from '../einwilligung.js';
 import type { TerminDaten } from '../module/termin/termin.js';
 import {
 	threadAnsicht,
@@ -7,6 +8,8 @@ import {
 	type ModulDaten,
 	type UmfrageAnsicht,
 } from './ansicht.js';
+import type { DateienModulAnsicht, FotosModulAnsicht } from '../dateien/module.js';
+import { absenderName } from './namen.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
 import type { ThreadKopf, UmfrageDaten } from './typen.js';
 
@@ -68,6 +71,7 @@ function eingabe(ich: string, k: ThreadKopf, module: ModulDaten[], rest: Partial
 		nachrichten: [],
 		zugangSeit: new Date('2026-01-01T00:00:00Z'),
 		verlaufGelesenBis: null,
+		fotoEinwilligungen: new Map(),
 		jetzt: JETZT,
 		...rest,
 	};
@@ -284,5 +288,141 @@ describe('threadDatenAus', () => {
 		expect(daten.kopf).toBe(k);
 		expect(daten.termine.map((t) => t.startDatum)).toEqual(['2026-10-30', '2026-10-24']);
 		expect(daten.umfragen.map((u) => u.modulId)).toEqual(['u1', 'u2']);
+	});
+});
+
+describe('threadAnsicht: Datei- und Foto-Module', () => {
+	const am = (stunde: number) => new Date(`2026-10-21T${String(stunde).padStart(2, '0')}:00:00Z`);
+	const foto = (id: string, vonId: string, stunde: number) => ({
+		id,
+		breite: 2560,
+		hoehe: 1440,
+		vonId,
+		hochgeladenAm: am(stunde),
+	});
+	const fotoModul = (
+		hochladen: 'JUGENDLEITER' | 'ALLE' = 'JUGENDLEITER',
+		fotos = [foto('f1', 'sandra', 8)],
+	): ModulDaten => ({
+		typ: 'FOTOS',
+		id: 'fm',
+		titel: 'Bilder',
+		hochladen,
+		fotos,
+	});
+	const dateiModul: ModulDaten = {
+		typ: 'DATEIEN',
+		id: 'dm',
+		titel: null,
+		dateien: [
+			{ id: 'd1', name: 'Packliste.pdf', typ: 'application/pdf', groesse: 1234, vonId: 'thomas', hochgeladenAm: am(7) },
+			{ id: 'd2', name: 'Plan.png', typ: 'image/png', groesse: 99, vonId: 'thomas', hochgeladenAm: am(9) },
+		],
+	};
+	const eltern = (erteiltVon: string): EinwilligungZeile[] => [{ erteiltVon, widerrufenAm: null }];
+	// Alle bis auf Tim: Paul ist volljaehrig und willigt selbst ein.
+	const fast = () =>
+		new Map<string, readonly EinwilligungZeile[]>([
+			['lena', eltern('sandra')],
+			['max', eltern('sandra')],
+			['jonas', eltern('thomas')],
+			['paul', eltern('paul')],
+		]);
+	const fotosVon = (ich: string, m: ModulDaten, rest: Partial<AnsichtEingabe> = {}) =>
+		ansichtVon(ich, kopf(), [m], rest).module[0] as FotosModulAnsicht;
+
+	it('zeigt Dateien in der gespeicherten Reihenfolge mit ISO-Zeit und ohne Absender', () => {
+		const m = ansichtVon('sandra', kopf(), [dateiModul]).module[0] as DateienModulAnsicht;
+		expect(m).toEqual({
+			typ: 'DATEIEN',
+			id: 'dm',
+			titel: null,
+			darfAendern: false,
+			dateien: [
+				{
+					id: 'd1',
+					name: 'Packliste.pdf',
+					typ: 'application/pdf',
+					groesse: 1234,
+					hochgeladenAm: '2026-10-21T07:00:00.000Z',
+				},
+				{ id: 'd2', name: 'Plan.png', typ: 'image/png', groesse: 99, hochgeladenAm: '2026-10-21T09:00:00.000Z' },
+			],
+		});
+	});
+
+	it('laesst nur den Bearbeiter Dateien aendern', () => {
+		const darf = (ich: string) => (ansichtVon(ich, kopf(), [dateiModul]).module[0] as DateienModulAnsicht).darfAendern;
+		expect(darf('thomas')).toBe(true);
+		expect(darf('sandra')).toBe(false);
+	});
+
+	it('laesst Foto-Loeschen je Person zu: das eigene, Bearbeiter alle', () => {
+		const fotos = [foto('f1', 'sandra', 8), foto('f2', 'lena', 9)];
+		const loeschen = (ich: string) => fotosVon(ich, fotoModul('ALLE', fotos)).fotos.map((f) => [f.id, f.darfLoeschen]);
+		expect(loeschen('sandra')).toEqual([
+			['f1', true],
+			['f2', false],
+		]);
+		expect(loeschen('thomas')).toEqual([
+			['f1', true],
+			['f2', true],
+		]);
+	});
+
+	it('uebernimmt Masse, ISO-Zeit und den Namen der hochladenden Person', () => {
+		const m = fotosVon('thomas', fotoModul());
+		expect(m).toMatchObject({ typ: 'FOTOS', id: 'fm', titel: 'Bilder', hochladen: 'JUGENDLEITER' });
+		expect(m.fotos).toEqual([
+			{
+				id: 'f1',
+				breite: 2560,
+				hoehe: 1440,
+				von: absenderName('sandra', umfeld),
+				hochgeladenAm: '2026-10-21T08:00:00.000Z',
+				darfLoeschen: true,
+			},
+		]);
+	});
+
+	it('nennt eine entfernte hochladende Person ehemaliges Mitglied', () => {
+		const m = fotosVon('sandra', fotoModul('ALLE', [foto('f1', 'mia', 8)]));
+		expect(m.fotos[0]).toMatchObject({ von: 'ehemaliges Mitglied', darfLoeschen: false });
+		expect(fotosVon('thomas', fotoModul('ALLE', [foto('f1', 'mia', 8)])).fotos[0].darfLoeschen).toBe(true);
+	});
+
+	it('laesst einen Leser bei JUGENDLEITER nicht hochladen und zeigt ihm keinen Hinweis', () => {
+		const m = fotosVon('sandra', fotoModul('JUGENDLEITER'), { fotoEinwilligungen: fast() });
+		expect(m).toMatchObject({ darfHochladen: false, hinweis: null });
+	});
+
+	it('zeigt dem Bearbeiter den Hinweis mit Tim', () => {
+		const m = fotosVon('thomas', fotoModul('JUGENDLEITER'), { fotoEinwilligungen: fast() });
+		expect(m).toMatchObject({ darfHochladen: true, hinweis: 'Von Tim S. dürfen keine Fotos gezeigt werden' });
+	});
+
+	it('zeigt einem Leser bei ALLE Upload und Hinweis, im Archiv nicht', () => {
+		const lebend = fotosVon('sandra', fotoModul('ALLE'), { fotoEinwilligungen: fast() });
+		expect(lebend).toMatchObject({ darfHochladen: true, hinweis: 'Von Tim S. dürfen keine Fotos gezeigt werden' });
+		const alt = ansichtVon('sandra', kopf(), [terminModul('2026-10-10'), fotoModul('ALLE')], {
+			fotoEinwilligungen: fast(),
+		}).module[1] as FotosModulAnsicht;
+		expect(alt).toMatchObject({ darfHochladen: false, hinweis: null });
+	});
+
+	it('hat keinen Hinweis, wenn alle, die dabei sind, eingewilligt haben', () => {
+		const dabei = umfrageModul({
+			antworten: [{ fuerId: 'lena', vonId: 'sandra', optionIds: ['o-dabei'], abgegebenAm: JETZT }],
+		});
+		const a = ansichtVon('thomas', kopf(), [dabei, fotoModul()], { fotoEinwilligungen: fast() });
+		expect((a.module[1] as FotosModulAnsicht).hinweis).toBeNull();
+	});
+
+	it('nennt mit Teilnahme-Umfrage nur die, die dabei sind', () => {
+		const dabei = umfrageModul({
+			antworten: [{ fuerId: 'lena', vonId: 'sandra', optionIds: ['o-dabei'], abgegebenAm: JETZT }],
+		});
+		const a = ansichtVon('thomas', kopf(), [dabei, fotoModul()], { fotoEinwilligungen: new Map() });
+		expect((a.module[1] as FotosModulAnsicht).hinweis).toBe('Von Lena M. dürfen keine Fotos gezeigt werden');
 	});
 });

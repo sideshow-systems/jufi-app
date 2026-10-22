@@ -59,6 +59,8 @@ export const VEREINS_MODELLE = [
 	'ThreadUntergruppe',
 	'ThreadModul',
 	'InfoModul',
+	'DateienModul',
+	'FotosModul',
 	'TerminModul',
 	'UmfrageModul',
 	'UmfrageOption',

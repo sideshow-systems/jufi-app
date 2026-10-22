@@ -258,6 +258,16 @@ describe('GET /threads', () => {
 			expect(r.threads.map((z) => z.id)).toEqual([t.threadId]);
 		});
 
+		it('findet einen Thread ueber den Namen einer Datei in seinem Datei-Modul', async () => {
+			const s = await szenario();
+			const treffer = await s.bowling('Zeltlager', {
+				module: [{ typ: 'DATEIEN', dateien: [{ name: 'Packliste-Sommer.pdf' }] }],
+			});
+			await s.bowling('Bowling');
+			const r = await s.liste(s.sandra.cookie, `?suche=${encodeURIComponent('packliste')}`);
+			expect(r.threads.map((z) => z.id)).toEqual([treffer.threadId]);
+		});
+
 		it('nur Leerraum ist keine Suche', async () => {
 			const s = await szenario();
 			await s.bowling();

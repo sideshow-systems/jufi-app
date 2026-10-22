@@ -121,6 +121,10 @@ interface Entfernt {
 							}
 						</ul>
 					}
+					<!-- Neben den Hinweisen, aber eigene Zeile: die Pille meint die DSGVO-Einwilligung, dies die Fotos. -->
+					@if (p.fotoEinwilligung !== undefined && p.fotoEinwilligung !== null) {
+						<p data-fotos>Fotos: {{ p.fotoEinwilligung ? 'erlaubt' : 'nicht erlaubt' }}</p>
+					}
 					@if (!darfAendern()) {
 						<dl>
 							@if (p.geburtsdatum) {

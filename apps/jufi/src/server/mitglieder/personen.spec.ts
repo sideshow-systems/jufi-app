@@ -215,6 +215,56 @@ describe('Personen', () => {
 		expect(sieSelbst.familie).toEqual([expect.objectContaining({ jungfischerId: kind.id, vorname: 'Kai' })]);
 	});
 
+	it('Einzelansicht des Kindes: Eine Foto-Einwilligung nimmt den Hinweis "ohne Einwilligung" nicht weg', async () => {
+		const v = await neuerVerein();
+		const verwalter = await v.mitglied(['MITGLIEDER'], 'Vera');
+		const mutter = await v.erwachsener('Mia');
+		const kind = await v.kind('Kai');
+		await v.zuordnen(mutter.id, kind.id);
+		await prisma.einwilligung.create({
+			data: { vereinId: v.verein.id, jungfischerId: kind.id, erteiltVon: mutter.id, art: 'FOTOS', textVersion: '1' },
+		});
+
+		const alsVerwalter = (await (await v.api(`/personen/${kind.id}`, verwalter.cookie)).json()) as Eintrag;
+		expect(alsVerwalter.warnhinweise?.map((w) => w.art)).toContain('EINWILLIGUNG_FEHLT');
+	});
+
+	it('Einzelansicht der Verwaltung nennt den Foto-Stand: false ohne, true mit gueltiger Zeile, null bei Erwachsenen; andere Betrachter sehen ihn nicht', async () => {
+		const v = await neuerVerein();
+		const verwalter = await v.mitglied(['MITGLIEDER'], 'Vera');
+		const betreuer = await v.mitglied(['ANTWORTEN_DETAIL'], 'Bert');
+		const mutter = await v.mitglied([], 'Mia');
+		const kind = await v.kind('Kai');
+		await v.zuordnen(mutter.personId, kind.id);
+		const ansicht = async (id: string, cookie: string) =>
+			(await (await v.api(`/personen/${id}`, cookie)).json()) as Eintrag & { fotoEinwilligung?: boolean | null };
+
+		expect((await ansicht(kind.id, verwalter.cookie)).fotoEinwilligung).toBe(false);
+		await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: kind.id,
+				erteiltVon: mutter.personId,
+				art: 'FOTOS',
+				textVersion: '1',
+			},
+		});
+		const mit = await ansicht(kind.id, verwalter.cookie);
+		expect(mit.fotoEinwilligung).toBe(true);
+		// Die Foto-Einwilligung ist nicht die DSGVO-Einwilligung: der Hinweis dazu bleibt.
+		expect(mit.warnhinweise?.map((w) => w.art)).toContain('EINWILLIGUNG_FEHLT');
+		expect((await ansicht(mutter.personId, verwalter.cookie)).fotoEinwilligung).toBeNull();
+		expect(await ansicht(kind.id, betreuer.cookie)).not.toHaveProperty('fotoEinwilligung');
+		expect(await ansicht(kind.id, mutter.cookie)).not.toHaveProperty('fotoEinwilligung');
+
+		// Ein widerrufener Stand zaehlt nicht.
+		await prisma.einwilligung.updateMany({
+			where: { jungfischerId: kind.id, art: 'FOTOS' },
+			data: { widerrufenAm: new Date() },
+		});
+		expect((await ansicht(kind.id, verwalter.cookie)).fotoEinwilligung).toBe(false);
+	});
+
 	it('Einzelansicht fuer Betreuer: Familie, aber weder Adresse noch Einladung noch Zugang noch Einwilligungshinweis', async () => {
 		const v = await neuerVerein();
 		const betreuer = await v.mitglied(['ANTWORTEN_DETAIL']);

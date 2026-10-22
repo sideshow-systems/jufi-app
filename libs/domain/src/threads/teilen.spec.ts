@@ -232,6 +232,28 @@ describe('teilenText', () => {
 	});
 });
 
+describe('teilenText: Datei- und Foto-Module', () => {
+	it('gibt fuer beide Typen keine Zeile (Spec 11)', () => {
+		const dateien: ModulAnsicht = {
+			typ: 'DATEIEN',
+			id: 'd1',
+			titel: 'Packliste',
+			dateien: [],
+			darfAendern: false,
+		};
+		const fotos: ModulAnsicht = {
+			typ: 'FOTOS',
+			id: 'f1',
+			titel: null,
+			hochladen: 'ALLE',
+			fotos: [],
+			darfHochladen: true,
+			hinweis: 'Von Tim S. dürfen keine Fotos gezeigt werden',
+		};
+		expect(zeilen(ansicht([terminModul(), dateien, fotos]))).toEqual(zeilen(ansicht([terminModul()])));
+	});
+});
+
 describe('ohneFormat', () => {
 	it('ersetzt alle vier Formatzeichen', () => {
 		expect(ohneFormat('*a* _b_ ~c~ `d`')).toBe('∗a∗ ˍbˍ ∼c∼ ˋdˋ');
@@ -275,6 +297,7 @@ describe('teilenText gegen die echten Regeln', () => {
 			nachrichten: [],
 			zugangSeit: new Date('2026-01-01T00:00:00Z'),
 			verlaufGelesenBis: null,
+			fotoEinwilligungen: new Map(),
 			jetzt: JETZT,
 		};
 		return teilenText({ ansicht: threadAnsicht(e)!, basisUrl: BASIS, slug: SLUG, jetzt: JETZT });

@@ -2,8 +2,17 @@ import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import type { ModulEntwurf, ThreadBearbeitung, ThreadEntwurf, VerwaltungListe } from '@jufi/domain';
+import { By } from '@angular/platform-browser';
+import {
+	KEINE_MEDIEN,
+	type MedienZahl,
+	type ModulEntwurf,
+	type ThreadBearbeitung,
+	type ThreadEntwurf,
+	type VerwaltungListe,
+} from '@jufi/domain';
 import { adminTestAnbieter, knopf, tippe } from '../../../admin/test-hilfen';
+import { HochladenFeldComponent } from '../../hochladen-feld';
 import { antworteAbgelaufen, API, erwarteAnmeldung, hake, ichMit, oeffneSeite, stabil, waehle } from '../test-hilfen';
 
 type Umfrage = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
@@ -74,6 +83,7 @@ function bearbeitung(rest: Partial<ThreadBearbeitung> = {}): ThreadBearbeitung {
 		darfArchivieren: true,
 		entwurf: bowling(),
 		sperren: {},
+		medien: { gesamt: KEINE_MEDIEN, module: {} },
 		untergruppen: UNTERGRUPPEN,
 		...rest,
 	};
@@ -708,6 +718,230 @@ describe('Thread-Editor', () => {
 			expect(seite.querySelector('[aria-label="Modul hinzufügen"]')).toBeNull();
 			expect(seite.querySelector('jf-modul-felder')).toBeNull();
 			expect(seite.textContent).toContain('Zielgruppe und Module des Austauschs stehen fest.');
+		});
+	});
+
+	describe('Datei- und Foto-Module', () => {
+		const ZELT: ModulEntwurf = { typ: 'FOTOS', id: 'm-fotos', titel: 'Zeltlager', hochladen: 'JUGENDLEITER' };
+		const PAPIERE: ModulEntwurf = { typ: 'DATEIEN', id: 'm-dateien', titel: null };
+		const FOTOS_23 = { fotos: 23, dateien: 0, personen: 5 };
+
+		// Der Bowling-Thread mit einem Foto- und einem Datei-Modul dahinter (Module 4 und 5).
+		function mitMedien(zahlen: Record<string, MedienZahl>, gesamt: MedienZahl = KEINE_MEDIEN) {
+			return bearbeitung({
+				entwurf: { ...bowling(), module: [...bowling().module, ZELT, PAPIERE] },
+				medien: { gesamt, module: zahlen },
+			});
+		}
+
+		const hochladeFeld = (harness: RouterTestingHarness) =>
+			harness.fixture.debugElement.query(By.directive(HochladenFeldComponent))
+				.componentInstance as HochladenFeldComponent;
+
+		it('Modul hinzufügen bietet Dateien und Fotos, Fotos beginnt mit dem Schalter aus', async () => {
+			const { harness, hinzufuegen, seite, listenTexte, karten } = await oeffneNeu();
+			hinzufuegen('Dateien');
+			await stabil(harness);
+			expect(listenTexte()).toEqual(['Dateien']);
+			expect(seite.querySelector('jf-dateien-felder')).toBeTruthy();
+			expect(seite.querySelector('jf-modul-felder')).toBeNull();
+
+			hinzufuegen('Fotos');
+			await stabil(harness);
+			expect(listenTexte()).toEqual(['Dateien', 'Fotos']);
+			expect(seite.querySelector('jf-dateien-felder')).toBeNull();
+			expect(seite.querySelector<HTMLInputElement>('jf-fotos-felder input[name="hochladen"]')?.checked).toBe(false);
+			expect(karten()).toHaveLength(2);
+		});
+
+		it('der Schalter und der Titel gehen in den Entwurf, der an den Server geht', async () => {
+			const { harness, hinzufuegen, seite, http } = await oeffneNeu();
+			tippe(seite, '#thread-titel', 'Zeltlager');
+			hinzufuegen('Fotos');
+			await stabil(harness);
+			tippe(seite, 'jf-fotos-felder input[name="titel"]', 'Bilder');
+			// Wie im Browser nach jedem Ereignis: Erst danach kennt das Bauteil den neuen Titel.
+			await stabil(harness);
+			hake(seite, 'jf-fotos-felder input[name="hochladen"]');
+			await stabil(harness);
+			knopf(seite, 'Entwurf speichern').click();
+
+			await vi.waitFor(() => {
+				const anfrage = http.expectOne({ method: 'POST', url: `${API}/threads` });
+				expect((anfrage.request.body as { entwurf: ThreadEntwurf }).entwurf.module).toEqual([
+					{ typ: 'FOTOS', id: null, titel: 'Bilder', hochladen: 'ALLE' },
+				]);
+				anfrage.flush(bearbeitung({ entwurf: { ...bowling(), module: [] } }));
+			});
+		});
+
+		it('ungespeichert steht dort Erst speichern, dann hochladen und kein Upload-Feld', async () => {
+			const { harness, hinzufuegen, seite } = await oeffneNeu();
+			hinzufuegen('Fotos');
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-fotos-felder')?.textContent).toContain('Erst speichern, dann hochladen');
+			expect(seite.querySelector('jf-hochladen-feld')).toBeNull();
+		});
+
+		it('gespeichert zeigt es die Zahl und ein Upload-Feld auf die Adresse des Moduls', async () => {
+			const { harness, seite } = await oeffneBestehend(mitMedien({ 'm-fotos': FOTOS_23 }, FOTOS_23));
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[3]?.click();
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-fotos-felder')?.textContent).toContain('23 Fotos');
+			expect(hochladeFeld(harness).ziel()).toBe(`${API}/module/m-fotos/fotos`);
+			expect(hochladeFeld(harness).art()).toBe('FOTO');
+
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[4]?.click();
+			await stabil(harness);
+			expect(seite.querySelector('jf-dateien-felder')?.textContent).toContain('Noch keine Dateien.');
+			expect(hochladeFeld(harness).ziel()).toBe(`${API}/module/m-dateien/dateien`);
+		});
+
+		it('nach einem Upload lädt der Editor nur die Zahlen neu und lässt den Entwurf stehen', async () => {
+			const { harness, seite, http } = await oeffneBestehend(mitMedien({ 'm-fotos': FOTOS_23 }, FOTOS_23));
+			tippe(seite, '#thread-titel', 'Zelten am See');
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[3]?.click();
+			await stabil(harness);
+
+			hochladeFeld(harness).hochgeladen.emit();
+			await vi.waitFor(() => {
+				const neu = { fotos: 24, dateien: 0, personen: 6 };
+				http.expectOne({ method: 'GET', url: `${API}/threads/t1/bearbeitung` }).flush({
+					...mitMedien({ 'm-fotos': neu }, neu),
+					version: 3,
+					// Der Server kennt den ungespeicherten Titel nicht; er darf ihn nicht ueberschreiben.
+					entwurf: { ...bowling(), titel: 'Anderer Titel vom Server', module: [] },
+				});
+			});
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-fotos-felder')?.textContent).toContain('24 Fotos');
+			expect(seite.querySelector<HTMLInputElement>('#thread-titel')?.value).toBe('Zelten am See');
+			expect(seite.querySelectorAll('ol.module > li')).toHaveLength(5);
+
+			// Die Version bleibt die geladene: Ein Upload ändert den Thread nicht (kein 409 beim Speichern).
+			knopf(seite, 'Entwurf speichern').click();
+			await vi.waitFor(() => {
+				const anfrage = http.expectOne({ method: 'PUT', url: `${API}/threads/t1` });
+				expect((anfrage.request.body as { version: number }).version).toBe(3);
+				anfrage.flush(bearbeitung({ version: 4 }));
+			});
+		});
+
+		it('Entfernen mit 23 Fotos von 5 Personen fragt mit den Zahlen', async () => {
+			const { harness, seite, nachLabel, listenTexte } = await oeffneBestehend(
+				mitMedien({ 'm-fotos': FOTOS_23 }, FOTOS_23),
+			);
+			nachLabel('Entfernen: Modul 4').click();
+			await stabil(harness);
+
+			const dialog = seite.querySelector<HTMLElement>('jf-bestaetigung [role="dialog"]')!;
+			expect(dialog.querySelector('p')?.textContent).toBe(
+				'Modul ‚Zeltlager‘ entfernen? Beim Speichern löscht das 23 Fotos von 5 Personen.',
+			);
+			expect(listenTexte()).toHaveLength(5);
+
+			knopf(dialog, 'Abbrechen').click();
+			await stabil(harness);
+			expect(seite.querySelector('jf-bestaetigung')).toBeNull();
+			expect(listenTexte()).toHaveLength(5);
+
+			nachLabel('Entfernen: Modul 4').click();
+			await stabil(harness);
+			knopf(seite.querySelector<HTMLElement>('jf-bestaetigung [role="dialog"]')!, 'Entfernen').click();
+			await stabil(harness);
+			expect(seite.querySelector('jf-bestaetigung')).toBeNull();
+			expect(listenTexte()).toEqual(['Info-Text', 'Termin', 'Umfrage', 'Dateien']);
+		});
+
+		it('die Rückfrage nennt ohne Titel den Typ und bei Dateien keine Personen', async () => {
+			const { harness, seite, nachLabel } = await oeffneBestehend(
+				mitMedien({ 'm-fotos': KEINE_MEDIEN, 'm-dateien': { fotos: 0, dateien: 3, personen: 0 } }),
+			);
+			nachLabel('Entfernen: Modul 5').click();
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-bestaetigung [role="dialog"] p')?.textContent).toBe(
+				'Modul ‚Dateien‘ entfernen? Beim Speichern löscht das 3 Dateien.',
+			);
+		});
+
+		it('ohne Medien entfernt es ohne Rückfrage', async () => {
+			const { harness, seite, nachLabel, listenTexte } = await oeffneBestehend(
+				mitMedien({ 'm-fotos': KEINE_MEDIEN, 'm-dateien': KEINE_MEDIEN }),
+			);
+			nachLabel('Entfernen: Modul 4').click();
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-bestaetigung')).toBeNull();
+			expect(listenTexte()).toEqual(['Info-Text', 'Termin', 'Umfrage', 'Dateien']);
+		});
+
+		it('ein ungespeichertes Modul entfernt es ohne Rückfrage', async () => {
+			const { harness, seite, hinzufuegen, nachLabel } = await oeffneBestehend(
+				mitMedien({ 'm-fotos': FOTOS_23 }, FOTOS_23),
+			);
+			hinzufuegen('Fotos');
+			await stabil(harness);
+			nachLabel('Entfernen: Modul 6').click();
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-bestaetigung')).toBeNull();
+			expect(seite.querySelectorAll('ol.module > li')).toHaveLength(5);
+		});
+
+		it('Thread löschen nennt, was mit verschwindet', async () => {
+			const gesamt = { fotos: 3, dateien: 2, personen: 2 };
+			const { harness, seite } = await oeffneBestehend(mitMedien({}, gesamt));
+			knopf(seite, 'Löschen').click();
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-bestaetigung [role="dialog"] p')?.textContent).toBe(
+				'Der Thread wird mit allen Modulen endgültig gelöscht. Das löscht auch 3 Fotos von 2 Personen und 2 Dateien.',
+			);
+		});
+
+		it('Thread löschen ohne Medien fragt wie bisher', async () => {
+			const { harness, seite } = await oeffneBestehend();
+			knopf(seite, 'Löschen').click();
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-bestaetigung [role="dialog"] p')?.textContent).toBe(
+				'Der Thread wird mit allen Modulen endgültig gelöscht.',
+			);
+		});
+
+		it('die Vorschau zeigt beide Module leer, ohne Upload und ohne Hinweis', async () => {
+			const { seite, karten } = await oeffneBestehend(mitMedien({ 'm-fotos': FOTOS_23 }, FOTOS_23));
+			const fotos = karten()[3]!;
+			const dateien = karten()[4]!;
+
+			expect(fotos.textContent).toContain('Zeltlager');
+			expect(fotos.textContent).toContain('Noch keine Fotos.');
+			expect(dateien.textContent).toContain('Noch keine Dateien.');
+			expect(seite.querySelector('jf-thread-vorschau jf-hochladen-feld')).toBeNull();
+		});
+
+		it('ein Fehler des Servers am Titel steht am Feld des Moduls', async () => {
+			const { harness, seite, http } = await oeffneBestehend(mitMedien({}));
+			seite.querySelectorAll<HTMLButtonElement>('ol.module > li .waehlen')[3]?.click();
+			await stabil(harness);
+			tippe(seite, '#thread-titel', 'Neu');
+			await stabil(harness);
+			knopf(seite, 'Entwurf speichern').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne({ method: 'PUT', url: `${API}/threads/t1` })
+					.flush(
+						{ fehler: 'Der Titel ist zu lang.', feld: 'module.3.titel' },
+						{ status: 400, statusText: 'Bad Request' },
+					),
+			);
+			await stabil(harness);
+
+			expect(seite.querySelector('jf-fotos-felder [role="alert"]')?.textContent).toContain('Der Titel ist zu lang.');
 		});
 	});
 

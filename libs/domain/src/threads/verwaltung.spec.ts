@@ -2,7 +2,7 @@ import type { TerminDaten } from '../module/termin/termin.js';
 import { threadDatenAus, type ModulDaten } from './ansicht.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
 import type { AntwortDaten, ThreadKopf, UmfrageDaten } from './typen.js';
-import { antwortenUebersicht, siehtAntworten, verwaltungThread, zielgruppeText } from './verwaltung.js';
+import { antwortenUebersicht, medienZahlen, siehtAntworten, verwaltungThread, zielgruppeText } from './verwaltung.js';
 
 const umfeld = bowlingUmfeld();
 const person = (id: string) => umfeld.personen.get(id)!;
@@ -244,5 +244,47 @@ describe('antwortenUebersicht', () => {
 			JETZT,
 		)!;
 		expect(u.umfragen[0].zeilen.find((z) => z.fuerId === 'lena')?.eingetragenVon).toBe('ehemaliges Mitglied');
+	});
+});
+
+describe('medienZahlen', () => {
+	const foto = (id: string, vonId: string) => ({ id, breite: 1, hoehe: 1, vonId, hochgeladenAm: JETZT });
+	const datei = (id: string) => ({
+		id,
+		name: `${id}.pdf`,
+		typ: 'application/pdf',
+		groesse: 1,
+		vonId: 'x',
+		hochgeladenAm: JETZT,
+	});
+
+	it('zaehlt Fotos, Dateien und verschiedene Hochladende, gesamt und je Modul', () => {
+		const module: ModulDaten[] = [
+			{ typ: 'INFO', id: 'i', titel: null, text: 'x' },
+			{ typ: 'DATEIEN', id: 'd', titel: null, dateien: [datei('1'), datei('2')] },
+			{
+				typ: 'FOTOS',
+				id: 'f1',
+				titel: null,
+				hochladen: 'ALLE',
+				fotos: [foto('a', 'p1'), foto('b', 'p2'), foto('c', 'p2')],
+			},
+			{ typ: 'FOTOS', id: 'f2', titel: null, hochladen: 'ALLE', fotos: [foto('d', 'p2'), foto('e', 'p3')] },
+		];
+		expect(medienZahlen(module)).toEqual({
+			gesamt: { fotos: 5, dateien: 2, personen: 3 },
+			module: {
+				d: { fotos: 0, dateien: 2, personen: 0 },
+				f1: { fotos: 3, dateien: 0, personen: 2 },
+				f2: { fotos: 2, dateien: 0, personen: 2 },
+			},
+		});
+	});
+
+	it('kennt leere Module und Threads ohne Medien', () => {
+		expect(medienZahlen([])).toEqual({ gesamt: { fotos: 0, dateien: 0, personen: 0 }, module: {} });
+		expect(medienZahlen([{ typ: 'DATEIEN', id: 'd', titel: null, dateien: [] }]).module).toEqual({
+			d: { fotos: 0, dateien: 0, personen: 0 },
+		});
 	});
 });

@@ -169,7 +169,7 @@ describe('Mitglieder-Huelle', () => {
 
 	it('macht auf /demo/medien den Eintrag Medien aktiv', async () => {
 		await oeffne('/demo/medien', VEREIN, () =>
-			vi.waitFor(() => http.expectOne(`${API}/dokumente`).flush({ kategorien: [], darfPflegen: false })),
+			vi.waitFor(() => http.expectOne(`${API}/medien`).flush({ bloecke: [] })),
 		);
 
 		expect(eintrag('Medien').getAttribute('aria-current')).toBe('page');

@@ -6,7 +6,7 @@ import { asynchron } from '../admin/asynchron.js';
 import { brauchtMitglied, mitgliedKontext } from '../mitglieder/sitzung.js';
 import { vereinsKontext } from '../verein.js';
 import { NICHT_GEFUNDEN } from './fehler.js';
-import { ladeThread, ladeThreadUmfeld, ladeVereinsstand } from './laden.js';
+import { ladeFotoEinwilligungen, ladeKoepfe, ladeThread, ladeThreadUmfeld, ladeVereinsstand } from './laden.js';
 
 export type GelesenBereich = 'uebersicht' | 'verlauf';
 
@@ -110,6 +110,9 @@ export async function ladeThreadAnsicht(
 		select: { art: true, stand: true, autorId: true, angelegtAm: true, geloeschtAm: true },
 	});
 
+	// Nach dem Umfeld, weil die Kinder des Threads daraus kommen; ohne Foto-Modul bleibt die Map leer.
+	const fotoEinwilligungen = await ladeFotoEinwilligungen(db, geladen.kopf, geladen.module, umfeld);
+
 	return threadAnsicht({
 		ich: mich,
 		kopf: geladen.kopf,
@@ -120,6 +123,7 @@ export async function ladeThreadAnsicht(
 		nachrichten,
 		zugangSeit,
 		verlaufGelesenBis: gelesen?.verlaufGelesenBis ?? null,
+		fotoEinwilligungen,
 		jetzt,
 	});
 }
@@ -129,11 +133,17 @@ export async function ladeThreadAnsicht(
  * ebenfalls mit der Person aus dem Umfeld), nur ohne Verlauf und Zaehler. Verworfen:
  * dafuer die ganze Ansicht zu berechnen -- das Oeffnen eines Threads ruft das hier bei
  * jedem Wechsel des Reiters auf.
+ *
+ * Nur der Kopf (ladeKoepfe), nicht der ganze Thread: siehtThread braucht weder Module noch
+ * Antworten. Jedes Foto und jede Vorschau fragt hier an (dateien/ausliefern.ts); mit ladeThread
+ * lud ein Zeltlager-Thread mit 300 Fotos beim Durchblaettern je Bild alle 300 Fotozeilen und
+ * alle Antworten mit, quadratisch in der Zahl der Fotos (Gesamtreview TP4 Etappe 2, I1).
  */
 export async function darfThreadSehen(db: VereinDb, personId: string, threadId: string): Promise<boolean> {
-	const [umfeld, geladen] = await Promise.all([ladeThreadUmfeld(db), ladeThread(db, threadId)]);
+	const [umfeld, koepfe] = await Promise.all([ladeThreadUmfeld(db), ladeKoepfe(db, [threadId])]);
+	const kopf = koepfe.get(threadId);
 	const mich = umfeld.personen.get(personId);
-	return geladen !== null && mich !== undefined && siehtThread(mich, geladen.kopf, umfeld);
+	return kopf !== undefined && mich !== undefined && siehtThread(mich, kopf, umfeld);
 }
 
 function istEindeutigVerletzt(error: unknown): boolean {

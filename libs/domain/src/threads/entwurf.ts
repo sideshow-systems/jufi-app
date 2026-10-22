@@ -2,6 +2,7 @@ import { terminFehler, type TerminDaten } from '../module/termin/termin.js';
 import { einheitenFuer, neueUmfrageVorlage, teilnahmeOptionen } from '../module/umfrage/umfrage.js';
 import { berlinerTag, istKalendertag, tagPlus } from '../zeit.js';
 import type { ModulDaten } from './ansicht.js';
+import type { FotoHochladen } from './rechte.js';
 import type { AntwortEinheit, ErgebnisSicht, Rollenfilter, ThreadKopf, ThreadModus } from './typen.js';
 
 // Spec 4.3 und Plan-Entscheidung 8. Dieselben Zahlen stehen als CHECKs im Schema; die
@@ -45,7 +46,9 @@ export interface OptionEntwurf {
 
 export type TerminEntwurf = Omit<TerminDaten, 'modulId'>;
 
-// id null heisst: neues Modul. Die Frist steht als ISO-Zeichenkette (UTC), nicht als Date:
+// id null heisst: neues Modul. Datei- und Foto-Module tragen keine Dateien im Entwurf: Die
+// Bytes kommen ueber eigene Upload-Routen, der Entwurf beschreibt nur das Modul (Plan-
+// Entscheidung 10). Die Frist steht als ISO-Zeichenkette (UTC), nicht als Date:
 // der Entwurf geht als JSON zwischen Editor und Server hin und her und soll ohne
 // Umwandlung gleich bleiben.
 export type ModulEntwurf =
@@ -63,7 +66,9 @@ export type ModulEntwurf =
 			frist: string | null;
 			ergebnisse: ErgebnisSicht;
 			optionen: OptionEntwurf[];
-	  };
+	  }
+	| { typ: 'DATEIEN'; id: string | null; titel: string | null }
+	| { typ: 'FOTOS'; id: string | null; titel: string | null; hochladen: FotoHochladen };
 
 export interface ThreadEntwurf {
 	titel: string;
@@ -89,7 +94,8 @@ const ROLLENFILTER: readonly Rollenfilter[] = [
 ];
 const EINHEITEN: readonly AntwortEinheit[] = ['JUNGFISCHER', 'ERWACHSENER', 'PERSON'];
 const ERGEBNISSE: readonly ErgebnisSicht[] = ['ALLE', 'SUMME', 'JUGENDLEITER'];
-const MODULTYPEN = ['INFO', 'TERMIN', 'UMFRAGE'] as const;
+const FOTO_HOCHLADEN: readonly FotoHochladen[] = ['JUGENDLEITER', 'ALLE'];
+const MODULTYPEN = ['INFO', 'TERMIN', 'UMFRAGE', 'DATEIEN', 'FOTOS'] as const;
 
 // ---------------------------------------------------------------------------------
 // Form: entwurfAus
@@ -175,6 +181,8 @@ function modul(w: unknown, i: number): ModulEntwurf {
 	const kopf = { id: textOderNull(w['id'], f('id')), titel: textOderNull(w['titel'], f('titel')) };
 	if (typ === 'INFO') return { typ, ...kopf, text: text(w['text'], f('text')) };
 	if (typ === 'TERMIN') return { typ, ...kopf, termin: termin(w['termin'], i) };
+	if (typ === 'DATEIEN') return { typ, ...kopf };
+	if (typ === 'FOTOS') return { typ, ...kopf, hochladen: wahl(w['hochladen'], FOTO_HOCHLADEN, f('hochladen')) };
 
 	const teilnahme = wahrheit(w['teilnahme'], f('teilnahme'));
 	const vielleicht = wahrheit(w['vielleicht'], f('vielleicht'));
@@ -290,6 +298,8 @@ function modulFehler(m: ModulEntwurf, i: number, rollenfilter: Rollenfilter, tei
 			...laengeFehler(f('treffpunkt'), m.termin.treffpunkt, GRENZEN.treffpunkt),
 		];
 	}
+	// Datei- und Foto-Module haben ausser dem Titel nichts zu pruefen; ab hier ist m eine Umfrage.
+	if (m.typ === 'DATEIEN' || m.typ === 'FOTOS') return fehler;
 	fehler.push(...pflichtFehler(f('frage'), m.frage, GRENZEN.frage, 'Bitte eine Frage eingeben.'));
 	if (!einheitenFuer(rollenfilter).includes(m.einheit)) {
 		fehler.push({ feld: f('einheit'), text: 'Diese Einheit fragt bei dieser Zielgruppe niemanden.' });
@@ -338,13 +348,14 @@ export function entwurfFehler(e: ThreadEntwurf, untergruppenIds: ReadonlySet<str
  * Berliner Tage nach jetzt: Der Tag ist in der Regel zu aendern, aber nie in der
  * Vergangenheit. jetzt kommt vom Aufrufer, die Regel kennt keine Uhr.
  */
-export function neuesModul(
-	typ: 'INFO' | 'TERMIN' | 'UMFRAGE',
-	vorhandene: readonly ModulEntwurf[],
-	jetzt: Date,
-): ModulEntwurf {
+export function neuesModul(typ: ModulEntwurf['typ'], vorhandene: readonly ModulEntwurf[], jetzt: Date): ModulEntwurf {
 	const neu = { id: null, titel: null };
 	if (typ === 'INFO') return { typ, ...neu, text: '' };
+	if (typ === 'DATEIEN') return { typ, ...neu };
+	// Fotos von allen Lesern sind die Ausnahme, die der Ersteller bewusst waehlt: Die Vorgabe
+	// bleibt bei den Jugendleitern. Verworfen: "ALLE" als Vorgabe, weil ein vergessener Schalter
+	// dann fremde Bilder in einen Familien-Thread liesse.
+	if (typ === 'FOTOS') return { typ, ...neu, hochladen: 'JUGENDLEITER' };
 	if (typ === 'TERMIN') {
 		const termin: TerminEntwurf = {
 			startDatum: tagPlus(berlinerTag(jetzt), 7),
@@ -382,26 +393,39 @@ export function entwurfAusThread(k: ThreadKopf, module: readonly ModulDaten[]): 
 		alleUntergruppen: k.alleUntergruppen,
 		untergruppenIds: [...k.untergruppenIds],
 		module: module.map((m): ModulEntwurf => {
-			if (m.typ === 'INFO') return { typ: m.typ, id: m.id, titel: m.titel, text: m.text };
-			if (m.typ === 'TERMIN') {
-				const { startDatum, endDatum, beginn, ende, ort, treffpunkt } = m.termin;
-				const termin = { startDatum, endDatum, beginn, ende, ort, treffpunkt };
-				return { typ: m.typ, id: m.id, titel: m.titel, termin };
+			switch (m.typ) {
+				case 'INFO':
+					return { typ: m.typ, id: m.id, titel: m.titel, text: m.text };
+				case 'TERMIN': {
+					const { startDatum, endDatum, beginn, ende, ort, treffpunkt } = m.termin;
+					const termin = { startDatum, endDatum, beginn, ende, ort, treffpunkt };
+					return { typ: m.typ, id: m.id, titel: m.titel, termin };
+				}
+				case 'DATEIEN':
+					return { typ: m.typ, id: m.id, titel: m.titel };
+				case 'FOTOS':
+					return { typ: m.typ, id: m.id, titel: m.titel, hochladen: m.hochladen };
+				case 'UMFRAGE': {
+					const u = m.umfrage;
+					return {
+						typ: m.typ,
+						id: m.id,
+						titel: m.titel,
+						frage: u.frage,
+						einheit: u.einheit,
+						mehrfach: u.mehrfach,
+						teilnahme: u.teilnahme,
+						vielleicht: u.vielleicht,
+						frist: u.frist ? u.frist.toISOString() : null,
+						ergebnisse: u.ergebnisse,
+						optionen: u.optionen.map((o) => ({ schluessel: o.schluessel, text: o.text })),
+					};
+				}
+				default: {
+					const unerreichbar: never = m;
+					return unerreichbar;
+				}
 			}
-			const u = m.umfrage;
-			return {
-				typ: m.typ,
-				id: m.id,
-				titel: m.titel,
-				frage: u.frage,
-				einheit: u.einheit,
-				mehrfach: u.mehrfach,
-				teilnahme: u.teilnahme,
-				vielleicht: u.vielleicht,
-				frist: u.frist ? u.frist.toISOString() : null,
-				ergebnisse: u.ergebnisse,
-				optionen: u.optionen.map((o) => ({ schluessel: o.schluessel, text: o.text })),
-			};
 		}),
 	};
 }

@@ -159,6 +159,71 @@ describe('Thread lesen und Gelesen-Stand', () => {
 			expect(umfrage.zeilen.find((z) => z.fuerId === s.lena.personId)?.eingetragenVon).toBeNull();
 		});
 
+		describe('Foto-Modul: Hinweis auf Kinder ohne Foto-Einwilligung', () => {
+			const hinweisAn = async (s: Awaited<ReturnType<typeof szenario>>, threadId: string) => {
+				const ansicht = await s.holeAnsicht(threadId, s.leiter.cookie);
+				const modul = ansicht.module.find((m) => m.typ === 'FOTOS');
+				return modul?.typ === 'FOTOS' ? modul.hinweis : undefined;
+			};
+			const willigtEin = (s: Awaited<ReturnType<typeof szenario>>, kind: string, von: string, widerrufen = false) =>
+				prisma.einwilligung.create({
+					data: {
+						vereinId: s.verein.id,
+						jungfischerId: kind,
+						erteiltVon: von,
+						art: 'FOTOS',
+						textVersion: '1',
+						widerrufenAm: widerrufen ? JETZT : null,
+					},
+				});
+			const fotoThread = (s: Awaited<ReturnType<typeof szenario>>) =>
+				legeThreadAn(prisma, s.verein, JETZT, {
+					titel: 'Fotos',
+					erstelltVonId: s.leiter.personId,
+					module: [{ typ: 'FOTOS', hochladen: 'JUGENDLEITER' }],
+				});
+
+			it('der Jugendleiter erfaehrt, wessen Kinder nicht gezeigt werden duerfen; mit der Einwilligung der Mutter nicht mehr', async () => {
+				const s = await szenario();
+				const t = await fotoThread(s);
+				expect(await hinweisAn(s, t.threadId)).toBe('Von Lena M. und Max M. dürfen keine Fotos gezeigt werden');
+
+				await willigtEin(s, s.lena.personId, s.sandra.personId);
+				await willigtEin(s, s.max.personId, s.sandra.personId);
+				expect(await hinweisAn(s, t.threadId)).toBeNull();
+			});
+
+			it('eine widerrufene Foto-Einwilligung und die DSGVO-Einwilligung zaehlen nicht', async () => {
+				const s = await szenario();
+				const t = await fotoThread(s);
+				await willigtEin(s, s.lena.personId, s.sandra.personId);
+				await willigtEin(s, s.max.personId, s.sandra.personId, true);
+				await prisma.einwilligung.create({
+					data: {
+						vereinId: s.verein.id,
+						jungfischerId: s.max.personId,
+						erteiltVon: s.sandra.personId,
+						art: 'DSGVO_ART8',
+						textVersion: '1',
+					},
+				});
+				expect(await hinweisAn(s, t.threadId)).toBe('Von Max M. dürfen keine Fotos gezeigt werden');
+			});
+
+			it('am Tag nach dem 18. Geburtstag gilt die Einwilligung der Mutter nicht mehr, nur die eigene', async () => {
+				const s = await szenario();
+				const t = await fotoThread(s);
+				await willigtEin(s, s.lena.personId, s.sandra.personId);
+				await willigtEin(s, s.max.personId, s.sandra.personId);
+				// JETZT ist der 22.10.2026: am 21.10.2008 geboren, ist Max seit gestern volljaehrig.
+				await prisma.person.update({ where: { id: s.max.personId }, data: { geburtsdatum: new Date('2008-10-21') } });
+				expect(await hinweisAn(s, t.threadId)).toBe('Von Max M. dürfen keine Fotos gezeigt werden');
+
+				await willigtEin(s, s.max.personId, s.max.personId);
+				expect(await hinweisAn(s, t.threadId)).toBeNull();
+			});
+		});
+
 		it('unbekannt, Nur Jugendleiter, Entwurf und Austausch sind fuer Sandra dieselbe 404', async () => {
 			const s = await szenario();
 			const nurLeiter = await legeThreadAn(prisma, s.verein, JETZT, {

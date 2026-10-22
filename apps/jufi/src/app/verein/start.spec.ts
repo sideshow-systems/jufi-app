@@ -34,6 +34,7 @@ function kind(zusatz: Partial<KindAnsicht> = {}): KindAnsicht {
 		zugang: { erlaubt: true, vorhanden: true, einwilligungGueltig: true },
 		ichBinErziehungsberechtigt: true,
 		volljaehrig: false,
+		fotos: { erlaubt: false, darfAendern: true },
 		...zusatz,
 	};
 }

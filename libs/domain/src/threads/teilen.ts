@@ -83,6 +83,8 @@ export function teilenText(e: { ansicht: ThreadAnsicht; basisUrl: string; slug: 
 		} else if (m.typ === 'UMFRAGE') {
 			zeilen.push(...umfrageZeilen(m));
 		}
+		// Dateien und Fotos bekommen keine Zeile (Spec 11): Der Text geht an eine Gruppe ausserhalb
+		// der App, und ein Name, eine Zahl oder ein Hinweis auf Einwilligungen gehoert nicht dorthin.
 	}
 	zeilen.push(`👉 Antworten: ${e.basisUrl}/${e.slug}/t/${threadSegment(ansicht.id, ansicht.titel)}`);
 	return zeilen.join('\n');

@@ -17,6 +17,11 @@ export interface MitgliedIch {
 	hatPasswort: boolean;
 	/** Ob die Person (noch nicht entfernte) Kinder hat; nur dann zeigt die Oberflaeche "Meine Jungfischer". */
 	hatKinder: boolean;
+	/**
+	 * Die Foto-Einwilligung der Person selbst; nur bei volljaehrigen Jungfischern, sonst null. Dann zeigt
+	 * das Profil den Abschnitt "Fotos". Eltern minderjaehriger Kinder pflegen sie unter "Meine Jungfischer".
+	 */
+	fotoEinwilligung: { erlaubt: boolean } | null;
 	totp: { moeglich: boolean; aktiv: boolean; wiederherstellungscodesUebrig: number };
 }
 
@@ -110,6 +115,8 @@ export interface PersonDetail extends PersonListe {
 	einladung?: { offen: boolean; ablauf: string | null; mailNichtZugestellt: boolean } | null;
 	/** Nur fuer die Verwaltung. */
 	zugang?: { vorhanden: boolean; letzteAnmeldungAm: string | null; erlaubt: boolean } | null;
+	/** Nur fuer die Verwaltung: ob Fotos der Person gezeigt werden duerfen; null bei Erwachsenen. */
+	fotoEinwilligung?: boolean | null;
 }
 
 export interface Untergruppe {
@@ -162,6 +169,8 @@ export interface KindAnsicht {
 	zugang: { erlaubt: boolean; vorhanden: boolean; einwilligungGueltig: boolean };
 	ichBinErziehungsberechtigt: boolean;
 	volljaehrig: boolean;
+	/** Ob Fotos des Kindes gezeigt werden duerfen; darfAendern = erziehungsberechtigt und nicht volljaehrig. */
+	fotos: { erlaubt: boolean; darfAendern: boolean };
 }
 
 /** Eine Person, die der Verein als Ansprechpartner fuehrt (hat mindestens ein Recht); nur Name, keine Rechte oder Adresse. */
@@ -415,6 +424,19 @@ export class MitgliederApi {
 
 	kindEinwilligung(slug: string, kindId: string, erteilen: boolean): Observable<{ erteilt: boolean }> {
 		return this.senden('POST', slug, `/meine-jungfischer/${encodeURIComponent(kindId)}/einwilligung`, { erteilen });
+	}
+
+	/** Die Foto-Einwilligung fuer ein minderjaehriges Kind; die DSGVO-Einwilligung bleibt davon unberuehrt. */
+	setzeFotoEinwilligung(slug: string, kindId: string, erteilen: boolean): Observable<{ erteilt: boolean }> {
+		return this.senden('POST', slug, `/meine-jungfischer/${encodeURIComponent(kindId)}/einwilligung`, {
+			erteilen,
+			art: 'FOTOS',
+		});
+	}
+
+	/** Ein volljaehriger Jungfischer willigt fuer sich selbst ein; fuer alle anderen antwortet der Server mit 404. */
+	setzeEigeneFotoEinwilligung(slug: string, erteilen: boolean): Observable<{ erteilt: boolean }> {
+		return this.senden('POST', slug, '/ich/einwilligung', { erteilen });
 	}
 
 	/** Fuer jede angemeldete Person lesbar, auch fuer Kinder: Sie sollen wissen, wen sie fragen koennen. */

@@ -1,5 +1,5 @@
 import { createPrismaClientFromEnv, vereinDb } from '@jufi/db';
-import type { ModulEntwurf, ThreadBearbeitung, ThreadEntwurf } from '@jufi/domain';
+import type { ModulEntwurf, ThreadAnsicht, ThreadBearbeitung, ThreadEntwurf } from '@jufi/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
@@ -330,6 +330,29 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(await s.stand()).toBe(vorher);
 		});
 
+		it('legt ein Datei- und ein Foto-Modul an; die Ansicht zeigt beide mit leeren Listen', async () => {
+			const s = await szenario();
+			const e = s.bowling();
+			e.module.push(
+				{ typ: 'DATEIEN', id: null, titel: 'Packliste' },
+				{ typ: 'FOTOS', id: null, titel: null, hochladen: 'ALLE' },
+			);
+			const r = await s.lege(e, s.thomas.cookie);
+			expect(r.status).toBe(201);
+			const b = (await r.json()) as ThreadBearbeitung;
+			expect(b.entwurf.module.map((m) => m.typ)).toEqual(['INFO', 'TERMIN', 'UMFRAGE', 'DATEIEN', 'FOTOS']);
+			expect(b.entwurf.module[3]).toMatchObject({ typ: 'DATEIEN', titel: 'Packliste' });
+			expect(b.entwurf.module[4]).toMatchObject({ typ: 'FOTOS', hochladen: 'ALLE' });
+			expect(await prisma.dateienModul.count({ where: { id: b.entwurf.module[3]?.id as string } })).toBe(1);
+			expect(await prisma.fotosModul.count({ where: { id: b.entwurf.module[4]?.id as string } })).toBe(1);
+
+			const a = await sende(server.url, s.api(`/threads/${b.id}`), { cookie: s.thomas.cookie });
+			expect(a.status).toBe(200);
+			const ansicht = (await a.json()) as ThreadAnsicht;
+			expect(ansicht.module[3]).toMatchObject({ typ: 'DATEIEN', titel: 'Packliste', dateien: [] });
+			expect(ansicht.module[4]).toMatchObject({ typ: 'FOTOS', hochladen: 'ALLE', fotos: [] });
+		});
+
 		it('meldet eine zweite Teilnahme-Umfrage als 409 DOPPELTE_TEILNAHME', async () => {
 			const s = await szenario();
 			const e = s.bowling();
@@ -431,6 +454,65 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(((await r.json()) as ThreadBearbeitung).version).toBe(stand);
 			expect(await s.arten(stand)).toEqual(['THREAD']);
 			expect(await s.system(t.threadId)).toEqual([]);
+		});
+
+		it('nimmt auf einem bestehenden Thread ein Datei- und ein Foto-Modul auf', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread();
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const entwurf: ThreadEntwurf = {
+				...b.entwurf,
+				module: [
+					...b.entwurf.module,
+					{ typ: 'DATEIEN', id: null, titel: null },
+					{ typ: 'FOTOS', id: null, titel: null, hochladen: 'JUGENDLEITER' },
+				],
+			};
+			const r = await s.ersetze(t.threadId, b.version, entwurf, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const neu = (await r.json()) as ThreadBearbeitung;
+			expect(neu.entwurf.module.map((m) => m.typ)).toEqual(['INFO', 'TERMIN', 'UMFRAGE', 'DATEIEN', 'FOTOS']);
+			expect(await s.arten(await s.stand())).toEqual(['MODUL', 'MODUL', 'THREAD']);
+		});
+
+		it('stellt hochladen eines Foto-Moduls um: Aenderung MODUL, die Zeilen der Fotos bleiben', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({
+				module: [...BOWLING_MODULE, { typ: 'FOTOS', hochladen: 'JUGENDLEITER', fotos: [{}, {}] }],
+			});
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const foto = b.entwurf.module[3];
+			expect(foto).toMatchObject({ typ: 'FOTOS', hochladen: 'JUGENDLEITER' });
+			const entwurf = {
+				...b.entwurf,
+				module: b.entwurf.module.map((m) => (m.typ === 'FOTOS' ? { ...m, hochladen: 'ALLE' as const } : m)),
+			};
+			const r = await s.ersetze(t.threadId, b.version, entwurf, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			const stand = await s.stand();
+			expect(await s.arten(stand)).toEqual(['MODUL', 'THREAD']);
+			expect(await prisma.fotosModul.findUniqueOrThrow({ where: { id: foto?.id as string } })).toMatchObject({
+				hochladen: 'ALLE',
+			});
+			expect(await prisma.datei.count({ where: { modulId: foto?.id as string } })).toBe(2);
+			expect(await prisma.dateiLoeschung.count({ where: { vereinId: s.verein.id } })).toBe(0);
+		});
+
+		it('entfernt ein Foto-Modul mit 3 Fotos: 200, die Zeilen sind weg, sechs Schluessel stehen auf der Loeschliste', async () => {
+			const s = await szenario();
+			const t = await s.bowlingThread({
+				module: [...BOWLING_MODULE, { typ: 'FOTOS', fotos: [{}, {}, {}] }],
+			});
+			expect(t.dateiIds).toHaveLength(3);
+			const b = await s.bearbeitung(t.threadId, s.thomas.cookie);
+			const entwurf = { ...b.entwurf, module: b.entwurf.module.filter((m) => m.typ !== 'FOTOS') };
+			const r = await s.ersetze(t.threadId, b.version, entwurf, s.thomas.cookie);
+			expect(r.status).toBe(200);
+			expect(await prisma.datei.count({ where: { id: { in: t.dateiIds } } })).toBe(0);
+			expect(await prisma.threadModul.count({ where: { id: t.modulIds[3] } })).toBe(0);
+			const erwartet = t.dateiIds.flatMap((id) => [`${s.verein.id}/${id}`, `${s.verein.id}/${id}.vorschau`]).sort();
+			const liste = await prisma.dateiLoeschung.findMany({ where: { vereinId: s.verein.id } });
+			expect(liste.map((l) => l.schluessel).sort()).toEqual(erwartet);
 		});
 
 		it('mit alter Version 409 VERALTET, nichts geaendert, Stand unveraendert', async () => {

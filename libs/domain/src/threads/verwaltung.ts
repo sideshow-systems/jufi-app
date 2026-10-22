@@ -1,9 +1,11 @@
+import { KEINE_MEDIEN, type MedienZahl } from '../dateien/medien.js';
 import type { TerminDaten } from '../module/termin/termin.js';
 import { naechsteTermine, terminZeit } from '../module/termin/termin.js';
 import { hatRecht } from '../rechte.js';
 import type { ThreadEntwurf } from './entwurf.js';
 import { ROLLENFILTER_TEXT } from './entwurf.js';
 import { istArchiviert } from './archiv.js';
+import type { ModulDaten } from './ansicht.js';
 import { gefragte } from './antworten.js';
 import { EHEMALIGES_MITGLIED, kurzname } from './namen.js';
 import { threadSegment } from './pfad.js';
@@ -79,7 +81,35 @@ export interface ThreadBearbeitung {
 	entwurf: ThreadEntwurf;
 	/** Je Umfrage-Modul-ID, was Antworten festlegen (umfrageSperre). */
 	sperren: Record<string, UmfrageSperre>;
+	/**
+	 * Was am Thread an Fotos und Dateien haengt, gesamt und je Modul-ID: Der Editor fragt damit
+	 * vor dem Entfernen eines Moduls oder dem Loeschen des Threads zurück (Plan-Entscheidung 11).
+	 */
+	medien: { gesamt: MedienZahl; module: Record<string, MedienZahl> };
 	untergruppen: { id: string; name: string }[];
+}
+
+// Was an den Datei- und Foto-Modulen eines Threads haengt, gesamt und je Modul-ID (nur Module dieser
+// beiden Typen, auch leere). "Personen" sind die verschiedenen Hochladenden der Fotos: Die Rueckfrage
+// im Editor nennt sie bei Fotos ("23 Fotos von 5 Personen"), bei Dateien nicht (medienZahlText).
+// Gesamt zaehlt jede Person einmal, auch wenn sie in zwei Modulen hochgeladen hat.
+export function medienZahlen(module: readonly ModulDaten[]): ThreadBearbeitung['medien'] {
+	const gesamt = { ...KEINE_MEDIEN };
+	const alle = new Set<string>();
+	const je: Record<string, MedienZahl> = {};
+	for (const m of module) {
+		if (m.typ === 'DATEIEN') {
+			je[m.id] = { ...KEINE_MEDIEN, dateien: m.dateien.length };
+			gesamt.dateien += m.dateien.length;
+		} else if (m.typ === 'FOTOS') {
+			const von = new Set(m.fotos.map((f) => f.vonId));
+			je[m.id] = { ...KEINE_MEDIEN, fotos: m.fotos.length, personen: von.size };
+			gesamt.fotos += m.fotos.length;
+			for (const id of von) alle.add(id);
+		}
+	}
+	gesamt.personen = alle.size;
+	return { gesamt, module: je };
 }
 
 // Wer die Antworten-Uebersicht eines Threads sieht: wer ihn bearbeiten darf (dann auch Nachtragen)

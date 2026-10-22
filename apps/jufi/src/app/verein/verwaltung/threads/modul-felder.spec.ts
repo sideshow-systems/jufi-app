@@ -392,6 +392,14 @@ describe('jf-modul-felder', () => {
 			expect(ergebnis).toEqual(ALLE.map((feld) => ({ feld, sichtbar: zeigtModulFeld(modul, feld) })));
 		});
 
+		it('Datei- und Foto-Module zeigen nur den Fehler am Titel (ihre Felder stehen in eigenen Bauteilen)', () => {
+			const dateien: ModulEntwurf = { typ: 'DATEIEN', id: 'm4', titel: null };
+			const fotos: ModulEntwurf = { typ: 'FOTOS', id: 'm5', titel: null, hochladen: 'JUGENDLEITER' };
+			for (const m of [dateien, fotos]) {
+				expect(ALLE.filter((feld) => zeigtModulFeld(m, feld))).toEqual(['titel']);
+			}
+		});
+
 		it('kennt die Optionen einer Teilnahme, aber weder Mehrfachauswahl noch Vielleicht noch Ergebnisse', () => {
 			const teilnahme = umfrage({ teilnahme: true });
 			expect(zeigtModulFeld(teilnahme, 'optionen')).toBe(true);

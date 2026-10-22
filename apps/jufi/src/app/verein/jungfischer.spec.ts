@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { adminTestAnbieter, knopf } from '../admin/test-hilfen';
+import { FOTO_EINWILLIGUNG_TEXT } from '@jufi/domain';
 import type { KindAnsicht } from './mitglieder-api';
 
 const API = '/demo/api/v1';
@@ -23,6 +24,7 @@ function kind(zusatz: Partial<KindAnsicht> = {}): KindAnsicht {
 		zugang: { erlaubt: true, vorhanden: true, einwilligungGueltig: true },
 		ichBinErziehungsberechtigt: true,
 		volljaehrig: false,
+		fotos: { erlaubt: false, darfAendern: true },
 		...zusatz,
 	};
 }
@@ -79,15 +81,116 @@ describe('Meine Jungfischer', () => {
 	});
 
 	it('Großmutter sieht keine Aktionen', async () => {
-		await oeffne([kind({ ichBinErziehungsberechtigt: false })]);
+		await oeffne([kind({ ichBinErziehungsberechtigt: false, fotos: { erlaubt: false, darfAendern: false } })]);
 		expect(seite.querySelectorAll('article button').length).toBe(0);
 		expect(seite.textContent).toContain('Lena Muster');
 	});
 
 	it('volljähriges Kind zeigt Hinweis statt Aktionen', async () => {
-		await oeffne([kind({ volljaehrig: true })]);
+		await oeffne([kind({ volljaehrig: true, fotos: { erlaubt: false, darfAendern: false } })]);
 		expect(seite.querySelectorAll('article button').length).toBe(0);
 		expect(seite.textContent).toContain('volljährig');
+	});
+
+	describe('Fotos', () => {
+		const fotosZeile = (): string => seite.querySelector('[data-fotos]')?.textContent ?? '';
+
+		it('nicht erlaubt: eine Zeile und der Knopf zum Erlauben', async () => {
+			await oeffne([kind()]);
+			expect(fotosZeile()).toContain('Fotos: nicht erlaubt');
+			expect(knopf(seite, 'Fotos erlauben')).toBeTruthy();
+			expect(seite.textContent).not.toContain('Erlaubnis zurückziehen');
+		});
+
+		it('erlaubt: eine Zeile und der Knopf zum Zurueckziehen', async () => {
+			await oeffne([kind({ fotos: { erlaubt: true, darfAendern: true } })]);
+			expect(fotosZeile()).toContain('Fotos: erlaubt');
+			expect(fotosZeile()).not.toContain('nicht erlaubt');
+			expect(knopf(seite, 'Erlaubnis zurückziehen')).toBeTruthy();
+		});
+
+		it('Erlauben schickt erst nach der Bestaetigung mit dem Wortlaut und laedt neu', async () => {
+			await oeffne([kind()]);
+			knopf(seite, 'Fotos erlauben').click();
+			await stabil();
+			http.expectNone(`${API}/meine-jungfischer/k1/einwilligung`);
+			const frage = seite.querySelector('[role="alertdialog"]')?.textContent ?? '';
+			expect(frage).toContain(FOTO_EINWILLIGUNG_TEXT);
+
+			knopf(seite, 'Ja, Fotos erlauben').click();
+			const anfrage = http.expectOne(`${API}/meine-jungfischer/k1/einwilligung`);
+			expect(anfrage.request.body).toEqual({ erteilen: true, art: 'FOTOS' });
+			anfrage.flush({ erteilt: true });
+			await neuGeladen([kind({ fotos: { erlaubt: true, darfAendern: true } })]);
+			expect(fotosZeile()).toContain('Fotos: erlaubt');
+			expect(seite.querySelector('[role="alertdialog"]')).toBeNull();
+		});
+
+		it('Abbrechen beim Erlauben sendet nichts', async () => {
+			await oeffne([kind()]);
+			knopf(seite, 'Fotos erlauben').click();
+			await stabil();
+			knopf(seite, 'Abbrechen').click();
+			await stabil();
+			http.expectNone(`${API}/meine-jungfischer/k1/einwilligung`);
+			expect(knopf(seite, 'Fotos erlauben')).toBeTruthy();
+		});
+
+		it('Zurueckziehen fragt nach und schickt erteilen false mit der Art FOTOS', async () => {
+			await oeffne([kind({ fotos: { erlaubt: true, darfAendern: true } })]);
+			knopf(seite, 'Erlaubnis zurückziehen').click();
+			await stabil();
+			http.expectNone(`${API}/meine-jungfischer/k1/einwilligung`);
+			expect(seite.querySelector('[role="alertdialog"]')?.textContent).toContain('Lena');
+			knopf(seite, 'Ja, zurückziehen').click();
+			const anfrage = http.expectOne(`${API}/meine-jungfischer/k1/einwilligung`);
+			expect(anfrage.request.body).toEqual({ erteilen: false, art: 'FOTOS' });
+			anfrage.flush({ erteilt: false });
+			await neuGeladen([kind()]);
+			expect(fotosZeile()).toContain('Fotos: nicht erlaubt');
+		});
+
+		it('die Rueckfrage zu den Fotos und die zum Zugang stehen nie gleichzeitig offen', async () => {
+			await oeffne([kind()]);
+			knopf(seite, 'Fotos erlauben').click();
+			await stabil();
+			knopf(seite, 'Einwilligung widerrufen').click();
+			await stabil();
+			expect(seite.querySelectorAll('[role="alertdialog"]').length).toBe(1);
+			expect(seite.querySelector('[role="alertdialog"]')?.textContent).toContain('Der Zugang von Lena endet');
+		});
+
+		it('ein Fehler beim Erlauben steht beim Kind', async () => {
+			await oeffne([kind()]);
+			knopf(seite, 'Fotos erlauben').click();
+			await stabil();
+			knopf(seite, 'Ja, Fotos erlauben').click();
+			http
+				.expectOne(`${API}/meine-jungfischer/k1/einwilligung`)
+				.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+			await stabil();
+			expect(seite.querySelector('[role="alert"]')?.textContent).toContain('nicht gefunden');
+		});
+
+		it('ohne darfAendern gibt es die Zeile, aber keine Knoepfe; volljaehrige Kinder pflegen es selbst', async () => {
+			await oeffne([
+				kind({
+					id: 'k2',
+					vorname: 'Gro',
+					ichBinErziehungsberechtigt: false,
+					fotos: { erlaubt: true, darfAendern: false },
+				}),
+				kind({ id: 'k3', vorname: 'Max', volljaehrig: true, fotos: { erlaubt: false, darfAendern: false } }),
+			]);
+			const gross = seite.querySelector('[data-kind="k2"]') as HTMLElement;
+			const volljaehrig = seite.querySelector('[data-kind="k3"]') as HTMLElement;
+			expect(gross.querySelector('[data-fotos]')?.textContent).toContain('Fotos: erlaubt');
+			expect(gross.querySelectorAll('button').length).toBe(0);
+			expect(gross.textContent).not.toContain('selbst im Profil');
+			expect(volljaehrig.querySelector('[data-fotos]')?.textContent).toContain('Fotos: nicht erlaubt');
+			expect(volljaehrig.textContent).toContain('Pflegt Max selbst im Profil.');
+			expect(volljaehrig.querySelectorAll('button').length).toBe(0);
+		});
 	});
 
 	// Der Waechter laeuft nur beim Betreten der Huelle; beim Wechsel zwischen den Seiten faengt die Seite das 401 selbst ab.

@@ -70,7 +70,7 @@ describe('createApp', () => {
 	it('setzt die Sicherheits-Header und kein X-Powered-By', async () => {
 		const r = await fetch(`${server.url}/healthz`);
 		expect(r.headers.get('content-security-policy')).toBe(
-			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
 		);
 		expect(r.headers.get('x-frame-options')).toBe('DENY');
 		expect(r.headers.get('x-content-type-options')).toBe('nosniff');

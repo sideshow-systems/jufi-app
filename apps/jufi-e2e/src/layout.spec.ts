@@ -69,8 +69,9 @@ const SEITEN: Seite[] = [
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/threads` },
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/termine` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/termine` },
-	// Medien und die Pflege der Dokumente; der Ablauf hat sein Dokument dann wieder geloescht, gemessen
-	// wird also der leere Zustand, in dem die Seite am schmalsten und am leichtesten zu verfehlen ist.
+	// Medien und die Pflege der Dokumente. Medien oeffnet mit "Fotos & Dateien", gemessen wird also der
+	// Block von Bowling mit Vorschaubild und Packliste aus dem Ablauf. Die Pflege der Dokumente ist leer,
+	// weil der Ablauf sein Dokument wieder geloescht hat; leer ist sie am leichtesten zu verfehlen.
 	{ rolle: 'mutter', art: 'mitglied', pfad: `${SLUG}/medien` },
 	{ rolle: 'kind', art: 'mitglied', pfad: `${SLUG}/medien` },
 	{ rolle: 'leitung', art: 'verwaltung', pfad: `${SLUG}/verwaltung/dokumente` },
@@ -455,10 +456,11 @@ test.describe('Thread-Editor', () => {
 						await pruefe('ohne Modul');
 					}
 
-					// Die Felder stehen nur fuer das gewaehlte Modul; Bowling hat Info-Text, Termin und Umfrage.
+					// Die Felder stehen nur fuer das gewaehlte Modul. Bowling hat Info-Text, Termin und Umfrage, dazu
+					// seit den Foto-Schritten des Ablaufs Dateien und Fotos, beide gespeichert, also mit Zahl und Upload.
 					const module = page.locator('ol.module button.waehlen');
-					await expect(module).toHaveCount(3);
-					for (let i = 0; i < 3; i++) {
+					await expect(module).toHaveCount(5);
+					for (let i = 0; i < 5; i++) {
 						await module.nth(i).click();
 						await expect(page.getByRole('heading', { name: `(Modul ${i + 1})` })).toBeVisible();
 						await pruefe(`Modul ${i + 1}`);

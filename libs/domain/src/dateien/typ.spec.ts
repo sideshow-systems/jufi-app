@@ -1,4 +1,4 @@
-import { erkenneTyp, FEHLER_TEXT, GRENZE_BYTES, KOPF_BYTES } from './typ.js';
+import { erkenneTyp, GRENZE_BYTES, KOPF_BYTES } from './typ.js';
 
 // Ein Kopf aus Bytes und Text, aufgefuellt auf KOPF_BYTES, damit die Mindestlaenge nie
 // der Grund fuer ein Ergebnis ist, das der Test gar nicht pruefen will.
@@ -90,18 +90,5 @@ describe('erkenneTyp', () => {
 	it('nimmt den Typ nur aus dem Inhalt, nie aus der Endung', () => {
 		expect(erkenneTyp(kopf('MZ'), 'virus.pdf', 'DATEI')).toEqual({ ok: false, grund: 'TYP' });
 		expect(erkenneTyp(JPEG, 'foto.pdf', 'DATEI')).toEqual({ ok: true, typ: 'image/jpeg' });
-	});
-});
-
-describe('FEHLER_TEXT', () => {
-	it('liefert die Texte wörtlich', () => {
-		expect(FEHLER_TEXT.GROESSE).toBe('Die Datei ist zu groß (höchstens 25 MB)');
-		expect(FEHLER_TEXT.KONTINGENT('4,9 GB', '5,0 GB')).toBe(
-			'Der Speicher des Vereins ist voll (4,9 GB von 5,0 GB belegt). Bitte wende dich an den Betreiber der Plattform.',
-		);
-		expect(FEHLER_TEXT.TYP).toBe(
-			'Diese Dateiart geht nicht. Erlaubt sind PDF, Word, Excel, PowerPoint, OpenDocument, JPEG und PNG.',
-		);
-		expect(FEHLER_TEXT.HEIC).toBe('HEIC-Bilder gehen nicht. Bitte als JPEG senden.');
 	});
 });

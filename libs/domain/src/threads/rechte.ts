@@ -86,3 +86,33 @@ export function darfLoeschenNachricht(
 	if (eintrag.autorId === person.id) return true;
 	return darfBearbeiten(person, kopf);
 }
+
+export type FotoHochladen = 'JUGENDLEITER' | 'ALLE';
+
+// Wer Fotos in ein Foto-Modul laden darf. Bearbeiter immer, auch im Entwurf und im Archiv:
+// Wer den Thread pflegt, laedt die Bilder der Veranstaltung auch Wochen danach noch hoch.
+// Leser nur, wenn der Ersteller es mit "Alle Leser laden hoch" erlaubt hat, und dann nur in
+// einem lebenden Thread: ein Entwurf ist fuer sie unsichtbar, und ein Archiv ist
+// abgeschlossen (3.7). Verworfen: das Recht an die Schreibsperre zu haengen, weil sie den
+// Modus "Nur Aushang" sperrt -- ein Aushang kann trotzdem Fotos sammeln.
+export function darfFotosHochladen(
+	person: ThreadPerson,
+	kopf: ThreadKopf,
+	hochladen: FotoHochladen,
+	e: { umfeld: Umfeld; termine: readonly TerminDaten[]; jetzt: Date },
+): boolean {
+	if (darfBearbeiten(person, kopf)) return true;
+	return (
+		hochladen === 'ALLE' &&
+		siehtThread(person, kopf, e.umfeld) &&
+		!!kopf.veroeffentlichtAm &&
+		!istArchiviert(kopf, e.termine, e.jetzt)
+	);
+}
+
+// Das eigene Foto darf jeder zurueckziehen, auch im Archiv (wie die eigene Nachricht), das
+// fremde nur, wer den Thread bearbeitet. Ob die Person den Thread sieht, prueft der Aufrufer:
+// hier steht nur die Frage nach dem Foto.
+export function darfFotoLoeschen(person: ThreadPerson, kopf: ThreadKopf, vonId: string): boolean {
+	return vonId === person.id || darfBearbeiten(person, kopf);
+}

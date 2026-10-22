@@ -186,6 +186,45 @@ describe('Meine Jungfischer', () => {
 		expect(await prisma.einwilligung.count({ where: { jungfischerId: v.kind.personId } })).toBe(1);
 	});
 
+	it('Widerruf der DSGVO-Einwilligung laesst die Foto-Einwilligung der Mutter unberuehrt und nimmt den Zugang trotzdem', async () => {
+		const v = await neuerVerein();
+		await v.willigtEin(v.kind.personId, v.mutter.personId);
+		const foto = await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: v.kind.personId,
+				erteiltVon: v.mutter.personId,
+				art: 'FOTOS',
+				textVersion: '1',
+			},
+		});
+
+		expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false })).status).toBe(200);
+		expect((await prisma.einwilligung.findUniqueOrThrow({ where: { id: foto.id } })).widerrufenAm).toBeNull();
+		expect(
+			await prisma.einwilligung.count({ where: { art: 'DSGVO_ART8', widerrufenAm: null, vereinId: v.verein.id } }),
+		).toBe(0);
+		// Die Foto-Einwilligung oeffnet keinen Zugang: ohne die DSGVO-Einwilligung ist er weg.
+		expect(await prisma.zugang.count({ where: { personId: v.kind.personId } })).toBe(0);
+	});
+
+	it('Erteilen zaehlt nur offene DSGVO-Einwilligungen: eine offene Foto-Zeile verhindert die Anlage nicht', async () => {
+		const v = await neuerVerein();
+		await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: v.kind.personId,
+				erteiltVon: v.mutter.personId,
+				art: 'FOTOS',
+				textVersion: '1',
+			},
+		});
+
+		expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true })).status).toBe(200);
+		const zeilen = await prisma.einwilligung.findMany({ where: { jungfischerId: v.kind.personId } });
+		expect(zeilen.map((z) => z.art).sort()).toEqual(['DSGVO_ART8', 'FOTOS']);
+	});
+
 	it('Widerruf, wenn der Vater noch gueltig eingewilligt hat: Zugang bleibt', async () => {
 		const v = await neuerVerein();
 		const vater = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
@@ -328,6 +367,255 @@ describe('Meine Jungfischer', () => {
 		await prisma.bezugsperson.deleteMany({ where: { erwachsenerId: v.mutter.personId } });
 		expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false })).status).toBe(404);
 		expect(await prisma.einwilligung.count({ where: { jungfischerId: v.kind.personId, widerrufenAm: null } })).toBe(1);
+	});
+
+	describe('Foto-Einwilligung', () => {
+		const fotoZeilen = (jungfischerId: string) =>
+			prisma.einwilligung.findMany({ where: { jungfischerId, art: 'FOTOS' }, orderBy: { erteiltAm: 'asc' } });
+		const ichSicht = async (cookie: string, slug: string) => {
+			const r = await sende(server.url, `/${slug}/api/v1/ich`, { cookie });
+			return (await r.json()) as { fotoEinwilligung: { erlaubt: boolean } | null };
+		};
+		const postIch = (slug: string, cookie: string, body: unknown) =>
+			sende(server.url, `/${slug}/api/v1/ich/einwilligung`, { methode: 'POST', body, cookie });
+		/** Ein Jungfischer, der laengst 18 ist: legeMitgliedAn vergibt ein Kinder-Geburtsdatum, das hier ersetzt wird. */
+		const volljaehrig = async (v: Awaited<ReturnType<typeof neuerVerein>>) => {
+			const person = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER', vorname: 'Vera' });
+			await prisma.person.update({ where: { id: person.personId }, data: { geburtsdatum: new Date('2000-01-01') } });
+			return person;
+		};
+
+		it('Mutter erteilt Fotos: GET zeigt erlaubt und darfAendern, die DSGVO-Einwilligung bleibt unberuehrt', async () => {
+			const v = await neuerVerein();
+			await v.willigtEin(v.kind.personId, v.mutter.personId);
+			const vorher = await v.liste(v.mutter.cookie);
+			expect(vorher.json.kinder[0]?.['fotos']).toEqual({ erlaubt: false, darfAendern: true });
+
+			const r = await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' });
+			expect(r.status).toBe(200);
+			expect(await r.json()).toEqual({ erteilt: true });
+
+			const nachher = await v.liste(v.mutter.cookie);
+			expect(nachher.json.kinder[0]?.['fotos']).toEqual({ erlaubt: true, darfAendern: true });
+			expect(nachher.json.kinder[0]?.['zugang']).toMatchObject({ einwilligungGueltig: true });
+			const zeilen = await fotoZeilen(v.kind.personId);
+			expect(zeilen).toHaveLength(1);
+			expect(zeilen[0]).toMatchObject({ erteiltVon: v.mutter.personId, textVersion: '1', widerrufenAm: null });
+			// Die DSGVO-Zeile ist weder angelegt noch angefasst worden.
+			const dsgvo = await prisma.einwilligung.findMany({
+				where: { jungfischerId: v.kind.personId, art: 'DSGVO_ART8' },
+			});
+			expect(dsgvo).toHaveLength(1);
+			expect(dsgvo[0]?.widerrufenAm).toBeNull();
+		});
+
+		it('Fotos allein oeffnen keinen Zugang: ohne DSGVO-Einwilligung bleibt einwilligungGueltig false', async () => {
+			const v = await neuerVerein();
+			expect(
+				(await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' })).status,
+			).toBe(200);
+			const k = (await v.liste(v.mutter.cookie)).json.kinder[0];
+			expect(k?.['fotos']).toEqual({ erlaubt: true, darfAendern: true });
+			expect(k?.['zugang']).toMatchObject({ einwilligungGueltig: false });
+		});
+
+		it('zweiter Klick legt keine zweite Zeile an; Widerruf setzt erlaubt auf false und laesst die DSGVO-Zeile stehen', async () => {
+			const v = await neuerVerein();
+			await v.willigtEin(v.kind.personId, v.mutter.personId);
+			await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' });
+			await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' });
+			expect(await fotoZeilen(v.kind.personId)).toHaveLength(1);
+
+			const r = await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false, art: 'FOTOS' });
+			expect(r.status).toBe(200);
+			expect(await r.json()).toEqual({ erteilt: false });
+			const k = (await v.liste(v.mutter.cookie)).json.kinder[0];
+			expect(k?.['fotos']).toEqual({ erlaubt: false, darfAendern: true });
+			expect(k?.['zugang']).toMatchObject({ einwilligungGueltig: true });
+			// Die Zeile bleibt als Nachweis stehen.
+			const zeilen = await fotoZeilen(v.kind.personId);
+			expect(zeilen).toHaveLength(1);
+			expect(zeilen[0]?.widerrufenAm).not.toBeNull();
+			// Der Zugang des Kindes bleibt: der Widerruf der Fotos sagt nichts ueber den Zugang.
+			expect(await prisma.zugang.count({ where: { personId: v.kind.personId } })).toBe(1);
+		});
+
+		it('Widerruf zieht alle offenen Foto-Zeilen zurueck, auch die des Vaters', async () => {
+			const v = await neuerVerein();
+			const vater = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+			await v.verknuepfe(vater.personId, v.kind.personId, true, 'VATER');
+			await v.post(vater.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' });
+			// Die Mutter sieht Fotos schon erlaubt: sie legt keine eigene Zeile daneben.
+			await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' });
+			expect(await fotoZeilen(v.kind.personId)).toHaveLength(1);
+
+			expect(
+				(await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false, art: 'FOTOS' })).status,
+			).toBe(200);
+			expect((await v.liste(vater.cookie)).json.kinder[0]?.['fotos']).toEqual({ erlaubt: false, darfAendern: true });
+			expect(await prisma.einwilligung.count({ where: { jungfischerId: v.kind.personId, widerrufenAm: null } })).toBe(
+				0,
+			);
+		});
+
+		it('eine unbekannte Art ist 400 und aendert nichts; ohne art gilt DSGVO_ART8', async () => {
+			const v = await neuerVerein();
+			for (const art of ['X', null, 7, 'fotos']) {
+				const r = await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art });
+				expect(r.status).toBe(400);
+			}
+			expect(await prisma.einwilligung.count({ where: { jungfischerId: v.kind.personId } })).toBe(0);
+
+			expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true })).status).toBe(200);
+			const zeilen = await prisma.einwilligung.findMany({ where: { jungfischerId: v.kind.personId } });
+			expect(zeilen.map((z) => z.art)).toEqual(['DSGVO_ART8']);
+		});
+
+		it('Grossmutter und volljaehriges Kind: 404 fuer Fotos ueber die Elternroute', async () => {
+			const v = await neuerVerein();
+			const oma = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+			await v.verknuepfe(oma.personId, v.kind.personId, false, 'GROSSMUTTER');
+			expect((await v.post(oma.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' })).status).toBe(
+				404,
+			);
+			const gross = await volljaehrig(v);
+			await v.verknuepfe(v.mutter.personId, gross.personId);
+			const r = await v.post(v.mutter.cookie, gross.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' });
+			expect(r.status).toBe(404);
+			expect(await prisma.einwilligung.count({ where: { art: 'FOTOS', vereinId: v.verein.id } })).toBe(0);
+		});
+
+		it('Volljaehriger willigt ueber /ich/einwilligung selbst ein: GET /ich zeigt erlaubt, Widerruf nimmt es zurueck', async () => {
+			const v = await neuerVerein();
+			const ich = await volljaehrig(v);
+			expect((await ichSicht(ich.cookie, v.verein.slug)).fotoEinwilligung).toEqual({ erlaubt: false });
+
+			const r = await postIch(v.verein.slug, ich.cookie, { erteilen: true });
+			expect(r.status).toBe(200);
+			expect(await r.json()).toEqual({ erteilt: true });
+			await postIch(v.verein.slug, ich.cookie, { erteilen: true });
+			const zeilen = await fotoZeilen(ich.personId);
+			expect(zeilen).toHaveLength(1);
+			expect(zeilen[0]).toMatchObject({ erteiltVon: ich.personId, art: 'FOTOS', textVersion: '1' });
+			expect((await ichSicht(ich.cookie, v.verein.slug)).fotoEinwilligung).toEqual({ erlaubt: true });
+
+			expect((await postIch(v.verein.slug, ich.cookie, { erteilen: false })).status).toBe(200);
+			expect((await ichSicht(ich.cookie, v.verein.slug)).fotoEinwilligung).toEqual({ erlaubt: false });
+			expect((await fotoZeilen(ich.personId))[0]?.widerrufenAm).not.toBeNull();
+		});
+
+		it('Minderjaehriger, Erwachsener und fehlende Sitzung bei /ich/einwilligung: 404 bzw. 401, GET /ich nennt null', async () => {
+			const v = await neuerVerein();
+			expect((await ichSicht(v.kind.cookie, v.verein.slug)).fotoEinwilligung).toBeNull();
+			expect((await ichSicht(v.mutter.cookie, v.verein.slug)).fotoEinwilligung).toBeNull();
+			expect((await postIch(v.verein.slug, v.kind.cookie, { erteilen: true })).status).toBe(404);
+			expect((await postIch(v.verein.slug, v.mutter.cookie, { erteilen: true })).status).toBe(404);
+			expect(
+				(await sende(server.url, v.api('/ich/einwilligung'), { methode: 'POST', body: { erteilen: true } })).status,
+			).toBe(401);
+			expect(await prisma.einwilligung.count({ where: { art: 'FOTOS', vereinId: v.verein.id } })).toBe(0);
+		});
+
+		it('Body ohne Boolean bei /ich/einwilligung: 400', async () => {
+			const v = await neuerVerein();
+			const ich = await volljaehrig(v);
+			expect((await postIch(v.verein.slug, ich.cookie, {})).status).toBe(400);
+			expect((await postIch(v.verein.slug, ich.cookie, { erteilen: 'ja' })).status).toBe(400);
+		});
+
+		it('Eltern-Erlaubnis von gestern gilt am 18. Geburtstag nicht mehr: erlaubt false, bis das Kind selbst einwilligt', async () => {
+			const v = await neuerVerein();
+			const t0 = new Date('2033-05-04T20:00:00Z');
+			const t1 = new Date('2033-05-05T01:00:00Z');
+			const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER', jetzt: t0 });
+			await v.verknuepfe(mutter.personId, v.kind.personId);
+			// Das Kind meldet sich unter der Test-Uhr an: die Sitzung der Hilfsfunktion stammt von der Wanduhr.
+			const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER', jetzt: t0 });
+			await v.verknuepfe(mutter.personId, kind.personId);
+			await prisma.einwilligung.create({
+				data: {
+					vereinId: v.verein.id,
+					jungfischerId: kind.personId,
+					erteiltVon: mutter.personId,
+					art: 'FOTOS',
+					textVersion: '1',
+				},
+			});
+			try {
+				uhr = t0;
+				expect((await v.liste(mutter.cookie)).json.kinder.find((k) => k['id'] === kind.personId)?.['fotos']).toEqual({
+					erlaubt: true,
+					darfAendern: true,
+				});
+				expect((await ichSicht(kind.cookie, v.verein.slug)).fotoEinwilligung).toBeNull();
+
+				uhr = t1;
+				// Die Mutter sieht Fotos nicht mehr erlaubt und kann nichts mehr aendern.
+				const nachher = (await v.liste(mutter.cookie)).json.kinder.find((k) => k['id'] === kind.personId);
+				expect(nachher?.['fotos']).toEqual({ erlaubt: false, darfAendern: false });
+				expect((await ichSicht(kind.cookie, v.verein.slug)).fotoEinwilligung).toEqual({ erlaubt: false });
+
+				expect((await postIch(v.verein.slug, kind.cookie, { erteilen: true })).status).toBe(200);
+				expect((await ichSicht(kind.cookie, v.verein.slug)).fotoEinwilligung).toEqual({ erlaubt: true });
+				expect((await v.liste(mutter.cookie)).json.kinder.find((k) => k['id'] === kind.personId)?.['fotos']).toEqual({
+					erlaubt: true,
+					darfAendern: false,
+				});
+			} finally {
+				uhr = null;
+			}
+		});
+
+		it('Eltern-Route meldet eine Umfeld-Aenderung mit dem Kind', async () => {
+			const v = await neuerVerein();
+			expect(
+				(await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true, art: 'FOTOS' })).status,
+			).toBe(200);
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [v.kind.personId])).toBe(1);
+		});
+
+		it('Widerruf meldet eine Aenderung, der wiederholte Widerruf ohne offene Zeile meldet nichts', async () => {
+			const v = await neuerVerein();
+			await prisma.einwilligung.create({
+				data: {
+					vereinId: v.verein.id,
+					jungfischerId: v.kind.personId,
+					erteiltVon: v.mutter.personId,
+					art: 'FOTOS',
+					textVersion: '1',
+				},
+			});
+			expect(
+				(await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false, art: 'FOTOS' })).status,
+			).toBe(200);
+			await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [v.kind.personId]);
+			const stand = (await prisma.verein.findUniqueOrThrow({ where: { id: v.verein.id } })).aenderungsstand;
+
+			expect(
+				(await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false, art: 'FOTOS' })).status,
+			).toBe(200);
+			expect((await prisma.verein.findUniqueOrThrow({ where: { id: v.verein.id } })).aenderungsstand).toBe(stand);
+			expect(ereignisse.fuer(v.verein.id)).toHaveLength(1);
+		});
+
+		it('Selbst-Route meldet eine Umfeld-Aenderung mit der Person, 404 und 400 melden nichts', async () => {
+			const v = await neuerVerein();
+			const ich = await volljaehrig(v);
+			expect((await postIch(v.verein.slug, v.mutter.cookie, { erteilen: true })).status).toBe(404);
+			expect((await postIch(v.verein.slug, ich.cookie, {})).status).toBe(400);
+			await erwarteNichts(prisma, ereignisse, v.verein.id);
+			expect((await postIch(v.verein.slug, ich.cookie, { erteilen: true })).status).toBe(200);
+			expect(await erwarteUmfeldAenderung(prisma, ereignisse, v.verein.id, [ich.personId])).toBe(1);
+		});
+
+		it('gleichzeitige Klicks auf /ich/einwilligung: hoechstens eine offene Zeile', async () => {
+			const v = await neuerVerein();
+			const ich = await volljaehrig(v);
+			await Promise.all([1, 2, 3].map(() => postIch(v.verein.slug, ich.cookie, { erteilen: true })));
+			expect(
+				await prisma.einwilligung.count({ where: { jungfischerId: ich.personId, art: 'FOTOS', widerrufenAm: null } }),
+			).toBe(1);
+		});
 	});
 
 	describe('Umfeld-Aenderungen auf dem Bus', () => {

@@ -13,7 +13,7 @@ import {
 	verifyTotp,
 } from '@jufi/auth';
 import { sperreVereinszeile, type Person, type VereinDb } from '@jufi/db';
-import { PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
+import { istVolljaehrig, PASSWORT_HINWEIS, pruefePasswort } from '@jufi/domain';
 import type { Response, Router } from 'express';
 import type { VolleAppDeps } from '../abhaengigkeiten.js';
 import { asynchron, text } from '../admin/asynchron.js';
@@ -22,6 +22,7 @@ import { reserviere, scheitere, zuVieleVersuche } from '../admin/versuche.js';
 import { vereinsKontext } from '../verein.js';
 import { nimmChallenge, speichereChallenge } from './challenges.js';
 import { brauchtMitglied, loescheMitgliederCookie, mitgliedKontext } from './sitzung.js';
+import { hatFotoEinwilligung } from './zugang.js';
 
 const FEHLGESCHLAGEN = { fehler: 'Anmeldung fehlgeschlagen' };
 const NICHT_GEFUNDEN = { fehler: 'nicht gefunden' };
@@ -153,6 +154,14 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 				// Die Oberflaeche zeigt "Meine Kinder" nur, wo es welche gibt; entfernte zaehlen nicht.
 				db.bezugsperson.count({ where: { erwachsenerId: person.id, jungfischer: { entferntAm: null } } }),
 			]);
+			// Nur ein volljaehriger Jungfischer pflegt seine Foto-Einwilligung selbst (POST /ich/einwilligung);
+			// fuer alle anderen null, damit die Oberflaeche den Abschnitt gar nicht erst zeigt. Die Eltern
+			// eines Minderjaehrigen pflegen sie unter "Meine Jungfischer".
+			const zeit = jetzt();
+			const fotoEinwilligung =
+				person.art === 'JUNGFISCHER' && istVolljaehrig(person, zeit)
+					? { erlaubt: await hatFotoEinwilligung(db, person, zeit) }
+					: null;
 			res.json({
 				person: {
 					id: person.id,
@@ -162,6 +171,7 @@ export function profilRouten(router: Router, deps: VolleAppDeps): void {
 					rechte: person.rechte,
 				},
 				hatKinder: kinder > 0,
+				fotoEinwilligung,
 				// Erwachsene melden sich mit der Adresse an, Jungfischer mit dem Anmeldenamen.
 				kennung: person.art === 'ERWACHSENER' ? person.email : zugang.anmeldename,
 				passkeys: passkeys.map((p) => ({

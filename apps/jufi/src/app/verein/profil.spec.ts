@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { adminTestAnbieter, knopf, tippe } from '../admin/test-hilfen';
 import { PasskeyBrowser } from '../gemeinsam/passkey-browser';
+import { FOTO_EINWILLIGUNG_TEXT_SELBST } from '@jufi/domain';
 import type { MitgliedIch } from './mitglieder-api';
 
 const API = '/demo/api/v1';
@@ -17,6 +18,7 @@ const ICH: MitgliedIch = {
 	],
 	hatPasswort: true,
 	hatKinder: false,
+	fotoEinwilligung: null,
 	totp: { moeglich: true, aktiv: false, wiederherstellungscodesUebrig: 0 },
 };
 
@@ -184,6 +186,70 @@ describe('Profil', () => {
 			knopf(seite, 'Passkey hinzufügen').click();
 			await stabil();
 			expect(seite.textContent).toContain('Der Browser hat sofort abgelehnt');
+		});
+	});
+
+	describe('Fotos', () => {
+		const volljaehrig = (erlaubt: boolean): MitgliedIch => ({
+			...ICH,
+			person: { ...ICH.person, art: 'JUNGFISCHER', rechte: [] },
+			fotoEinwilligung: { erlaubt },
+		});
+		const abschnitt = (): HTMLElement | null => seite.querySelector<HTMLElement>('[data-fotos]');
+
+		it('der Abschnitt fehlt, wenn die Person kein volljaehriger Jungfischer ist', async () => {
+			await oeffne();
+			expect(abschnitt()).toBeNull();
+			expect(seite.textContent).not.toContain('Fotos erlauben');
+		});
+
+		it('zeigt den Stand und erlaubt erst nach der Bestaetigung mit dem Wortlaut in der Ich-Form', async () => {
+			await oeffne(volljaehrig(false));
+			expect(abschnitt()?.querySelector('h2')?.textContent).toBe('Fotos');
+			expect(abschnitt()?.textContent).toContain('Fotos: nicht erlaubt');
+			knopf(abschnitt() as HTMLElement, 'Fotos erlauben').click();
+			await stabil();
+			http.expectNone(`${API}/ich/einwilligung`);
+			expect(seite.querySelector('[role="alertdialog"]')?.textContent).toContain(FOTO_EINWILLIGUNG_TEXT_SELBST);
+
+			knopf(seite, 'Ja, Fotos erlauben').click();
+			const anfrage = http.expectOne(`${API}/ich/einwilligung`);
+			expect(anfrage.request.body).toEqual({ erteilen: true });
+			anfrage.flush({ erteilt: true });
+			await neuGeladen(volljaehrig(true));
+			expect(abschnitt()?.textContent).toContain('Fotos: erlaubt');
+			expect(seite.querySelector('[role="alertdialog"]')).toBeNull();
+		});
+
+		it('Zurueckziehen fragt nach und schickt erteilen false', async () => {
+			await oeffne(volljaehrig(true));
+			knopf(abschnitt() as HTMLElement, 'Erlaubnis zurückziehen').click();
+			await stabil();
+			http.expectNone(`${API}/ich/einwilligung`);
+			knopf(seite, 'Ja, zurückziehen').click();
+			const anfrage = http.expectOne(`${API}/ich/einwilligung`);
+			expect(anfrage.request.body).toEqual({ erteilen: false });
+			anfrage.flush({ erteilt: false });
+			await neuGeladen(volljaehrig(false));
+			expect(abschnitt()?.textContent).toContain('Fotos: nicht erlaubt');
+		});
+
+		it('Abbrechen sendet nichts, ein Fehler steht im Abschnitt', async () => {
+			await oeffne(volljaehrig(false));
+			knopf(abschnitt() as HTMLElement, 'Fotos erlauben').click();
+			await stabil();
+			knopf(seite, 'Abbrechen').click();
+			await stabil();
+			http.expectNone(`${API}/ich/einwilligung`);
+
+			knopf(abschnitt() as HTMLElement, 'Fotos erlauben').click();
+			await stabil();
+			knopf(seite, 'Ja, Fotos erlauben').click();
+			http
+				.expectOne(`${API}/ich/einwilligung`)
+				.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' });
+			await stabil();
+			expect(abschnitt()?.querySelector('[role="alert"]')?.textContent).toContain('nicht gefunden');
 		});
 	});
 

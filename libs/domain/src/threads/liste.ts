@@ -42,7 +42,7 @@ function vergleichbar(text: string): string {
 	return text.normalize('NFC').toLocaleLowerCase('de');
 }
 
-// Spec 4.1: Titel, Info-Texte und Orte. Die Frage einer Umfrage zählt nicht: Sie ist
+// Spec 4.1 und Plan-Entscheidung 14: Titel, Info-Texte, Orte und Dateinamen. Die Frage einer Umfrage zählt nicht: Sie ist
 // ein Teil der Abstimmung und würde Treffer liefern, deren Grund in der Liste nicht zu
 // sehen ist. Im Speicher mit includes statt als ILIKE in der Datenbank: "%", "_" und
 // "\" blieben so ganz gewöhnliche Zeichen, und ob "ä" auch "Ä" findet, hinge nicht an
@@ -53,6 +53,8 @@ export function passtZuSuche(kopf: ThreadKopf, module: readonly ModulDaten[], su
 	for (const m of module) {
 		if (m.typ === 'INFO') texte.push(m.text);
 		if (m.typ === 'TERMIN' && m.termin.ort !== null) texte.push(m.termin.ort);
+		// Dateinamen wie die Texte der anderen Module. Fotos haben keinen Namen (Plan-Entscheidung 12).
+		if (m.typ === 'DATEIEN') texte.push(...m.dateien.map((d) => d.name));
 	}
 	return texte.some((t) => vergleichbar(t).includes(gesucht));
 }

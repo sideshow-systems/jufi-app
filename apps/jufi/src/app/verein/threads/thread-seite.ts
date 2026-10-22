@@ -24,6 +24,8 @@ import { KarteComponent, PilleComponent } from '../../gestaltung/ui';
 import { betrifft, Echtzeit, type EchtzeitEreignis } from '../echtzeit';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { VerwaltungThreadsApi } from '../verwaltung/threads/threads-api';
+import { DateienModulComponent } from './dateien-modul';
+import { FotosModulComponent } from './fotos-modul';
 import { InfoModul } from './info-modul';
 import { teile } from './teilen';
 import { TerminModul } from './termin-modul';
@@ -58,7 +60,18 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
  */
 @Component({
 	selector: 'jf-thread-seite',
-	imports: [IconComponent, InfoModul, KarteComponent, PilleComponent, RouterLink, TerminModul, UmfrageModul, Verlauf],
+	imports: [
+		DateienModulComponent,
+		FotosModulComponent,
+		IconComponent,
+		InfoModul,
+		KarteComponent,
+		PilleComponent,
+		RouterLink,
+		TerminModul,
+		UmfrageModul,
+		Verlauf,
+	],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		@switch (zustand()) {
@@ -163,6 +176,12 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 									}
 									@case ('UMFRAGE') {
 										<jf-umfrage-modul [modul]="m" [slug]="slug()" (geaendert)="ersetzeModul($event)" />
+									}
+									@case ('DATEIEN') {
+										<jf-dateien-modul [modul]="m" [slug]="slug()" (geaendert)="dateienGeaendert()" />
+									}
+									@case ('FOTOS') {
+										<jf-fotos-modul [modul]="m" [slug]="slug()" (geaendert)="dateienGeaendert()" />
 									}
 									@default {
 										<!-- Ein Modultyp, den erst ein neuerer Server kennt: lieber ein Hinweis als eine leere Karte. -->
@@ -704,6 +723,16 @@ export class ThreadSeite {
 		const ersetzt: ThreadAnsicht = { ...alt, module: alt.module.map((m) => (m.id === neu.id ? neu : m)) };
 		if (this.gemeldet === alt) this.gemeldet = ersetzt;
 		this.thread.set(ersetzt);
+	}
+
+	/**
+	 * Nach Upload, Umbenennen oder Loeschen im Datei- und im Foto-Modul: Die Seite laedt still neu, wie nach einer
+	 * Live-Nachricht. Verworfen: die Dateiliste aus der Antwort einsetzen wie bei der Umfrage; der
+	 * Server haengt die Endung an und ordnet die Liste, und die Antwort des Hochladens kennt nur
+	 * die eine Zeile.
+	 */
+	protected dateienGeaendert(): void {
+		void this.aktualisiereStill();
 	}
 
 	/**

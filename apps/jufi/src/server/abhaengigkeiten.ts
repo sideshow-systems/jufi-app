@@ -1,6 +1,7 @@
 import { AttemptTracker, verifyAuthentication, verifyRegistration } from '@jufi/auth';
 import type { PrismaClient } from '@jufi/db';
 import type { Request } from 'express';
+import { FotoSchlange } from './dateien/foto-schlange.js';
 import { VerzeichnisSpeicher, type DateiSpeicher } from './dateien/speicher.js';
 import { Bus } from './echtzeit/bus.js';
 import { Nachlauf } from './nachlauf.js';
@@ -45,6 +46,12 @@ export interface AppDeps {
 	/** Uploads je Person und zehn Minuten; ein Test bekommt so einen frischen Zaehler. */
 	uploadFenster?: Fensterzaehler;
 	/**
+	 * Reihe der Fotoverarbeitung. Von aussen, damit ein Test eine Schlange mit Platz fuer einen
+	 * einzigen Wartenden geben kann, statt neun Uploads aufzustauen. Der Vorgabewert tut beim
+	 * Erzeugen nichts, darf also auch beim Bau in server.ts entstehen.
+	 */
+	fotoSchlange?: FotoSchlange;
+	/**
 	 * Was die Routen nach einem Commit melden (Etappe 5); der Hub abonniert ihn. Von aussen,
 	 * damit ein Test die Ereignisse einer App sammeln kann und server.ts Hub und Routen an
 	 * denselben Bus haengt.
@@ -83,6 +90,7 @@ export function mitStandardwerten(deps: AppDeps): VolleAppDeps {
 		// 60 je 10 Minuten: genug fuer das Anlegen einer ganzen Dokumentensammlung auf einmal, zu
 		// wenig, um mit einer Schleife die Platte oder den Verbrauch eines Vereins zu fuellen.
 		uploadFenster: deps.uploadFenster ?? new Fensterzaehler(60, 600_000, () => jetzt().getTime()),
+		fotoSchlange: deps.fotoSchlange ?? new FotoSchlange(),
 		bus: deps.bus ?? new Bus(),
 		seitenHtml: deps.seitenHtml ?? (async () => null),
 	};

@@ -16,6 +16,7 @@ const ICH: MitgliedIch = {
 	passkeys: [],
 	hatPasswort: true,
 	hatKinder: false,
+	fotoEinwilligung: null,
 	totp: { moeglich: false, aktiv: false, wiederherstellungscodesUebrig: 0 },
 };
 

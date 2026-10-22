@@ -290,6 +290,53 @@ describe('Threads laden', () => {
 		expect(await modulOrt(fremder.db, modulIds[0])).toEqual({ threadId, typ: 'INFO' });
 	});
 
+	it('laedt Datei- und Foto-Module mit ihren Zeilen je Modul, aelteste zuerst, und modulOrt kennt beide Typen', async () => {
+		const { verein, db } = await neuerVerein();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const { threadId, modulIds, dateiIds } = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [
+				{ typ: 'DATEIEN', dateien: [{ name: 'Packliste.pdf' }, { name: 'Plan.pdf' }] },
+				{ typ: 'FOTOS', hochladen: 'ALLE', fotos: [{}, {}, {}] },
+				{ typ: 'FOTOS', fotos: [] },
+			],
+		});
+		// Die Zeile mit dem juengsten Zeitpunkt steht hinten, auch wenn sie zuerst angelegt wurde.
+		await db.datei.update({
+			where: { id: dateiIds[0] as string },
+			data: { hochgeladenAm: new Date('2026-10-23T10:00:00Z') },
+		});
+
+		const geladen = await ladeThread(db, threadId);
+		const [dateien, fotos, leer] = geladen?.module ?? [];
+		expect(dateien).toMatchObject({ typ: 'DATEIEN', id: modulIds[0] });
+		expect(dateien?.typ === 'DATEIEN' && dateien.dateien.map((d) => d.name)).toEqual(['Plan.pdf', 'Packliste.pdf']);
+		expect(dateien?.typ === 'DATEIEN' && dateien.dateien[0]).toMatchObject({
+			typ: 'application/pdf',
+			groesse: 1000,
+			vonId: sandra.personId,
+		});
+		expect(fotos).toMatchObject({ typ: 'FOTOS', id: modulIds[1], hochladen: 'ALLE' });
+		expect(fotos?.typ === 'FOTOS' && fotos.fotos).toHaveLength(3);
+		expect(fotos?.typ === 'FOTOS' && fotos.fotos[0]).toMatchObject({ breite: 800, hoehe: 600, vonId: sandra.personId });
+		expect(leer).toMatchObject({ typ: 'FOTOS', hochladen: 'JUGENDLEITER', fotos: [] });
+
+		expect(await modulOrt(db, modulIds[0] as string)).toEqual({ threadId, typ: 'DATEIEN' });
+		expect(await modulOrt(db, modulIds[1] as string)).toEqual({ threadId, typ: 'FOTOS' });
+	});
+
+	it('ueberspringt ein Datei- oder Foto-Modul ohne seine Kopfzeile', async () => {
+		const { verein, db } = await neuerVerein();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const { threadId, modulIds } = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [{ typ: 'DATEIEN' }, { typ: 'FOTOS' }, { typ: 'INFO', text: 'bleibt' }],
+		});
+		await db.dateienModul.delete({ where: { id: modulIds[0] as string } });
+		await db.fotosModul.delete({ where: { id: modulIds[1] as string } });
+		expect((await ladeThread(db, threadId))?.module.map((m) => m.typ)).toEqual(['INFO']);
+	});
+
 	it('liefert null fuer einen unbekannten Thread', async () => {
 		const { db } = await neuerVerein();
 		expect(await ladeThread(db, 'gibt-es-nicht')).toBeNull();

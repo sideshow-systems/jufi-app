@@ -16,6 +16,8 @@ export interface DateienBilanz {
 	waisen: number;
 	temp: number;
 	fehlend: number;
+	/** Schluessel, an denen das Loeschen scheiterte; der naechste Lauf versucht sie wieder. */
+	fehler: number;
 }
 
 function fehlerName(fehler: unknown): string {
@@ -52,7 +54,7 @@ export async function raeumeDateienAuf(
 	speicher: DateiSpeicher,
 	jetzt: Date,
 ): Promise<DateienBilanz> {
-	const bilanz: DateienBilanz = { geloescht: 0, waisen: 0, temp: 0, fehlend: 0 };
+	const bilanz: DateienBilanz = { geloescht: 0, waisen: 0, temp: 0, fehlend: 0, fehler: 0 };
 
 	// 1. Loeschliste
 	const faellig = await prisma.dateiLoeschung.findMany({
@@ -66,6 +68,7 @@ export async function raeumeDateienAuf(
 			bilanz.geloescht++;
 		} catch (fehler) {
 			// Ein Eintrag, der nicht geht, soll die anderen und die Schritte danach nicht blockieren.
+			bilanz.fehler++;
 			console.error(`Aufraeumen: Loeschliste ${schluessel} gescheitert (${fehlerName(fehler)})`);
 		}
 	}
@@ -101,17 +104,31 @@ export async function raeumeDateienAuf(
 			// nur, was er als seine Waise erkennt.
 			if (!teile) continue;
 			if (gebraucht.has(dateiSchluessel(teile.vereinId, teile.dateiId)) || gemerkt.has(schluessel)) continue;
-			await speicher.loesche(schluessel);
-			bilanz.waisen++;
+			// Wie bei der Loeschliste: Ein einzelner Schluessel (Rechte, volles Volume) darf den Lauf
+			// nicht beenden, sonst blieben Temp-Dateien und die Meldung fehlender Bytes fuer immer aus.
+			// Verworfen: den Lauf abbrechen -- ein Schluessel, der nie geht, hielte jede Nacht alle auf.
+			try {
+				await speicher.loesche(schluessel);
+				bilanz.waisen++;
+			} catch (fehler) {
+				bilanz.fehler++;
+				console.error(`Aufraeumen: Waise ${schluessel} gescheitert (${fehlerName(fehler)})`);
+			}
 		}
 	}
 
 	// 3. Temp-Dateien
 	bilanz.temp = await speicher.raeumeTempAuf(new Date(jetzt.getTime() - TEMP_FRIST_MS));
 
-	// 4. Zeilen ohne Bytes
-	const zeilen = await prisma.datei.findMany({ select: { id: true, vereinId: true } });
-	bilanz.fehlend = zeilen.filter((z) => !vorhanden.has(dateiSchluessel(z.vereinId, z.id))).length;
+	// 4. Zeilen ohne Bytes. Ein Foto braucht beide Fassungen: Fehlt nur die Vorschau (etwa nach einer
+	// teilweisen Wiederherstellung), zeigt das Raster ein kaputtes Bild, obwohl die Hauptfassung da ist.
+	// Gezaehlt wird je Zeile, nicht je Schluessel, damit die Zahl zur Meldung "Dateien ohne Bytes" passt.
+	const zeilen = await prisma.datei.findMany({ select: { id: true, vereinId: true, art: true } });
+	bilanz.fehlend = zeilen.filter(
+		(z) =>
+			!vorhanden.has(dateiSchluessel(z.vereinId, z.id)) ||
+			(z.art === 'FOTO' && !vorhanden.has(dateiSchluessel(z.vereinId, z.id, true))),
+	).length;
 	if (bilanz.fehlend > 0) {
 		console.error(`Aufraeumen: ${bilanz.fehlend} Dateien ohne Bytes im Speicher (Restore pruefen)`);
 	}

@@ -43,9 +43,18 @@ describe('VerzeichnisSpeicher', () => {
 	it('legt beim Uebernehmen das Vereinsverzeichnis an und liefert den Inhalt wieder', async () => {
 		await ablegen('v1/d1', 'Inhalt');
 		expect((await stat(join(wurzel, 'v1'))).isDirectory()).toBe(true);
-		const strom = await speicher.lies('v1/d1');
-		expect(strom).not.toBeNull();
-		expect(await lesen(strom!)).toBe('Inhalt');
+		const gelesen = await speicher.lies('v1/d1');
+		expect(gelesen).not.toBeNull();
+		expect(await lesen(gelesen!.strom)).toBe('Inhalt');
+	});
+
+	it('nennt die Groesse der Bytes in Bytes, nicht in Zeichen', async () => {
+		await ablegen('v1/d1', 'Grüße 🎣');
+		const gelesen = await speicher.lies('v1/d1');
+		const inhalt = await lesen(gelesen!.strom);
+		expect(gelesen!.bytes).toBe(Buffer.byteLength('Grüße 🎣'));
+		expect(Buffer.byteLength(inhalt)).toBe(gelesen!.bytes);
+		expect((await stat(join(wurzel, 'v1/d1'))).size).toBe(gelesen!.bytes);
 	});
 
 	it('nimmt die Temp-Datei weg, statt sie zu kopieren', async () => {
@@ -117,6 +126,7 @@ describe('VerzeichnisSpeicher', () => {
 
 		expect(geloescht).toBe(1);
 		expect(await readdir(join(wurzel, 'tmp'))).toEqual([neu.split('/').pop()]);
+		(await speicher.lies('v1/d1'))?.strom.destroy();
 		expect(await speicher.lies('v1/d1')).not.toBeNull();
 	});
 });

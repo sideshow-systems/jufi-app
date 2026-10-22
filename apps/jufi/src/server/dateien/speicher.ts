@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { createReadStream } from 'node:fs';
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 /**
@@ -15,8 +14,13 @@ export interface DateiSpeicher {
 	neueTempDatei(): Promise<string>;
 	/** Macht aus einer Temp-Datei die Datei unter `schluessel`, atomar (rename). */
 	uebernimm(tempPfad: string, schluessel: string): Promise<void>;
-	/** null, wenn es die Bytes nicht gibt. */
-	lies(schluessel: string): Promise<Readable | null>;
+	/**
+	 * Der Strom und seine Laenge in Bytes, oder null, wenn es die Bytes nicht gibt. Die Laenge
+	 * kommt vom selben geoeffneten Deskriptor wie der Strom: Sie beschreibt genau die Bytes, die
+	 * er liefert, auch wenn die Datei danach ersetzt wird. Verworfen: `Datei.groesse` als
+	 * Content-Length -- bei Fotos zaehlt sie beide Fassungen (Spec 2.1).
+	 */
+	lies(schluessel: string): Promise<{ strom: Readable; bytes: number } | null>;
 	/** Fehlende Bytes sind kein Fehler: das Loeschen soll wiederholbar sein. */
 	loesche(schluessel: string): Promise<void>;
 	/** Alle abgelegten Dateien, ohne tmp/. Der Waisen-Schritt des Aufraeumers geht sie durch. */
@@ -60,20 +64,32 @@ export class VerzeichnisSpeicher implements DateiSpeicher {
 		await rename(tempPfad, ziel);
 	}
 
-	async lies(schluessel: string): Promise<Readable | null> {
+	async lies(schluessel: string): Promise<{ strom: Readable; bytes: number } | null> {
 		let pfad: string;
 		try {
 			pfad = this.pfad(schluessel);
 		} catch {
 			return null;
 		}
+		let griff;
 		try {
-			if (!(await stat(pfad)).isFile()) return null;
+			griff = await open(pfad, 'r');
 		} catch (e) {
 			if (istFehler(e, 'ENOENT') || istFehler(e, 'ENOTDIR')) return null;
 			throw e;
 		}
-		return createReadStream(pfad);
+		try {
+			const info = await griff.stat();
+			if (!info.isFile()) {
+				await griff.close();
+				return null;
+			}
+			// createReadStream des Griffs schliesst ihn am Ende, bei Fehler und bei destroy.
+			return { strom: griff.createReadStream(), bytes: info.size };
+		} catch (e) {
+			await griff.close().catch(() => undefined);
+			throw e;
+		}
 	}
 
 	async loesche(schluessel: string): Promise<void> {
