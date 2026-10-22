@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import type { ModulAnsicht, ThreadEntwurf } from '@jufi/domain';
 import { DateienModulComponent } from '../../threads/dateien-modul';
 import { FotosModulComponent } from '../../threads/fotos-modul';
+import { HelferModul } from '../../threads/helfer-modul';
 import { InfoModul } from '../../threads/info-modul';
 import { TerminModul } from '../../threads/termin-modul';
 import { UmfrageModul } from '../../threads/umfrage-modul';
@@ -82,7 +83,7 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
  */
 @Component({
 	selector: 'jf-thread-vorschau',
-	imports: [DateienModulComponent, FotosModulComponent, InfoModul, TerminModul, UmfrageModul],
+	imports: [DateienModulComponent, FotosModulComponent, HelferModul, InfoModul, TerminModul, UmfrageModul],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<div class="rahmen" role="region" aria-label="Vorschau am Handy">
@@ -113,6 +114,9 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 							}
 							@case ('UMFRAGE') {
 								<jf-umfrage-modul [modul]="m" slug="" [vorschau]="true" />
+							}
+							@case ('HELFER') {
+								<jf-helfer-modul [modul]="m" slug="" [vorschau]="true" />
 							}
 							<!-- Leere Listen ohne Rechte: kein Upload, kein Hinweis, und slug leer wie beim Termin. -->
 							@case ('DATEIEN') {

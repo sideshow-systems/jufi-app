@@ -111,6 +111,24 @@ describe('ThreadApi', () => {
 		expect(antwort).toEqual({ modul: { id: 'm 3' }, stand: 9 });
 	});
 
+	it('trageEin ist PUT /helfer/:positionId/eintraege/:fuerId', () => {
+		let antwort: unknown;
+		api.trageEin('demo', 'pos 1', 'p/1', { notiz: 'Kuchen', clientId: 'c-3' }).subscribe((a) => (antwort = a));
+		const anfrage = http.expectOne('/demo/api/v1/helfer/pos%201/eintraege/p%2F1');
+		expect(anfrage.request.method).toBe('PUT');
+		expect(anfrage.request.body).toEqual({ notiz: 'Kuchen', clientId: 'c-3' });
+		anfrage.flush({ modul: { id: 'm5' }, stand: 9 });
+		expect(antwort).toEqual({ modul: { id: 'm5' }, stand: 9 });
+	});
+
+	it('trageAus ist DELETE ohne Koerper', () => {
+		api.trageAus('demo', 'pos1', 'p1').subscribe();
+		const anfrage = http.expectOne('/demo/api/v1/helfer/pos1/eintraege/p1');
+		expect(anfrage.request.method).toBe('DELETE');
+		expect(anfrage.request.body).toBeNull();
+		anfrage.flush({ modul: { id: 'm5' }, stand: 10 });
+	});
+
 	it('Fehler kommen als ApiFehler an', () => {
 		let fehler: ApiFehler | undefined;
 		api

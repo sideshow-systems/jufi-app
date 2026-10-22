@@ -1,6 +1,7 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import type {
+	HelferModulAnsicht,
 	StartAnsicht,
 	SyncAntwort,
 	TerminZeile,
@@ -110,4 +111,26 @@ export class ThreadApi {
 			koerper,
 		);
 	}
+
+	/**
+	 * Antwortet 200 mit der ganzen Liste. Ein Eintrag ist ein Upsert je Position und Zeile (Plan-
+	 * Entscheidung 5): Dieselbe Route traegt ein und aendert die Notiz.
+	 */
+	trageEin(
+		slug: string,
+		positionId: string,
+		fuerId: string,
+		koerper: { notiz: string | null; clientId: string },
+	): Observable<{ modul: HelferModulAnsicht; stand: number }> {
+		return this.senden('PUT', slug, helferPfad(positionId, fuerId), koerper);
+	}
+
+	/** Ohne Koerper und ohne clientId, denn die Route ist idempotent (Plan-Entscheidung 4). */
+	trageAus(slug: string, positionId: string, fuerId: string): Observable<{ modul: HelferModulAnsicht; stand: number }> {
+		return this.senden('DELETE', slug, helferPfad(positionId, fuerId));
+	}
+}
+
+function helferPfad(positionId: string, fuerId: string): string {
+	return `/helfer/${encodeURIComponent(positionId)}/eintraege/${encodeURIComponent(fuerId)}`;
 }
