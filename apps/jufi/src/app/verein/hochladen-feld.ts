@@ -47,12 +47,22 @@ const ACCEPT: Record<DateiArt, string> = { FOTO: 'image/*', DATEI: ENDUNGEN_DATE
 			/>
 		</label>
 		@if (reihe().length > 0) {
+			@if (weiterUm(); as uhrzeit) {
+				<!-- Die Uhrzeit statt einer Wartezeit: Nach 429 kann es bis zu zehn Minuten dauern, und eine
+					 Zahl Sekunden, die nicht herunterzaehlt, saehe nach einem haengenden Upload aus. -->
+				<p class="gedaempft klein" role="status" data-weiter-um>
+					Zu viele Uploads auf einmal. Geht um {{ uhrzeit }} Uhr von selbst weiter.
+				</p>
+			}
 			<ul>
 				@for (h of reihe(); track h.schluessel) {
 					<li [attr.data-hochladung]="h.schluessel">
 						<div class="kopf">
 							@if (h.vorschau; as bild) {
-								<img class="vorschau" [src]="bild" alt="" />
+								<!-- Das volle Original (bis 48 MP) fuer eine Kachel von 3 rem: lazy laedt es erst, wenn
+									 die Zeile in Sicht kommt, async dekodiert es neben dem Zeichnen. Bei hundert gewaehlten
+									 Fotos dekodierte das Handy sonst alle auf einmal. -->
+								<img class="vorschau" [src]="bild" alt="" loading="lazy" decoding="async" />
 							}
 							<span class="name">{{ h.datei.name }}</span>
 						</div>
@@ -160,6 +170,11 @@ export class HochladenFeldComponent {
 
 	protected readonly accept = computed(() => ACCEPT[this.art()]);
 	protected readonly reihe = computed(() => this.schlange()?.reihe() ?? []);
+	/** Die Uhrzeit (hh:mm, Ortszeit des Geraets), zu der die Reihe nach 429 weitermacht. */
+	protected readonly weiterUm = computed(() => {
+		const um = this.schlange()?.weiterUm() ?? null;
+		return um === null ? null : new Date(um).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+	});
 
 	constructor() {
 		inject(DestroyRef).onDestroy(() => this.schlange()?.beende());

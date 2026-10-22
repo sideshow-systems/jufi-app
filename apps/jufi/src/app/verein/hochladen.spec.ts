@@ -89,7 +89,24 @@ describe('ladeHoch', () => {
 			.expectOne('/demo/api/v1/dokumente?kategorie=k1')
 			.flush({ fehler: 'Zu viele', wartenSekunden: 30 }, { status: 429, statusText: 'Too Many Requests' });
 
-		expect(staende).toEqual([{ art: 'fehler', text: 'Zu viele Versuche – bitte in 30 Sekunden erneut' }]);
+		expect(staende).toEqual([
+			{ art: 'fehler', text: 'Zu viele Versuche – bitte in 30 Sekunden erneut', code: 'ZU_VIELE' },
+		]);
+	});
+
+	it('meldet 429 des Upload-Fensters als Code ZU_VIELE mit Retry-After', () => {
+		const staende = starte(datei(10));
+
+		http
+			.expectOne('/demo/api/v1/dokumente?kategorie=k1')
+			.flush(
+				{ fehler: 'Zu viele Uploads. Bitte warte einen Moment.' },
+				{ status: 429, statusText: 'Too Many Requests', headers: { 'Retry-After': '312' } },
+			);
+
+		expect(staende).toEqual([
+			{ art: 'fehler', text: 'Zu viele Uploads. Bitte warte einen Moment.', code: 'ZU_VIELE', wiederholenNach: 312 },
+		]);
 	});
 
 	it('uebersetzt einen abgebrochenen Aufbau (Status 0) in einen deutschen Satz', () => {

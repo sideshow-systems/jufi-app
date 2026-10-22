@@ -11,6 +11,12 @@ import { istNichtAngemeldet } from './sitzung-abgelaufen';
  */
 export const NICHT_ANGEMELDET = 'NICHT_ANGEMELDET';
 
+/**
+ * Der Code fuer 429 "zu viele Uploads" (60 je zehn Minuten, Spec 9.2). Wie NICHT_ANGEMELDET ein Code
+ * des Clients: Der Server nennt fuer 429 keinen, die Warteschlange haelt daran aber die ganze Reihe an.
+ */
+export const ZU_VIELE = 'ZU_VIELE';
+
 export type HochladenStand =
 	| { art: 'fortschritt'; anteil: number }
 	| { art: 'fertig'; antwort: unknown }
@@ -50,8 +56,9 @@ function retryAfter(e: unknown): number | null {
  * Aufrufer mit demselben Helfer wie jede andere Seite (zurAnmeldung). Verworfen: hier einen
  * Interceptor oder den Router anfassen, denn der Upload-Client laeuft bewusst ohne Interceptoren
  * (siehe DateienApi) und ladeHoch bleibt eine freie Funktion ohne Injektionskontext.
- * Bei einer vollen Foto-Warteschlange (503) steht in wiederholenNach, wie lange der Server zu
- * warten bittet (Retry-After); die Warteschlange der Seite wiederholt dann von selbst.
+ * Bei einer vollen Foto-Warteschlange (503) und bei zu vielen Uploads (429, Code ZU_VIELE) steht in
+ * wiederholenNach, wie lange der Server zu warten bittet (Retry-After); die Warteschlange der Seite
+ * macht dann von selbst weiter.
  *
  * Der HttpClient kommt vom Aufrufer, weil ladeHoch eine freie Funktion ist und inject nur im
  * Injektionskontext laeuft; DateienApi reicht den passenden durch (siehe dort zum Backend).
@@ -89,10 +96,11 @@ export function ladeHoch(
 					return of<HochladenStand>({ art: 'fehler', text: ABGELAUFEN, code: NICHT_ANGEMELDET });
 				}
 				const nach = retryAfter(e);
+				const code = f.code ?? (f.status === 429 ? ZU_VIELE : undefined);
 				return of<HochladenStand>({
 					art: 'fehler',
 					text: f.status === 0 ? ABGEBROCHEN : fehlertext(f),
-					...(f.code !== undefined ? { code: f.code } : {}),
+					...(code !== undefined ? { code } : {}),
 					...(nach !== null ? { wiederholenNach: nach } : {}),
 				});
 			}),

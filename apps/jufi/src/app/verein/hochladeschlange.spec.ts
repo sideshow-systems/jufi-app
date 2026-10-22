@@ -347,6 +347,100 @@ describe('Hochladeschlange', () => {
 		});
 	});
 
+	describe('zu viele Uploads (429)', () => {
+		const zuViele = { fehler: 'Zu viele Uploads. Bitte warte einen Moment.' };
+		const fenster = (retryAfter?: string) => ({
+			status: 429,
+			statusText: 'Too Many Requests',
+			...(retryAfter === undefined ? {} : { headers: { 'Retry-After': retryAfter } }),
+		});
+
+		it('haelt die ganze Reihe an, laesst alle Zeilen auf wartet und macht nach Retry-After selbst weiter', () => {
+			vi.useFakeTimers({ now: new Date('2026-10-22T14:20:00Z') });
+			const s = neu('FOTO');
+			s.fuegeHinzu([datei('a.jpg', 10, 'image/jpeg'), datei('b.jpg', 10, 'image/jpeg')], URL_FOTOS);
+
+			http.expectOne(URL_FOTOS).flush(zuViele, fenster('300'));
+
+			expect(zustaende(s)).toEqual(['wartet', 'wartet']);
+			expect(s.reihe().every((h) => h.fehler === null)).toBe(true);
+			expect(s.weiterUm()).toBe(new Date('2026-10-22T14:25:00Z').getTime());
+			// Ohne die Kappung auf 30 s wie bei 503: Das Fenster gibt erst nach Retry-After einen Platz frei.
+			vi.advanceTimersByTime(299_999);
+			http.expectNone(URL_FOTOS);
+
+			vi.advanceTimersByTime(1);
+			expect(s.weiterUm()).toBeNull();
+			const wieder = http.expectOne(URL_FOTOS);
+			expect(wieder.request.headers.get('X-Dateiname')).toBe('a.jpg');
+			wieder.flush({}, { status: 201, statusText: 'Created' });
+			http.expectOne(URL_FOTOS).flush({}, { status: 201, statusText: 'Created' });
+			expect(s.reihe()).toEqual([]);
+		});
+
+		it('wartet ohne Retry-After eine Minute', () => {
+			vi.useFakeTimers();
+			const s = neu('FOTO');
+			s.fuegeHinzu([datei('a.jpg', 10, 'image/jpeg')], URL_FOTOS);
+
+			http.expectOne(URL_FOTOS).flush(zuViele, fenster());
+			vi.advanceTimersByTime(59_999);
+			http.expectNone(URL_FOTOS);
+			vi.advanceTimersByTime(1);
+			http.expectOne(URL_FOTOS).flush({}, { status: 201, statusText: 'Created' });
+		});
+
+		it('startet waehrend der Pause nichts, auch nicht nach Nochmal, Verwerfen oder neuer Auswahl', () => {
+			vi.useFakeTimers();
+			const s = neu('FOTO');
+			s.fuegeHinzu([datei('a.jpg', 10, 'image/jpeg'), datei('b.jpg', 10, 'image/jpeg')], URL_FOTOS);
+			http.expectOne(URL_FOTOS).flush({ fehler: FEHLER_TEXT.TYP.FOTO, code: 'TYP' }, { status: 415, statusText: 'x' });
+			http.expectOne(URL_FOTOS).flush(zuViele, fenster('60'));
+
+			s.nochmal(s.reihe()[0]?.schluessel as number);
+			s.verwirf(s.reihe()[1]?.schluessel as number);
+			s.fuegeHinzu([datei('c.jpg', 10, 'image/jpeg')], URL_FOTOS);
+			http.expectNone(URL_FOTOS);
+			expect(zustaende(s)).toEqual(['wartet', 'wartet']);
+
+			vi.advanceTimersByTime(60_000);
+			const namen: string[] = [];
+			for (let i = 0; i < 2; i++) {
+				const anfrage = http.expectOne(URL_FOTOS);
+				namen.push(anfrage.request.headers.get('X-Dateiname') ?? '');
+				anfrage.flush({}, { status: 201, statusText: 'Created' });
+			}
+			expect(namen).toEqual(['a.jpg', 'c.jpg']);
+		});
+
+		it('meldet schon angenommene Dateien beim Anhalten, damit sie nicht bis zum Ende unsichtbar bleiben', () => {
+			vi.useFakeTimers();
+			const s = neu('FOTO');
+			s.fuegeHinzu([datei('a.jpg', 10, 'image/jpeg'), datei('b.jpg', 10, 'image/jpeg')], URL_FOTOS);
+			http.expectOne(URL_FOTOS).flush({}, { status: 201, statusText: 'Created' });
+			expect(staepel).toBe(0);
+
+			http.expectOne(URL_FOTOS).flush(zuViele, fenster('60'));
+			expect(staepel).toBe(1);
+
+			vi.advanceTimersByTime(60_000);
+			http.expectOne(URL_FOTOS).flush({}, { status: 201, statusText: 'Created' });
+			expect(staepel).toBe(2);
+		});
+
+		it('startet nach beende nichts mehr und vergisst die Uhrzeit', () => {
+			vi.useFakeTimers();
+			const s = neu('FOTO');
+			s.fuegeHinzu([datei('a.jpg', 10, 'image/jpeg')], URL_FOTOS);
+			http.expectOne(URL_FOTOS).flush(zuViele, fenster('60'));
+
+			s.beende();
+			expect(s.weiterUm()).toBeNull();
+			vi.advanceTimersByTime(60_000);
+			http.expectNone(URL_FOTOS);
+		});
+	});
+
 	describe('abgelaufene Sitzung', () => {
 		const abgelaufen = { fehler: 'nicht angemeldet' };
 		const unauthorized = { status: 401, statusText: 'Unauthorized' };
@@ -362,6 +456,18 @@ describe('Hochladeschlange', () => {
 			http.expectNone(URL_A);
 			expect(zustaende(s)).toEqual(['fehler', 'wartet', 'wartet']);
 			expect(s.reihe()[0]?.code).toBe('NICHT_ANGEMELDET');
+		});
+
+		it('startet die naechste Datei nicht, wenn die Fehlerzeile verworfen wird oder neue Dateien dazukommen', () => {
+			const s = neu('DATEI', vi.fn());
+			s.fuegeHinzu([datei('a.pdf'), datei('b.pdf')], URL_A);
+			http.expectOne(URL_A).flush(abgelaufen, unauthorized);
+
+			s.verwirf(s.reihe()[0]?.schluessel as number);
+			s.fuegeHinzu([datei('c.pdf')], URL_A);
+
+			http.expectNone(URL_A);
+			expect(zustaende(s)).toEqual(['wartet', 'wartet']);
 		});
 
 		it('setzt die Reihe nach Nochmal fort', () => {

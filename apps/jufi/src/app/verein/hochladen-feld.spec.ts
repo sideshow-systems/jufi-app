@@ -137,12 +137,43 @@ describe('jf-hochladen-feld', () => {
 		expect(f.el.querySelectorAll('li')).toHaveLength(0);
 	});
 
-	it('zeigt bei Fotos das Vorschaubild der Datei', () => {
+	it('zeigt bei Fotos das Vorschaubild der Datei, spaet geladen und nebenher dekodiert', () => {
 		const f = zeige('FOTO');
 		f.waehle([datei('bild.jpg', 'image/jpeg')]);
 
-		expect(f.el.querySelector('li img')?.getAttribute('src')).toBe('blob:test/1');
+		const bild = f.el.querySelector('li img');
+		expect(bild?.getAttribute('src')).toBe('blob:test/1');
+		expect(bild?.getAttribute('loading')).toBe('lazy');
+		expect(bild?.getAttribute('decoding')).toBe('async');
 		http.expectOne(ZIEL);
+	});
+
+	it('nennt nach 429 die Uhrzeit, zu der es weitergeht, und laesst die Zeilen auf Wartet', () => {
+		vi.useFakeTimers({ now: new Date(2026, 9, 22, 14, 20, 0) });
+		try {
+			const f = zeige('FOTO');
+			f.waehle([datei('a.jpg', 'image/jpeg'), datei('b.jpg', 'image/jpeg')]);
+			http
+				.expectOne(ZIEL)
+				.flush(
+					{ fehler: 'Zu viele Uploads. Bitte warte einen Moment.' },
+					{ status: 429, statusText: 'Too Many Requests', headers: { 'Retry-After': '312' } },
+				);
+			f.fixture.detectChanges();
+
+			expect(f.el.querySelector('[data-weiter-um]')?.textContent?.trim()).toBe(
+				'Zu viele Uploads auf einmal. Geht um 14:25 Uhr von selbst weiter.',
+			);
+			expect(f.el.querySelectorAll('[role="alert"]')).toHaveLength(0);
+			expect([...f.el.querySelectorAll('li')].map((z) => z.textContent?.includes('Wartet'))).toEqual([true, true]);
+
+			vi.advanceTimersByTime(312_000);
+			f.fixture.detectChanges();
+			expect(f.el.querySelector('[data-weiter-um]')).toBeNull();
+			http.expectOne(ZIEL);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('geht bei abgelaufener Sitzung zur Anmeldung, mit der Seite als weiter', async () => {

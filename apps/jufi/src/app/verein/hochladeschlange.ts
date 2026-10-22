@@ -2,7 +2,7 @@ import type { HttpClient } from '@angular/common/http';
 import { type Signal, signal } from '@angular/core';
 import type { DateiArt } from '@jufi/domain';
 import type { Subscription } from 'rxjs';
-import { ladeHoch, NICHT_ANGEMELDET, WIEDERHOLEN_NACH_VORGABE_S } from './hochladen';
+import { ladeHoch, NICHT_ANGEMELDET, WIEDERHOLEN_NACH_VORGABE_S, ZU_VIELE } from './hochladen';
 
 /** Eine Datei auf dem Weg zum Server, bis sie angenommen ist oder die Person sie verwirft. */
 export interface Hochladung {
@@ -27,7 +27,9 @@ export interface SchlangeEinstellung {
 	nachErfolg?: (hochladung: Hochladung, antwort: unknown) => void;
 	/**
 	 * Einmal, wenn nichts mehr laeuft oder wartet und seit dem letzten Mal mindestens eine Datei
-	 * angenommen wurde (Fehlerzeilen zaehlen nicht als offen). Die Seite laedt dann einmal neu statt je
+	 * angenommen wurde (Fehlerzeilen zaehlen nicht als offen). Ebenso, wenn die Reihe nach 429 fuer
+	 * laengere Zeit anhaelt: Die schon angenommenen Fotos sollen dann nicht bis zu zehn Minuten
+	 * unsichtbar bleiben. Die Seite laedt dann einmal neu statt je
 	 * Datei: Zehn Fotos ergaeben sonst zehn Neuladungen des Threads. Verworfen: je Datei melden und in
 	 * den Modul-Bauteilen entprellen; die Schlange weiss als einzige, wann der Stapel durch ist, und
 	 * ein Zeitfenster kaeme bei langsamen Uploads zu frueh oder bei schnellen zu spaet.
@@ -47,6 +49,16 @@ const WIEDERHOLEN_MAX_S = 30;
 /** Wiederholungen nach 503 (Plan-Entscheidung 16); mit dem ersten Versuch sind es vier. */
 const WIEDERHOLUNGEN = 3;
 
+/**
+ * Wartezeit nach 429, wenn Retry-After fehlt. Der Server nennt sie immer (annehmen.ts); fehlt sie
+ * doch, etwa hinter einem Proxy, liefe die Reihe mit der Vorgabe von 503 (2 s) staendig gegen das
+ * volle Fenster.
+ */
+const ZU_VIELE_VORGABE_S = 60;
+
+/** Laenger nimmt setTimeout nicht an (2^31 - 1 ms); darueber feuerte es sofort. */
+const MAX_WARTEN_MS = 2_147_483_647;
+
 /** Der Versuch, der gerade laeuft oder auf seine Wiederholung wartet. */
 interface Lauf {
 	schluessel: number;
@@ -62,6 +74,21 @@ interface Lauf {
  * je Person (60 je zehn Minuten), das Kontingent entscheidet unter einer Sperre, und die Foto-
  * Verarbeitung hat nur einen Platz in Arbeit; zehn parallele Dateien meldeten dort zehnmal
  * "beschaeftigt" statt einmal.
+ *
+ * Meldet der Server "zu viele Uploads" (429, 60 je zehn Minuten; Spec 9.2), haelt die ganze Reihe
+ * an: Die Zeile geht zurueck auf "wartet", ebenso alle dahinter, und nach der Zeit aus Retry-After
+ * macht die Schlange von selbst mit derselben Datei weiter. Wann, steht in weiterUm. Hier ohne die
+ * Kappung auf 30 s wie bei 503: Das Fenster gibt einen Platz erst frei, wenn der aelteste Upload zehn
+ * Minuten alt ist, und eine gekappte Wartezeit fuehrte nur zu weiteren 429. Dass es so lange dauert,
+ * sieht die Person an der Uhrzeit. Verworfen: jede Datei einzeln scheitern lassen -- wer nach dem
+ * Zeltlager 120 Fotos waehlt, saehe sonst ab dem 61. in Sekunden 60 rote Zeilen mit je "Nochmal".
+ *
+ * Nach einem 401 haelt die Reihe ebenfalls an, bis die Person "Nochmal" an der Fehlerzeile drueckt:
+ * Jede weitere Datei bekaeme dasselbe 401. Das gilt auch, wenn sie inzwischen eine Zeile verwirft
+ * oder neue Dateien waehlt; verwirft sie die Fehlerzeile selbst, bleiben die uebrigen stehen. Das
+ * nimmt die Schlange in Kauf, denn die Seite ist nach 401 ohnehin auf dem Weg zur Anmeldung
+ * (beiNichtAngemeldet). Verworfen: nach verwirf die naechste Datei starten -- sie holte nur das
+ * naechste 401 ab.
  *
  * Meldet der Server "beschaeftigt" (503, Foto-Verarbeitung voll), wartet die Schlange die Zeit aus
  * Retry-After und versucht dieselbe Datei bis zu dreimal neu, ohne dass die Zeile einen Fehler zeigt:
@@ -82,6 +109,13 @@ export class Hochladeschlange {
 	private readonly versuche = new Map<number, number>();
 	private beendet = false;
 	private abgemeldet = false;
+	/** Nach 401: Die Reihe steht, bis nochmal sie wieder freigibt. */
+	private angehalten = false;
+	/** Nach 429: Die Reihe steht bis zum Ablauf dieses Zeitgebers. */
+	private pause: ReturnType<typeof setTimeout> | null = null;
+	private readonly weiterUmZeit = signal<number | null>(null);
+	/** Wann die Reihe nach 429 von selbst weitermacht (Millisekunden seit 1970), sonst null. */
+	readonly weiterUm: Signal<number | null> = this.weiterUmZeit.asReadonly();
 	/** Seit der letzten Meldung nachStapel angenommene Dateien. */
 	private erfolge = 0;
 
@@ -107,6 +141,8 @@ export class Hochladeschlange {
 	/** Die Zeile eines Fehlers noch einmal von vorn, auch mit frischem Zaehler fuer die Wiederholungen. */
 	nochmal(schluessel: number): void {
 		if (this.beendet || this.zeile(schluessel)?.zustand !== 'fehler') return;
+		// Nach einer neuen Anmeldung setzt Nochmal die ganze Reihe wieder in Gang (siehe Klasse).
+		this.angehalten = false;
 		this.versuche.delete(schluessel);
 		this.aendere(schluessel, { zustand: 'wartet', anteil: 0, fehler: null, code: null });
 		this.starteNaechste();
@@ -124,6 +160,7 @@ export class Hochladeschlange {
 	beende(): void {
 		this.beendet = true;
 		this.stoppeLauf();
+		this.beendePause();
 		for (const h of this.zeilen()) this.gibFrei(h);
 		this.zeilen.set([]);
 	}
@@ -153,14 +190,36 @@ export class Hochladeschlange {
 		this.zeitgeber = null;
 	}
 
+	private beendePause(): void {
+		if (this.pause !== null) clearTimeout(this.pause);
+		this.pause = null;
+		this.weiterUmZeit.set(null);
+	}
+
 	private starteNaechste(): void {
-		if (this.beendet || this.lauf !== null) return;
+		if (this.beendet || this.lauf !== null || this.angehalten || this.pause !== null) return;
 		const h = this.zeilen().find((x) => x.zustand === 'wartet');
 		if (h) return this.starte(h.schluessel);
+		this.meldeStapel();
+	}
+
+	private meldeStapel(): void {
 		if (this.erfolge > 0) {
 			this.erfolge = 0;
 			this.e.nachStapel?.();
 		}
+	}
+
+	/** Haelt die Reihe nach 429 an und setzt sie nach `sekunden` von selbst fort (siehe Klasse). */
+	private pausiere(sekunden: number): void {
+		const ms = Math.min(sekunden * 1000, MAX_WARTEN_MS);
+		this.weiterUmZeit.set(Date.now() + ms);
+		this.pause = setTimeout(() => {
+			this.pause = null;
+			this.weiterUmZeit.set(null);
+			this.starteNaechste();
+		}, ms);
+		this.meldeStapel();
 	}
 
 	private starte(schluessel: number): void {
@@ -195,6 +254,11 @@ export class Hochladeschlange {
 				);
 				return;
 			}
+			if (stand.code === ZU_VIELE) {
+				this.lauf = null;
+				this.aendere(schluessel, { zustand: 'wartet', anteil: 0 });
+				return this.pausiere(stand.wiederholenNach ?? ZU_VIELE_VORGABE_S);
+			}
 			this.lauf = null;
 			this.aendere(schluessel, {
 				zustand: 'fehler',
@@ -205,6 +269,7 @@ export class Hochladeschlange {
 			// Nach einem 401 starten die wartenden Dateien nicht: Sie bekaemen alle dasselbe 401, und nach der
 			// Anmeldung soll Nochmal sie wieder in Gang setzen. Sie bleiben dafuer auf wartet.
 			if (stand.code === NICHT_ANGEMELDET) {
+				this.angehalten = true;
 				if (!this.abgemeldet) {
 					this.abgemeldet = true;
 					this.e.beiNichtAngemeldet?.();
