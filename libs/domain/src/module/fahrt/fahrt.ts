@@ -1,5 +1,5 @@
 import { istKalendertag } from '../../zeit.js';
-import { darfAntworten } from '../../threads/antworten.js';
+import { darfFuerKindHandeln } from '../../rechte.js';
 import { istArchiviert } from '../../threads/archiv.js';
 import { GRENZEN } from '../../threads/entwurf.js';
 import { dabeiKinder, kurzname } from '../../threads/namen.js';
@@ -69,13 +69,14 @@ function grundErlaubnis(person: ThreadPerson, daten: FahrtKontext, umfeld: Umfel
 	return 'ERLAUBT';
 }
 
-// Das Antwortrecht fuer ein Kind, wie es die Umfrage und die Helferliste kennen: das Kind
-// selbst, seine Familie, die Leitung. Die Einheit JUNGFISCHER und keine Frist, weil hier
-// nur gefragt ist, wessen Zeile die Person fuehren darf.
-function darfFuerKind(person: ThreadPerson, kindId: string, daten: FahrtKontext, umfeld: Umfeld, jetzt: Date): boolean {
-	return (
-		darfAntworten(person, kindId, { einheit: 'JUNGFISCHER', frist: null }, daten.kopf, umfeld, jetzt) === 'ERLAUBT'
-	);
+// Wer fuer ein Kind handeln darf: das Kind selbst oder wer ihm zugeordnet ist (Spec 6.2 meint
+// die Bezugsperson). Verworfen: das Antwortrecht (darfAntworten mit Einheit JUNGFISCHER),
+// denn das haengt an gefragte, und die ist bei "Nur Familie" fuer Kinder leer: dort duerfte
+// nur die Leitung einsetzen, obwohl die Fahrgemeinschaft in jedem Rollenfilter erlaubt ist
+// (Plan-Entscheidung 14). Die Leitung prueft der Aufrufer vorher.
+function darfFuerKind(person: ThreadPerson, kind: ThreadPerson | undefined, umfeld: Umfeld): boolean {
+	if (!kind || kind.art !== 'JUNGFISCHER') return false;
+	return kind.id === person.id || darfFuerKindHandeln(person, kind, umfeld.zuordnungen);
 }
 
 // Plan-Entscheidung 8: Ein Auto bietet jede Person nur fuer sich selbst an, auch die
@@ -118,10 +119,9 @@ export function darfEinsetzen(
 ): FahrtErlaubnis {
 	const grund = grundErlaubnis(person, daten, umfeld, jetzt);
 	if (grund !== 'ERLAUBT') return grund;
-	if (!kinderImThread(daten.kopf, umfeld).some((k) => k.id === kindId)) return 'NICHT_GEFUNDEN';
-	if (!darfBearbeiten(person, daten.kopf) && !darfFuerKind(person, kindId, daten, umfeld, jetzt)) {
-		return 'NICHT_GEFUNDEN';
-	}
+	const kind = kinderImThread(daten.kopf, umfeld).find((k) => k.id === kindId);
+	if (!kind) return 'NICHT_GEFUNDEN';
+	if (!darfBearbeiten(person, daten.kopf) && !darfFuerKind(person, kind, umfeld)) return 'NICHT_GEFUNDEN';
 	return betrachteteKinder(daten.kopf, daten, umfeld).some((k) => k.id === kindId) ? 'ERLAUBT' : 'NICHT_DABEI';
 }
 
@@ -129,7 +129,7 @@ export function darfEinsetzen(
 // inzwischen nicht mehr betrachtet wird; sonst bliebe ein Platz belegt, den niemand mehr
 // freigeben duerfte. Deshalb fehlt hier die Betrachtet-Pruefung von darfEinsetzen. Recht
 // hat die Leitung, der Fahrer des Autos (er raeumt seinen Platz selbst) und wer fuer das
-// Kind antworten darf. Verworfen: das Herausnehmen auf die Familie zu beschraenken, denn
+// Kind handeln darf (darfFuerKind); das Kind muss dafuer nicht mehr zum Thread gehoeren. Verworfen: das Herausnehmen auf die Familie zu beschraenken, denn
 // ein Fahrer, dem ein Kind absagt, muss den Platz freigeben koennen.
 export function darfHerausnehmen(
 	person: ThreadPerson,
@@ -144,7 +144,7 @@ export function darfHerausnehmen(
 	if (darfBearbeiten(person, daten.kopf)) return 'ERLAUBT';
 	const fahrerId = mitfahrt.autoId === null ? null : fahrt.autos.find((a) => a.id === mitfahrt.autoId)?.fahrerId;
 	if (fahrerId === person.id) return 'ERLAUBT';
-	return darfFuerKind(person, mitfahrt.kindId, daten, umfeld, jetzt) ? 'ERLAUBT' : 'NICHT_GEFUNDEN';
+	return darfFuerKind(person, umfeld.personen.get(mitfahrt.kindId), umfeld) ? 'ERLAUBT' : 'NICHT_GEFUNDEN';
 }
 
 // Wer schon im Auto sitzt, aendert nichts am Fuellstand und darf bleiben (auch im vollen

@@ -282,6 +282,24 @@ describe('darfEinsetzen', () => {
 		expect(einsetzen('thomas', 'mia')).toBe('NICHT_GEFUNDEN');
 	});
 
+	describe('bei Nur Familie (Entscheidung 14)', () => {
+		const nurFamilie: Partial<ThreadKopf> = { rollenfilter: 'NUR_FAMILIE' };
+		const ohneUmfrage = (von: string, kindId: string, k: Partial<ThreadKopf> = nurFamilie) =>
+			darfEinsetzen(person(von), kindId, kontext(k, []), umfeld, JETZT);
+
+		it('erlaubt der Mutter ihr Kind, obwohl dort niemand pro Jungfischer gefragt ist', () => {
+			expect(ohneUmfrage('sandra', 'lena')).toBe('ERLAUBT');
+		});
+
+		it('verweigert der Mutter ein fremdes Kind', () => {
+			expect(ohneUmfrage('sandra', 'tim')).toBe('NICHT_GEFUNDEN');
+		});
+
+		it('verweigert dem Jungfischer, der den Thread nicht sieht', () => {
+			expect(ohneUmfrage('lena', 'lena')).toBe('NICHT_GEFUNDEN');
+		});
+	});
+
 	it('meldet vor dem eigenen Recht Entwurf und Archiv, wie die anderen Regeln', () => {
 		expect(einsetzen('thomas', 'lena', { veroeffentlichtAm: null })).toBe('ENTWURF');
 		expect(einsetzen('sandra', 'lena', { archivModus: 'ARCHIVIERT' })).toBe('ARCHIVIERT');
@@ -317,6 +335,13 @@ describe('darfHerausnehmen', () => {
 
 	it('erlaubt der Mutter, ihr Kind von "kommt selbst" zu loesen', () => {
 		expect(heraus('sandra', 'lena', null)).toBe('ERLAUBT');
+	});
+
+	it('erlaubt der Mutter bei Nur Familie ihr Kind herauszunehmen, einer Fremden nicht', () => {
+		const k = kontext({ rollenfilter: 'NUR_FAMILIE' }, []);
+		const von = (id: string) => darfHerausnehmen(person(id), { kindId: 'max', autoId: 'a-hans' }, f, k, umfeld, JETZT);
+		expect(von('sandra')).toBe('ERLAUBT');
+		expect(von('peter')).toBe('NICHT_GEFUNDEN');
 	});
 
 	it('meldet im Archiv ARCHIVIERT, nur die Leitung darf noch', () => {
