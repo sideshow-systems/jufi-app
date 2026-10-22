@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import type { ModulAnsicht, ThreadEntwurf } from '@jufi/domain';
 import { DateienModulComponent } from '../../threads/dateien-modul';
 import { FotosModulComponent } from '../../threads/fotos-modul';
+import { FahrtModul } from '../../threads/fahrt-modul';
 import { HelferModul } from '../../threads/helfer-modul';
 import { InfoModul } from '../../threads/info-modul';
 import { TerminModul } from '../../threads/termin-modul';
@@ -54,7 +55,7 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 			};
 		}
 		// Ohne Autos und Kinder wie die Umfrage ohne Zeilen: Die Vorschau bietet nichts an, was die API
-		// riefe. Eine Karte fuer die Fahrgemeinschaft gibt es in der Vorschau noch nicht.
+		// riefe; die Karte zeigt die gewaehlten Richtungen mit leerer Liste.
 		if (m.typ === 'FAHRT') {
 			const richtungen = (
 				[
@@ -108,7 +109,7 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
  */
 @Component({
 	selector: 'jf-thread-vorschau',
-	imports: [DateienModulComponent, FotosModulComponent, HelferModul, InfoModul, TerminModul, UmfrageModul],
+	imports: [DateienModulComponent, FahrtModul, FotosModulComponent, HelferModul, InfoModul, TerminModul, UmfrageModul],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<div class="rahmen" role="region" aria-label="Vorschau am Handy">
@@ -142,6 +143,9 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 							}
 							@case ('HELFER') {
 								<jf-helfer-modul [modul]="m" slug="" [vorschau]="true" />
+							}
+							@case ('FAHRT') {
+								<jf-fahrt-modul [modul]="m" slug="" [vorschau]="true" />
 							}
 							<!-- Leere Listen ohne Rechte: kein Upload, kein Hinweis, und slug leer wie beim Termin. -->
 							@case ('DATEIEN') {

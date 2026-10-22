@@ -129,6 +129,52 @@ describe('ThreadApi', () => {
 		anfrage.flush({ modul: { id: 'm5' }, stand: 10 });
 	});
 
+	describe('Fahrgemeinschaft', () => {
+		const auto = { plaetze: 3, abfahrtTag: '2026-10-23', abfahrtZeit: '15:30', ort: 'Vereinsheim', notiz: null };
+
+		it('bieteAuto ist POST /fahrten/:modulId/autos mit Richtung und clientId', () => {
+			let antwort: unknown;
+			api.bieteAuto('demo', 'm 7', { ...auto, richtung: 'HIN', clientId: 'c-4' }).subscribe((a) => (antwort = a));
+			const anfrage = http.expectOne('/demo/api/v1/fahrten/m%207/autos');
+			expect(anfrage.request.method).toBe('POST');
+			expect(anfrage.request.body).toEqual({ ...auto, richtung: 'HIN', clientId: 'c-4' });
+			anfrage.flush({ modul: { id: 'm 7' }, stand: 11 }, { status: 201, statusText: 'Created' });
+			expect(antwort).toEqual({ modul: { id: 'm 7' }, stand: 11 });
+		});
+
+		it('aendereAuto ist PUT /autos/:id ohne clientId', () => {
+			api.aendereAuto('demo', 'a/1', auto).subscribe();
+			const anfrage = http.expectOne('/demo/api/v1/autos/a%2F1');
+			expect(anfrage.request.method).toBe('PUT');
+			expect(anfrage.request.body).toEqual(auto);
+			anfrage.flush({ modul: { id: 'm7' }, stand: 12 });
+		});
+
+		it('zieheAutoZurueck ist DELETE ohne Koerper', () => {
+			api.zieheAutoZurueck('demo', 'a1').subscribe();
+			const anfrage = http.expectOne('/demo/api/v1/autos/a1');
+			expect(anfrage.request.method).toBe('DELETE');
+			expect(anfrage.request.body).toBeNull();
+			anfrage.flush({ modul: { id: 'm7' }, stand: 13 });
+		});
+
+		it('setzeEin ist PUT /fahrten/:modulId/:richtung/:kindId mit der Richtung klein in der Adresse', () => {
+			api.setzeEin('demo', 'm7', 'RUECK', 'k/1', { autoId: null, clientId: 'c-5' }).subscribe();
+			const anfrage = http.expectOne('/demo/api/v1/fahrten/m7/rueck/k%2F1');
+			expect(anfrage.request.method).toBe('PUT');
+			expect(anfrage.request.body).toEqual({ autoId: null, clientId: 'c-5' });
+			anfrage.flush({ modul: { id: 'm7' }, stand: 14 });
+		});
+
+		it('nimmHeraus ist DELETE ohne Koerper', () => {
+			api.nimmHeraus('demo', 'm7', 'HIN', 'k1').subscribe();
+			const anfrage = http.expectOne('/demo/api/v1/fahrten/m7/hin/k1');
+			expect(anfrage.request.method).toBe('DELETE');
+			expect(anfrage.request.body).toBeNull();
+			anfrage.flush({ modul: { id: 'm7' }, stand: 15 });
+		});
+	});
+
 	it('Fehler kommen als ApiFehler an', () => {
 		let fehler: ApiFehler | undefined;
 		api

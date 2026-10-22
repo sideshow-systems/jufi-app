@@ -16,6 +16,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import {
+	type FahrtModulAnsicht,
 	type HelferModulAnsicht,
 	idAusSegment,
 	teilenText,
@@ -33,6 +34,7 @@ import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { VerwaltungThreadsApi } from '../verwaltung/threads/threads-api';
 import { DateienModulComponent } from './dateien-modul';
 import { FotosModulComponent } from './fotos-modul';
+import { FahrtModul } from './fahrt-modul';
 import { HelferModul } from './helfer-modul';
 import { InfoModul } from './info-modul';
 import { teile } from './teilen';
@@ -71,6 +73,7 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 	imports: [
 		DateienModulComponent,
 		FotosModulComponent,
+		FahrtModul,
 		HelferModul,
 		IconComponent,
 		InfoModul,
@@ -188,6 +191,14 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 									}
 									@case ('HELFER') {
 										<jf-helfer-modul
+											[modul]="m"
+											[slug]="slug()"
+											(geaendert)="ersetzeModul($event)"
+											(veraltet)="modulVeraltet()"
+										/>
+									}
+									@case ('FAHRT') {
+										<jf-fahrt-modul
 											[modul]="m"
 											[slug]="slug()"
 											(geaendert)="ersetzeModul($event)"
@@ -725,7 +736,7 @@ export class ThreadSeite {
 	}
 
 	/**
-	 * Setzt die Umfrage oder Helferliste nach einer Antwort als neues Modul ein, als neuer Thread-Wert, damit die
+	 * Setzt die Umfrage, Helferliste oder Fahrgemeinschaft nach einer Antwort als neues Modul ein, als neuer Thread-Wert, damit die
 	 * Seite neu zeichnet. Der Stand bleibt der geladene: Die Antwort meldet zwar den neuen
 	 * Vereinsstand, aber bis dorthin koennen andere am Thread geaendert haben, was die Seite nicht
 	 * geladen hat (Rahmen 1). Die eigene Antwort macht den Thread fuer die Person ohnehin nicht
@@ -734,7 +745,7 @@ export class ThreadSeite {
 	 * Verworfen: den Thread neu laden; das kostete eine Anfrage je Tipp und setzte die Seite
 	 * waehrend des Ladens auf "Wird geladen".
 	 */
-	protected ersetzeModul(neu: UmfrageAnsicht | HelferModulAnsicht): void {
+	protected ersetzeModul(neu: UmfrageAnsicht | HelferModulAnsicht | FahrtModulAnsicht): void {
 		const alt = this.thread();
 		if (alt === null) return;
 		const ersetzt: ThreadAnsicht = { ...alt, module: alt.module.map((m) => (m.id === neu.id ? neu : m)) };
@@ -753,7 +764,7 @@ export class ThreadSeite {
 	}
 
 	/**
-	 * Die Helferliste hat eine Handlung abgewiesen, weil sie sich seit dem Laden geaendert hat (voll,
+	 * Helferliste oder Fahrgemeinschaft hat eine Handlung abgewiesen, weil sie sich seit dem Laden geaendert hat (voll,
 	 * archiviert, Frist vorbei, nicht mehr da): Die Seite laedt still neu, damit die Karte zeigt, was
 	 * der Server jetzt sieht. Der Satz zum Grund bleibt an der Karte stehen. Verworfen: den Thread
 	 * mit "Wird geladen" neu zu laden; das risse die Karte mitsamt dem Satz weg.
