@@ -17,7 +17,7 @@ import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
 import { Nachlauf } from './nachlauf.js';
-import { legeThreadAn, trageEinTest } from './threads/test-threads.js';
+import { bieteAutoTest, legeThreadAn, trageEinTest } from './threads/test-threads.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
 import { vereinsApi, vereinsRouten } from './verein.js';
@@ -161,6 +161,33 @@ async function fremdeHelferliste(k: Kontext): Promise<{ positionId: string; clie
 async function fremdeEintraege(k: Kontext) {
 	return {
 		eintraege: await k.prisma.helferEintrag.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
+		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
+	};
+}
+
+/**
+ * Eine Fahrgemeinschaft in fremd mit einem Auto der fremden Person; jeder Fall legt seine eigene
+ * an, damit Anbieten, Aendern und Zurueckziehen nicht vom Zustand eines anderen Falls abhaengen.
+ */
+async function fremdeFahrt(k: Kontext): Promise<{ modulId: string; autoId: string; clientId: string }> {
+	const { modulIds } = await legeThreadAn(k.prisma, k.fremd, new Date(), {
+		titel: 'Fremde Fahrgemeinschaft',
+		erstelltVonId: k.fremdePersonId,
+		module: [{ typ: 'FAHRT' }],
+	});
+	const modulId = modulIds[0] as string;
+	const db = vereinDb(k.prisma, k.fremd.id);
+	const autoId = await bieteAutoTest(db, modulId, k.fremdePersonId, 'HIN', 3);
+	const { clientId } = await db.auto.findUniqueOrThrow({ where: { id: autoId }, select: { clientId: true } });
+	return { modulId, autoId, clientId };
+}
+
+/** Alles, was Anbieten, Aendern oder Zurueckziehen in fremd veraendern koennte: Autos, Mitfahrten, Verlauf, Stand. */
+async function fremdeAutos(k: Kontext) {
+	return {
+		autos: await k.prisma.auto.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
+		mitfahrten: await k.prisma.mitfahrt.findMany({ where: { vereinId: k.fremd.id }, orderBy: { id: 'asc' } }),
+		verlauf: await k.prisma.verlaufEintrag.count({ where: { vereinId: k.fremd.id } }),
 		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
 	};
 }
@@ -1043,6 +1070,84 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 		await trageEinTest(vereinDb(k.prisma, k.eigen.id), eigenePosition, k.eigenerLeiterId, k.eigenerLeiterId);
 		expect((await trageAus(k.eigen.slug, eigenePosition, k.eigenerLeiterId, k.eigenerLeiter)).status).toBe(200);
 		expect(await fremdeEintraege(k)).toEqual(vorher);
+	},
+	'POST /fahrten/:modulId/autos': async (k) => {
+		const f = await fremdeFahrt(k);
+		const vorher = await fremdeAutos(k);
+		const biete = (slug: string, modulId: string, clientId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/fahrten/${modulId}/autos`, {
+				methode: 'POST',
+				body: { plaetze: 2, richtung: 'HIN', clientId },
+				cookie,
+			});
+		const fremd = (slug: string) => biete(slug, f.modulId, 'mandant-neu', k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		// Gegenprobe: In einer eigenen Fahrgemeinschaft bietet derselbe Leiter an, und die clientId
+		// des Autos in fremd ist in eigen frei: ein 409 verriete, dass es sie dort gibt.
+		const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'FAHRT' }],
+		});
+		expect((await biete(k.eigen.slug, eigene.modulIds[0] as string, f.clientId, k.eigenerLeiter)).status).toBe(201);
+		expect(await fremdeAutos(k)).toEqual(vorher);
+	},
+	'PUT /autos/:id': async (k) => {
+		const f = await fremdeFahrt(k);
+		const vorher = await fremdeAutos(k);
+		const aendere = (slug: string, autoId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/autos/${autoId}`, { methode: 'PUT', body: { plaetze: 5 }, cookie });
+		const fremd = (slug: string) => aendere(slug, f.autoId, k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		// Gegenprobe: Das eigene Auto aendert derselbe Leiter, das Recht fehlt also nicht.
+		const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'FAHRT' }],
+		});
+		const eigenesAuto = await bieteAutoTest(
+			vereinDb(k.prisma, k.eigen.id),
+			eigene.modulIds[0] as string,
+			k.eigenerLeiterId,
+			'HIN',
+			3,
+		);
+		expect((await aendere(k.eigen.slug, eigenesAuto, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeAutos(k)).toEqual(vorher);
+	},
+	'DELETE /autos/:id': async (k) => {
+		const f = await fremdeFahrt(k);
+		const vorher = await fremdeAutos(k);
+		const ziehZurueck = (slug: string, autoId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/autos/${autoId}`, { methode: 'DELETE', cookie });
+		const fremd = (slug: string) => ziehZurueck(slug, f.autoId, k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+			erstelltVonId: k.eigenerLeiterId,
+			module: [{ typ: 'FAHRT' }],
+		});
+		const eigenesAuto = await bieteAutoTest(
+			vereinDb(k.prisma, k.eigen.id),
+			eigene.modulIds[0] as string,
+			k.eigenerLeiterId,
+			'HIN',
+			3,
+		);
+		expect((await ziehZurueck(k.eigen.slug, eigenesAuto, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeAutos(k)).toEqual(vorher);
 	},
 	'PATCH /untergruppen/:id': async (k) => {
 		const vorher = await k.prisma.untergruppe.findUniqueOrThrow({ where: { id: k.fremdeGruppeId } });
