@@ -12,7 +12,7 @@
  */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { rm, stat } from 'node:fs/promises';
 import sharp from 'sharp';
 
 // Beide Einstellungen gelten fuer den ganzen Prozess, also auch fuers Logo; das ist
@@ -45,6 +45,18 @@ async function hashe(pfad: string): Promise<string> {
 }
 
 /**
+ * Fehler des Dateisystems: die eigenen (stat, Hash) tragen einen Text-`code` (ENOENT, EACCES, ENOSPC ...).
+ * sharp meldet Lese- und Schreibfehler dagegen als Error ohne `code`, nur mit libvips-Text
+ * ("unable to open for write", "write error", "system error: ...", "Input file is missing");
+ * "premature end of JPEG image" und andere Dekodierfehler gehoeren nicht dazu.
+ */
+function istDateisystemFehler(fehler: unknown): boolean {
+	if (!(fehler instanceof Error)) return false;
+	if (typeof (fehler as { code?: unknown }).code === 'string') return true;
+	return /unable to open for write|write error|system error|input file is missing/i.test(fehler.message);
+}
+
+/**
  * Macht aus dem Upload die beiden Fassungen eines Fotos: Haupt (lange Seite
  * 2560 px) und Vorschau (480 px), beide JPEG.
  *
@@ -60,11 +72,40 @@ async function hashe(pfad: string): Promise<string> {
  *
  * `bytes` zaehlt beide Fassungen (Spec 2.1), `sha256` gilt der Hauptfassung
  * (Restore-Probe, Spec 12.4).
+ *
+ * Vertrag bei Fehlern: Das Ergebnis `{ ok: false }` gilt nur fuer ein Bild, das
+ * nicht geht (zu viele Pixel, kein lesbares Bild). Ein Fehler des Dateisystems
+ * (Eingabe fehlt, Ausgabe nicht beschreibbar, Platte voll) wird geworfen, denn er
+ * ist kein Fehler des Nutzers und darf ihm nicht als "Bildart geht nicht"
+ * erscheinen; der Aufrufer meldet ihn als Serverfehler. Auf beiden Wegen sind
+ * danach beide Ausgabepfade geloescht, der Aufrufer muss also keine Reste
+ * aufraeumen. Bekannte Luecke: sharp traegt keinen `code`, die
+ * Erkennung seiner Dateisystemfehler stuetzt sich auf den Text von libvips. Meldet
+ * eine Platte voll in anderen Worten, zaehlt sie als TYP.
  */
 export async function verarbeiteFoto(
 	eingabe: string,
 	ausgabe: { haupt: string; vorschau: string },
 ): Promise<FotoErgebnis> {
+	try {
+		const ergebnis = await verarbeite(eingabe, ausgabe);
+		if (!ergebnis.ok) await raeume(ausgabe);
+		return ergebnis;
+	} catch (fehler) {
+		await raeume(ausgabe);
+		throw fehler;
+	}
+}
+
+async function raeume(ausgabe: { haupt: string; vorschau: string }): Promise<void> {
+	// force: ein Pfad, den es nie gab, ist kein Fehler. Ein echter Fehler beim Loeschen
+	// soll den urspruenglichen nicht verdecken, darum gilt `allSettled`.
+	await Promise.allSettled([rm(ausgabe.haupt, { force: true }), rm(ausgabe.vorschau, { force: true })]);
+}
+
+async function verarbeite(eingabe: string, ausgabe: { haupt: string; vorschau: string }): Promise<FotoErgebnis> {
+	let breite: number;
+	let hoehe: number;
 	try {
 		const haupt = await sharp(eingabe, { limitInputPixels: MAX_PIXEL, failOn: 'error', sequentialRead: true })
 			.rotate()
@@ -72,26 +113,24 @@ export async function verarbeiteFoto(
 			.flatten({ background: '#ffffff' })
 			.jpeg({ quality: 82 })
 			.toFile(ausgabe.haupt);
+		breite = haupt.width;
+		hoehe = haupt.height;
 		// Nicht ueber die Hauptfassung hinaus vergroessern: ein 100-px-Bild braucht keine 480er-Vorschau.
 		await sharp(ausgabe.haupt)
 			.resize({ width: VORSCHAU_SEITE, height: VORSCHAU_SEITE, fit: 'inside', withoutEnlargement: true })
 			.jpeg({ quality: 75 })
 			.toFile(ausgabe.vorschau);
-		const [hauptGroesse, vorschauGroesse, sha256] = await Promise.all([
-			stat(ausgabe.haupt),
-			stat(ausgabe.vorschau),
-			hashe(ausgabe.haupt),
-		]);
-		return {
-			ok: true,
-			breite: haupt.width,
-			hoehe: haupt.height,
-			bytes: hauptGroesse.size + vorschauGroesse.size,
-			sha256,
-		};
 	} catch (fehler) {
-		// Jeder andere Fehler (kein Bild, abgeschnitten, beschaedigt) ist fuer den
-		// Aufrufer ein falscher Typ; die Einzelheiten helfen ihm nicht weiter.
+		if (istDateisystemFehler(fehler)) throw fehler;
+		// Was dann noch bleibt, sind Dekodierfehler (kein Bild, abgeschnitten, beschaedigt): fuer
+		// den Aufrufer ein falscher Typ, die Einzelheiten helfen ihm nicht weiter.
 		return { ok: false, grund: istPixelLimit(fehler) ? 'PIXEL' : 'TYP' };
 	}
+	// Ausserhalb des Fangs oben: ein Fehler beim Zaehlen und Hashen ist ein Dateisystemfehler.
+	const [hauptGroesse, vorschauGroesse, sha256] = await Promise.all([
+		stat(ausgabe.haupt),
+		stat(ausgabe.vorschau),
+		hashe(ausgabe.haupt),
+	]);
+	return { ok: true, breite, hoehe, bytes: hauptGroesse.size + vorschauGroesse.size, sha256 };
 }

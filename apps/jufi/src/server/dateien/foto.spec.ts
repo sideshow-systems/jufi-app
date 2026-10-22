@@ -93,6 +93,49 @@ describe('verarbeiteFoto', () => {
 		expect(await lauf(Buffer.from('kein Bild, nur Text'))).toEqual({ ok: false, grund: 'TYP' });
 	});
 
+	it('meldet fuer ein mitten im Strom abgeschnittenes JPEG TYP', async () => {
+		// Haelt fest, was sharp 0.35.5 mit failOn 'error' tut: ein abgeschnittenes JPEG
+		// ("premature end of JPEG image") ist ein Fehler, kein halbes Bild. Aendert eine
+		// neue sharp-Version das, soll dieser Test es merken, denn dann kaeme ein
+		// angeschnittenes Foto durch.
+		const ganz = await erzeugeBild({ breite: 600, hoehe: 400, format: 'jpeg' });
+		const ergebnis = await lauf(ganz.subarray(0, Math.floor(ganz.length / 2)));
+		expect(ergebnis).toEqual({ ok: false, grund: 'TYP' });
+		await expect(stat(haupt)).rejects.toThrow();
+		await expect(stat(vorschau)).rejects.toThrow();
+	});
+
+	it('raeumt beide Ausgaben weg, wenn die Vorschau nicht geschrieben werden kann', async () => {
+		await writeFile(eingabe, await erzeugeBild({ breite: 300, hoehe: 200, format: 'jpeg' }));
+		const unerreichbar = join(ordner, 'gibt-es-nicht', 'vorschau');
+		// Die Hauptfassung ist da, wenn die Vorschau scheitert: genau der Rest, der liegen bleiben koennte.
+		await expect(verarbeiteFoto(eingabe, { haupt, vorschau: unerreichbar })).rejects.toThrow();
+		await expect(stat(haupt)).rejects.toThrow();
+	});
+
+	it('wirft bei einer Eingabe, die es nicht gibt, statt TYP zu melden', async () => {
+		await expect(verarbeiteFoto(join(ordner, 'fehlt'), { haupt, vorschau })).rejects.toThrow();
+		await expect(stat(haupt)).rejects.toThrow();
+		await expect(stat(vorschau)).rejects.toThrow();
+	});
+
+	it('wirft bei einem Ausgabepfad, der nicht erreichbar ist, statt TYP zu melden', async () => {
+		await writeFile(eingabe, await erzeugeBild({ breite: 300, hoehe: 200, format: 'jpeg' }));
+		const unerreichbar = join(ordner, 'gibt-es-nicht', 'haupt');
+		await expect(verarbeiteFoto(eingabe, { haupt: unerreichbar, vorschau })).rejects.toThrow();
+		await expect(stat(unerreichbar)).rejects.toThrow();
+		await expect(stat(vorschau)).rejects.toThrow();
+	});
+
+	it('loescht beide Ausgaben auch bei einem Bildfehler', async () => {
+		// Vorhandene Reste eines frueheren Laufs duerfen nach einem Fehler nicht stehen bleiben.
+		await writeFile(haupt, 'alt');
+		await writeFile(vorschau, 'alt');
+		expect(await lauf(Buffer.from('kein Bild'))).toEqual({ ok: false, grund: 'TYP' });
+		await expect(stat(haupt)).rejects.toThrow();
+		await expect(stat(vorschau)).rejects.toThrow();
+	});
+
 	it('zaehlt beide Fassungen in bytes und hasht die Hauptfassung', async () => {
 		const ergebnis = await lauf(await erzeugeBild({ breite: 1000, hoehe: 800, format: 'png' }));
 		if (!ergebnis.ok) throw new Error('Verarbeitung gescheitert');
