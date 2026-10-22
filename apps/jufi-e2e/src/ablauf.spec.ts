@@ -967,6 +967,187 @@ test.describe.serial('Ablauf von Verein bis Kind', () => {
 		await kontext.close();
 	});
 
+	// Die Helferliste (TP4 Etappe 3), wieder auf Bowling: Die Leitung haengt sie an den laufenden Thread,
+	// die Mutter traegt sich ein, Mia sieht es live, die Leitung traegt nach und versucht, eine belegte
+	// Position zu entfernen. Die Einheit bleibt bei der Vorgabe "pro Erwachsener": gefragt sind Mutter
+	// und Leitung, Mia liest nur mit.
+
+	/** Eine Position der Helferliste auf der Thread-Seite, nach ihrem Text (section mit aria-label). */
+	function helferPosition(seite: Page, text: string): Locator {
+		return seite.locator('jf-helfer-modul').getByRole('region', { name: text, exact: true });
+	}
+
+	/** Die Mutter traegt sich auf ihrer offenen Thread-Seite mit Notiz ein und wartet auf die Antwort des Servers. */
+	async function trageEin(position: Locator, notiz: string): Promise<void> {
+		await position.getByRole('button', { name: 'Eintragen', exact: true }).click();
+		await position.getByLabel('Notiz (optional)').fill(notiz);
+		// Der Knopf im Formular, nicht der, der es geoeffnet hat: Beide heissen "Eintragen".
+		await position.locator('form').getByRole('button', { name: 'Eintragen', exact: true }).click();
+		await expect(position.locator('form')).toHaveCount(0);
+	}
+
+	test('Leitung fuegt Bowling eine Helferliste mit Kuchen und Grill hinzu', async ({ browser }) => {
+		const { kontext, seite } = await ausSitzung(browser, 'leitung', { viewport: { width: 1280, height: 800 } });
+		const fristTag = tagPlus(berlinerTag(new Date()), 3);
+		await seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}`);
+		await expect(seite.getByRole('heading', { name: 'Thread bearbeiten', level: 1 })).toBeVisible();
+		const module = seite.locator('ol.module > li');
+		const vorher = await module.count();
+
+		await seite.getByRole('group', { name: 'Modul hinzufügen' }).getByRole('button', { name: 'Helferliste' }).click();
+		await expect(module).toHaveCount(vorher + 1);
+		const felder = seite.locator('jf-helfer-felder');
+		// Die Vorgabe des Editors: pro Erwachsener, eine leere Position mit einem Platz.
+		await expect(felder.getByLabel('Einheit')).toHaveValue('ERWACHSENER');
+		await felder.getByRole('textbox', { name: 'Position 1', exact: true }).fill('Kuchen');
+		await expect(felder.getByRole('spinbutton', { name: 'Anzahl: Position 1', exact: true })).toHaveValue('1');
+		await felder.getByRole('button', { name: 'Position hinzufügen' }).click();
+		await felder.getByRole('textbox', { name: 'Position 2', exact: true }).fill('Grill');
+		await felder.getByRole('spinbutton', { name: 'Anzahl: Position 2', exact: true }).fill('2');
+		await felder.getByRole('checkbox', { name: 'ohne Frist' }).uncheck();
+		await felder.getByLabel('Datum', { exact: true }).fill(fristTag);
+		await expect(felder.getByLabel('Uhrzeit', { exact: true })).toHaveValue('18:00');
+
+		// Die Vorschau zeigt die Liste, wie die Familie sie sehen wird, noch ohne Eintraege.
+		const vorschau = seite.getByRole('region', { name: 'Vorschau am Handy' }).locator('jf-helfer-modul');
+		await expect(vorschau.getByRole('region', { name: 'Kuchen', exact: true })).toContainText('0/1');
+		await expect(vorschau.getByRole('region', { name: 'Grill', exact: true })).toContainText('0/2');
+
+		await seite.getByRole('button', { name: 'Speichern', exact: true }).click();
+		await expect(seite.getByRole('status').filter({ hasText: 'Gespeichert' })).toBeVisible();
+		await kontext.close();
+	});
+
+	test('Mutter traegt sich ueber Braucht deine Antwort bei Kuchen ein, Mia sieht es live', async ({ browser }) => {
+		// Mia hat den Thread offen, bevor die Mutter sich eintraegt.
+		const kind = await ausSitzung(browser, 'kind');
+		const ws = await oeffneVerbunden(kind.seite, `/${SLUG}/t/${bowling}`);
+		const kuchenKind = helferPosition(kind.seite, 'Kuchen');
+		await expect(kuchenKind).toContainText('Noch niemand eingetragen.');
+		// Gefragt sind Erwachsene: Mia sieht die Liste, hat aber keinen Knopf darin.
+		await expect(kind.seite.locator('jf-helfer-modul').getByRole('button')).toHaveCount(0);
+		const signal = ws.waitForEvent('framereceived', {
+			predicate: (f) => alsSignal(f.payload)?.threadId === bowlingId,
+		});
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/`);
+		await expect(mutter.seite.getByRole('heading', { name: 'Hallo Mara' })).toBeVisible();
+		const brauchtAntwort = mutter.seite
+			.locator('jf-abschnitt')
+			.filter({ has: mutter.seite.getByRole('heading', { name: 'Braucht deine Antwort', exact: true }) });
+		// Die eigene Zeile, ohne Vornamen davor: Die Umfrage haben Mia und Mats schon beantwortet, offen ist
+		// nur die Helferliste, und die fragt die Mutter selbst.
+		const zeile = brauchtAntwort.getByRole('link', { name: /^🎳 Bowling noch offen/ });
+		await expect(zeile).toBeVisible();
+		await expect(brauchtAntwort.getByRole('link')).toHaveCount(1);
+		await zeile.click();
+		await expect(mutter.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+
+		const kuchen = helferPosition(mutter.seite, 'Kuchen');
+		await trageEin(kuchen, 'Marmorkuchen');
+		await expect(kuchen.locator('.fuell')).toHaveText(/^\s*1\/1\s*voll\s*$/);
+		await expect(kuchen).toContainText('Mara M.');
+		await expect(kuchen).toContainText('Marmorkuchen');
+
+		await expect(kuchenKind).toContainText('Marmorkuchen', { timeout: 5000 });
+		await expect(kuchenKind).toContainText('Mara M.');
+		await expect(kuchenKind.locator('.fuell')).toHaveText(/^\s*1\/1\s*voll\s*$/);
+		await kamLive(ws, signal);
+		await kind.kontext.close();
+
+		// Mit einem Eintrag im Modul ist die Liste fuer die Mutter erledigt (Plan zu Etappe 3, Entscheidung 8),
+		// auch wenn Grill noch Platz hat. Erst der Beweis, dass die Bloecke geladen sind.
+		await mutter.seite.goto(`/${SLUG}/`);
+		await expect(
+			mutter.seite
+				.locator('jf-start-bloecke jf-abschnitt')
+				.filter({ has: mutter.seite.getByRole('heading', { name: 'Als Nächstes', exact: true }) })
+				.getByRole('link', { name: /Bowling/ }),
+		).toBeVisible();
+		await expect(brauchtAntwort).toHaveCount(0);
+		await mutter.kontext.close();
+	});
+
+	test('Leitung traegt die Mutter in der Antworten-Uebersicht bei Grill nach, die Mutter sieht es', async ({
+		browser,
+	}) => {
+		const leitung = await ausSitzung(browser, 'leitung', { viewport: { width: 1280, height: 800 } });
+		await leitung.seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}/antworten`);
+		await expect(leitung.seite.getByRole('heading', { name: '🎳 Bowling', level: 1 })).toBeVisible();
+		const block = leitung.seite.locator('[data-helfer]');
+		await expect(block.getByRole('heading', { name: 'Helferliste', level: 2 })).toBeVisible();
+		// Gefragt sind die Mutter und die Leitung selbst (Jugendleiter); ohne Eintrag ist nur noch die Leitung.
+		await expect(block).toContainText('1 ohne Eintrag');
+		const kuchen = block.getByRole('region', { name: 'Kuchen', exact: true });
+		await expect(kuchen.locator('.zahl')).toHaveText('1/1');
+		await expect(kuchen).toContainText('Marmorkuchen');
+		// Eine volle Position hat kein Formular zum Nachtragen.
+		await expect(kuchen.getByRole('form')).toHaveCount(0);
+
+		const grill = block.getByRole('region', { name: 'Grill', exact: true });
+		const formular = grill.getByRole('form', { name: 'Eintragen in Grill' });
+		await formular.getByLabel('Person').selectOption({ label: 'Mara M.' });
+		await formular.getByRole('button', { name: 'Eintragen in Grill' }).click();
+		await expect(grill.locator('.zahl')).toHaveText('1/2');
+		await expect(grill).toContainText('Mara M.');
+		await expect(grill).toContainText('eingetragen von Lea L.');
+		await leitung.kontext.close();
+
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		const grillMutter = helferPosition(mutter.seite, 'Grill');
+		await expect(grillMutter.locator('.fuell')).toHaveText(/^\s*1\/2\s*$/);
+		await expect(grillMutter).toContainText('Mara M.');
+		// Die Zeile geht die Mutter an, also sieht sie, wer sie eingetragen hat (Plan zu Etappe 3, Entscheidung 11).
+		await expect(grillMutter).toContainText('eingetragen von Lea L.');
+		await expect(grillMutter.getByRole('button', { name: 'Austragen', exact: true })).toBeVisible();
+		await mutter.kontext.close();
+	});
+
+	test('Leitung kann Kuchen nicht entfernen, auch nicht aus einem Editor von vor dem Eintrag', async ({ browser }) => {
+		const leitung = await ausSitzung(browser, 'leitung', { viewport: { width: 1280, height: 800 } });
+		const felder = leitung.seite.locator('jf-helfer-felder');
+		const entfernen = felder.getByRole('button', { name: 'Entfernen: Position 1', exact: true });
+		/** Oeffnet den Editor frisch und waehlt die Helferliste, das letzte Modul. */
+		const oeffneEditor = async () => {
+			await leitung.seite.goto(`/${SLUG}/verwaltung/threads/${bowlingId}`);
+			await expect(leitung.seite.getByRole('heading', { name: 'Thread bearbeiten', level: 1 })).toBeVisible();
+			await leitung.seite.locator('ol.module > li').last().locator('button.waehlen').click();
+			await expect(felder.getByRole('textbox', { name: 'Position 1', exact: true })).toHaveValue('Kuchen');
+		};
+
+		// Ein frischer Editor kennt den Eintrag und laesst das Entfernen gar nicht erst zu.
+		await oeffneEditor();
+		await expect(entfernen).toBeDisabled();
+
+		// Damit der Server entscheiden muss, braucht es einen Editor, der den Eintrag nicht kennt: Die Mutter
+		// traegt sich aus, die Leitung oeffnet den Editor neu, die Mutter traegt sich wieder ein. Der Editor
+		// laedt Eintraege nicht live nach. Verworfen: den Editor vor dem ersten Eintrag offen zu halten -- dann
+		// stuende dieser Schritt mitten im Eintragen der Mutter statt nach dem Nachtragen.
+		const mutter = await ausSitzung(browser, 'mutter');
+		await mutter.seite.goto(`/${SLUG}/t/${bowling}`);
+		const kuchen = helferPosition(mutter.seite, 'Kuchen');
+		await kuchen.getByRole('button', { name: 'Austragen', exact: true }).click();
+		await expect(kuchen).toContainText('Noch niemand eingetragen.');
+		await expect(kuchen.locator('.fuell')).toHaveText(/^\s*0\/1\s*$/);
+
+		await oeffneEditor();
+		await expect(entfernen).toBeEnabled();
+
+		await trageEin(kuchen, 'Marmorkuchen');
+		await expect(kuchen.locator('.fuell')).toHaveText(/^\s*1\/1\s*voll\s*$/);
+		await mutter.kontext.close();
+
+		await entfernen.click();
+		await expect(felder.getByRole('textbox', { name: 'Position 1', exact: true })).toHaveValue('Grill');
+		await leitung.seite.getByRole('button', { name: 'Speichern', exact: true }).click();
+		// Der Satz des Servers steht an den Positionen der Helferliste, nicht unter den Knoepfen.
+		await expect(felder.getByRole('alert')).toHaveText('Für „Kuchen“ hat sich schon jemand eingetragen.');
+		await expect(leitung.seite.getByRole('status').filter({ hasText: 'Gespeichert' })).toHaveCount(0);
+		await leitung.kontext.close();
+	});
+
 	test('Nach Fristende gibt es keinen Antwortknopf mehr, die Leitung traegt weiter nach', async ({ browser }) => {
 		// Die Frist von Bowling kommt danach zurueck: Das Projekt layout misst die Antwortknoepfe der Seite,
 		// und eine abgelaufene Frist nahm sie ihm. Gelesen wird sie vor dem Beenden, nicht neu erfunden.

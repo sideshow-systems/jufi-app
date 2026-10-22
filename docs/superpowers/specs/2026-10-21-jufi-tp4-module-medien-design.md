@@ -269,13 +269,29 @@ Regel: `ohneFotoEinwilligung(thread, umfeld, jetzt)` in `libs/domain`.
 
 Eine Person kann sich für mehrere Positionen eintragen, je Position einmal. Verworfen: eine Anzahl je Eintrag („2 Kuchen“) — selten, und die Notiz deckt es ab.
 
+**Ein Eintrag ist ein Upsert je `(positionId, fuerId)`** (Plan zu Etappe 3, Entscheidung 5). Eine geänderte Notiz überschreibt `notiz`, `vonId` und `clientId`; `eingetragenAm` bleibt, die Reihenfolge in der Position ist die der Anmeldung. Wie bei der Umfrage-Antwort erkennt der Server eine Wiederholung nur, solange niemand die Zeile seither geändert hat.
+
+**Jeder Eintrag belegt einen Platz und wird gezeigt, auch wenn die Person nicht mehr gefragt ist** (Plan zu Etappe 3, Entscheidung 1): Entfernte („ehemaliges Mitglied“, 12.2) ebenso wie Personen, die die Zielgruppe verlassen haben. Füllstand, `VOLL` und die Editor-Prüfung „Anzahl nicht unter den Eingetragenen“ zählen damit dieselben Zeilen, nämlich die der Datenbank. Verworfen: wie bei Umfragen ausblenden — ein ausgeblendeter Eintrag gäbe seinen Platz frei; käme die Person zurück, wäre die Position überbucht. Der Kuchen kommt ja trotzdem.
+
 ### 5.2 Regeln
 
 - **Eintragen** (`PUT`, Upsert mit Notiz) und **Austragen** (`DELETE`): wer für `fuerId` antworten darf (TP3 3.3), vor der Frist und nicht im Archiv; danach nur, wer den Thread bearbeiten darf (Nachtragen, „eingetragen von“).
-- **Platz**: Der Server zählt die Einträge unter der Vereinssperre (`mitAenderung`); ist die Position voll, 409 `VOLL`. Eine Notiz ändern belegt keinen neuen Platz.
+  - **Einen Eintrag einer Person, die nicht mehr gefragt ist, trägt nur aus, wer den Thread bearbeiten darf** (`darfAustragen`; Plan zu Etappe 3, Entscheidung 2). Für alle anderen ergibt das 404, wie jede Zeile, die sie nicht haben.
+  - **Im Archiv** bekommt, wer den Thread nicht bearbeiten darf, 409 mit dem vorhandenen `ARCHIVIERT` (8: „nur noch Leitung“; Plan zu Etappe 3, Entscheidung 3). Geprüft wird nach 404 und Entwurf, vor der Frist (410). Der Umfrage-Antwort fehlt diese Prüfung bisher; das ist eine offene Frage an den Eigentümer.
+- **Platz**: Der Server zählt die Einträge unter der Vereinssperre (`mitAenderung`); ist die Position voll, 409 `VOLL` (9.3). Eine Notiz ändern belegt keinen neuen Platz.
 - **Anzeige**: Alle Leser sehen je Position Füllstand („Kuchen 1/4“) und die Eingetragenen mit Notiz („Sandra M. (Mutter von Lena und Max) – Marmorkuchen“). Eine Ergebnis-Einstellung wie bei Umfragen gibt es nicht; wer sich einträgt, will gesehen werden.
-- **Editor**: Eine Anzahl unter der Zahl der Eingetragenen lehnt er ab; eine Position mit Einträgen lässt sich nicht löschen; umbenennen und umsortieren geht (Schlüssel bleibt).
+  - **„eingetragen von“ sieht nur, wen es angeht** (Plan zu Etappe 3, Entscheidung 11): Unter einem Eintrag steht es, wenn der Betrachter für diese Zeile antworten oder den Thread bearbeiten darf; der Satz kommt aus `eingetragenVon` (`namen.ts`). Fremde Leser sehen nur Name und Notiz.
+  - **Thread-Seite**: je Position Füllstand `1/4`, bei voller Position zusätzlich `voll`, leer „Noch niemand eingetragen.“ Knöpfe „Eintragen“, „Austragen“ und „Notiz ändern“, für Kinder „Lena eintragen“ und „Lena austragen“. Das Formular hat das Feld „Notiz (optional)“ und den Knopf „Eintragen“, beim Ändern „Speichern“, dazu „Abbrechen“; bei Kindern steht darüber „Für Lena“.
+- **„Neu“**: In einem Thread mit Helferliste sieht jeder Leser Einträge (keine Ergebnis-Einstellung, siehe oben). Deshalb ist `antwortenSichtbar` dort für Nicht-Entfernte immer `true` (Plan zu Etappe 3, Entscheidung 7).
+- **„Braucht deine Antwort“** (Rahmen 5.2; Plan zu Etappe 3, Entscheidung 8) nennt eine Helferliste je eigener Zeile ohne einen einzigen Eintrag im Modul — wer Kuchen bringt, muss nicht auch noch fahren. Das gilt nur, solange die Liste eine Frist hat, die noch läuft, und mindestens eine Position einen freien Platz hat. Verworfen: auch ohne Frist — Familien, die nicht helfen können, würden sonst ohne Ende gemahnt.
+- **Editor**: Eine Anzahl unter der Zahl der Eingetragenen lehnt er ab; eine Position mit Einträgen lässt sich nicht löschen; umbenennen und umsortieren geht (Schlüssel bleibt). Der Server antwortet mit 409 und dem Satz am Feld: „Für „Kuchen“ hat sich schon jemand eingetragen.“ bzw. „Für „Kuchen“ sind schon 3 eingetragen.“; eine Helferliste mit Einträgen lässt sich nicht entfernen („Die Helferliste „Mitbringen“ hat schon Einträge und lässt sich nicht entfernen.“).
+  - **Die Einheit lässt sich nach dem ersten Eintrag nicht mehr ändern** (409 „Die Einheit lässt sich nach den ersten Einträgen nicht mehr ändern.“, analog TP3 3.14; Plan zu Etappe 3, Entscheidung 9). Sonst stünden Einträge von Personen da, die nach der neuen Einheit gar nicht gefragt wären.
+  - **Eine Friständerung schreibt `FRIST_GEAENDERT`** wie bei der Umfrage (Plan zu Etappe 3, Entscheidung 10). `frage` ist dabei der Modultitel, ohne Titel „Helferliste“.
+- **Suche**: Die Thread-Suche findet keine Positionstexte, wie sie keine Umfrage-Fragen findet (`liste.ts`; Plan zu Etappe 3, Entscheidung 12).
 - Die Antworten-Übersicht der Verwaltung zeigt die Helferliste mit Nachtragen.
+  - **Die Verwaltungsliste verlinkt sie auch bei einer Helferliste** (Plan zu Etappe 3, Entscheidung 13). `VerwaltungThread.hatUmfrage` heißt dafür `hatAntwortModul`; der Link im Editor folgt derselben Angabe.
+  - Je Helferliste ein Block: Titel oder „Helferliste“, Frist und „<n> ohne Eintrag“ — **auch bei 0**, denn die 0 sagt, dass sich alle gemeldet haben. Je Position Füllstand, die Eingetragenen mit Notiz, „eingetragen von …“ und „Austragen“.
+  - **Je nicht voller Position steht das Formular zum Nachtragen immer offen** (Person, „Notiz (optional)“, „Eintragen“). Die Leitung arbeitet dort Listen ab; ein Aufklappen kostete je Eintrag einen Klick. Verworfen: das Formular erst auf Knopfdruck zu zeigen.
 
 ---
 
@@ -349,10 +365,11 @@ Helfer-Einträge, Autos, Mitfahrten und Kostenposten heißen hier **Eintragungen
 - **Entwurf**: keine Eintragungen (TP3 3.6).
 - **Archiv**: nur noch Leitung (TP3 3.7).
 - **Wiederholbarkeit**: Jede Eintragungs-Route nimmt eine `clientId` (je Verein eindeutig) wie die Umfrage-Antwort (TP3 2.3).
+  - **Ausnahme Austragen**: `DELETE /helfer/:positionId/eintraege/:fuerId` nimmt keine `clientId` und ist idempotent (Plan zu Etappe 3, Entscheidung 4). Ein fehlender Eintrag ergibt 200 mit der frischen Ansicht und schreibt nichts. Nach dem Löschen gibt es keine Zeile mehr, an der eine `clientId` hängen könnte; die Wiederholung erkennt der Server am fehlenden Eintrag. Verworfen: eine eigene Tabelle für gelöschte `clientId`s.
 - **Schreibpfad** wie TP3 4.2: Form (400), Ort des Moduls, Sichtbarkeit und Recht (404), Wiederholung über `clientId`, Entwurf/Frist/Archiv (409/410), dann `mitAenderung` mit Neuprüfung unter der Sperre, nach dem Commit `deps.bus`, Antwort mit frischer Ansicht des Moduls.
-- **Änderungsart**: Eintragungen schreiben `ANTWORT` mit `objektId` = Modul; Autos ebenso. Ansichten werden je Person neu berechnet; kein Zahlstand erreicht Fremde.
+- **Änderungsart**: Eintragungen schreiben `ANTWORT` mit `objektId` = Modul-ID (Plan zu Etappe 3, Entscheidung 6); Autos ebenso. Die Umfrage schreibt dort weiter die ID der Antwort. Ansichten werden je Person neu berechnet; kein Zahlstand erreicht Fremde.
 - **„Neu“**: Eintragungen zählen wie Antworten (TP3 3.9).
-- **Gefragte und Antwortrecht** nutzen die vorhandene Logik aus `threads/antworten.ts` (`gefragte`, `darfAntworten`); sie wird dafür von `UmfrageDaten` gelöst und nimmt die Einheit als Parameter.
+- **Gefragte und Antwortrecht** nutzen die vorhandene Logik aus `threads/antworten.ts` (`gefragte`, `antwortZeilen`, `darfAntworten`); sie ist dafür von `UmfrageDaten` gelöst und nimmt den schmalen Typ `AntwortRegel` (`einheit`, `frist`). Umfrage und Helferliste fragen so dieselbe Logik.
 
 ---
 
@@ -362,29 +379,31 @@ Helfer-Einträge, Autos, Mitfahrten und Kostenposten heißen hier **Eintragungen
 
 Alle unter `/<slug>/api/v1`, mit `brauchtMitglied` und je einem Eintrag im Mandanten-Test (TP2 9). Wo eine Person etwas nicht sieht: 404.
 
-| Methode und Pfad                                             | Zweck                                                               |
-| ------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `POST /module/:modulId/fotos`                                | Foto hochladen (2.3, 4.2)                                           |
-| `POST /module/:modulId/dateien`                              | Datei hochladen (Kopf `X-Dateiname`)                                |
-| `PUT /dateien/:id`                                           | Datei umbenennen (Datei-Modul, Leitung)                             |
-| `DELETE /dateien/:id`                                        | Foto oder Datei löschen (2.7)                                       |
-| `GET /dateien/:id`, `GET /dateien/:id/vorschau`              | ausliefern (2.5)                                                    |
-| `GET /medien`                                                | Medienbereich (3.2)                                                 |
-| `GET /dokumente`                                             | Kategorien und Dokumente                                            |
-| `POST /dokumente?kategorie=`                                 | Dokument hochladen (Körper ist die Datei)                           |
-| `PUT /dokumente/:id`, `PUT /dokumente/:id/datei`             | Titel, Kategorie, Position ändern; Datei ersetzen                   |
-| `DELETE /dokumente/:id`                                      |                                                                     |
-| `POST /dokument-kategorien`, `PUT …/:id`, `DELETE …/:id`     | Kategorien pflegen; `PUT /dokument-kategorien/reihenfolge` sortiert |
-| `PUT /helfer/:positionId/eintraege/:fuerId`, `DELETE` ebenso | eintragen (mit Notiz), austragen                                    |
-| `POST /fahrten/:modulId/autos`, `PUT /autos/:id`, `DELETE`   | Auto anbieten, ändern, zurückziehen                                 |
-| `PUT /fahrten/:modulId/:richtung/:kindId`, `DELETE` ebenso   | Kind einsetzen (`{ autoId \| null, clientId }`), herausnehmen       |
-| `PUT /kosten/:modulId/:kindId/meldung`                       | Familie: `{ gemeldet: boolean, clientId }`                          |
-| `PUT /kosten/:modulId/:kindId`                               | Leitung: `{ status?, betragCent? \| null }`                         |
-| vorhandene Einwilligungs-Route der Jungfischer               | nimmt `art` optional (`DSGVO_ART8` Vorgabe, `FOTOS`), 4.4           |
-| `POST /ich/einwilligung`                                     | Foto-Einwilligung eines Volljährigen für sich selbst (4.4)          |
-| Plattform-Admin                                              | Verbrauch je Verein in der Vereinsliste, Speichergrenze ändern      |
+| Methode und Pfad                                             | Zweck                                                                 |
+| ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `POST /module/:modulId/fotos`                                | Foto hochladen (2.3, 4.2)                                             |
+| `POST /module/:modulId/dateien`                              | Datei hochladen (Kopf `X-Dateiname`)                                  |
+| `PUT /dateien/:id`                                           | Datei umbenennen (Datei-Modul, Leitung)                               |
+| `DELETE /dateien/:id`                                        | Foto oder Datei löschen (2.7)                                         |
+| `GET /dateien/:id`, `GET /dateien/:id/vorschau`              | ausliefern (2.5)                                                      |
+| `GET /medien`                                                | Medienbereich (3.2)                                                   |
+| `GET /dokumente`                                             | Kategorien und Dokumente                                              |
+| `POST /dokumente?kategorie=`                                 | Dokument hochladen (Körper ist die Datei)                             |
+| `PUT /dokumente/:id`, `PUT /dokumente/:id/datei`             | Titel, Kategorie, Position ändern; Datei ersetzen                     |
+| `DELETE /dokumente/:id`                                      |                                                                       |
+| `POST /dokument-kategorien`, `PUT …/:id`, `DELETE …/:id`     | Kategorien pflegen; `PUT /dokument-kategorien/reihenfolge` sortiert   |
+| `PUT /helfer/:positionId/eintraege/:fuerId`, `DELETE` ebenso | eintragen (`{ notiz \| null, clientId }`), austragen (ohne Körper, 8) |
+| `POST /fahrten/:modulId/autos`, `PUT /autos/:id`, `DELETE`   | Auto anbieten, ändern, zurückziehen                                   |
+| `PUT /fahrten/:modulId/:richtung/:kindId`, `DELETE` ebenso   | Kind einsetzen (`{ autoId \| null, clientId }`), herausnehmen         |
+| `PUT /kosten/:modulId/:kindId/meldung`                       | Familie: `{ gemeldet: boolean, clientId }`                            |
+| `PUT /kosten/:modulId/:kindId`                               | Leitung: `{ status?, betragCent? \| null }`                           |
+| vorhandene Einwilligungs-Route der Jungfischer               | nimmt `art` optional (`DSGVO_ART8` Vorgabe, `FOTOS`), 4.4             |
+| `POST /ich/einwilligung`                                     | Foto-Einwilligung eines Volljährigen für sich selbst (4.4)            |
+| Plattform-Admin                                              | Verbrauch je Verein in der Vereinsliste, Speichergrenze ändern        |
 
 **`art` ist optional, Vorgabe `DSGVO_ART8`** (Plan zu Etappe 2, Entscheidung 7): So bleiben Client und Tests der DSGVO-Einwilligung unverändert.
+
+**Die Helfer-Routen antworten mit `{ modul, stand }`** wie die Umfrage-Antwort: der frischen Ansicht der Helferliste für die anfragende Person und dem Stand der Änderung (Plan zu Etappe 3). Eine Notiz mit Steuer- oder Formatzeichen (`\p{Cc}`, `\p{Cf}`) oder über 80 Zeichen ergibt 400 am Feld `notiz`. Das Austragen ist idempotent (8).
 
 Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, Kostenbetrag und Bankdaten) laufen weiter über `POST /threads` und `PUT /threads/:id` (TP3 4.1); `ModulTyp` bekommt `HELFER`, `FAHRT`, `KOSTEN`, `DATEIEN`, `FOTOS`.
 
@@ -396,9 +415,9 @@ Module selbst (Typ, Titel, Felder, Positionen, Fahrtrichtungen, Foto-Schalter, K
 
 ### 9.3 Fehler
 
-Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Feld `code`**: `{ fehler: '<Text>', code: 'GROESSE' | 'KONTINGENT' | 'TYP' | 'HEIC' | 'BESCHAEFTIGT' | 'VOLL' }` (Plan zu Etappe 1, Entscheidung 2; `BESCHAEFTIGT` und `VOLL` mit Etappe 2). Die API antwortet sonst nur mit `{ fehler }`; verworfen: Codes statt Text — der Client zeigt den Text überall direkt an, und Tests und Skripte prüfen den Code. Zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` mit `Retry-After: 2` (Warteschlange voll, 2.4); 409 `VOLL` (Datei-Modul mit 20 Dateien, Foto-Modul mit 500 Fotos, später Helfer-Position und Auto). Fehlende Rechte beim Hochladen, Umbenennen und Löschen ergeben 404, nicht 403 (4.2; Plan zu Etappe 2, Entscheidung 5). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
+Wie TP3 4.4. **Jeder Fehler der Dateien-Routen trägt neben dem Klartext ein Feld `code`**: `{ fehler: '<Text>', code: 'GROESSE' | 'KONTINGENT' | 'TYP' | 'HEIC' | 'BESCHAEFTIGT' | 'VOLL' }` (Plan zu Etappe 1, Entscheidung 2; `BESCHAEFTIGT` und `VOLL` mit Etappe 2). Die API antwortet sonst nur mit `{ fehler }`; verworfen: Codes statt Text — der Client zeigt den Text überall direkt an, und Tests und Skripte prüfen den Code. Zusätzlich: 411 ohne `Content-Length`; 413 mit `GROESSE` oder `KONTINGENT`; 415 `TYP` (mit Sonderfall HEIC); 503 `BESCHAEFTIGT` mit `Retry-After: 2` (Warteschlange voll, 2.4); 409 `VOLL` (Datei-Modul mit 20 Dateien, Foto-Modul mit 500 Fotos, Helfer-Position ohne freien Platz, später Auto). Fehlende Rechte beim Hochladen, Umbenennen und Löschen ergeben 404, nicht 403 (4.2; Plan zu Etappe 2, Entscheidung 5). Der Client zeigt je Code eine eigene Meldung; ein gescheitertes Foto bleibt mit „Nochmal“ in der Liste.
 
-`GROESSE` und `TYP` haben je Art einen eigenen Text: „Das Foto ist zu groß (höchstens 20 MB)“ und „Die Datei ist zu groß (höchstens 25 MB)“, bei zu vielen Pixeln „Das Foto hat zu viele Pixel (höchstens 50 Megapixel)“; für Fotos „Diese Bildart geht nicht. Erlaubt sind JPEG, PNG und WebP.“ `VOLL` heißt „Hier passen höchstens 20 Dateien hinein“ bzw. „Hier passen höchstens 500 Fotos hinein“, `BESCHAEFTIGT` „Gerade werden viele Fotos verarbeitet. Bitte gleich noch einmal versuchen.“
+`GROESSE` und `TYP` haben je Art einen eigenen Text: „Das Foto ist zu groß (höchstens 20 MB)“ und „Die Datei ist zu groß (höchstens 25 MB)“, bei zu vielen Pixeln „Das Foto hat zu viele Pixel (höchstens 50 Megapixel)“; für Fotos „Diese Bildart geht nicht. Erlaubt sind JPEG, PNG und WebP.“ `VOLL` heißt „Hier passen höchstens 20 Dateien hinein“ bzw. „Hier passen höchstens 500 Fotos hinein“, an der Helfer-Position `{ fehler: 'Hier sind schon alle Plätze vergeben.', code: 'VOLL' }` (Etappe 3; eine Notiz ändern belegt keinen Platz und endet nie so), `BESCHAEFTIGT` „Gerade werden viele Fotos verarbeitet. Bitte gleich noch einmal versuchen.“
 
 ---
 
@@ -466,6 +485,8 @@ Das Zeltlager-Szenario (1.1) mit erzeugten Testbildern; dazu die Leiste mit fün
 ### 13.4 Demo
 
 `pnpm run demo` baut das Zeltlager mit allen Modulen auf: erzeugte Fotos, zwei Dateien, Helfer-Einträge, zwei Autos, Kostenposten in allen drei Zuständen und eine Befreiung; Tim ohne Foto-Einwilligung; Dokumente in den drei Kategorien.
+
+**Bis dahin hat Bowling eine Helferliste** (Plan zu Etappe 3, Entscheidung 14), damit es zur lokalen Abnahme von Etappe 3 etwas gibt: als letztes Modul „Mitbringen und fahren“, pro Erwachsener, Frist fünf Tage nach dem Einspielen um 18:00, Positionen „Fahrer“ (2) und „Snacks“ (3); Sandra ist bei „Snacks“ eingetragen, mit der Notiz „Gemüsesticks“. Das Zeltlager mit allen Modulen bleibt in Etappe 6.
 
 **Demo-Fotos kommen mit Etappe 6** (Plan zu Etappe 2, Entscheidung 15). Für die lokale Abnahme von Etappe 2 erzeugt `node tools/erzeuge-testbilder.mjs <verzeichnis> --bunt <n>` bunte Testbilder aus Kreisen und Rechtecken (1600 × 1200, mit Nummer); dasselbe Skript erzeugt die acht Bilder der Fotoprobe (2.4).
 
