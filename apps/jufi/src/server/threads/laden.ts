@@ -1,4 +1,4 @@
-import type { VereinDb, VereinTx } from '@jufi/db';
+import type { ModulTyp, VereinDb, VereinTx } from '@jufi/db';
 import {
 	baueUmfeld,
 	type AntwortDaten,
@@ -245,10 +245,7 @@ export async function ladeKoepfe(db: VereinDb, threadIds: readonly string[]): Pr
 }
 
 /** Zu welchem Thread ein Modul gehoert und welcher Art es ist; null, wenn es im Verein kein solches Modul gibt. */
-export async function modulOrt(
-	db: VereinDb,
-	modulId: string,
-): Promise<{ threadId: string; typ: 'INFO' | 'TERMIN' | 'UMFRAGE' } | null> {
+export async function modulOrt(db: VereinDb, modulId: string): Promise<{ threadId: string; typ: ModulTyp } | null> {
 	const modul = await db.threadModul.findUnique({ where: { id: modulId }, select: { threadId: true, typ: true } });
 	return modul ?? null;
 }

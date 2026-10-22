@@ -66,7 +66,8 @@ async function ladeAngaben(db: VereinDb, nur?: string): Promise<Map<string, Anga
 			orderBy: [{ angelegtAm: 'desc' }, { id: 'desc' }],
 		}),
 		db.einwilligung.findMany({
-			where: { ...(nur ? { jungfischerId: nur } : {}), widerrufenAm: null },
+			// Nur die DSGVO-Einwilligung: der Warnhinweis "ohne Einwilligung" meint sie, nicht die Fotos.
+			where: { ...(nur ? { jungfischerId: nur } : {}), art: 'DSGVO_ART8', widerrufenAm: null },
 			select: { jungfischerId: true, erteiltVon: true, widerrufenAm: true },
 		}),
 	]);

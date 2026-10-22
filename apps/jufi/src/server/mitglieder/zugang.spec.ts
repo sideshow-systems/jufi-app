@@ -1,5 +1,5 @@
 import { hashToken } from '@jufi/auth';
-import { createPrismaClientFromEnv, sperreVereinszeile, type Recht } from '@jufi/db';
+import { createPrismaClientFromEnv, sperreVereinszeile, vereinDb, type Recht } from '@jufi/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
@@ -8,6 +8,7 @@ import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test
 import { legeVereinAn } from '../test-vereine.js';
 import { legeThreadAn } from '../threads/test-threads.js';
 import { legeMitgliedAn } from './test-mitglieder.js';
+import { hatEinwilligung } from './zugang.js';
 
 describe('Entfernen und Zugang entziehen', () => {
 	const prisma = createPrismaClientFromEnv();
@@ -54,6 +55,30 @@ describe('Entfernen und Zugang entziehen', () => {
 			});
 		return { verein, verwalter, leitung, api, entferne, person, verknuepfe, willigtEin };
 	}
+
+	it('ein Kind mit nur einer Foto-Einwilligung hat keinen Zugang, mit zusaetzlicher DSGVO-Einwilligung schon', async () => {
+		const v = await neuerVerein();
+		const kind = await legeMitgliedAn(prisma, v.verein, { art: 'JUNGFISCHER', vorname: 'Kai' });
+		const mutter = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });
+		await v.verknuepfe(mutter.personId, kind.personId);
+		await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: kind.personId,
+				erteiltVon: mutter.personId,
+				art: 'FOTOS',
+				textVersion: '1',
+			},
+		});
+		const hat = async () =>
+			vereinDb(prisma, v.verein.id).$transaction(async (tx) =>
+				hatEinwilligung(tx, await v.person(kind.personId), new Date()),
+			);
+
+		expect(await hat()).toBe(false);
+		await v.willigtEin(kind.personId, mutter.personId);
+		expect(await hat()).toBe(true);
+	});
 
 	it('Entfernen eines Jungfischers leert die Zeile, loescht Zugang, Passkeys, Sitzungen, Einladungen, Zuordnungen und Mitgliedschaften und laesst Einwilligungen stehen', async () => {
 		const v = await neuerVerein();

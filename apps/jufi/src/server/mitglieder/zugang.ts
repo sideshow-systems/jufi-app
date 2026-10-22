@@ -73,7 +73,10 @@ export async function entzieheZugangWennUngueltig(tx: Transaktion, kind: Person,
 export async function hatEinwilligung(tx: Transaktion, kind: Person, jetzt: Date): Promise<boolean> {
 	if (istVolljaehrig(kind, jetzt)) return true;
 	const [einwilligungen, zuordnungen] = await Promise.all([
-		tx.einwilligung.findMany({ where: { jungfischerId: kind.id } }),
+		// Nur die DSGVO-Einwilligung: eine Foto-Einwilligung (TP4 Etappe 2) erlaubt Fotos, oeffnet aber
+		// keinen Zugang. Verworfen: alle Arten lesen und danach filtern -- ein vergessener Filter
+		// gaebe dem Kind den Zugang.
+		tx.einwilligung.findMany({ where: { jungfischerId: kind.id, art: 'DSGVO_ART8' } }),
 		tx.bezugsperson.findMany({ where: { jungfischerId: kind.id } }),
 	]);
 	// Entfernte Erteiler bleiben in der Map: darfEinwilligen weist sie selbst ab, und ein

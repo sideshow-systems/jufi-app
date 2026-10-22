@@ -215,6 +215,20 @@ describe('Personen', () => {
 		expect(sieSelbst.familie).toEqual([expect.objectContaining({ jungfischerId: kind.id, vorname: 'Kai' })]);
 	});
 
+	it('Einzelansicht des Kindes: Eine Foto-Einwilligung nimmt den Hinweis "ohne Einwilligung" nicht weg', async () => {
+		const v = await neuerVerein();
+		const verwalter = await v.mitglied(['MITGLIEDER'], 'Vera');
+		const mutter = await v.erwachsener('Mia');
+		const kind = await v.kind('Kai');
+		await v.zuordnen(mutter.id, kind.id);
+		await prisma.einwilligung.create({
+			data: { vereinId: v.verein.id, jungfischerId: kind.id, erteiltVon: mutter.id, art: 'FOTOS', textVersion: '1' },
+		});
+
+		const alsVerwalter = (await (await v.api(`/personen/${kind.id}`, verwalter.cookie)).json()) as Eintrag;
+		expect(alsVerwalter.warnhinweise?.map((w) => w.art)).toContain('EINWILLIGUNG_FEHLT');
+	});
+
 	it('Einzelansicht fuer Betreuer: Familie, aber weder Adresse noch Einladung noch Zugang noch Einwilligungshinweis', async () => {
 		const v = await neuerVerein();
 		const betreuer = await v.mitglied(['ANTWORTEN_DETAIL']);

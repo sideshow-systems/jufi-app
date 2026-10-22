@@ -210,8 +210,9 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 				const erteilen = lesBoolean(req.body, 'erteilen');
 				if (erteilen) {
 					// Eine offene reicht: ein zweiter Klick soll keine zweite Zeile als Nachweis erzeugen.
+					// Nur DSGVO-Zeilen zaehlen: eine offene Foto-Einwilligung ersetzt sie nicht.
 					const offen = await tx.einwilligung.count({
-						where: { jungfischerId: kind.id, erteiltVon: ich.id, widerrufenAm: null },
+						where: { jungfischerId: kind.id, erteiltVon: ich.id, art: 'DSGVO_ART8', widerrufenAm: null },
 					});
 					if (offen === 0) {
 						await vermerke([kind.id]);
@@ -227,11 +228,12 @@ export function jungfischerRouten(router: Router, deps: Pick<VolleAppDeps, 'jetz
 					}
 				} else {
 					// Nur die eigenen: die Einwilligung des Vaters widerruft die Mutter nicht. Die Zeilen
-					// bleiben als Nachweis stehen, verworfen: sie zu loeschen.
+					// bleiben als Nachweis stehen, verworfen: sie zu loeschen. Die Foto-Einwilligung bleibt
+					// unberuehrt: Wer den Zugang widerruft, hat damit nichts ueber Fotos gesagt.
 					// Immer vermerkt, auch ohne offene Zeile: der Haken danach kann dem Kind den Zugang nehmen.
 					await vermerke([kind.id]);
 					await tx.einwilligung.updateMany({
-						where: { jungfischerId: kind.id, erteiltVon: ich.id, widerrufenAm: null },
+						where: { jungfischerId: kind.id, erteiltVon: ich.id, art: 'DSGVO_ART8', widerrufenAm: null },
 						data: { widerrufenAm: zeit },
 					});
 					await entzieheZugangWennUngueltig(tx, kind, zeit);

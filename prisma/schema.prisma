@@ -76,8 +76,12 @@ enum EinladungArt {
   RESET
 }
 
+/// DSGVO_ART8 oeffnet dem Kind den Zugang zur App, FOTOS erlaubt nur, es auf Fotos
+/// zu zeigen (TP4 Etappe 2, Entscheidung 8). Jede Abfrage nennt die Art, die sie meint;
+/// die eine ersetzt die andere nicht, und der Widerruf der einen zieht die andere nicht mit.
 enum EinwilligungArt {
   DSGVO_ART8
+  FOTOS
 }
 
 /// Was im AdminProtokoll steht (Spec 7.5). Loeschen eines Vereins fehlt bewusst:
@@ -118,11 +122,20 @@ enum ArchivModus {
   AKTIV_HALTEN
 }
 
-/// Teilprojekt 4 ergaenzt weitere Typen.
+/// Teilprojekt 4 ergaenzt weitere Typen (Etappe 2: DATEIEN, FOTOS).
 enum ModulTyp {
   INFO
   TERMIN
   UMFRAGE
+  DATEIEN
+  FOTOS
+}
+
+/// Wer in ein Foto-Modul hochladen darf (TP4-Spec). Dieselben Werte wie
+/// FotoHochladen in libs/domain/src/threads/rechte.ts.
+enum FotoHochladen {
+  JUGENDLEITER
+  ALLE
 }
 
 enum AntwortEinheit {
@@ -216,6 +229,8 @@ model Verein {
   threadUntergruppen     ThreadUntergruppe[]
   threadModule           ThreadModul[]
   infoModule             InfoModul[]
+  dateienModule          DateienModul[]
+  fotosModule            FotosModul[]
   terminModule           TerminModul[]
   umfrageModule          UmfrageModul[]
   umfrageOptionen        UmfrageOption[]
@@ -666,10 +681,12 @@ model ThreadModul {
   position Int
   titel    String?
 
-  info    InfoModul?
-  termin  TerminModul?
-  umfrage UmfrageModul?
-  dateien Datei[]
+  info        InfoModul?
+  termin      TerminModul?
+  umfrage     UmfrageModul?
+  dateienKopf DateienModul?
+  fotosKopf   FotosModul?
+  dateien     Datei[]
 
   @@unique([vereinId, id])
   /// Ziel des Fremdschluessels von UmfrageModul: So stimmt dessen threadId immer
@@ -688,6 +705,32 @@ model InfoModul {
   text     String
 
   /// Prisma verlangt fuer die 1:1-Relation einen Schluessel genau ueber deren Felder.
+  @@unique([vereinId, id])
+}
+
+/// Kopfzeile des Datei-Moduls. Sie traegt nichts ausser der Modul-ID; die Dateien
+/// haengen ueber Datei.modulId am ThreadModul, nicht hieran. Verworfen: gar keine
+/// Zeile, nur ModulTyp -- jedes Modul hat so dieselbe Form (Kopfzeile je Typ), und das
+/// Datei-Modul bekommt einen Ort fuer spaetere Felder.
+model DateienModul {
+  /// Dieselbe id wie das ThreadModul.
+  id       String      @id
+  vereinId String
+  verein   Verein      @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modul    ThreadModul @relation(fields: [vereinId, id], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([vereinId, id])
+}
+
+/// Kopfzeile des Foto-Moduls. Die Fotos selbst sind Datei-Zeilen am ThreadModul.
+model FotosModul {
+  /// Dieselbe id wie das ThreadModul.
+  id        String        @id
+  vereinId  String
+  verein    Verein        @relation(fields: [vereinId], references: [id], onDelete: Cascade)
+  modul     ThreadModul   @relation(fields: [vereinId, id], references: [vereinId, id], onDelete: Cascade, onUpdate: NoAction)
+  hochladen FotoHochladen @default(JUGENDLEITER)
+
   @@unique([vereinId, id])
 }
 

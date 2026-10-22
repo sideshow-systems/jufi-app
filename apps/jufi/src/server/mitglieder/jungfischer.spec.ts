@@ -186,6 +186,45 @@ describe('Meine Jungfischer', () => {
 		expect(await prisma.einwilligung.count({ where: { jungfischerId: v.kind.personId } })).toBe(1);
 	});
 
+	it('Widerruf der DSGVO-Einwilligung laesst die Foto-Einwilligung der Mutter unberuehrt und nimmt den Zugang trotzdem', async () => {
+		const v = await neuerVerein();
+		await v.willigtEin(v.kind.personId, v.mutter.personId);
+		const foto = await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: v.kind.personId,
+				erteiltVon: v.mutter.personId,
+				art: 'FOTOS',
+				textVersion: '1',
+			},
+		});
+
+		expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: false })).status).toBe(200);
+		expect((await prisma.einwilligung.findUniqueOrThrow({ where: { id: foto.id } })).widerrufenAm).toBeNull();
+		expect(
+			await prisma.einwilligung.count({ where: { art: 'DSGVO_ART8', widerrufenAm: null, vereinId: v.verein.id } }),
+		).toBe(0);
+		// Die Foto-Einwilligung oeffnet keinen Zugang: ohne die DSGVO-Einwilligung ist er weg.
+		expect(await prisma.zugang.count({ where: { personId: v.kind.personId } })).toBe(0);
+	});
+
+	it('Erteilen zaehlt nur offene DSGVO-Einwilligungen: eine offene Foto-Zeile verhindert die Anlage nicht', async () => {
+		const v = await neuerVerein();
+		await prisma.einwilligung.create({
+			data: {
+				vereinId: v.verein.id,
+				jungfischerId: v.kind.personId,
+				erteiltVon: v.mutter.personId,
+				art: 'FOTOS',
+				textVersion: '1',
+			},
+		});
+
+		expect((await v.post(v.mutter.cookie, v.kind.personId, 'einwilligung', { erteilen: true })).status).toBe(200);
+		const zeilen = await prisma.einwilligung.findMany({ where: { jungfischerId: v.kind.personId } });
+		expect(zeilen.map((z) => z.art).sort()).toEqual(['DSGVO_ART8', 'FOTOS']);
+	});
+
 	it('Widerruf, wenn der Vater noch gueltig eingewilligt hat: Zugang bleibt', async () => {
 		const v = await neuerVerein();
 		const vater = await legeMitgliedAn(prisma, v.verein, { art: 'ERWACHSENER' });

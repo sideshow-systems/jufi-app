@@ -1112,6 +1112,51 @@ describe('Dateien und Dokumente (TP4)', () => {
 		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
 	});
 
+	it('ein Foto-Modul hat die Vorgabe JUGENDLEITER, und das Loeschen des Moduls nimmt die 1:1-Zeile mit', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const t = await thread(v.id, p.id);
+		const fotos = await prisma.threadModul.create({
+			data: { vereinId: v.id, threadId: t.id, typ: 'FOTOS', position: 0 },
+		});
+		const dateien = await prisma.threadModul.create({
+			data: { vereinId: v.id, threadId: t.id, typ: 'DATEIEN', position: 1 },
+		});
+		const fotosZeile = await prisma.fotosModul.create({ data: { id: fotos.id, vereinId: v.id } });
+		await prisma.dateienModul.create({ data: { id: dateien.id, vereinId: v.id } });
+
+		expect(fotosZeile.hochladen).toBe('JUGENDLEITER');
+		await prisma.fotosModul.update({ where: { id: fotos.id }, data: { hochladen: 'ALLE' } });
+
+		await prisma.threadModul.deleteMany({ where: { threadId: t.id } });
+		expect(await prisma.fotosModul.count({ where: { vereinId: v.id } })).toBe(0);
+		expect(await prisma.dateienModul.count({ where: { vereinId: v.id } })).toBe(0);
+	});
+
+	it('ein Thread mit Foto-Modul und Foto laesst sich nicht loeschen', async () => {
+		const v = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const t = await thread(v.id, p.id);
+		const m = await prisma.threadModul.create({ data: { vereinId: v.id, threadId: t.id, typ: 'FOTOS', position: 0 } });
+		await prisma.fotosModul.create({ data: { id: m.id, vereinId: v.id } });
+		await datei(v.id, p.id, { art: 'FOTO', name: '', typ: 'image/jpeg', modulId: m.id });
+
+		// NoAction an der Datei gilt, obwohl die Kaskade das Foto-Modul vorher mitnimmt.
+		expect(await fehlercode(prisma.thread.delete({ where: { id: t.id } }))).toBe('P2003');
+		expect(await prisma.fotosModul.count({ where: { id: m.id } })).toBe(1);
+	});
+
+	it('ein Foto-Modul eines fremden Vereins oder ohne Kopfzeile ist nicht moeglich', async () => {
+		const v = await vereinMitKategorien();
+		const fremd = await vereinMitKategorien();
+		const p = await erwachsener(v.id);
+		const t = await thread(v.id, p.id);
+		const m = await prisma.threadModul.create({ data: { vereinId: v.id, threadId: t.id, typ: 'FOTOS', position: 0 } });
+
+		expect(await fehlercode(prisma.fotosModul.create({ data: { id: m.id, vereinId: fremd.id } }))).toBe('P2003');
+		expect(await fehlercode(prisma.fotosModul.create({ data: { id: 'gibt-es-nicht', vereinId: v.id } }))).toBe('P2003');
+	});
+
 	it('Kategorienamen sind je Verein eindeutig, ohne Rand und hoechstens 40 Zeichen lang', async () => {
 		const v = await vereinMitKategorien();
 		const andere = await vereinMitKategorien();
