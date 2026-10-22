@@ -57,10 +57,11 @@ const FEHLERFELDER = {
 	INFO: ['titel', 'text'],
 	TERMIN: ['titel', 'termin', 'ort', 'treffpunkt'],
 	TEILNAHME: ['titel', 'frage', 'teilnahme', 'optionen', 'einheit', 'frist'],
-	// Die Felder der Datei- und Foto-Module kommen mit ihren Bauteilen; bis dahin zeigt das
-	// Formular nichts, und ein Fehler an ihnen gehoert unter die Knoepfe.
-	DATEIEN: [],
-	FOTOS: [],
+	// Datei- und Foto-Module zeigt jf-dateien-felder bzw. jf-fotos-felder, nicht dieses Bauteil
+	// (TP4-Spec 10). Beide nehmen den Fehler am Titel; der Schalter der Fotos hat keinen, weil
+	// jeder Wert erlaubt ist.
+	DATEIEN: ['titel'],
+	FOTOS: ['titel'],
 	UMFRAGE: ['titel', 'frage', 'teilnahme', 'optionen', 'mehrfach', 'einheit', 'frist'],
 } as const satisfies Record<string, readonly string[]>;
 

@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import type { ModulAnsicht, ThreadEntwurf } from '@jufi/domain';
+import { DateienModulComponent } from '../../threads/dateien-modul';
+import { FotosModulComponent } from '../../threads/fotos-modul';
 import { InfoModul } from '../../threads/info-modul';
 import { TerminModul } from '../../threads/termin-modul';
 import { UmfrageModul } from '../../threads/umfrage-modul';
@@ -16,8 +18,8 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 		const id = `vorschau-${i}`;
 		if (m.typ === 'INFO') return { typ: 'INFO', id, titel: m.titel, text: m.text };
 		if (m.typ === 'TERMIN') return { typ: 'TERMIN', id, titel: m.titel, termin: { modulId: id, ...m.termin } };
-		// Ohne Dateien und Fotos, ohne Rechte: Die Vorschau hat nichts hochgeladen, und die
-		// Bauteile fuer diese Module kennt sie noch nicht.
+		// Ohne Dateien und Fotos, ohne Rechte: Die Vorschau hat nichts hochgeladen, und ein Entwurf
+		// hat auch kein gespeichertes Modul, in das sich hochladen liesse.
 		if (m.typ === 'DATEIEN') return { typ: 'DATEIEN', id, titel: m.titel, dateien: [], darfAendern: false };
 		if (m.typ === 'FOTOS') {
 			return {
@@ -60,7 +62,7 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
  */
 @Component({
 	selector: 'jf-thread-vorschau',
-	imports: [InfoModul, TerminModul, UmfrageModul],
+	imports: [DateienModulComponent, FotosModulComponent, InfoModul, TerminModul, UmfrageModul],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
 		<div class="rahmen" role="region" aria-label="Vorschau am Handy">
@@ -91,6 +93,13 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 							}
 							@case ('UMFRAGE') {
 								<jf-umfrage-modul [modul]="m" slug="" [vorschau]="true" />
+							}
+							<!-- Leere Listen ohne Rechte: kein Upload, kein Hinweis, und slug leer wie beim Termin. -->
+							@case ('DATEIEN') {
+								<jf-dateien-modul [modul]="m" slug="" />
+							}
+							@case ('FOTOS') {
+								<jf-fotos-modul [modul]="m" slug="" />
 							}
 						}
 					</div>

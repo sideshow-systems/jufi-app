@@ -154,6 +154,29 @@ describe('Thread-Vorschau', () => {
 		expect(k[2]?.querySelector('jf-umfrage-modul')?.textContent).toContain('Kommst du mit?');
 	});
 
+	it('zeigt Datei- und Foto-Modul mit leeren Listen, ohne Upload und ohne Hinweis', async () => {
+		const fixture = TestBed.createComponent(ThreadVorschauComponent);
+		const e = bowling();
+		e.module = [
+			{ typ: 'DATEIEN', id: null, titel: null },
+			{ typ: 'FOTOS', id: 'm-fotos', titel: 'Zeltlager', hochladen: 'ALLE' },
+		];
+		fixture.componentRef.setInput('entwurf', e);
+		fixture.componentRef.setInput('zielgruppe', 'Alle');
+		fixture.componentRef.setInput('markiert', null);
+		fixture.detectChanges();
+		await fixture.whenStable();
+		const el = fixture.nativeElement as HTMLElement;
+		const karten = [...el.querySelectorAll<HTMLElement>('.karte')];
+
+		expect(karten[0]?.querySelector('jf-dateien-modul')?.textContent).toContain('Noch keine Dateien.');
+		expect(karten[1]?.querySelector('jf-fotos-modul')?.textContent).toContain('Zeltlager');
+		expect(karten[1]?.textContent).toContain('Noch keine Fotos.');
+		expect(el.querySelector('jf-hochladen-feld')).toBeNull();
+		expect(el.querySelector('.hinweis')).toBeNull();
+		expect(el.querySelector('img')).toBeNull();
+	});
+
 	it('zeigt die Antworten der Umfrage, aber man kann nicht abstimmen', async () => {
 		const { karten } = await zeige();
 		const knoepfe = [...(karten()[2]?.querySelectorAll<HTMLButtonElement>('jf-umfrage-modul button') ?? [])];

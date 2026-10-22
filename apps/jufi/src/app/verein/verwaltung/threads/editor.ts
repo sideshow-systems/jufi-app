@@ -15,6 +15,9 @@ import {
 	entwurfFehler,
 	type Feldfehler,
 	GRENZEN,
+	KEINE_MEDIEN,
+	type MedienZahl,
+	medienZahlText,
 	type ModulEntwurf,
 	MODUS_TEXT,
 	neuesModul,
@@ -34,6 +37,8 @@ import { wertVon } from '../../../gemeinsam/formular';
 import { IconComponent } from '../../../gestaltung/icon';
 import { KarteComponent, PilleComponent } from '../../../gestaltung/ui';
 import { beiAbgelaufenerSitzung } from '../../sitzung-abgelaufen';
+import { DateienFelderComponent } from './dateien-felder';
+import { FotosFelderComponent } from './fotos-felder';
 import { ModulFelderComponent, zeigtModulFeld } from './modul-felder';
 import { VerwaltungThreadsApi } from './threads-api';
 import { ThreadVorschauComponent } from './vorschau';
@@ -46,6 +51,8 @@ const TYPEN: readonly { typ: ModulTyp; text: string }[] = [
 	{ typ: 'INFO', text: 'Info-Text' },
 	{ typ: 'TERMIN', text: 'Termin' },
 	{ typ: 'UMFRAGE', text: 'Umfrage' },
+	{ typ: 'DATEIEN', text: 'Dateien' },
+	{ typ: 'FOTOS', text: 'Fotos' },
 ];
 
 /** Gleiche Grenze wie die Media Query in den Stilen: darunter Umschalter statt zwei Spalten (Spec 6.6). */
@@ -158,6 +165,8 @@ interface ServerFehler {
 	selector: 'jf-thread-editor',
 	imports: [
 		BestaetigungComponent,
+		DateienFelderComponent,
+		FotosFelderComponent,
 		IconComponent,
 		KarteComponent,
 		ModulFelderComponent,
@@ -326,7 +335,7 @@ interface ServerFehler {
 													class="knopf leise nur-icon"
 													[attr.aria-label]="'Entfernen: Modul ' + (i + 1)"
 													[disabled]="entfernenGesperrt(e.modul)"
-													(click)="entfernen(i)"
+													(click)="entfernenFragen(i)"
 												>
 													<jf-icon name="schliessen" />
 												</button>
@@ -363,14 +372,39 @@ interface ServerFehler {
 							@for (a of ausgewaehlt(); track a.eintrag.schluessel) {
 								<jf-karte class="block">
 									<h2>{{ typText(a.eintrag.modul.typ) }} (Modul {{ a.index + 1 }})</h2>
-									<jf-modul-felder
-										[modul]="a.eintrag.modul"
-										[index]="a.index"
-										[rollenfilter]="kopf().rollenfilter"
-										[sperre]="sperreFuer(a.eintrag.modul)"
-										[fehler]="modulFehler(a.index)"
-										(geaendert)="modulGeaendert(a.eintrag.schluessel, $event)"
-									/>
+									@let m = a.eintrag.modul;
+									@switch (m.typ) {
+										@case ('DATEIEN') {
+											<jf-dateien-felder
+												[modul]="m"
+												[slug]="slug()"
+												[zahl]="zahlFuer(m)"
+												[fehler]="modulFehler(a.index)"
+												(aendern)="modulGeaendert(a.eintrag.schluessel, $event)"
+												(hochgeladen)="ladeMedien()"
+											/>
+										}
+										@case ('FOTOS') {
+											<jf-fotos-felder
+												[modul]="m"
+												[slug]="slug()"
+												[zahl]="zahlFuer(m)"
+												[fehler]="modulFehler(a.index)"
+												(aendern)="modulGeaendert(a.eintrag.schluessel, $event)"
+												(hochgeladen)="ladeMedien()"
+											/>
+										}
+										@default {
+											<jf-modul-felder
+												[modul]="m"
+												[index]="a.index"
+												[rollenfilter]="kopf().rollenfilter"
+												[sperre]="sperreFuer(m)"
+												[fehler]="modulFehler(a.index)"
+												(geaendert)="modulGeaendert(a.eintrag.schluessel, $event)"
+											/>
+										}
+									}
 								</jf-karte>
 							}
 						}
@@ -436,10 +470,19 @@ interface ServerFehler {
 					<p class="status" role="status">{{ status() }}</p>
 				}
 
+				@if (fragtEntfernen(); as f) {
+					<jf-bestaetigung
+						titel="Modul entfernen?"
+						[text]="f.text"
+						bestaetigung="Entfernen"
+						(bestaetigt)="entferneBestaetigt()"
+						(abgebrochen)="fragtEntfernen.set(null)"
+					/>
+				}
 				@if (fragtLoeschen()) {
 					<jf-bestaetigung
 						titel="Thread löschen?"
-						text="Der Thread wird mit allen Modulen endgültig gelöscht."
+						[text]="loeschText()"
 						bestaetigung="Endgültig löschen"
 						(bestaetigt)="loesche()"
 						(abgebrochen)="fragtLoeschen.set(false)"
@@ -683,6 +726,8 @@ export class ThreadEditorComponent {
 	protected readonly status = signal<string | null>(null);
 	protected readonly laeuft = signal(false);
 	protected readonly fragtLoeschen = signal(false);
+	/** Das Modul, dessen Entfernen gerade eine Rueckfrage zeigt, am Schluessel statt am Index (siehe Eintrag). */
+	protected readonly fragtEntfernen = signal<{ schluessel: string; text: string } | null>(null);
 	/** Nach dem Loeschen gibt es nichts mehr zu verlieren; der Waechter soll nicht fragen. */
 	private readonly geloescht = signal(false);
 
@@ -691,6 +736,8 @@ export class ThreadEditorComponent {
 
 	private uebergabe = uebergabeAus(inject(Router).currentNavigation());
 	private lauf = 0;
+	/** Zaehlt jeden Stand, der die Medienzahlen setzt; eine spaetere Antwort ueberholt eine fruehere (siehe ladeMedien). */
+	private medienLauf = 0;
 	private weg = false;
 
 	protected readonly kopf = computed(() => this.arbeit().kopf);
@@ -860,6 +907,7 @@ export class ThreadEditorComponent {
 	 * ihrer Position: Ein neues Modul bekommt beim Speichern seine ID und damit einen neuen Schluessel.
 	 */
 	private uebernehme(b: ThreadBearbeitung): void {
+		this.medienLauf++;
 		const vorher = this.gewaehlterIndex();
 		this.bearbeitung.set(b);
 		this.version = b.version;
@@ -952,6 +1000,33 @@ export class ThreadEditorComponent {
 		});
 	}
 
+	// Ein Modul mit Fotos oder Dateien nimmt beim Speichern seine Medien mit (Plan-Entscheidung 11):
+	// Die Rueckfrage nennt die Zahlen, solange noch nichts verloren ist. Ein Modul ohne Medien, auch
+	// ein ungespeichertes, faellt ohne Rueckfrage weg; verworfen: jedes Entfernen bestaetigen zu
+	// lassen, das machte aus dem Alltag (ein Info-Text zu viel) eine Huerde.
+	protected entfernenFragen(i: number): void {
+		const e = this.arbeit().module[i];
+		if (e === undefined) return;
+		const zahl = this.zahlFuer(e.modul);
+		const medien = zahl === null ? null : medienZahlText(zahl);
+		if (medien === null) {
+			this.entfernen(i);
+			return;
+		}
+		const name = e.modul.titel?.trim() || this.typText(e.modul.typ);
+		this.fragtEntfernen.set({
+			schluessel: e.schluessel,
+			text: `Modul ‚${name}‘ entfernen? Beim Speichern löscht das ${medien}.`,
+		});
+	}
+
+	protected entferneBestaetigt(): void {
+		const f = this.fragtEntfernen();
+		this.fragtEntfernen.set(null);
+		const i = this.arbeit().module.findIndex((e) => e.schluessel === f?.schluessel);
+		if (i >= 0) this.entfernen(i);
+	}
+
 	protected entfernen(i: number): void {
 		const weg = this.arbeit().module[i];
 		if (weg === undefined) return;
@@ -998,6 +1073,19 @@ export class ThreadEditorComponent {
 	protected modulFehler(i: number): Feldfehler[] {
 		return this.fehlerJeModul().get(i) ?? KEINE_FEHLER;
 	}
+
+	/** Null bei einem ungespeicherten Modul: Es hat keine Medien und keine Zahl. */
+	protected zahlFuer(m: ModulEntwurf): MedienZahl | null {
+		if (m.id === null) return null;
+		return this.bearbeitung()?.medien.module[m.id] ?? KEINE_MEDIEN;
+	}
+
+	/** Was das Loeschen des Threads mitnimmt, wenn Fotos oder Dateien daran haengen. */
+	protected readonly loeschText = computed(() => {
+		const basis = 'Der Thread wird mit allen Modulen endgültig gelöscht.';
+		const medien = medienZahlText(this.bearbeitung()?.medien.gesamt ?? KEINE_MEDIEN);
+		return medien === null ? basis : `${basis} Das löscht auch ${medien}.`;
+	});
 
 	/** Nur gespeicherte Umfragen haben Antworten und damit eine Sperre. */
 	protected sperreFuer(m: ModulEntwurf): UmfrageSperre | null {
@@ -1135,6 +1223,31 @@ export class ThreadEditorComponent {
 				this.gewaehlt.set(e.schluessel);
 				return;
 			}
+		}
+	}
+
+	// ---- Medien ------------------------------------------------------------------------
+
+	/**
+	 * Holt nach einem Upload die Zahlen neu und uebernimmt nur sie, nicht den Entwurf und nicht die
+	 * Version: Die Arbeitskopie hat ungespeicherte Eingaben, und ein Upload aendert den Thread nicht
+	 * (kein neuer Stand, also kein 409 beim naechsten Speichern). Verworfen: ein eigener Endpunkt
+	 * nur fuer die Zahlen, denn die Bearbeitung liefert sie schon und ein Weg weniger bleibt zu
+	 * pflegen. Eine Antwort, die ein Speichern oder eine neuere Anfrage ueberholt hat, verfaellt
+	 * (medienLauf), sonst stuende die Zahl von vor dem Speichern wieder da.
+	 */
+	protected async ladeMedien(): Promise<void> {
+		const id = this.id();
+		if (id === undefined || this.bearbeitung() === null) return;
+		const lauf = this.lauf;
+		const nummer = ++this.medienLauf;
+		const veraltet = () => this.weg || lauf !== this.lauf || nummer !== this.medienLauf;
+		try {
+			const neu = await firstValueFrom(this.api.bearbeitung(this.slug(), id));
+			if (veraltet()) return;
+			this.bearbeitung.update((alt) => (alt === null ? alt : { ...alt, medien: neu.medien }));
+		} catch (ursache) {
+			if (!veraltet()) await this.zeigeFehler(ursache);
 		}
 	}
 
