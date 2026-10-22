@@ -108,7 +108,7 @@ export async function fahrtAntwort(
 export async function antworteMitFahrtAnsicht(
 	res: Response,
 	status: 200 | 201,
-	laden: () => Promise<unknown>,
+	laden: () => Promise<{ modul: FahrtModulAnsicht; stand: number }>,
 ): Promise<void> {
 	try {
 		res.status(status).json(await laden());

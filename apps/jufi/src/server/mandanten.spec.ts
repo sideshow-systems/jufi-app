@@ -17,7 +17,7 @@ import { Hub } from './echtzeit/hub.js';
 import { erzeugeEinladung } from './einladung.js';
 import { legeMitgliedAn } from './mitglieder/test-mitglieder.js';
 import { Nachlauf } from './nachlauf.js';
-import { bieteAutoTest, legeThreadAn, trageEinTest } from './threads/test-threads.js';
+import { bieteAutoTest, legeThreadAn, setzeEinTest, trageEinTest } from './threads/test-threads.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from './test-setup.js';
 import { legeVereinAn } from './test-vereine.js';
 import { vereinsApi, vereinsRouten } from './verein.js';
@@ -190,6 +190,38 @@ async function fremdeAutos(k: Kontext) {
 		verlauf: await k.prisma.verlaufEintrag.count({ where: { vereinId: k.fremd.id } }),
 		stand: (await k.prisma.verein.findUniqueOrThrow({ where: { id: k.fremd.id } })).aenderungsstand,
 	};
+}
+
+/**
+ * Wie fremdeFahrt, dazu das fremde Kind in dem Auto; die clientId der Mitfahrt zeigt, dass ein
+ * Einsetzen in eigen sie nicht als vergeben meldet.
+ */
+async function fremdeMitfahrt(k: Kontext): Promise<{ modulId: string; autoId: string; clientId: string }> {
+	const f = await fremdeFahrt(k);
+	const db = vereinDb(k.prisma, k.fremd.id);
+	const id = await setzeEinTest(db, f.modulId, 'HIN', k.fremdesKindId, f.autoId, k.fremdePersonId);
+	const { clientId } = await db.mitfahrt.findUniqueOrThrow({ where: { id }, select: { clientId: true } });
+	return { modulId: f.modulId, autoId: f.autoId, clientId };
+}
+
+/** Eine eigene Fahrgemeinschaft mit Auto und einem Kind, das der eigene Leiter einsetzen darf. */
+async function eigeneMitfahrt(k: Kontext): Promise<{ modulId: string; autoId: string; kindId: string }> {
+	const eigene = await legeThreadAn(k.prisma, k.eigen, new Date(), {
+		erstelltVonId: k.eigenerLeiterId,
+		module: [{ typ: 'FAHRT' }],
+	});
+	const modulId = eigene.modulIds[0] as string;
+	const kind = await k.prisma.person.create({
+		data: {
+			vereinId: k.eigen.id,
+			art: 'JUNGFISCHER',
+			vorname: 'Eigenes',
+			nachname: 'Mitfahrkind',
+			geburtsdatum: new Date('2015-05-05'),
+		},
+	});
+	const autoId = await bieteAutoTest(vereinDb(k.prisma, k.eigen.id), modulId, k.eigenerLeiterId, 'HIN', 3);
+	return { modulId, autoId, kindId: kind.id };
 }
 
 /** Ein frischer Thread in eigen, den die Verwaltung von eigen sieht und in dem sie schreiben darf. */
@@ -1147,6 +1179,61 @@ const FAELLE: Record<string, (k: Kontext) => Promise<void>> = {
 			3,
 		);
 		expect((await ziehZurueck(k.eigen.slug, eigenesAuto, k.eigenerLeiter)).status).toBe(200);
+		expect(await fremdeAutos(k)).toEqual(vorher);
+	},
+	'PUT /fahrten/:modulId/:richtung/:kindId': async (k) => {
+		const f = await fremdeMitfahrt(k);
+		const vorher = await fremdeAutos(k);
+		const setze = (
+			slug: string,
+			modulId: string,
+			kindId: string,
+			autoId: string | null,
+			clientId: string,
+			cookie?: string,
+		) =>
+			sende(k.url, `/${slug}/api/v1/fahrten/${modulId}/hin/${kindId}`, {
+				methode: 'PUT',
+				body: { autoId, clientId },
+				cookie,
+			});
+		const fremd = (slug: string) => setze(slug, f.modulId, k.fremdesKindId, f.autoId, 'mandant-neu', k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		// Gegenprobe: In einer eigenen Fahrgemeinschaft setzt derselbe Leiter ein, und die clientId der
+		// Mitfahrt in fremd ist in eigen frei: ein 409 verriete, dass es sie dort gibt.
+		const eigene = await eigeneMitfahrt(k);
+		expect(
+			(await setze(k.eigen.slug, eigene.modulId, eigene.kindId, eigene.autoId, f.clientId, k.eigenerLeiter)).status,
+		).toBe(200);
+		expect(await fremdeAutos(k)).toEqual(vorher);
+	},
+	'DELETE /fahrten/:modulId/:richtung/:kindId': async (k) => {
+		const f = await fremdeMitfahrt(k);
+		const vorher = await fremdeAutos(k);
+		const nimmHeraus = (slug: string, modulId: string, kindId: string, cookie?: string) =>
+			sende(k.url, `/${slug}/api/v1/fahrten/${modulId}/hin/${kindId}`, { methode: 'DELETE', cookie });
+		const fremd = (slug: string) => nimmHeraus(slug, f.modulId, k.fremdesKindId, k.eigenerLeiter);
+		expect((await fremd(k.gesperrt.slug)).status).toBe(404);
+		expect((await fremd(k.fremd.slug)).status).toBe(401);
+		const r = await fremd(k.eigen.slug);
+		expect(r.status).toBe(404);
+		expect(await r.json()).toEqual({ fehler: 'nicht gefunden' });
+
+		const eigene = await eigeneMitfahrt(k);
+		await setzeEinTest(
+			vereinDb(k.prisma, k.eigen.id),
+			eigene.modulId,
+			'HIN',
+			eigene.kindId,
+			eigene.autoId,
+			k.eigenerLeiterId,
+		);
+		expect((await nimmHeraus(k.eigen.slug, eigene.modulId, eigene.kindId, k.eigenerLeiter)).status).toBe(200);
 		expect(await fremdeAutos(k)).toEqual(vorher);
 	},
 	'PATCH /untergruppen/:id': async (k) => {
