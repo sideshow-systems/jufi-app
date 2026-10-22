@@ -340,6 +340,17 @@ describe('Threads anlegen und ersetzen', () => {
 			expect(await s.stand()).toBe(vorher);
 		});
 
+		it('lehnt eine Fahrgemeinschaft ab, solange der Speicher sie nicht kennt: 400 am Typ des Moduls', async () => {
+			const s = await szenario();
+			const e = s.bowling();
+			e.module.push({ typ: 'FAHRT', id: null, titel: null, hin: true, rueck: true });
+			const vorher = await s.stand();
+			const r = await s.lege(e, s.thomas.cookie);
+			expect(r.status).toBe(400);
+			expect(await r.json()).toEqual({ fehler: 'Ungültige Anfrage', feld: `module.${e.module.length - 1}.typ` });
+			expect(await s.stand()).toBe(vorher);
+		});
+
 		it('legt ein Datei- und ein Foto-Modul an; die Ansicht zeigt beide mit leeren Listen', async () => {
 			const s = await szenario();
 			const e = s.bowling();

@@ -1,7 +1,9 @@
+import { undListe } from '../dateien/medien.js';
+import { RICHTUNG_TEXT } from '../module/fahrt/fahrt.js';
 import { terminFehler, terminZeit, type TerminDaten } from '../module/termin/termin.js';
 import { fristZeitpunkt } from '../module/umfrage/umfrage.js';
 import { istKalendertag } from '../zeit.js';
-import { absenderName, kurzname } from './namen.js';
+import { absenderName, EHEMALIGES_MITGLIED, kurzname } from './namen.js';
 import { darfLoeschenNachricht } from './rechte.js';
 import type { ThreadKopf, ThreadModus, ThreadPerson, Umfeld } from './typen.js';
 
@@ -11,7 +13,8 @@ export const MODUS_TEXT: Readonly<Record<ThreadModus, string>> = {
 	CHAT: 'Offener Chat',
 };
 
-export type SystemArt = 'VEROEFFENTLICHT' | 'TERMIN_GEAENDERT' | 'FRIST_GEAENDERT' | 'MODUS_GEAENDERT';
+export type SystemArt =
+	'VEROEFFENTLICHT' | 'TERMIN_GEAENDERT' | 'FRIST_GEAENDERT' | 'MODUS_GEAENDERT' | 'AUTO_ZURUECKGEZOGEN';
 
 function zeichenkette(wert: unknown): wert is string {
 	return typeof wert === 'string';
@@ -57,8 +60,12 @@ function lesbarerTermin(wert: unknown): TerminDaten | null {
  * Die Daten kommen aus einer JSON-Spalte und werden feldweise geprueft; was sich
  * nicht lesen laesst, ergibt den allgemeinen Satz statt eines Fehlers, denn ein
  * kaputter Verlaufseintrag darf den Thread nicht unlesbar machen.
+ *
+ * Das Umfeld braucht nur AUTO_ZURUECKGEZOGEN: Der Eintrag speichert Fahrer und Kinder als IDs
+ * (Plan-Entscheidung 4), die Namen entstehen hier. Verworfen: die Namen zu speichern, denn dann
+ * stuende ein spaeter entferntes Kind weiter mit Namen im Verlauf.
  */
-export function systemSatz(art: SystemArt, daten: unknown, handelnd: string): string {
+export function systemSatz(art: SystemArt, daten: unknown, handelnd: string, umfeld: Umfeld): string {
 	const d = typeof daten === 'object' && daten !== null ? (daten as Record<string, unknown>) : {};
 	switch (art) {
 		case 'VEROEFFENTLICHT':
@@ -85,6 +92,20 @@ export function systemSatz(art: SystemArt, daten: unknown, handelnd: string): st
 				return `${handelnd} hat den Modus auf „${MODUS_TEXT[modus as ThreadModus]}“ gestellt`;
 			}
 			break;
+		}
+		case 'AUTO_ZURUECKGEZOGEN': {
+			const { fahrerId, richtung, kindIds } = d;
+			if (!zeichenkette(fahrerId) || (richtung !== 'HIN' && richtung !== 'RUECK')) break;
+			// Ohne Kind gaebe es keinen Eintrag (Entscheidung 4); eine leere Liste ist kaputt.
+			if (!Array.isArray(kindIds) || kindIds.length === 0 || !kindIds.every(zeichenkette)) break;
+			// Der Fahrer steht mit Kurznamen, nicht mit absenderName: Dessen Klammer ("Mutter von ...")
+			// stuende neben der Klammer mit der Richtung.
+			const name = (id: string) => {
+				const p = umfeld.personen.get(id);
+				return p ? kurzname(p) : EHEMALIGES_MITGLIED;
+			};
+			const brauchen = kindIds.length === 1 ? 'braucht' : 'brauchen';
+			return `Auto von ${name(fahrerId)} (${RICHTUNG_TEXT[richtung]}) zurückgezogen – ${undListe(kindIds.map(name))} ${brauchen} wieder eine Mitfahrt.`;
 		}
 	}
 	return `${handelnd} hat den Thread geändert`;
@@ -181,7 +202,7 @@ export function verlaufAnsicht(
 	let text: string | null;
 	if (nachricht) text = geloescht ? null : eintrag.text;
 	else if (eintrag.systemArt)
-		text = systemSatz(eintrag.systemArt, eintrag.systemDaten, handelnder(eintrag.autorId, umfeld));
+		text = systemSatz(eintrag.systemArt, eintrag.systemDaten, handelnder(eintrag.autorId, umfeld), umfeld);
 	else text = `${handelnder(eintrag.autorId, umfeld)} hat den Thread geändert`;
 	return {
 		id: eintrag.id,

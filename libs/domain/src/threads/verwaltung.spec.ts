@@ -1,7 +1,7 @@
 import type { TerminDaten } from '../module/termin/termin.js';
 import { threadDatenAus, type ModulDaten } from './ansicht.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
-import type { AntwortDaten, HelferDaten, HelferEintragDaten, ThreadKopf, UmfrageDaten } from './typen.js';
+import type { AntwortDaten, FahrtDaten, HelferDaten, HelferEintragDaten, ThreadKopf, UmfrageDaten } from './typen.js';
 import { antwortenUebersicht, medienZahlen, siehtAntworten, verwaltungThread, zielgruppeText } from './verwaltung.js';
 
 const umfeld = bowlingUmfeld();
@@ -122,6 +122,31 @@ const helferModul = (h: Partial<HelferDaten> = {}): ModulDaten => {
 	return { typ: 'HELFER', id: helfer.modulId, titel: helfer.titel, helfer };
 };
 
+const fahrtModul = (f: Partial<FahrtDaten> = {}): ModulDaten => {
+	const fahrt: FahrtDaten = {
+		modulId: 'f1',
+		titel: null,
+		hin: true,
+		rueck: true,
+		autos: [
+			{
+				id: 'a1',
+				fahrerId: 'sandra',
+				richtung: 'HIN',
+				plaetze: 3,
+				abfahrtTag: null,
+				abfahrtZeit: null,
+				ort: null,
+				notiz: null,
+				angelegtAm: JETZT,
+			},
+		],
+		mitfahrten: [],
+		...f,
+	};
+	return { typ: 'FAHRT', id: fahrt.modulId, titel: fahrt.titel, fahrt };
+};
+
 describe('verwaltungThread', () => {
 	it('beschreibt einen veroeffentlichten Thread fuer den Ersteller', () => {
 		const t = verwaltungThread(
@@ -171,6 +196,11 @@ describe('verwaltungThread', () => {
 });
 
 describe('verwaltungThread: Antwort-Module', () => {
+	it('meldet eine Fahrgemeinschaft allein als Antwort-Modul', () => {
+		const t = verwaltungThread(person('thomas'), daten(kopf(), [fahrtModul()]), UNTERGRUPPEN, JETZT);
+		expect(t.hatAntwortModul).toBe(true);
+	});
+
 	it('meldet eine Helferliste allein als Antwort-Modul', () => {
 		const t = verwaltungThread(person('thomas'), daten(kopf(), [helferModul()]), UNTERGRUPPEN, JETZT);
 		expect(t.hatAntwortModul).toBe(true);
@@ -357,6 +387,25 @@ describe('antwortenUebersicht: Helferliste', () => {
 
 	it('hat ohne Helferliste eine leere Liste', () => {
 		expect(antwortenUebersicht(person('thomas'), daten(kopf()), umfeld, JETZT)?.helfer).toEqual([]);
+	});
+});
+
+describe('antwortenUebersicht: Fahrgemeinschaft', () => {
+	it('gibt der Leitung die Ansicht der Fahrgemeinschaft, mit ihren Rechten', () => {
+		const u = antwortenUebersicht(person('thomas'), daten(kopf(), [fahrtModul()]), umfeld, JETZT)!;
+		expect(u.fahrt).toMatchObject({ typ: 'FAHRT', id: 'f1', leitung: true });
+		expect(u.fahrt?.richtungen.map((r) => r.richtung)).toEqual(['HIN', 'RUECK']);
+		expect(u.fahrt?.richtungen[0].autos).toMatchObject([
+			{ id: 'a1', fahrer: 'Sandra M. (Mutter von Lena und Max)', darfAendern: true },
+		]);
+	});
+
+	it('ist ohne Fahrgemeinschaft null', () => {
+		expect(antwortenUebersicht(person('thomas'), daten(kopf(), [umfrageModul()]), umfeld, JETZT)?.fahrt).toBeNull();
+	});
+
+	it('bleibt fuer wen die Uebersicht nichts angeht null', () => {
+		expect(antwortenUebersicht(person('sandra'), daten(kopf(), [fahrtModul()]), umfeld, JETZT)).toBeNull();
 	});
 });
 

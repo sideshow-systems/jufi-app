@@ -1100,6 +1100,7 @@ export class ThreadEditorComponent {
 		if (m.typ === 'DATEIEN') return 'Dateien';
 		if (m.typ === 'FOTOS') return 'Fotos';
 		if (m.typ === 'HELFER') return 'Helferliste';
+		if (m.typ === 'FAHRT') return 'Fahrgemeinschaft';
 		return m.frage.trim() || 'Noch ohne Frage';
 	}
 

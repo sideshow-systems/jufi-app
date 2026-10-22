@@ -1,4 +1,5 @@
 import { KEINE_MEDIEN, type MedienZahl } from '../dateien/medien.js';
+import { fahrtAnsicht, type FahrtModulAnsicht, type FahrtSperre } from '../module/fahrt/fahrt.js';
 import type { HelferSperre } from '../module/helfer/helfer.js';
 import type { TerminDaten } from '../module/termin/termin.js';
 import { naechsteTermine, terminZeit } from '../module/termin/termin.js';
@@ -60,9 +61,9 @@ export interface VerwaltungThread {
 	/** Ob die Person die Antworten-Uebersicht sehen darf (siehtAntworten); sonst waere der Link dorthin eine 404-Seite. */
 	darfAntwortenSehen: boolean;
 	/**
-	 * Ob der Thread etwas hat, das die Antworten-Uebersicht zeigt: eine Umfrage oder eine
-	 * Helferliste (Plan-Entscheidung 13). Verworfen: hatUmfrage zu behalten und die Helferliste
-	 * mitzumeinen, denn der Name luege dann bei jedem Thread mit Liste und ohne Umfrage.
+	 * Ob der Thread etwas hat, das die Antworten-Uebersicht zeigt: eine Umfrage, eine Helferliste
+	 * (Plan-Entscheidung 13) oder eine Fahrgemeinschaft. Verworfen: hatUmfrage zu behalten und die
+	 * Helferliste mitzumeinen, denn der Name luege dann bei jedem Thread mit Liste und ohne Umfrage.
 	 */
 	hatAntwortModul: boolean;
 }
@@ -89,6 +90,8 @@ export interface ThreadBearbeitung {
 	sperren: Record<string, UmfrageSperre>;
 	/** Je Helfer-Modul-ID, was Eintraege festlegen (helferSperre). */
 	helferSperren: Record<string, HelferSperre>;
+	/** Was Autos und Mitfahrten der Fahrgemeinschaft festlegen (fahrtSperre); null ohne Fahrgemeinschaft. */
+	fahrtSperre: FahrtSperre | null;
 	/**
 	 * Was am Thread an Fotos und Dateien haengt, gesamt und je Modul-ID: Der Editor fragt damit
 	 * vor dem Entfernen eines Moduls oder dem Loeschen des Threads zurück (Plan-Entscheidung 11).
@@ -145,7 +148,7 @@ export function verwaltungThread(
 	namen: ReadonlyMap<string, string>,
 	jetzt: Date,
 ): VerwaltungThread {
-	const { kopf, termine, umfragen, helfer } = daten;
+	const { kopf, termine, umfragen, helfer, fahrt } = daten;
 	return {
 		id: kopf.id,
 		segment: threadSegment(kopf.id, kopf.titel),
@@ -159,7 +162,7 @@ export function verwaltungThread(
 		naechsterTermin: naechsterTerminText(kopf, termine, jetzt),
 		darfBearbeiten: darfBearbeiten(ich, kopf),
 		darfAntwortenSehen: siehtAntworten(ich, kopf),
-		hatAntwortModul: umfragen.length > 0 || helfer.length > 0,
+		hatAntwortModul: umfragen.length > 0 || helfer.length > 0 || fahrt !== null,
 	};
 }
 
@@ -209,6 +212,12 @@ export interface AntwortenUebersicht {
 	darfNachtragen: boolean;
 	umfragen: UmfrageUebersicht[];
 	helfer: HelferUebersicht[];
+	/**
+	 * Die Fahrgemeinschaft mit der Ansicht der anfragenden Person (Plan-Entscheidung 17): Die
+	 * Leitung braucht dieselben Bedienelemente wie auf der Thread-Seite, vor allem "Umsetzen".
+	 * Verworfen: eine eigene Tabelle, die jede Regel ein zweites Mal rechnete.
+	 */
+	fahrt: FahrtModulAnsicht | null;
 }
 
 // Anders als bei den Umfragen stehen hier auch Eintraege von Personen, die nicht mehr gefragt
@@ -303,5 +312,14 @@ export function antwortenUebersicht(
 			};
 		}),
 		helfer: helfer.map((h) => helferUebersicht(h, kopf, umfeld, name, jetzt)),
+		fahrt: daten.fahrt
+			? fahrtAnsicht(
+					ich,
+					{ typ: 'FAHRT', id: daten.fahrt.modulId, titel: daten.fahrt.titel, fahrt: daten.fahrt },
+					daten,
+					umfeld,
+					jetzt,
+				)
+			: null,
 	};
 }

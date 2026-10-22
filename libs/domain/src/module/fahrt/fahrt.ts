@@ -1,8 +1,9 @@
 import { istKalendertag } from '../../zeit.js';
 import { darfFuerKindHandeln } from '../../rechte.js';
+import type { ModulDaten } from '../../threads/ansicht.js';
 import { istArchiviert } from '../../threads/archiv.js';
 import { GRENZEN } from '../../threads/entwurf.js';
-import { dabeiKinder, kurzname } from '../../threads/namen.js';
+import { absenderName, dabeiKinder, EHEMALIGES_MITGLIED, kurzname } from '../../threads/namen.js';
 import { darfBearbeiten } from '../../threads/rechte.js';
 import { kinderImThread, siehtThread } from '../../threads/sichtbarkeit.js';
 import type {
@@ -10,12 +11,18 @@ import type {
 	FahrtDaten,
 	MitfahrtDaten,
 	Richtung,
+	ThreadDaten,
 	ThreadKopf,
 	ThreadPerson,
 	Umfeld,
 	UmfrageDaten,
 } from '../../threads/typen.js';
-import { UHRZEIT, type TerminDaten } from '../termin/termin.js';
+import { letzterTag, UHRZEIT, type TerminDaten } from '../termin/termin.js';
+
+export const RICHTUNG_TEXT: Readonly<Record<Richtung, string>> = { HIN: 'Hinfahrt', RUECK: 'Rückfahrt' };
+
+// Hinfahrt vor Rueckfahrt: die Reihenfolge der Ansicht und der Konflikte.
+const RICHTUNGEN: readonly Richtung[] = ['HIN', 'RUECK'];
 
 // Der Server macht aus NICHT_GEFUNDEN 404 und aus den anderen vier die 409 mit dem
 // gleichnamigen Code.
@@ -209,5 +216,167 @@ export function pruefeAuto(roh: unknown): { ok: true; auto: AutoEingabe } | { ok
 	return {
 		ok: true,
 		auto: { plaetze, abfahrtTag: tag.wert, abfahrtZeit: zeit.wert, ort: ort.wert, notiz: notiz.wert },
+	};
+}
+
+// Was an einer Fahrgemeinschaft durch Eintraege festliegt, je Richtung: ein Auto oder eine
+// Mitfahrt (auch "kommt selbst") genuegt. Der Editor sperrt damit Umschalter und Entfernen,
+// bevor der Server mit 409 antworten muss; beide fragen dieselbe Funktion (wie helferSperre).
+export interface FahrtSperre {
+	/** Irgendeine Richtung hat Eintraege: das Modul laesst sich nicht entfernen. */
+	eingetragen: boolean;
+	HIN: boolean;
+	RUECK: boolean;
+}
+
+export function fahrtSperre(f: FahrtDaten): FahrtSperre {
+	const belegt = (richtung: Richtung) =>
+		f.autos.some((a) => a.richtung === richtung) || f.mitfahrten.some((m) => m.richtung === richtung);
+	const hin = belegt('HIN');
+	const rueck = belegt('RUECK');
+	return { eingetragen: hin || rueck, HIN: hin, RUECK: rueck };
+}
+
+export type FahrtKonflikt = { richtung: Richtung };
+
+// Plan-Entscheidung 10: Eine Richtung mit Autos oder Mitfahrten laesst sich nicht abschalten.
+// Verworfen: die Eintraege dabei still zu loeschen, denn dann stuende eine Familie ohne
+// Nachricht nicht mehr in ihrem Auto. Hinfahrt zuerst, der Server meldet nur den ersten.
+export function pruefeFahrtAenderung(alt: FahrtDaten, neu: { hin: boolean; rueck: boolean }): FahrtKonflikt[] {
+	const sperre = fahrtSperre(alt);
+	const an: Record<Richtung, boolean> = { HIN: neu.hin, RUECK: neu.rueck };
+	return RICHTUNGEN.filter((richtung) => sperre[richtung] && !an[richtung]).map((richtung) => ({ richtung }));
+}
+
+export interface FahrtKind {
+	kindId: string;
+	/** kurzname; ein Kind, das nicht im Umfeld steht (entfernt), heisst ehemaliges Mitglied. */
+	name: string;
+	/** Das Kind gehoert nicht mehr zu den betrachteten (abgesagt, Vielleicht): es sitzt noch im Auto. */
+	nichtMehrDabei: boolean;
+	darfHerausnehmen: boolean;
+}
+
+export interface FahrtAutoAnsicht {
+	id: string;
+	fahrerId: string;
+	/** absenderName: wie ein Absender im Verlauf. */
+	fahrer: string;
+	eigenes: boolean;
+	darfAendern: boolean;
+	plaetze: number;
+	frei: number;
+	abfahrtTag: string | null;
+	abfahrtZeit: string | null;
+	ort: string | null;
+	notiz: string | null;
+	mitfahrer: FahrtKind[];
+}
+
+export interface FahrtRichtungAnsicht {
+	richtung: Richtung;
+	/** Plan-Entscheidung 15: Vorbelegung des Abfahrtstags im Formular, ohne Termin null. */
+	vorschlagTag: string | null;
+	darfAnbieten: boolean;
+	autos: FahrtAutoAnsicht[];
+	brauchtMitfahrt: { kindId: string; name: string }[];
+	kommtSelbst: FahrtKind[];
+}
+
+export interface FahrtModulAnsicht {
+	typ: 'FAHRT';
+	id: string;
+	titel: string | null;
+	leitung: boolean;
+	richtungen: FahrtRichtungAnsicht[];
+	/** Die Kinder, die die Person selbst einsetzen darf; die Leitung setzt andere ueber "Umsetzen" um. */
+	kinder: { kindId: string; vorname: string; selbst: boolean }[];
+}
+
+/**
+ * Die Fahrgemeinschaft so, wie die Person sie sieht. Alle Leser sehen alle Autos und Mitfahrer
+ * (Plan-Entscheidung 11: alle Leser sehen die Fahrgemeinschaft); was die Person tun darf, kommt je
+ * Auto und je Kind aus den Regeln dieser Datei, damit Entwurf, Archiv und Zuordnung an einer
+ * Stelle entschieden werden.
+ *
+ * "Kinder" sind die, fuer die die Person einsetzen darf und die betrachtet werden, mit der
+ * Zuordnung als Grenze auch fuer die Leitung: Sie darf jedes betrachtete Kind einsetzen
+ * (darfEinsetzen), die Liste soll aber nur ihre eigenen zeigen, sonst stuende am Handy jedes
+ * Kind des Vereins als Knopf neben ihrem. Verworfen: die Liste aus antwortZeilen zu bilden,
+ * denn gefragte ist bei "Nur Familie" fuer Kinder leer, obwohl die Mutter dort einsetzen darf.
+ * Die Leitung setzt fremde Kinder ueber "Umsetzen" an der Mitfahrt um.
+ */
+export function fahrtAnsicht(
+	ich: ThreadPerson,
+	modul: Extract<ModulDaten, { typ: 'FAHRT' }>,
+	daten: ThreadDaten,
+	umfeld: Umfeld,
+	jetzt: Date,
+): FahrtModulAnsicht {
+	const f = modul.fahrt;
+	const betrachtete = betrachteteKinder(daten.kopf, daten, umfeld);
+	const betrachtetIds = new Set(betrachtete.map((k) => k.id));
+	const name = (id: string) => {
+		const p = umfeld.personen.get(id);
+		return p ? kurzname(p) : EHEMALIGES_MITGLIED;
+	};
+	const kind = (m: MitfahrtDaten): FahrtKind => ({
+		kindId: m.kindId,
+		name: name(m.kindId),
+		nichtMehrDabei: !betrachtetIds.has(m.kindId),
+		darfHerausnehmen: darfHerausnehmen(ich, m, f, daten, umfeld, jetzt) === 'ERLAUBT',
+	});
+	// Der erste Termin in Modulreihenfolge (Plan-Entscheidung 15), nicht der fruehste: Der Ersteller
+	// ordnet die Module, und ein Thread hat in der Regel einen.
+	const termin = daten.termine[0];
+	const vorschlag: Record<Richtung, string | null> = {
+		HIN: termin ? termin.startDatum : null,
+		RUECK: termin ? letzterTag(termin) : null,
+	};
+	const anbietenErlaubt = darfAnbieten(ich, daten, umfeld, jetzt) === 'ERLAUBT';
+
+	return {
+		typ: 'FAHRT',
+		id: modul.id,
+		titel: modul.titel,
+		leitung: darfBearbeiten(ich, daten.kopf),
+		richtungen: RICHTUNGEN.filter((richtung) => (richtung === 'HIN' ? f.hin : f.rueck)).map(
+			(richtung): FahrtRichtungAnsicht => ({
+				richtung,
+				vorschlagTag: vorschlag[richtung],
+				darfAnbieten: anbietenErlaubt && !f.autos.some((a) => a.richtung === richtung && a.fahrerId === ich.id),
+				autos: f.autos
+					.filter((a) => a.richtung === richtung)
+					.map((a): FahrtAutoAnsicht => {
+						const mitfahrer = f.mitfahrten.filter((m) => m.autoId === a.id).map(kind);
+						return {
+							id: a.id,
+							fahrerId: a.fahrerId,
+							fahrer: absenderName(a.fahrerId, umfeld),
+							eigenes: a.fahrerId === ich.id,
+							darfAendern: darfAutoAendern(ich, a, daten, umfeld, jetzt) === 'ERLAUBT',
+							plaetze: a.plaetze,
+							// Auch ein Kind, das nicht mehr betrachtet wird, belegt seinen Platz (hatPlatzIn).
+							frei: Math.max(0, a.plaetze - mitfahrer.length),
+							abfahrtTag: a.abfahrtTag,
+							abfahrtZeit: a.abfahrtZeit,
+							ort: a.ort,
+							notiz: a.notiz,
+							mitfahrer,
+						};
+					}),
+				brauchtMitfahrt: brauchtMitfahrt(f, richtung, betrachtete).map((k) => ({
+					kindId: k.id,
+					name: kurzname(k),
+				})),
+				kommtSelbst: f.mitfahrten
+					.filter((m) => m.richtung === richtung && m.autoId === null)
+					.map(kind)
+					.sort((a, b) => a.name.localeCompare(b.name, 'de') || a.kindId.localeCompare(b.kindId)),
+			}),
+		),
+		kinder: betrachtete
+			.filter((k) => darfFuerKind(ich, k, umfeld) && darfEinsetzen(ich, k.id, daten, umfeld, jetzt) === 'ERLAUBT')
+			.map((k) => ({ kindId: k.id, vorname: k.vorname, selbst: k.id === ich.id })),
 	};
 }

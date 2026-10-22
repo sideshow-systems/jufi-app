@@ -98,6 +98,9 @@ export function teilenText(e: { ansicht: ThreadAnsicht; basisUrl: string; slug: 
 			// Die Zeile der Helferliste kommt mit Etappe 6 (Spec 11); bis dahin lieber keine als eine halbe.
 			case 'HELFER':
 				break;
+			// Dasselbe fuer die Fahrgemeinschaft: Die Zeilen "Hin: ..." kommen mit Etappe 6 (Spec 11).
+			case 'FAHRT':
+				break;
 			default: {
 				const unerreichbar: never = m;
 				return unerreichbar;

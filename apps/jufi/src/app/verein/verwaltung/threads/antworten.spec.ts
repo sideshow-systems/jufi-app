@@ -77,6 +77,7 @@ function uebersicht(rest: Partial<AntwortenUebersicht> = {}): AntwortenUebersich
 		darfNachtragen: true,
 		umfragen: [BOWLING],
 		helfer: [],
+		fahrt: null,
 		...rest,
 	};
 }

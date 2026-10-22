@@ -914,3 +914,74 @@ describe('Helferliste im Entwurf', () => {
 		});
 	});
 });
+
+describe('Fahrgemeinschaft im Entwurf', () => {
+	type Fahrt = Extract<ModulEntwurf, { typ: 'FAHRT' }>;
+	const fahrt = (aenderung: Partial<Fahrt> = {}): Fahrt => ({
+		typ: 'FAHRT',
+		id: null,
+		titel: null,
+		hin: true,
+		rueck: true,
+		...aenderung,
+	});
+	const mitFahrt = (...fahrten: Fahrt[]): ThreadEntwurf => {
+		const e = bowling();
+		e.module.push(...fahrten);
+		return e;
+	};
+	const body = (e: ThreadEntwurf) => JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
+
+	it('liest eine Fahrgemeinschaft mit beiden Richtungen unveraendert', () => {
+		expect(entwurfAus(body(mitFahrt(fahrt({ titel: 'Fahrten' }))))).toEqual({
+			entwurf: mitFahrt(fahrt({ titel: 'Fahrten' })),
+		});
+		expect(entwurfFehler(mitFahrt(fahrt()), GRUPPEN)).toEqual([]);
+	});
+
+	it('weist fehlende oder falsche Richtungen mit dem Feld des Moduls ab', () => {
+		const ungueltig = (feld: string) => ({ fehler: { feld, text: 'Ungültige Anfrage' } });
+		const k = body(mitFahrt(fahrt()));
+		(k['module'] as Record<string, unknown>[])[3]['hin'] = 'ja';
+		expect(entwurfAus(k)).toEqual(ungueltig('module.3.hin'));
+		const k2 = body(mitFahrt(fahrt()));
+		delete (k2['module'] as Record<string, unknown>[])[3]['rueck'];
+		expect(entwurfAus(k2)).toEqual(ungueltig('module.3.rueck'));
+	});
+
+	it('verlangt mindestens eine Richtung, am Feld hin', () => {
+		expect(entwurfFehler(mitFahrt(fahrt({ hin: false, rueck: false })), GRUPPEN)).toEqual([
+			{ feld: 'module.3.hin', text: 'Bitte mindestens eine Richtung.' },
+		]);
+		expect(entwurfFehler(mitFahrt(fahrt({ hin: false })), GRUPPEN)).toEqual([]);
+		expect(entwurfFehler(mitFahrt(fahrt({ rueck: false })), GRUPPEN)).toEqual([]);
+	});
+
+	it('begrenzt den Titel wie bei jedem Modul', () => {
+		expect(entwurfFehler(mitFahrt(fahrt({ titel: zeichen(81) })), GRUPPEN)).toEqual([
+			{ feld: 'module.3.titel', text: 'Höchstens 80 Zeichen.' },
+		]);
+	});
+
+	it('meldet die zweite Fahrgemeinschaft als Konflikt am Feld typ', () => {
+		expect(entwurfFehler(mitFahrt(fahrt(), fahrt()), GRUPPEN)).toEqual([
+			{ feld: 'module.4.typ', text: 'Es gibt schon eine Fahrgemeinschaft.', konflikt: true },
+		]);
+	});
+
+	it('legt neu beide Richtungen ohne Titel an, auch wenn es schon eine gibt', () => {
+		const erwartet = { typ: 'FAHRT', id: null, titel: null, hin: true, rueck: true };
+		expect(neuesModul('FAHRT', [], JETZT, 'JUNGFISCHER_FAMILIE')).toEqual(erwartet);
+		// Nur der Editor blendet den Typ aus; speichern scheitert dann an modulFehler (Konflikt).
+		expect(neuesModul('FAHRT', [fahrt()], JETZT, 'JUNGFISCHER_FAMILIE')).toEqual(erwartet);
+	});
+
+	it('uebernimmt die Fahrgemeinschaft eines Threads in den Entwurf und in die Threaddaten', () => {
+		const daten = { modulId: 'f1', titel: 'Fahrten', hin: true, rueck: false, autos: [], mitfahrten: [] };
+		const module: ModulDaten[] = [{ typ: 'FAHRT', id: 'f1', titel: 'Fahrten', fahrt: daten }];
+		const e = entwurfAusThread(kopf(), module);
+		expect(e.module).toEqual([{ typ: 'FAHRT', id: 'f1', titel: 'Fahrten', hin: true, rueck: false }]);
+		expect(entwurfAus(JSON.parse(JSON.stringify(e)))).toEqual({ entwurf: e });
+		expect(threadDatenAus(kopf(), module).fahrt).toBe(daten);
+	});
+});

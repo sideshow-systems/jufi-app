@@ -2,6 +2,8 @@ import { terminZeit, type TerminDaten } from '../module/termin/termin.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
 import { linkTeile, MODUS_TEXT, systemSatz, verlaufAnsicht, type VerlaufEintragDaten } from './verlauf.js';
 
+const umfeld = bowlingUmfeld();
+
 const termin: TerminDaten = {
 	modulId: 'm',
 	startDatum: '2026-10-24',
@@ -14,53 +16,99 @@ const termin: TerminDaten = {
 
 describe('systemSatz', () => {
 	it('meldet die Veroeffentlichung', () => {
-		expect(systemSatz('VEROEFFENTLICHT', {}, 'Thomas K.')).toBe('Thomas K. hat den Thread veröffentlicht');
+		expect(systemSatz('VEROEFFENTLICHT', {}, 'Thomas K.', umfeld)).toBe('Thomas K. hat den Thread veröffentlicht');
 	});
 
 	it('nennt beim Termin dieselbe Zeitangabe wie die Karte', () => {
-		expect(systemSatz('TERMIN_GEAENDERT', { termin }, 'Thomas K.')).toBe(
+		expect(systemSatz('TERMIN_GEAENDERT', { termin }, 'Thomas K.', umfeld)).toBe(
 			`Thomas K. hat den Termin auf ${terminZeit(termin)} verschoben`,
 		);
 	});
 
 	it('braucht fuer den Termin keine modulId', () => {
 		const { modulId: _weg, ...ohneModul } = termin;
-		expect(systemSatz('TERMIN_GEAENDERT', { termin: ohneModul }, 'Thomas K.')).toBe(
+		expect(systemSatz('TERMIN_GEAENDERT', { termin: ohneModul }, 'Thomas K.', umfeld)).toBe(
 			`Thomas K. hat den Termin auf ${terminZeit(termin)} verschoben`,
 		);
 	});
 
 	it('nennt bei der Frist den Berliner Zeitpunkt in voller Form', () => {
 		const daten = { frage: 'Kommst du mit?', frist: '2026-10-22T16:00:00.000Z' };
-		expect(systemSatz('FRIST_GEAENDERT', daten, 'Thomas K.')).toBe(
+		expect(systemSatz('FRIST_GEAENDERT', daten, 'Thomas K.', umfeld)).toBe(
 			'Thomas K. hat die Frist für „Kommst du mit?“ auf Do 22.10. 18:00 gesetzt',
 		);
 	});
 
 	it('meldet eine aufgehobene Frist', () => {
-		expect(systemSatz('FRIST_GEAENDERT', { frage: 'Kommst du mit?', frist: null }, 'Thomas K.')).toBe(
+		expect(systemSatz('FRIST_GEAENDERT', { frage: 'Kommst du mit?', frist: null }, 'Thomas K.', umfeld)).toBe(
 			'Thomas K. hat die Frist für „Kommst du mit?“ aufgehoben',
 		);
 	});
 
 	it('nennt beim Modus den Anzeigetext', () => {
-		expect(systemSatz('MODUS_GEAENDERT', { modus: 'AUSHANG' }, 'Thomas K.')).toBe(
+		expect(systemSatz('MODUS_GEAENDERT', { modus: 'AUSHANG' }, 'Thomas K.', umfeld)).toBe(
 			'Thomas K. hat den Modus auf „Nur Aushang“ gestellt',
 		);
 	});
 
 	it('faellt bei unlesbaren Daten auf den allgemeinen Satz zurueck', () => {
 		const allgemein = 'Thomas K. hat den Thread geändert';
-		expect(systemSatz('TERMIN_GEAENDERT', null, 'Thomas K.')).toBe(allgemein);
-		expect(systemSatz('TERMIN_GEAENDERT', { termin: 3 }, 'Thomas K.')).toBe(allgemein);
-		expect(systemSatz('TERMIN_GEAENDERT', { termin: { ...termin, beginn: '25:00' } }, 'Thomas K.')).toBe(allgemein);
-		expect(systemSatz('TERMIN_GEAENDERT', { termin: { ...termin, startDatum: 'morgen' } }, 'Thomas K.')).toBe(
+		expect(systemSatz('TERMIN_GEAENDERT', null, 'Thomas K.', umfeld)).toBe(allgemein);
+		expect(systemSatz('TERMIN_GEAENDERT', { termin: 3 }, 'Thomas K.', umfeld)).toBe(allgemein);
+		expect(systemSatz('TERMIN_GEAENDERT', { termin: { ...termin, beginn: '25:00' } }, 'Thomas K.', umfeld)).toBe(
 			allgemein,
 		);
-		expect(systemSatz('MODUS_GEAENDERT', { modus: 'X' }, 'Thomas K.')).toBe(allgemein);
-		expect(systemSatz('MODUS_GEAENDERT', { modus: 'toString' }, 'Thomas K.')).toBe(allgemein);
-		expect(systemSatz('FRIST_GEAENDERT', { frage: 'Q', frist: 'bald' }, 'Thomas K.')).toBe(allgemein);
-		expect(systemSatz('FRIST_GEAENDERT', { frist: null }, 'Thomas K.')).toBe(allgemein);
+		expect(systemSatz('TERMIN_GEAENDERT', { termin: { ...termin, startDatum: 'morgen' } }, 'Thomas K.', umfeld)).toBe(
+			allgemein,
+		);
+		expect(systemSatz('MODUS_GEAENDERT', { modus: 'X' }, 'Thomas K.', umfeld)).toBe(allgemein);
+		expect(systemSatz('MODUS_GEAENDERT', { modus: 'toString' }, 'Thomas K.', umfeld)).toBe(allgemein);
+		expect(systemSatz('FRIST_GEAENDERT', { frage: 'Q', frist: 'bald' }, 'Thomas K.', umfeld)).toBe(allgemein);
+		expect(systemSatz('FRIST_GEAENDERT', { frist: null }, 'Thomas K.', umfeld)).toBe(allgemein);
+	});
+});
+
+describe('systemSatz: AUTO_ZURUECKGEZOGEN', () => {
+	const allgemein = 'Thomas K. hat den Thread geändert';
+	const satz = (daten: unknown) => systemSatz('AUTO_ZURUECKGEZOGEN', daten, 'Sandra M.', umfeld);
+
+	it('nennt Fahrer, Richtung und zwei Kinder mit "brauchen"', () => {
+		expect(satz({ fahrerId: 'sandra', richtung: 'HIN', kindIds: ['lena', 'max'] })).toBe(
+			'Auto von Sandra M. (Hinfahrt) zurückgezogen – Lena M. und Max M. brauchen wieder eine Mitfahrt.',
+		);
+	});
+
+	it('sagt bei einem Kind "braucht" und bei der Rueckfahrt Rueckfahrt', () => {
+		expect(satz({ fahrerId: 'sandra', richtung: 'RUECK', kindIds: ['lena'] })).toBe(
+			'Auto von Sandra M. (Rückfahrt) zurückgezogen – Lena M. braucht wieder eine Mitfahrt.',
+		);
+	});
+
+	it('zaehlt drei Kinder mit Komma und "und" auf', () => {
+		expect(satz({ fahrerId: 'sandra', richtung: 'HIN', kindIds: ['lena', 'max', 'tim'] })).toBe(
+			'Auto von Sandra M. (Hinfahrt) zurückgezogen – Lena M., Max M. und Tim S. brauchen wieder eine Mitfahrt.',
+		);
+	});
+
+	it('nennt den Fahrer mit Kurznamen, nicht mit der Beziehung', () => {
+		expect(satz({ fahrerId: 'sandra', richtung: 'HIN', kindIds: ['lena'] })).not.toContain('Mutter');
+	});
+
+	it('nennt Unbekannte ehemaliges Mitglied, Fahrer wie Kind', () => {
+		expect(satz({ fahrerId: 'mia', richtung: 'HIN', kindIds: ['mia'] })).toBe(
+			'Auto von ehemaliges Mitglied (Hinfahrt) zurückgezogen – ehemaliges Mitglied braucht wieder eine Mitfahrt.',
+		);
+	});
+
+	it('faellt bei unlesbaren Daten auf den allgemeinen Satz zurueck', () => {
+		const handelnd = (daten: unknown) => systemSatz('AUTO_ZURUECKGEZOGEN', daten, 'Thomas K.', umfeld);
+		expect(handelnd(null)).toBe(allgemein);
+		expect(handelnd({})).toBe(allgemein);
+		expect(handelnd({ fahrerId: 'sandra', richtung: 'SEITWAERTS', kindIds: ['lena'] })).toBe(allgemein);
+		expect(handelnd({ fahrerId: 3, richtung: 'HIN', kindIds: ['lena'] })).toBe(allgemein);
+		expect(handelnd({ fahrerId: 'sandra', richtung: 'HIN', kindIds: 'lena' })).toBe(allgemein);
+		expect(handelnd({ fahrerId: 'sandra', richtung: 'HIN', kindIds: [1] })).toBe(allgemein);
+		expect(handelnd({ fahrerId: 'sandra', richtung: 'HIN', kindIds: [] })).toBe(allgemein);
 	});
 });
 

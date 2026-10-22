@@ -51,6 +51,9 @@ const FEHLERFELDER = {
 	// Die Helferliste zeigt jf-helfer-felder (TP4-Spec 10). Die Konflikte des Servers an belegten
 	// Positionen stehen an "positionen", der an der Einheit an "einheit" (vergleich.ts).
 	HELFER: ['titel', 'einheit', 'frist', 'positionen'],
+	// Die Fahrgemeinschaft hat im Editor noch kein eigenes Bauteil, also zeigt keine Vorlage einen
+	// Fehler an ihr; der Editor nennt ihn dann als Satz unter den Knoepfen.
+	FAHRT: [],
 	UMFRAGE: ['titel', 'frage', 'teilnahme', 'optionen', 'mehrfach', 'einheit', 'frist'],
 } as const satisfies Record<string, readonly string[]>;
 

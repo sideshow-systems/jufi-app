@@ -1,5 +1,6 @@
 import type { DateienModulAnsicht, DateiZeile, FotosModulAnsicht, FotoZeile } from '../dateien/module.js';
 import type { EinwilligungZeile } from '../einwilligung.js';
+import { fahrtAnsicht, type FahrtModulAnsicht } from '../module/fahrt/fahrt.js';
 import { helferAnsicht, type HelferModulAnsicht } from '../module/helfer/helfer.js';
 import type { TerminDaten } from '../module/termin/termin.js';
 import { antwortZeilen, auswertung, darfAntworten, type Auswertung } from './antworten.js';
@@ -18,6 +19,7 @@ import { siehtThread } from './sichtbarkeit.js';
 import { ungeleseneNachrichten, type NachrichtenEingabe } from './start.js';
 import type {
 	AntwortEinheit,
+	FahrtDaten,
 	HelferDaten,
 	Rollenfilter,
 	ThreadArt,
@@ -56,7 +58,8 @@ export type ModulDaten =
 	| { typ: 'UMFRAGE'; id: string; titel: string | null; umfrage: UmfrageDaten }
 	| { typ: 'DATEIEN'; id: string; titel: string | null; dateien: readonly DateiDaten[] }
 	| { typ: 'FOTOS'; id: string; titel: string | null; hochladen: FotoHochladen; fotos: readonly FotoDaten[] }
-	| { typ: 'HELFER'; id: string; titel: string | null; helfer: HelferDaten };
+	| { typ: 'HELFER'; id: string; titel: string | null; helfer: HelferDaten }
+	| { typ: 'FAHRT'; id: string; titel: string | null; fahrt: FahrtDaten };
 
 // Archivregel und Schreibsperre brauchen die Termine, die Zeilen die Umfragen und
 // Helferlisten; alle liegen sonst nur verstreut in den Modulen.
@@ -66,8 +69,8 @@ export function threadDatenAus(kopf: ThreadKopf, module: readonly ModulDaten[]):
 		termine: module.flatMap((m) => (m.typ === 'TERMIN' ? [m.termin] : [])),
 		umfragen: module.flatMap((m) => (m.typ === 'UMFRAGE' ? [m.umfrage] : [])),
 		helfer: module.flatMap((m) => (m.typ === 'HELFER' ? [m.helfer] : [])),
-		// Die Variante FAHRT von ModulDaten kommt mit der Ansicht der Fahrgemeinschaft.
-		fahrt: null,
+		// Hoechstens eine je Thread (Plan-Entscheidung 9), der Speicher sichert es mit einem Unique.
+		fahrt: module.find((m) => m.typ === 'FAHRT')?.fahrt ?? null,
 	};
 }
 
@@ -99,11 +102,12 @@ export interface UmfrageAnsicht {
 }
 
 export type ModulAnsicht =
-	| Exclude<ModulDaten, { typ: 'UMFRAGE' | 'DATEIEN' | 'FOTOS' | 'HELFER' }>
+	| Exclude<ModulDaten, { typ: 'UMFRAGE' | 'DATEIEN' | 'FOTOS' | 'HELFER' | 'FAHRT' }>
 	| UmfrageAnsicht
 	| DateienModulAnsicht
 	| FotosModulAnsicht
-	| HelferModulAnsicht;
+	| HelferModulAnsicht
+	| FahrtModulAnsicht;
 
 export interface ThreadAnsicht {
 	id: string;
@@ -264,6 +268,8 @@ function modulAnsicht(m: ModulDaten, e: AnsichtEingabe): ModulAnsicht {
 			return fotosAnsicht(m, e);
 		case 'HELFER':
 			return helferAnsicht(e.ich, m, threadDatenAus(e.kopf, e.module), e.umfeld, e.jetzt);
+		case 'FAHRT':
+			return fahrtAnsicht(e.ich, m, threadDatenAus(e.kopf, e.module), e.umfeld, e.jetzt);
 		default: {
 			const unerreichbar: never = m;
 			return unerreichbar;

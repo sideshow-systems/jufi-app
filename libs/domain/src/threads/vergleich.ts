@@ -1,3 +1,4 @@
+import { fahrtSperre, pruefeFahrtAenderung, RICHTUNG_TEXT } from '../module/fahrt/fahrt.js';
 import { helferSperre, pruefeHelferAenderung } from '../module/helfer/helfer.js';
 import { pruefeUmfrageAenderung, TEILNAHME_OPTIONEN } from '../module/umfrage/umfrage.js';
 import type { ModulDaten } from './ansicht.js';
@@ -9,6 +10,7 @@ const UNGUELTIG = 'Ungültige Anfrage';
 
 type UmfrageEntwurf = Extract<ModulEntwurf, { typ: 'UMFRAGE' }>;
 type HelferEntwurf = Extract<ModulEntwurf, { typ: 'HELFER' }>;
+type FahrtEntwurf = Extract<ModulEntwurf, { typ: 'FAHRT' }>;
 
 // Ersatztitel einer Helferliste ohne eigenen Titel, in Konflikt und Systemeintrag (Entscheidung 10).
 const HELFERLISTE = 'Helferliste';
@@ -58,7 +60,8 @@ export interface EntwurfVergleich {
 	kopfGeaendert: boolean;
 	/** Rollenfilter, Untergruppen-Schalter oder die gewaehlten Untergruppen haben sich geaendert. */
 	sichtbarkeitGeaendert: boolean;
-	system: { art: SystemArt; daten: Record<string, unknown> }[];
+	/** Nur Aenderungen am Thread selbst; AUTO_ZURUECKGEZOGEN schreibt die Route des Autos, nicht der Editor. */
+	system: { art: Exclude<SystemArt, 'AUTO_ZURUECKGEZOGEN'>; daten: Record<string, unknown> }[];
 }
 
 const FESTE_SCHLUESSEL: readonly string[] = TEILNAHME_OPTIONEN.map((o) => o.schluessel);
@@ -160,6 +163,11 @@ function vergleicheBestehendes(alt: ModulDaten, neu: ModulEntwurf, i: number): B
 		case 'HELFER':
 			if (neu.typ === 'HELFER') helfer(ergebnis, alt, neu, i);
 			break;
+		// Autos und Mitfahrten haben eigene Routen; am Modul stehen nur Titel und Richtungen. Eine
+		// geaenderte Richtung ist keine Nachricht an die Gruppe: kein Systemeintrag.
+		case 'FAHRT':
+			if (neu.typ === 'FAHRT') fahrt(ergebnis, alt, neu, i);
+			break;
 		// Die Dateien selbst zaehlen nie, sie haben eigene Routen; ausser dem Titel bleibt nichts.
 		case 'DATEIEN':
 			break;
@@ -176,7 +184,7 @@ function vergleicheBestehendes(alt: ModulDaten, neu: ModulEntwurf, i: number): B
 	return ergebnis;
 }
 
-function eintrag(e: Bestehendes, art: SystemArt, daten: Record<string, unknown>): void {
+function eintrag(e: Bestehendes, art: EntwurfVergleich['system'][number]['art'], daten: Record<string, unknown>): void {
 	e.system.push({ art, daten });
 }
 
@@ -249,6 +257,20 @@ function helfer(e: Bestehendes, alt: ModulDaten & { typ: 'HELFER' }, neu: Helfer
 			? `Für „${altText}“ hat sich schon jemand eingetragen.`
 			: `Für „${neu.positionen.find((p) => p.schluessel === k.schluessel)?.text ?? altText}“ sind schon ${k.belegt} eingetragen.`;
 	e.konflikt = { feld: f('positionen'), text, konflikt: true };
+}
+
+function fahrt(e: Bestehendes, alt: ModulDaten & { typ: 'FAHRT' }, neu: FahrtEntwurf, i: number): void {
+	const f = alt.fahrt;
+	e.geaendert ||= f.hin !== neu.hin || f.rueck !== neu.rueck;
+	// Nur der erste Konflikt, die Hinfahrt zuerst: Die Richtungen, die der Editor sperrt, kennt er
+	// aus fahrtSperre schon vorher.
+	const [k] = pruefeFahrtAenderung(f, { hin: neu.hin, rueck: neu.rueck });
+	if (!k) return;
+	e.konflikt = {
+		feld: `module.${i}.${k.richtung === 'HIN' ? 'hin' : 'rueck'}`,
+		text: `Für die ${RICHTUNG_TEXT[k.richtung]} gibt es schon Autos oder Mitfahrten.`,
+		konflikt: true,
+	};
 }
 
 function gleicheMenge(a: readonly string[], b: readonly string[]): boolean {
@@ -362,6 +384,17 @@ export function vergleicheEntwurf(
 				fehler: {
 					feld: 'module',
 					text: `Die Helferliste „${m.titel ?? HELFERLISTE}“ hat schon Einträge und lässt sich nicht entfernen.`,
+					konflikt: true,
+				},
+			});
+		}
+		// Plan-Entscheidung 10: Autos und Mitfahrten zaehlen wie Antworten (NoAction am Fremdschluessel).
+		if (m.typ === 'FAHRT' && fahrtSperre(m.fahrt).eingetragen) {
+			konflikte.push({
+				rang: index,
+				fehler: {
+					feld: 'module',
+					text: 'Die Fahrgemeinschaft hat schon Einträge und lässt sich nicht entfernen.',
 					konflikt: true,
 				},
 			});

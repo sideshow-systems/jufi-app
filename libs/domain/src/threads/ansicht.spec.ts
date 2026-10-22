@@ -11,8 +11,19 @@ import {
 import type { DateienModulAnsicht, FotosModulAnsicht } from '../dateien/module.js';
 import { absenderName } from './namen.js';
 import { bowlingUmfeld, JETZT, kopf } from './testhilfe.js';
+import type { FahrtModulAnsicht } from '../module/fahrt/fahrt.js';
 import type { HelferModulAnsicht } from '../module/helfer/helfer.js';
-import type { HelferDaten, HelferEintragDaten, HelferPositionDaten, ThreadKopf, UmfrageDaten } from './typen.js';
+import type {
+	AutoDaten,
+	FahrtDaten,
+	HelferDaten,
+	HelferEintragDaten,
+	HelferPositionDaten,
+	MitfahrtDaten,
+	Richtung,
+	ThreadKopf,
+	UmfrageDaten,
+} from './typen.js';
 
 const umfeld = bowlingUmfeld();
 const person = (id: string) => umfeld.personen.get(id)!;
@@ -546,5 +557,272 @@ describe('threadAnsicht: Helferliste', () => {
 	it('gibt die Liste an die Threaddaten', () => {
 		const modul = helferModul([kuchen()]);
 		expect(threadDatenAus(kopf(), [infoModul, modul]).helfer).toEqual([modul.helfer]);
+	});
+});
+
+describe('threadAnsicht: Fahrgemeinschaft', () => {
+	const gestern = new Date('2026-10-21T12:00:00Z');
+	const auto = (daten: Partial<AutoDaten> = {}): AutoDaten => ({
+		id: 'a1',
+		fahrerId: 'sandra',
+		richtung: 'HIN',
+		plaetze: 3,
+		abfahrtTag: '2026-10-23',
+		abfahrtZeit: '15:30',
+		ort: 'Vereinsheim',
+		notiz: 'Kindersitze vorhanden',
+		angelegtAm: gestern,
+		...daten,
+	});
+	const mitfahrt = (kindId: string, autoId: string | null, richtung: Richtung = 'HIN'): MitfahrtDaten => ({
+		richtung,
+		kindId,
+		autoId,
+		vonId: 'sandra',
+		eingetragenAm: gestern,
+	});
+	const fahrtModul = (
+		f: Partial<FahrtDaten> = {},
+		titel: string | null = null,
+	): Extract<ModulDaten, { typ: 'FAHRT' }> => ({
+		typ: 'FAHRT',
+		id: 'f1',
+		titel,
+		fahrt: { modulId: 'f1', titel, hin: true, rueck: true, autos: [], mitfahrten: [], ...f },
+	});
+	// Lena dabei, Max wie angegeben beantwortet.
+	const teilnahme = (max: 'o-dabei' | 'o-vielleicht' | 'o-abgesagt' | null): ModulDaten =>
+		umfrageModul({
+			antworten: [
+				{ fuerId: 'lena', vonId: 'sandra', optionIds: ['o-dabei'], abgegebenAm: gestern },
+				...(max ? [{ fuerId: 'max', vonId: 'sandra', optionIds: [max], abgegebenAm: gestern }] : []),
+			],
+		});
+	const fahrtVon = (ich: string, module: ModulDaten[], k: ThreadKopf = kopf()): FahrtModulAnsicht =>
+		ansichtVon(ich, k, module).module.find((m) => m.typ === 'FAHRT') as FahrtModulAnsicht;
+	const hin = (a: FahrtModulAnsicht) => a.richtungen.find((r) => r.richtung === 'HIN')!;
+	const rueck = (a: FahrtModulAnsicht) => a.richtungen.find((r) => r.richtung === 'RUECK')!;
+	const sandrasAuto = fahrtModul({ autos: [auto()], mitfahrten: [mitfahrt('lena', 'a1')] });
+
+	it('zeigt Kopf und je eingeschalteter Richtung einen Eintrag, Hinfahrt zuerst', () => {
+		const a = fahrtVon('thomas', [fahrtModul({}, 'Fahrten')]);
+		expect(a).toMatchObject({ typ: 'FAHRT', id: 'f1', titel: 'Fahrten', leitung: true });
+		expect(a.richtungen.map((r) => r.richtung)).toEqual(['HIN', 'RUECK']);
+		expect(fahrtVon('sandra', [fahrtModul({ hin: false })]).richtungen.map((r) => r.richtung)).toEqual(['RUECK']);
+		expect(fahrtVon('sandra', [fahrtModul({ rueck: false })]).richtungen.map((r) => r.richtung)).toEqual(['HIN']);
+		expect(fahrtVon('sandra', [fahrtModul()]).leitung).toBe(false);
+	});
+
+	it('beschreibt Sandras Auto mit Fahrer, freien Plaetzen und dem Kurznamen des Mitfahrers', () => {
+		const [a] = hin(fahrtVon('peter', [sandrasAuto])).autos;
+		expect(a).toMatchObject({
+			id: 'a1',
+			fahrerId: 'sandra',
+			fahrer: 'Sandra M. (Mutter von Lena und Max)',
+			plaetze: 3,
+			frei: 2,
+			abfahrtTag: '2026-10-23',
+			abfahrtZeit: '15:30',
+			ort: 'Vereinsheim',
+			notiz: 'Kindersitze vorhanden',
+		});
+		expect(a.mitfahrer).toEqual([{ kindId: 'lena', name: 'Lena M.', nichtMehrDabei: false, darfHerausnehmen: false }]);
+		expect(rueck(fahrtVon('peter', [sandrasAuto])).autos).toEqual([]);
+	});
+
+	it('ordnet Autos und Mitfahrer in der Reihenfolge der Daten und zaehlt nur das eigene Auto', () => {
+		const modul = fahrtModul({
+			autos: [auto(), auto({ id: 'a2', fahrerId: 'peter', plaetze: 2 })],
+			mitfahrten: [mitfahrt('tim', 'a1'), mitfahrt('lena', 'a1'), mitfahrt('paul', 'a2')],
+		});
+		const autos = hin(fahrtVon('thomas', [modul])).autos;
+		expect(autos.map((a) => [a.id, a.frei, a.mitfahrer.map((m) => m.kindId)])).toEqual([
+			['a1', 1, ['tim', 'lena']],
+			['a2', 1, ['paul']],
+		]);
+	});
+
+	it('laesst nie weniger als 0 frei', () => {
+		const modul = fahrtModul({
+			autos: [auto({ plaetze: 1 })],
+			mitfahrten: [mitfahrt('lena', 'a1'), mitfahrt('max', 'a1')],
+		});
+		expect(hin(fahrtVon('thomas', [modul])).autos[0].frei).toBe(0);
+	});
+
+	it('zeigt ein Kind, das abgesagt hat, mit Zusatz und laesst den Platz belegt', () => {
+		const modul = fahrtModul({
+			autos: [auto()],
+			mitfahrten: [mitfahrt('lena', 'a1'), mitfahrt('max', 'a1')],
+		});
+		const dabei = hin(fahrtVon('sandra', [teilnahme('o-dabei'), modul])).autos[0];
+		expect(dabei.mitfahrer.map((m) => [m.name, m.nichtMehrDabei])).toEqual([
+			['Lena M.', false],
+			['Max M.', false],
+		]);
+		expect(dabei.frei).toBe(1);
+		const abgesagt = hin(fahrtVon('sandra', [teilnahme('o-abgesagt'), modul])).autos[0];
+		expect(abgesagt.mitfahrer.map((m) => [m.name, m.nichtMehrDabei, m.darfHerausnehmen])).toEqual([
+			['Lena M.', false, true],
+			['Max M.', true, true],
+		]);
+		expect(abgesagt.frei).toBe(1);
+	});
+
+	it('nennt eine entfernte Person ehemaliges Mitglied, als Fahrer wie als Kind', () => {
+		const modul = fahrtModul({
+			autos: [auto({ fahrerId: 'mia' })],
+			mitfahrten: [mitfahrt('mia', 'a1')],
+		});
+		const [a] = hin(fahrtVon('thomas', [modul])).autos;
+		expect(a.fahrer).toBe('ehemaliges Mitglied');
+		expect(a.mitfahrer).toEqual([
+			{ kindId: 'mia', name: 'ehemaliges Mitglied', nichtMehrDabei: true, darfHerausnehmen: true },
+		]);
+	});
+
+	it('trennt "Braucht noch Mitfahrt" und "Kommt selbst" je Richtung, nach Kurzname', () => {
+		const modul = fahrtModul({
+			autos: [auto()],
+			mitfahrten: [mitfahrt('lena', 'a1'), mitfahrt('max', null), mitfahrt('tim', null, 'RUECK')],
+		});
+		const a = fahrtVon('thomas', [modul]);
+		expect(hin(a).brauchtMitfahrt).toEqual([
+			{ kindId: 'jonas', name: 'Jonas K.' },
+			{ kindId: 'paul', name: 'Paul V.' },
+			{ kindId: 'tim', name: 'Tim S.' },
+		]);
+		expect(hin(a).kommtSelbst).toEqual([
+			{ kindId: 'max', name: 'Max M.', nichtMehrDabei: false, darfHerausnehmen: true },
+		]);
+		expect(rueck(a).brauchtMitfahrt.map((k) => k.kindId)).toEqual(['jonas', 'lena', 'max', 'paul']);
+		expect(rueck(a).kommtSelbst.map((k) => k.kindId)).toEqual(['tim']);
+	});
+
+	it('zaehlt in "Braucht noch Mitfahrt" nur, wer dabei ist', () => {
+		const a = fahrtVon('thomas', [teilnahme('o-vielleicht'), fahrtModul()]);
+		expect(hin(a).brauchtMitfahrt).toEqual([{ kindId: 'lena', name: 'Lena M.' }]);
+	});
+
+	it('sagt dem Fahrer: eigenes Auto, aendern erlaubt, kein zweites Auto in dieser Richtung', () => {
+		const a = fahrtVon('sandra', [sandrasAuto]);
+		expect(hin(a).autos[0]).toMatchObject({ eigenes: true, darfAendern: true });
+		expect(hin(a).darfAnbieten).toBe(false);
+		expect(rueck(a).darfAnbieten).toBe(true);
+	});
+
+	it('laesst die Leitung jedes Auto aendern, eine fremde Person nicht', () => {
+		expect(hin(fahrtVon('thomas', [sandrasAuto])).autos[0]).toMatchObject({ eigenes: false, darfAendern: true });
+		expect(hin(fahrtVon('thomas', [sandrasAuto])).darfAnbieten).toBe(true);
+		expect(hin(fahrtVon('peter', [sandrasAuto])).autos[0]).toMatchObject({ eigenes: false, darfAendern: false });
+		expect(hin(fahrtVon('peter', [sandrasAuto])).darfAnbieten).toBe(true);
+	});
+
+	it('laesst Kinder kein Auto anbieten', () => {
+		expect(hin(fahrtVon('lena', [sandrasAuto])).darfAnbieten).toBe(false);
+	});
+
+	it('laesst die Familie ihr Kind herausnehmen, die Leitung und den Fahrer jedes', () => {
+		const modul = fahrtModul({
+			autos: [auto({ fahrerId: 'peter' })],
+			mitfahrten: [mitfahrt('lena', 'a1'), mitfahrt('paul', 'a1')],
+		});
+		const kann = (ich: string) => hin(fahrtVon(ich, [modul])).autos[0].mitfahrer.map((m) => m.darfHerausnehmen);
+		expect(kann('sandra')).toEqual([true, false]);
+		expect(kann('peter')).toEqual([true, true]);
+		expect(kann('thomas')).toEqual([true, true]);
+		expect(kann('hans')).toEqual([false, false]);
+	});
+
+	describe('kinder', () => {
+		const kinder = (ich: string, module: ModulDaten[], k: ThreadKopf = kopf()) => fahrtVon(ich, module, k).kinder;
+
+		it('nennt der Mutter ihre Kinder in Vornamen-Reihenfolge', () => {
+			expect(kinder('sandra', [fahrtModul()])).toEqual([
+				{ kindId: 'lena', vorname: 'Lena', selbst: false },
+				{ kindId: 'max', vorname: 'Max', selbst: false },
+			]);
+		});
+
+		it('nennt bei Lena dabei und Max vielleicht nur Lena', () => {
+			expect(kinder('sandra', [teilnahme('o-vielleicht'), fahrtModul()])).toEqual([
+				{ kindId: 'lena', vorname: 'Lena', selbst: false },
+			]);
+		});
+
+		it('nennt dem Kind sich selbst', () => {
+			expect(kinder('lena', [fahrtModul()])).toEqual([{ kindId: 'lena', vorname: 'Lena', selbst: true }]);
+		});
+
+		it('nennt der Leitung nur ihre eigenen Kinder, nicht alle', () => {
+			expect(kinder('thomas', [fahrtModul()])).toEqual([{ kindId: 'jonas', vorname: 'Jonas', selbst: false }]);
+		});
+
+		it('nennt einem Jugendleiter ohne Bearbeitungsrecht und ohne eigenes Kind keines', () => {
+			expect(kinder('bea', [fahrtModul()])).toEqual([]);
+		});
+
+		it('nennt einer Mutter bei Nur Familie ihre Kinder, obwohl dort niemand als Kind gefragt ist', () => {
+			const familie = kopf({ rollenfilter: 'NUR_FAMILIE' });
+			expect(kinder('sandra', [fahrtModul()], familie).map((k) => k.kindId)).toEqual(['lena', 'max']);
+		});
+
+		it('nennt im Archiv der Familie keines mehr, der Leitung ihre', () => {
+			const archiv = kopf({ archivModus: 'ARCHIVIERT' });
+			const a = fahrtVon('sandra', [fahrtModul()], archiv);
+			expect(a.kinder).toEqual([]);
+			expect(hin(a).darfAnbieten).toBe(false);
+			expect(fahrtVon('thomas', [fahrtModul()], archiv).kinder.map((k) => k.kindId)).toEqual(['jonas']);
+		});
+	});
+
+	describe('vorschlagTag', () => {
+		const termin = (startDatum: string, endDatum: string | null, modulId = 't1'): ModulDaten => ({
+			typ: 'TERMIN',
+			id: modulId,
+			titel: null,
+			termin: { ...termin0, modulId, startDatum, endDatum },
+		});
+		const termin0 = {
+			modulId: 't1',
+			startDatum: '',
+			endDatum: null,
+			beginn: null,
+			ende: null,
+			ort: null,
+			treffpunkt: null,
+		};
+
+		it('schlaegt hin den ersten und rueck den letzten Tag des Termins vor', () => {
+			const a = fahrtVon('sandra', [termin('2026-10-23', '2026-10-25'), fahrtModul()]);
+			expect(hin(a).vorschlagTag).toBe('2026-10-23');
+			expect(rueck(a).vorschlagTag).toBe('2026-10-25');
+		});
+
+		it('nimmt bei einem eintaegigen Termin fuer beide denselben Tag', () => {
+			const a = fahrtVon('sandra', [termin('2026-10-24', null), fahrtModul()]);
+			expect([hin(a).vorschlagTag, rueck(a).vorschlagTag]).toEqual(['2026-10-24', '2026-10-24']);
+		});
+
+		it('nimmt den ersten Termin in Modulreihenfolge, nicht den fruehesten', () => {
+			const a = fahrtVon('sandra', [
+				termin('2026-10-30', '2026-11-01', 't2'),
+				termin('2026-10-23', null, 't1'),
+				fahrtModul(),
+			]);
+			expect(hin(a).vorschlagTag).toBe('2026-10-30');
+			expect(rueck(a).vorschlagTag).toBe('2026-11-01');
+		});
+
+		it('hat ohne Termin keinen Vorschlag', () => {
+			const a = fahrtVon('sandra', [fahrtModul()]);
+			expect([hin(a).vorschlagTag, rueck(a).vorschlagTag]).toEqual([null, null]);
+		});
+	});
+
+	it('gibt die Fahrgemeinschaft an die Threaddaten', () => {
+		const modul = fahrtModul();
+		expect(threadDatenAus(kopf(), [infoModul, modul]).fahrt).toBe(modul.fahrt);
+		expect(threadDatenAus(kopf(), [infoModul]).fahrt).toBeNull();
 	});
 });

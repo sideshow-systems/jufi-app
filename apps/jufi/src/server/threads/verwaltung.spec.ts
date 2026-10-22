@@ -196,6 +196,7 @@ describe('Lesende Routen der Verwaltung', () => {
 				'darfArchivieren',
 				'darfLoeschen',
 				'entwurf',
+				'fahrtSperre',
 				'helferSperren',
 				'id',
 				'medien',

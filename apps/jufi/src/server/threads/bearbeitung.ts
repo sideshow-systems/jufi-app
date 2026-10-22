@@ -108,6 +108,9 @@ export async function ladeBearbeitung(
 		entwurf: entwurfAusThread(kopf, module),
 		sperren: Object.fromEntries(daten.umfragen.map((u) => [u.modulId, umfrageSperre(u)])),
 		helferSperren: Object.fromEntries(daten.helfer.map((h) => [h.modulId, helferSperre(h)])),
+		// Der Server laedt die Fahrgemeinschaft noch nicht (ladeThread kennt den Typ nicht), also gibt es
+		// nichts zu sperren.
+		fahrtSperre: null,
 		medien: medienZahlen(module),
 		untergruppen,
 	};

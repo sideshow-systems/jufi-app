@@ -15,8 +15,10 @@ import {
 	darfAutoAendern,
 	darfEinsetzen,
 	darfHerausnehmen,
+	fahrtSperre,
 	hatPlatzIn,
 	pruefeAuto,
+	pruefeFahrtAenderung,
 	type FahrtKontext,
 } from './fahrt.js';
 
@@ -350,5 +352,44 @@ describe('darfHerausnehmen', () => {
 			darfHerausnehmen(person(id), { kindId: 'max', autoId: 'a-sandra' }, f, k, umfeld, JETZT);
 		expect(von('sandra')).toBe('ARCHIVIERT');
 		expect(von('thomas')).toBe('ERLAUBT');
+	});
+});
+
+describe('fahrtSperre', () => {
+	it('ist ohne Autos und Mitfahrten nirgends gesperrt', () => {
+		expect(fahrtSperre(fahrt([], []))).toEqual({ eingetragen: false, HIN: false, RUECK: false });
+	});
+
+	it('sperrt die Richtung eines Autos, die andere bleibt frei', () => {
+		expect(fahrtSperre(fahrt([auto('a1', 'sandra')], []))).toEqual({ eingetragen: true, HIN: true, RUECK: false });
+	});
+
+	it('sperrt auch mit nur einem "kommt selbst" in der Rueckrichtung', () => {
+		expect(fahrtSperre(fahrt([], [mitfahrt('max', null, 'RUECK')]))).toEqual({
+			eingetragen: true,
+			HIN: false,
+			RUECK: true,
+		});
+	});
+});
+
+describe('pruefeFahrtAenderung', () => {
+	const belegt = fahrt([auto('a1', 'sandra')], [mitfahrt('max', null, 'RUECK')]);
+
+	it('findet nichts, solange keine belegte Richtung abgeschaltet wird', () => {
+		expect(pruefeFahrtAenderung(belegt, { hin: true, rueck: true })).toEqual([]);
+	});
+
+	it('meldet jede abgeschaltete Richtung mit Eintraegen, Hinfahrt zuerst', () => {
+		expect(pruefeFahrtAenderung(belegt, { hin: false, rueck: false })).toEqual([
+			{ richtung: 'HIN' },
+			{ richtung: 'RUECK' },
+		]);
+		expect(pruefeFahrtAenderung(belegt, { hin: true, rueck: false })).toEqual([{ richtung: 'RUECK' }]);
+	});
+
+	it('laesst eine leere Richtung abschalten', () => {
+		const nurHin = fahrt([auto('a1', 'sandra')], []);
+		expect(pruefeFahrtAenderung(nurHin, { hin: true, rueck: false })).toEqual([]);
 	});
 });

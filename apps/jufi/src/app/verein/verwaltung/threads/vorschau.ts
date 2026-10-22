@@ -53,6 +53,31 @@ export function vorschauModule(e: ThreadEntwurf, jetzt: Date): ModulAnsicht[] {
 				zeilen: [],
 			};
 		}
+		// Ohne Autos und Kinder wie die Umfrage ohne Zeilen: Die Vorschau bietet nichts an, was die API
+		// riefe. Eine Karte fuer die Fahrgemeinschaft gibt es in der Vorschau noch nicht.
+		if (m.typ === 'FAHRT') {
+			const richtungen = (
+				[
+					['HIN', m.hin],
+					['RUECK', m.rueck],
+				] as const
+			).filter(([, an]) => an);
+			return {
+				typ: 'FAHRT',
+				id,
+				titel: m.titel,
+				leitung: false,
+				richtungen: richtungen.map(([richtung]) => ({
+					richtung,
+					vorschlagTag: null,
+					darfAnbieten: false,
+					autos: [],
+					brauchtMitfahrt: [],
+					kommtSelbst: [],
+				})),
+				kinder: [],
+			};
+		}
 		return {
 			typ: 'UMFRAGE',
 			id,

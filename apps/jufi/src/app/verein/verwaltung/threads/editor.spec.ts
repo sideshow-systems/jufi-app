@@ -84,6 +84,7 @@ function bearbeitung(rest: Partial<ThreadBearbeitung> = {}): ThreadBearbeitung {
 		entwurf: bowling(),
 		sperren: {},
 		helferSperren: {},
+		fahrtSperre: null,
 		medien: { gesamt: KEINE_MEDIEN, module: {} },
 		untergruppen: UNTERGRUPPEN,
 		...rest,

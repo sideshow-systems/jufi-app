@@ -68,6 +68,10 @@ function liesEntwurf(wert: unknown): { entwurf: ThreadEntwurf } | { feld: string
 	const gelesen = entwurfAus(wert);
 	if ('fehler' in gelesen) return { feld: gelesen.fehler.feld };
 	const e = gelesen.entwurf;
+	// Der Speicher kennt die Fahrgemeinschaft noch nicht: 400 am Typ des Moduls, wie fuer jeden Typ,
+	// den entwurfAus nicht liest.
+	const fahrt = e.module.findIndex((m) => m.typ === 'FAHRT');
+	if (fahrt >= 0) return { feld: `module.${fahrt}.typ` };
 	return { entwurf: { ...e, untergruppenIds: [...new Set(e.untergruppenIds)] } };
 }
 
@@ -263,6 +267,10 @@ async function schreibeModul(
 	id: string | null,
 	positionenLoeschen: readonly string[] = [],
 ): Promise<string> {
+	// liesEntwurf lehnt die Fahrgemeinschaft ab, solange der Speicher sie nicht kennt; der Wurf
+	// schliesst die Luecke, falls ein Pfad daran vorbei kaeme, statt eine Zeile mit unbekanntem Typ
+	// zu schreiben.
+	if (neu.typ === 'FAHRT') throw new Error('Die Fahrgemeinschaft wird noch nicht gespeichert');
 	const kopf = { position, titel: neu.titel };
 	let modulId: string;
 	if (id === null) {
