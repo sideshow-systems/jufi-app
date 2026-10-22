@@ -44,9 +44,15 @@ import { ladeThread, ladeThreadUmfeld, ladeVereinsstand, positionOrt } from './l
  * Frist (410), freier Platz (409 VOLL), dann mitAenderung mit denselben Pruefungen auf dem
  * Stand unter der Sperre, nach dem Commit der Bus.
  *
- * DELETE: Rate-Limit, 404, 409/410 wie beim PUT; ohne Eintrag 200 ohne Schreiben
- * (Plan-Entscheidung 4: das DELETE hat keine clientId, die Wiederholung erkennt der Server am
- * fehlenden Eintrag), sonst mitAenderung mit Neupruefung.
+ * DELETE: Rate-Limit, 404 und 409 ENTWURF aus darfAustragen, dann ohne Eintrag 200 ohne
+ * Schreiben (Plan-Entscheidung 4: das DELETE hat keine clientId, die Wiederholung erkennt der
+ * Server am fehlenden Eintrag), erst danach 409 ARCHIVIERT und 410, sonst mitAenderung mit
+ * Neupruefung in derselben Reihenfolge. Die Idempotenz geht Frist und Archiv vor (Spec 8,
+ * Ruling R5): Ging die Antwort auf ein gelungenes Austragen verloren, scheitert der zweite Klick
+ * sonst an einer Frist, die fuer einen schon geloeschten Eintrag nichts mehr bedeutet.
+ * Verworfen: die Reihenfolge des PUT (alle Abbrueche vor dem Eintrag) -- sie machte ein
+ * wiederholtes DELETE nach der Frist zur 410, im Archiv zur 409 und fuer die Leitung bei einer
+ * entfernten Person zur 404.
  */
 
 type Helfer = Extract<ModulDaten, { typ: 'HELFER' }>;
@@ -89,13 +95,19 @@ async function ladeLage(
 	return null;
 }
 
-/** Wer fuer fuerId ein- oder austragen darf: mit Eintrag darfAustragen (Plan-Entscheidung 2), ohne darfEintragen. */
-function austragErlaubnis(lage: Lage, fuerId: string, zeit: Date): EintragErlaubnis {
+/**
+ * Die Pruefung des Austragens, an einer Stelle fuer vor und unter der Sperre (Kopfkommentar).
+ * Die Erlaubnis kommt immer aus darfAustragen, auch ohne Eintrag: darfEintragen sagte der
+ * Leitung fuer eine entfernte Person "nicht gefunden", obwohl sie ihren Eintrag eben noch
+ * austragen durfte (Plan-Entscheidung 2). 404 und Entwurf stehen vor dem fehlenden Eintrag,
+ * damit ein stilles 200 nicht verraet, dass es fuer eine fremde Zeile nichts auszutragen gibt.
+ */
+function austragPruefung(lage: Lage, fuerId: string, zeit: Date): ThreadAbbruch | 'KEIN_EINTRAG' | null {
 	const { mich, modul, daten, umfeld, position } = lage;
-	const eintrag = position.eintraege.find((e) => e.fuerId === fuerId);
-	return eintrag
-		? darfAustragen(mich, eintrag, modul.helfer, daten, umfeld, zeit)
-		: darfEintragen(mich, fuerId, modul.helfer, daten, umfeld, zeit);
+	const erlaubnis = darfAustragen(mich, { fuerId }, modul.helfer, daten, umfeld, zeit);
+	if (erlaubnis === 'NICHT_GEFUNDEN' || erlaubnis === 'ENTWURF') return abbruch(erlaubnis);
+	if (!position.eintraege.some((e) => e.fuerId === fuerId)) return 'KEIN_EINTRAG';
+	return abbruch(erlaubnis);
 }
 
 /**
@@ -176,11 +188,12 @@ export async function schreibeEintrag(
 }
 
 /**
- * Das Austragen unter der Sperre. Dieselbe Erlaubnis wie vor der Sperre (austragErlaubnis), auf
+ * Das Austragen unter der Sperre. Dieselbe Pruefung wie vor der Sperre (austragPruefung), auf
  * dem neuen Stand: Frist, Archiv und Zuordnung koennen sich dazwischen geaendert haben. Ist der
- * Eintrag inzwischen weg (ein gleichzeitiges DELETE war schneller), endet es als Wiederholung:
- * Sie rollt den vergebenen Stand zurueck, und die Route antwortet 200 wie beim fehlenden Eintrag
- * vor der Sperre (Plan-Entscheidung 4), wie DELETE /verlauf/:eintragId (fehler.ts).
+ * Eintrag inzwischen weg (ein gleichzeitiges DELETE war schneller), endet es als Wiederholung,
+ * auch wenn Frist oder Archiv inzwischen greifen: Sie rollt den vergebenen Stand zurueck, und
+ * die Route antwortet 200 wie beim fehlenden Eintrag vor der Sperre (Plan-Entscheidung 4), wie
+ * DELETE /verlauf/:eintragId (fehler.ts).
  */
 export async function loescheEintrag(
 	tx: VereinTx,
@@ -189,9 +202,9 @@ export async function loescheEintrag(
 	const { personId, threadId, positionId, fuerId, zeit } = eingabe;
 	const lage = await ladeLage(tx, personId, threadId, positionId);
 	if (!lage) throw new ThreadAbbruch(404, NICHT_GEFUNDEN);
-	const ende = abbruch(austragErlaubnis(lage, fuerId, zeit));
-	if (ende) throw ende;
-	if (!lage.position.eintraege.some((e) => e.fuerId === fuerId)) throw new Wiederholung(null);
+	const pruefung = austragPruefung(lage, fuerId, zeit);
+	if (pruefung === 'KEIN_EINTRAG') throw new Wiederholung(null);
+	if (pruefung) throw pruefung;
 
 	await tx.helferEintrag.delete({ where: { positionId_fuerId: { positionId, fuerId } }, select: { id: true } });
 	return { ergebnis: null, aenderungen: [{ threadId, art: 'ANTWORT' as const, objektId: lage.modul.id }] };
@@ -334,13 +347,10 @@ export function helferRouten(router: Router, deps: VolleAppDeps): void {
 			const { threadId } = ort;
 			const lage = await ladeLage(db, person.id, threadId, positionId);
 			if (!lage) return void res.status(404).json(NICHT_GEFUNDEN);
-			// Auch ohne Eintrag erst 404, 409 und 410: Ein stilles 200 verriete sonst, dass es fuer
-			// eine fremde Zeile nichts auszutragen gibt.
-			const ende = abbruch(austragErlaubnis(lage, fuerId, zeit));
-			if (ende) return void antworteThreadFehler(res, ende);
-			if (!lage.position.eintraege.some((e) => e.fuerId === fuerId)) {
-				return antworteMitAnsicht(res, () => ansicht(db, verein.id, lage, zeit));
-			}
+			// Ohne Eintrag erst 404 und Entwurf, dann 200, erst danach Archiv und Frist (austragPruefung).
+			const pruefung = austragPruefung(lage, fuerId, zeit);
+			if (pruefung === 'KEIN_EINTRAG') return antworteMitAnsicht(res, () => ansicht(db, verein.id, lage, zeit));
+			if (pruefung) return void antworteThreadFehler(res, pruefung);
 
 			let fehler: unknown;
 			try {

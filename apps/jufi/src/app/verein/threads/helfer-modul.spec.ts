@@ -342,6 +342,58 @@ describe('Helferliste-Modul', () => {
 			await fertig();
 		});
 
+		describe('Fokus', () => {
+			function ueberschrift(): HTMLElement {
+				const h = stelle().querySelector<HTMLElement>('h3');
+				if (!h) throw new Error('keine Ueberschrift');
+				return h;
+			}
+
+			it('Oeffnen setzt ihn ins Notizfeld, Abbrechen auf die Ueberschrift der Position', async () => {
+				zeige();
+				knopf(stelle(), 'Lena eintragen').click();
+				await fertig();
+
+				expect(document.activeElement).toBe(el.querySelector('input[name="notiz"]'));
+
+				knopf(el.querySelector('form') as HTMLElement, 'Abbrechen').click();
+				await fertig();
+
+				expect(ueberschrift().tabIndex).toBe(-1);
+				expect(document.activeElement).toBe(ueberschrift());
+			});
+
+			it('Notiz aendern setzt ihn ins Notizfeld, nach dem Speichern steht er auf der Ueberschrift', async () => {
+				zeige(helfer({ positionen: [position({ eintraege: [{ ...SANDRA, fuerId: 'k-lena' }] })] }));
+				knopf(stelle(), 'Notiz ändern').click();
+				await fertig();
+
+				expect(document.activeElement).toBe(el.querySelector('input[name="notiz"]'));
+
+				knopf(el.querySelector('form') as HTMLElement, 'Speichern').click();
+				anfrage('PUT', 'k-lena').flush({ modul: helfer(), stand: 50 });
+				await fertig();
+
+				expect(el.querySelector('form')).toBeNull();
+				expect(document.activeElement).toBe(ueberschrift());
+			});
+
+			it('schliesst eine 409 das Formular, steht er ebenfalls auf der Ueberschrift', async () => {
+				zeige();
+				knopf(stelle(), 'Lena eintragen').click();
+				await fertig();
+				knopf(el.querySelector('form') as HTMLElement, 'Eintragen').click();
+				anfrage('PUT', 'k-lena').flush(
+					{ fehler: 'Hier sind schon alle Plätze vergeben.', code: 'VOLL' },
+					{ status: 409, statusText: 'Conflict' },
+				);
+				await fertig();
+
+				expect(el.querySelector('form')).toBeNull();
+				expect(document.activeElement).toBe(ueberschrift());
+			});
+		});
+
 		it('zeigt nur eine Zeile an, deren Eintragen der Server erlaubt', () => {
 			zeige(helfer({ zeilen: [zeile('k-lena', 'Lena', { darfEintragen: false }), zeile('k-max', 'Max')] }));
 

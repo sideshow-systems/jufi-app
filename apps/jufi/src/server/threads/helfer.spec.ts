@@ -314,7 +314,7 @@ describe('Eintragen und Austragen in der Helferliste', () => {
 			it.each<[string, unknown, string]>([
 				['Notiz mit 81 Zeichen', { notiz: 'x'.repeat(81), clientId: 'c-1' }, 'notiz'],
 				['Notiz als Zahl', { notiz: 5, clientId: 'c-1' }, 'notiz'],
-				['Notiz mit Richtungsumkehr', { notiz: 'Kuchen‮', clientId: 'c-1' }, 'notiz'],
+				['Notiz mit Richtungsumkehr', { notiz: 'Kuchen\u202e', clientId: 'c-1' }, 'notiz'],
 				['ohne clientId', { notiz: 'Kuchen' }, 'clientId'],
 				['clientId mit Leerzeichen', { notiz: 'Kuchen', clientId: 'a b' }, 'clientId'],
 			])('%s: 400 mit feld, ohne Zeile und ohne Stand', async (_name, body, feld) => {
@@ -581,6 +581,72 @@ describe('Eintragen und Austragen in der Helferliste', () => {
 			expect(s.ereignisse()).toHaveLength(1);
 		});
 
+		// Ruling R5: Geht die Antwort auf das erste DELETE verloren, darf der zweite Klick nicht an
+		// Frist oder Archiv scheitern, denn der Eintrag ist schon weg (Spec 8).
+		it('ein zweites DELETE nach der Frist: 200 statt 410, keine Aenderung, kein Ereignis', async () => {
+			const s = await szenario();
+			const l = await s.liste();
+			await trageEinTest(s.db, l.kuchen, s.sandra.personId, s.sandra.personId);
+			try {
+				uhr = new Date(FRIST.getTime() - 1000);
+				expect((await s.trageAus(l.kuchen, s.sandra.personId, s.sandra.cookie, gestellt)).status).toBe(200);
+				const vorher = await s.stand();
+
+				uhr = FRIST;
+				const r = await s.trageAus(l.kuchen, s.sandra.personId, s.sandra.cookie, gestellt);
+
+				expect(r.status).toBe(200);
+				const { modul, stand } = (await r.json()) as Eingetragen;
+				expect(stand).toBe(vorher);
+				expect(modul.fristAbgelaufen).toBe(true);
+				expect(s.position(modul, l.kuchen)?.belegt).toBe(0);
+				expect(await s.stand()).toBe(vorher);
+				expect(s.ereignisse()).toHaveLength(1);
+			} finally {
+				uhr = JETZT;
+			}
+		});
+
+		it('ein zweites DELETE der Mutter im Archiv: 200 statt 409 ARCHIVIERT, keine Aenderung', async () => {
+			const s = await szenario();
+			const l = await s.liste();
+			await trageEinTest(s.db, l.kuchen, s.sandra.personId, s.sandra.personId);
+			expect((await s.trageAus(l.kuchen, s.sandra.personId, s.sandra.cookie)).status).toBe(200);
+			await prisma.thread.update({ where: { id: l.threadId }, data: { archivModus: 'ARCHIVIERT' } });
+			const vorher = await s.stand();
+
+			const r = await s.trageAus(l.kuchen, s.sandra.personId, s.sandra.cookie);
+
+			expect(r.status).toBe(200);
+			const { modul, stand } = (await r.json()) as Eingetragen;
+			expect(stand).toBe(vorher);
+			expect(s.position(modul, l.kuchen)?.belegt).toBe(0);
+			expect(await s.stand()).toBe(vorher);
+			expect(s.ereignisse()).toHaveLength(1);
+		});
+
+		it('Thomas traegt den entfernten Peter zweimal aus: das zweite DELETE ist 200, fuer Sandra bleibt es 404', async () => {
+			const s = await szenario();
+			const l = await s.liste();
+			await trageEinTest(s.db, l.kuchen, s.peter.personId, s.peter.personId);
+			await prisma.person.update({ where: { id: s.peter.personId }, data: { entferntAm: JETZT } });
+			expect((await s.trageAus(l.kuchen, s.peter.personId, s.thomas.cookie)).status).toBe(200);
+			const vorher = await s.stand();
+
+			const r = await s.trageAus(l.kuchen, s.peter.personId, s.thomas.cookie);
+			const fremd = await s.trageAus(l.kuchen, s.peter.personId, s.sandra.cookie);
+
+			expect(r.status).toBe(200);
+			const { modul, stand } = (await r.json()) as Eingetragen;
+			expect(stand).toBe(vorher);
+			expect(s.position(modul, l.kuchen)?.belegt).toBe(0);
+			// Die 404 steht weiter vor dem stillen 200: Fuer eine fremde Zeile verraet es nichts.
+			expect(fremd.status).toBe(404);
+			expect(await fremd.json()).toEqual(NICHT_GEFUNDEN);
+			expect(await s.stand()).toBe(vorher);
+			expect(s.ereignisse()).toHaveLength(1);
+		});
+
 		it('Sandra traegt Peter aus: 404, der Eintrag bleibt', async () => {
 			const s = await szenario();
 			const l = await s.liste();
@@ -772,6 +838,27 @@ describe('Eintragen und Austragen in der Helferliste', () => {
 			await trageEinTest(s.db, l.kuchen, s.sandra.personId, s.sandra.personId);
 			await prisma.helferModul.update({ where: { id: l.modulId }, data: { frist: new Date(JETZT.getTime() - 1000) } });
 			await erwarteAbbruch(s, loescheDirekt(s, l, l.kuchen, s.sandra.personId), 410, { code: 'FRIST_ABGELAUFEN' });
+		});
+
+		it('Austragen: Eintrag weg und Frist abgelaufen ist eine Wiederholung, keine 410', async () => {
+			const s = await szenario();
+			const l = await s.liste();
+			await prisma.helferModul.update({ where: { id: l.modulId }, data: { frist: new Date(JETZT.getTime() - 1000) } });
+			const vorher = await s.stand();
+
+			const fehler = await loescheDirekt(s, l, l.kuchen, s.sandra.personId).catch((e: unknown) => e);
+
+			expect(fehler).toBeInstanceOf(Wiederholung);
+			expect(await s.stand()).toBe(vorher);
+		});
+
+		it('Austragen: Eintrag weg im inzwischen zurueckgezogenen Thread bleibt 409 ENTWURF', async () => {
+			const s = await szenario();
+			const l = await s.liste();
+			await prisma.thread.update({ where: { id: l.threadId }, data: { veroeffentlichtAm: null } });
+			await erwarteAbbruch(s, loescheDirekt(s, l, l.kuchen, s.sandra.personId, s.thomas.personId), 409, {
+				code: 'ENTWURF',
+			});
 		});
 	});
 

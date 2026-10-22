@@ -367,8 +367,8 @@ die Routen unter `PUT`/`DELETE /<slug>/api/v1/helfer/:positionId/eintraege/:fuer
 - **Frist und Archiv:** Nach der Frist und im Archiv trägt nur noch ein und aus, wer den Thread bearbeiten darf. Unter „Braucht
   deine Antwort“ steht eine Helferliste nur mit laufender Frist und freiem Platz, und nur so lange, bis die Zeile einen
   Eintrag im Modul hat.
-- **Nachtragen:** In der Antworten-Übersicht der Verwaltung trägt die Leitung Gefragte ein und aus, auch nach der Frist.
-  Wer die Zeile angeht, sieht darunter „eingetragen von …“.
+- **Nachtragen:** In der Antworten-Übersicht der Verwaltung trägt Gefragte ein und aus, wer den Thread bearbeiten darf,
+  auch nach der Frist. Wer die Zeile angeht, sieht darunter „eingetragen von …“.
 
 ## Sicherung
 

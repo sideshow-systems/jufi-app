@@ -835,6 +835,11 @@ model HelferEintrag {
   vonId         String
   von           Person         @relation("HelferEintragVon", fields: [vereinId, vonId], references: [vereinId, id], onDelete: NoAction, onUpdate: NoAction)
   /// 1-80 Zeichen oder null (CHECK helfer_eintrag_notiz); ein Leerstring ist keine Notiz.
+  /// Der CHECK braucht kein btrim: pruefeNotiz (@jufi/domain) trimmt vorher und macht
+  /// aus Leerem null, und die Route schreibt nur, was pruefeNotiz liefert. "   " kaeme
+  /// also nur an der Domain vorbei (Demo, Handarbeit) in die Datenbank. Verworfen:
+  /// btrim im CHECK wie bei umfrage_frage -- es schuetzte nur vor diesem Umweg, und die
+  /// angewandte Migration laesst sich wegen ihrer Pruefsumme nicht mehr aendern.
   notiz         String?
   /// Bleibt beim Aendern der Notiz stehen: Die Reihenfolge in der Position ist die der Anmeldung.
   eingetragenAm DateTime

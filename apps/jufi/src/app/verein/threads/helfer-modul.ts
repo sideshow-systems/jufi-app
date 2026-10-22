@@ -1,4 +1,18 @@
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, input, output, signal } from '@angular/core';
+import {
+	afterNextRender,
+	ChangeDetectionStrategy,
+	Component,
+	computed,
+	DestroyRef,
+	type ElementRef,
+	inject,
+	Injector,
+	input,
+	output,
+	signal,
+	viewChild,
+	viewChildren,
+} from '@angular/core';
 import { Router } from '@angular/router';
 import { fristText, type HelferModulAnsicht } from '@jufi/domain';
 import { firstValueFrom, type Observable } from 'rxjs';
@@ -73,7 +87,7 @@ const MODUL = 'modul';
 		@for (p of positionen(); track p.id) {
 			<section class="position" [attr.aria-label]="p.text">
 				<div class="kopf">
-					<h3>{{ p.text }}</h3>
+					<h3 #ueberschrift tabindex="-1" [attr.data-position]="p.id">{{ p.text }}</h3>
 					<span class="fuell">
 						<span>{{ p.belegt }}/{{ p.anzahl }}</span>
 						@if (p.voll) {
@@ -141,6 +155,7 @@ const MODUL = 'modul';
 							<label class="feld">
 								<span>Notiz (optional)</span>
 								<input
+									#notizFeld
 									name="notiz"
 									maxlength="80"
 									autocomplete="off"
@@ -183,6 +198,9 @@ const MODUL = 'modul';
 			min-width: 0;
 			font-size: var(--schrift);
 			overflow-wrap: anywhere;
+		}
+		h3:focus {
+			outline: none;
 		}
 		p {
 			margin: 0;
@@ -278,6 +296,9 @@ export class HelferModul {
 
 	private readonly api = inject(ThreadApi);
 	private readonly router = inject(Router);
+	private readonly injector = inject(Injector);
+	private readonly notizFeld = viewChild<ElementRef<HTMLInputElement>>('notizFeld');
+	private readonly ueberschriften = viewChildren<ElementRef<HTMLElement>>('ueberschrift');
 
 	protected readonly MODUL = MODUL;
 	protected readonly sendet = signal(false);
@@ -367,10 +388,35 @@ export class HelferModul {
 		this.fehler.set(null);
 		this.notiz.set(a.notiz?.text ?? '');
 		this.formular.set({ positionId: p.id, fuerId: a.fuerId, aendern: a.notiz !== null });
+		// Wer Eintragen oder Notiz aendern drueckt, will gleich tippen (wie die Umbenennung in dokumente.ts).
+		this.fokussiere(() => this.notizFeld()?.nativeElement);
 	}
 
 	protected schliesse(): void {
+		const f = this.formular();
 		this.formular.set(null);
+		if (f !== null) this.fokussiereUeberschrift(f.positionId);
+	}
+
+	/**
+	 * Erst nach dem Zeichnen: Das Notizfeld gibt es vorher noch nicht, und die Ueberschrift soll den
+	 * Fokus erst bekommen, wenn Formular oder Knopf schon weg sind. Verworfen: ein effect auf das
+	 * Notizfeld wie in dokumente.ts -- er fokussierte nicht neu, wenn das Formular in derselben
+	 * Position fuer eine andere Zeile aufgeht, denn das Feld bleibt dabei dasselbe Element.
+	 */
+	private fokussiere(ziel: () => HTMLElement | undefined): void {
+		afterNextRender(() => ziel()?.focus(), { injector: this.injector });
+	}
+
+	/**
+	 * Nach Abbrechen, Erfolg oder einer Abweisung verschwinden Formular oder Knopf, und der Fokus
+	 * fiele auf body: Tastatur und Screenreader verloren den Ort. Die Ueberschrift der Position
+	 * bleibt dagegen stehen (track p.id), darum geht er dorthin.
+	 */
+	private fokussiereUeberschrift(positionId: string): void {
+		this.fokussiere(
+			() => this.ueberschriften().find((u) => u.nativeElement.dataset['position'] === positionId)?.nativeElement,
+		);
 	}
 
 	/**
@@ -405,6 +451,7 @@ export class HelferModul {
 			if (this.weg) return;
 			this.formular.set(null);
 			this.geaendert.emit(modul);
+			this.fokussiereUeberschrift(ort);
 		} catch (ursache) {
 			if (this.weg) return;
 			const f = alsApiFehler(ursache);
@@ -426,6 +473,7 @@ export class HelferModul {
 			this.formular.set(null);
 			this.fehler.set({ ort: MODUL, text: 'Das gibt es nicht mehr, oder du darfst hier nichts ändern.' });
 			this.veraltet.emit();
+			this.fokussiereUeberschrift(ort);
 			return;
 		}
 		if (f.status === 409 || f.status === 410) {
@@ -433,6 +481,7 @@ export class HelferModul {
 			this.formular.set(null);
 			this.fehler.set({ ort, text: f.code === 'VOLL' ? 'Hier sind schon alle Plätze vergeben.' : fehlertext(f) });
 			this.veraltet.emit();
+			this.fokussiereUeberschrift(ort);
 			return;
 		}
 		this.fehler.set({ ort, text: fehlertext(f) });

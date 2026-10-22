@@ -79,7 +79,7 @@ describe('pruefeNotiz', () => {
 	});
 
 	it('lehnt Steuer- und Formatzeichen ab', () => {
-		expect(pruefeNotiz('a‮b')).toEqual({ ok: false });
+		expect(pruefeNotiz('a\u202eb')).toEqual({ ok: false });
 		expect(pruefeNotiz('a\u0007b')).toEqual({ ok: false });
 	});
 

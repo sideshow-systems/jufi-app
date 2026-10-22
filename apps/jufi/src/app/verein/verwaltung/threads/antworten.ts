@@ -545,7 +545,10 @@ export class ThreadAntwortenComponent {
 		// Der zweite Tipp eines Doppeltipps kommt an, bevor der Knopf als gesperrt gezeichnet ist.
 		if (this.sendet()) return;
 		this.sendet.set(true);
+		// Beide Saetze weg, wie in fuehreHelferAus: Ein Fehler am Helfer-Block bezoege sich sonst nach
+		// der naechsten Handlung noch auf einen Stand, den das Neuladen schon ersetzt hat.
 		this.fehler.set(null);
+		this.helferFehler.set(null);
 		try {
 			await firstValueFrom(
 				this.threadApi.antworte(this.slug(), modulId, fuerId, {

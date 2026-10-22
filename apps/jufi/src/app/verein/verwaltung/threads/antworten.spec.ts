@@ -483,6 +483,31 @@ describe('Antworten-Uebersicht der Verwaltung', () => {
 			// afterEach prueft per verify(), dass keine weitere Anfrage offen ist.
 		});
 
+		it('eine gelungene Umfrage-Antwort nimmt den alten Fehler am Helfer-Block weg', async () => {
+			const { harness, http, position, block, zeile } = await oeffneHelfer(FISCHERFEST, { umfragen: [BOWLING] });
+			knopf(position('p-kuchen').querySelector<HTMLElement>('li')!, 'Austragen').click();
+			await vi.waitFor(() =>
+				http
+					.expectOne(`${API}/helfer/p-kuchen/eintraege/k-sandra`)
+					.flush({ fehler: 'nicht gefunden' }, { status: 404, statusText: 'Not Found' }),
+			);
+			await stabil(harness);
+			expect(block().querySelector('[role="alert"]')).not.toBeNull();
+
+			knopf(zeile('Tom')!, 'Eintragen').click();
+			await stabil(harness);
+			knopf(zeile('Tom')!, '✓ Dabei').click();
+			await vi.waitFor(() =>
+				http.expectOne(`${API}/umfragen/m-umfrage/antworten/k-tom`).flush({ modul: {}, stand: 7 }),
+			);
+			await vi.waitFor(() =>
+				http.expectOne(`${API}/threads/t1/antworten`).flush(uebersicht({ helfer: [FISCHERFEST] })),
+			);
+			await stabil(harness);
+
+			expect(block().querySelector('[role="alert"]')).toBeNull();
+		});
+
 		it('ein abgelaufenes Login beim Nachtragen fuehrt zur Anmeldung', async () => {
 			const { http, position } = await oeffneHelfer();
 			knopf(position('p-kuchen').querySelector<HTMLElement>('li')!, 'Austragen').click();
