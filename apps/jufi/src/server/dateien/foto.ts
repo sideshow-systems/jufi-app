@@ -16,7 +16,9 @@ import { rm, stat } from 'node:fs/promises';
 import sharp from 'sharp';
 
 // Beide Einstellungen gelten fuer den ganzen Prozess, also auch fuers Logo; das ist
-// gewollt. Der Container hat 256 MiB: ein 48-MP-Bild belegt entpackt rund 150 MB,
+// gewollt. Die Speichergrenze des Containers (mem_limit in deploy/jufi-services.yml)
+// deckt genau ein teures Foto: ein 48-MP-Bild belegt entpackt rund 150 MB, ein
+// progressives JPEG mit allen Koeffizienten mehr als das Doppelte,
 // und libvips wuerde die Arbeit sonst auf mehrere Faeden verteilen und Zeilen
 // zwischenspeichern (Cache), was den Spitzenwert vervielfacht. Verworfen: die
 // Grenzen je Aufruf setzen, denn sharp kennt sie nur global.

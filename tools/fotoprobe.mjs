@@ -5,9 +5,13 @@
 //   node /app/probe/fotoprobe.mjs <bild> [<bild> ...]
 //
 // Je Bild ruft sie verarbeiteFoto aus genau der Datei, die im Betrieb laeuft
-// (apps/jufi/src/server/dateien/foto.ts), und gibt Eingabe- und Ausgabemasse und die
-// Bytes beider Fassungen aus. Den Spitzenwert des Speichers liest danach deploy.sh aus
-// der cgroup; hier steht nur der eigene Hoechststand des Prozesses (maxRSS) dabei.
+// (apps/jufi/src/server/dateien/foto.ts), nacheinander wie die FotoSchlange der App, und
+// gibt Eingabe- und Ausgabemasse, die Bytes beider Fassungen und den bisherigen
+// Hoechststand des Prozesses (maxRSS) aus. maxRSS sinkt nie: Bei mehreren Bildern in
+// einem Aufruf gehoert eine Spitze dem ersten Bild, nach dem sie steht. deploy.sh ruft
+// darum jedes Bild einmal allein (Spitze je Bild) und dann alle in einem Prozess (wie im
+// Betrieb, wo ein langlebiger Prozess Foto um Foto verarbeitet). Den Spitzenwert des
+// ganzen Containers liest deploy.sh danach aus der cgroup.
 //
 // deploy.sh legt foto.ts als foto.mts neben dieses Skript. Node 22 entfernt die Typen
 // beim Laden, ohne Bau (darum darf foto.ts nur loeschbare Syntax nutzen und nur sharp
@@ -36,6 +40,11 @@ if (bilder.length === 0) {
 	process.exit(2);
 }
 
+/** maxRSS in KiB (Node-Dokumentation zu process.resourceUsage). */
+function maxRssMiB() {
+	return Math.round(process.resourceUsage().maxRSS / 1024);
+}
+
 const { verarbeiteFoto } = await import(new URL('./foto.mts', import.meta.url).href);
 const arbeit = await mkdtemp(join(tmpdir(), 'fotoprobe-'));
 let fehler = false;
@@ -56,12 +65,11 @@ try {
 		}
 		console.log(
 			`${basename(bild)}: ${kopf.width} x ${kopf.height} -> ${ergebnis.breite} x ${ergebnis.hoehe}, ` +
-				`${ergebnis.bytes} Bytes (beide Fassungen), ${dauer} ms`,
+				`${ergebnis.bytes} Bytes (beide Fassungen), ${dauer} ms, Prozess bisher hoechstens ${maxRssMiB()} MiB`,
 		);
 	}
 } finally {
 	await rm(arbeit, { recursive: true, force: true });
 }
-// maxRSS in KiB (Node-Dokumentation zu process.resourceUsage).
-console.log(`Probe-Prozess: hoechstens ${Math.round(process.resourceUsage().maxRSS / 1024)} MiB`);
+console.log(`Probe-Prozess: hoechstens ${maxRssMiB()} MiB`);
 process.exit(fehler ? 1 : 0);

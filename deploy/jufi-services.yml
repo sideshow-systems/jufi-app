@@ -167,12 +167,29 @@ services:
       # `up -d jufi` die Mail-Falle mitbringt und kein Dienst vergessen wird.
       jufi-mailpit:
         condition: service_started
-    # Gemessen im Rauchtest von tools/deploy.sh: rund 65 MB im Leerlauf. Die
-    # Grenze laesst Platz fuer argon2 beim Anmelden (19 MB je laufendem Hash,
-    # libs/auth passwords.ts) und schuetzt die anderen Apps auf dem Server.
-    # Halb so viel wie HWYD (512m), weil hier kein Analyse-Endpunkt grosse
-    # Antworten im Speicher baut.
-    mem_limit: 256m
+    # Bemessen nach dem teuersten Foto, das die Upload-Route annimmt (TP4-Spec 2.4).
+    # Die App allein braucht im Leerlauf rund 79 MiB (Rauchtest von tools/deploy.sh).
+    # Die Fotoverarbeitung laeuft immer nur einmal zur Zeit (FotoSchlange, auch das
+    # Vereinslogo), braucht aber je nach Kodierung sehr verschieden viel: Ein
+    # progressives JPEG haelt alle Koeffizienten, ein Adam7-PNG wird ganz entpackt.
+    # Gemessen am 22.10.2026 (sharp 0.35, Probe allein im Image, cgroup-Spitze):
+    # 48-MP-JPEG 79 MiB, 20-MB-PNG 86 MiB, 48-MP-WebP 96 MiB, progressives
+    # 48-MP-JPEG 4:2:0 218 MiB, Adam7-PNG mit 50 MP 282 MiB, progressives
+    # 48-MP-JPEG 4:4:4 356 MiB, alle nacheinander in einem Prozess 362 MiB.
+    # Mit 256m beendete der Kernel die Probe schon am 4:4:4-JPEG. Bedarf im
+    # Rauchtest (App im Leerlauf plus Probe) rund 441 MiB, plus rund 25 % Reserve
+    # fuer argon2 beim Anmelden (19 MB je Hash, libs/auth passwords.ts) und
+    # gleichzeitige Anfragen, aufgerundet auf 64m: 576m.
+    # Verworfen: die Fotoverarbeitung in einen Kindprozess auslagern -- er liefe
+    # in derselben cgroup, braeuchte also dieselbe Grenze plus eine zweite
+    # Node-Laufzeit, und machte nur die Folgen eines Abbruchs kleiner, nicht den
+    # Bedarf;
+    # verworfen: eine Pixelgrenze je Kodierung (z. B. 24 MP fuer progressive
+    # JPEGs) -- sie wiese Fotos ab, die Handys so liefern, und die Spec waehlt
+    # ausdruecklich das Anheben der Grenze statt einer kleineren Fotogrenze.
+    # Die VM teilt sich 3,7 GB ohne Swap; ueber 768m geht es nicht ohne
+    # Ruecksprache mit dem Eigentuemer.
+    mem_limit: 576m
     volumes:
       - jufi-dateien:/daten
     # Wie im Image (Dockerfile), hier noch einmal, damit der Block fuer sich lesbar
