@@ -11,6 +11,7 @@ import {
 	type EntwurfVergleich,
 	type ModulEntwurf,
 	type OptionEntwurf,
+	type PositionEntwurf,
 	type ThreadEntwurf,
 	type ThreadKopf,
 	type ThreadPerson,
@@ -40,11 +41,12 @@ import { ladeThread, ladeThreadUmfeld, type GeladenerThread } from './laden.js';
 const ZEICHEN = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 /**
- * Schluessel einer neuen Option (Plan-Entscheidung 11): "o" und acht Zeichen aus a-z0-9,
- * gezogen mit randomInt aus node:crypto. Verworfen: den Schluessel aus dem Text ableiten --
+ * Schluessel einer neuen Option oder Helfer-Position (Plan-Entscheidung 11): "o" und acht Zeichen
+ * aus a-z0-9, gezogen mit randomInt aus node:crypto. Verworfen: den Schluessel aus dem Text ableiten --
  * ein Umbenennen vor dem ersten Speichern ergaebe zwei Schreibweisen fuer dieselbe Option.
  * Das "o" vorn haelt sie von den festen Schluesseln der Teilnahme fern (dabei, vielleicht,
- * abgesagt): keiner von ihnen beginnt damit.
+ * abgesagt): keiner von ihnen beginnt damit. Positionen haben keine festen Schluessel, nutzen aber
+ * dieselbe Form, damit es nur eine Regel fuer "vom Server vergeben" gibt.
  */
 export function neuerSchluessel(): string {
 	let schluessel = 'o';
@@ -157,6 +159,9 @@ async function schreibeUntergruppen(tx: VereinTx, threadId: string, e: ThreadEnt
  * geantwortet hat, die Fremdschluessel ohne Kaskade (UmfrageAntwort.umfrage,
  * UmfrageAntwortOption.option) halten also nicht. Info, Termin, Umfrage, die Koepfe von Datei-
  * und Foto-Modul und die Optionen gehen per Kaskade mit dem ThreadModul; die Dateien selbst nie.
+ * Eine Helferliste geht samt Positionen per Kaskade mit, ihre Eintraege nie (NoAction): Eine
+ * Liste mit Eintraegen laesst vergleicheEntwurf nicht loeschen, unter der Sperre geprueft, also
+ * kommt hier keine an. Wegfallende Positionen behaltener Listen loescht schreibePositionen.
  *
  * Geloescht wird vor allem anderen, weil die beiden eindeutigen Indizes nicht aufschiebbar
  * sind: Eine geloeschte Teilnahme-Umfrage gibt umfrage_eine_teilnahme fuer eine neue frei,
@@ -207,9 +212,48 @@ async function schreibeOptionen(tx: VereinTx, umfrageId: string, optionen: reado
 }
 
 /**
+ * Die Positionen einer Helferliste in der Reihenfolge des Entwurfs, wie schreibeOptionen ueber
+ * ihren Schluessel: eine bestehende behaelt Zeile und ID (und damit ihre Eintraege), Text, Anzahl
+ * und Position werden ueberschrieben; eine neue bekommt ihren Schluessel hier.
+ *
+ * `loeschen` sind die Schluessel aus ModulPlan.positionenLoeschen. vergleicheEntwurf nimmt dort nur
+ * unbelegte auf (eine belegte ist ein Konflikt, der Plan dann leer), der Fremdschluessel der
+ * Eintraege haelt also nicht. Geloescht wird zuerst: So kann kein neuer Schluessel mit einem
+ * wegfallenden am Index (modulId, schluessel) zusammenstossen. Verworfen: das Loeschen wie bei den
+ * Optionen in loescheModule -- dort muesste es nur der Kaskade wegen stehen, und die Positionen
+ * stuenden an zwei Stellen.
+ */
+async function schreibePositionen(
+	tx: VereinTx,
+	modulId: string,
+	positionen: readonly PositionEntwurf[],
+	loeschen: readonly string[],
+): Promise<void> {
+	if (loeschen.length > 0) {
+		await tx.helferPosition.deleteMany({ where: { modulId, schluessel: { in: [...loeschen] } } });
+	}
+	const vergeben = new Set(positionen.flatMap((p) => (p.schluessel === null ? [] : [p.schluessel])));
+	for (const [position, p] of positionen.entries()) {
+		let schluessel = p.schluessel;
+		if (schluessel === null) {
+			// Wie bei den Optionen: Die Schleife erspart den P2002 eines (praktisch unmoeglichen) Zusammenstosses.
+			do schluessel = neuerSchluessel();
+			while (vergeben.has(schluessel));
+			vergeben.add(schluessel);
+		}
+		await tx.helferPosition.upsert({
+			where: { modulId_schluessel: { modulId, schluessel } },
+			create: { modulId, schluessel, text: p.text, anzahl: p.anzahl, position },
+			update: { text: p.text, anzahl: p.anzahl, position },
+		});
+	}
+}
+
+/**
  * Schreibt ein Modul an seine Position: legt es an (id null) oder ueberschreibt ein
  * behaltenes ganz. Die Untertabelle per upsert, damit beide Faelle denselben Weg nehmen; ihr
  * Typ steht fest, vergleicheEntwurf verbietet einen Typwechsel. Liefert die Modul-ID.
+ * `positionenLoeschen` gilt nur fuer eine behaltene Helferliste (ModulPlan); ein neues Modul hat keine.
  */
 async function schreibeModul(
 	tx: VereinTx,
@@ -217,12 +261,8 @@ async function schreibeModul(
 	position: number,
 	neu: ModulEntwurf,
 	id: string | null,
+	positionenLoeschen: readonly string[] = [],
 ): Promise<string> {
-	// Die Helferliste hat in dieser Datenbank noch keine Tabellen (sie kommen mit dem Datenmodell
-	// der Etappe). Bis dahin ist sie fuer den Server ein Typ, den er nicht speichern kann: 400 am
-	// Typ wie bei einem unbekannten, unter der Transaktion, also ohne halb geschriebenen Thread.
-	// Verworfen: sie still zu uebergehen, denn dann meldete der Editor "gespeichert" ohne Liste.
-	if (neu.typ === 'HELFER') throw new ThreadAbbruch(400, ungueltigesFeld(`module.${position}.typ`));
 	const kopf = { position, titel: neu.titel };
 	let modulId: string;
 	if (id === null) {
@@ -260,9 +300,13 @@ async function schreibeModul(
 			create: { id: modulId, hochladen: neu.hochladen },
 			update: { hochladen: neu.hochladen },
 		});
+	} else if (neu.typ === 'HELFER') {
+		// Die Frist als ISO wie bei der Umfrage; der Titel steht im Kopf (ThreadModul), nicht hier.
+		const daten = { einheit: neu.einheit, frist: neu.frist ? new Date(neu.frist) : null };
+		await tx.helferModul.upsert({ where: { id: modulId }, create: { id: modulId, ...daten }, update: daten });
+		await schreibePositionen(tx, modulId, neu.positionen, positionenLoeschen);
 	} else {
-		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN und FOTOS sind oben behandelt,
-		// HELFER am Anfang).
+		// Alles, was bleibt, ist die Umfrage (INFO, TERMIN, DATEIEN, FOTOS und HELFER sind oben behandelt).
 		const daten = {
 			frage: neu.frage,
 			einheit: neu.einheit,
@@ -311,7 +355,7 @@ async function ersetzeThread(
 	const geaendert = plan.behalten
 		.filter((m) => m.geaendert)
 		.sort((a, b) => Number(istTeilnahme(a.neu)) - Number(istTeilnahme(b.neu)));
-	for (const m of geaendert) await schreibeModul(tx, threadId, m.position, m.neu, m.id);
+	for (const m of geaendert) await schreibeModul(tx, threadId, m.position, m.neu, m.id, m.positionenLoeschen);
 	const angelegt: string[] = [];
 	for (const a of plan.anlegen) angelegt.push(await schreibeModul(tx, threadId, a.position, a.neu, null));
 

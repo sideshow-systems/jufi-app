@@ -34,6 +34,12 @@ export async function ladeUntergruppen(db: VereinDb | VereinTx): Promise<{ id: s
  * Text mehr, und Systemeintraege sind Verlauf, keine Meinungsaeusserung. Die Antworten sind
  * mit dem Thread schon geladen (`daten`), die Nachrichten kommen aus einer eigenen Zaehlung.
  * Eine Stelle fuer beides: darfLoeschen der Bearbeitung und DELETE zaehlen so dasselbe.
+ *
+ * Helfer-Eintraege zaehlen als Antworten (TP4-Spec 8): Wer sich eingetragen hat, hat geantwortet,
+ * und ohne diese Zaehlung scheiterte DELETE erst am Fremdschluessel des Eintrags (NoAction) und
+ * endete als 404 statt als 409 NICHT_LOESCHBAR. Verworfen: ein eigenes Feld `eintraege` --
+ * darfLoeschen fragt nur "leer oder nicht", ein drittes Feld aenderte die Regel nicht.
+ * `daten` muss dafuer mit Antworten geladen sein (ladeThread tut das).
  */
 export async function loeschZaehler(
 	db: VereinDb | VereinTx,
@@ -42,7 +48,9 @@ export async function loeschZaehler(
 	const nachrichten = await db.verlaufEintrag.count({
 		where: { threadId: daten.kopf.id, art: 'NACHRICHT', geloeschtAm: null },
 	});
-	const antworten = daten.umfragen.reduce((summe, u) => summe + u.antworten.length, 0);
+	const antworten =
+		daten.umfragen.reduce((summe, u) => summe + u.antworten.length, 0) +
+		daten.helfer.reduce((summe, h) => summe + h.positionen.reduce((n, p) => n + p.eintraege.length, 0), 0);
 	return { antworten, nachrichten };
 }
 

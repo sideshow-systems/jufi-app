@@ -6,11 +6,13 @@ import { createApp } from '../app.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { legeThreadAn, ordneZu } from './test-threads.js';
+import { legeThreadAn, ordneZu, trageEinTest } from './test-threads.js';
 
 // Feste Uhr der App und fester Zugangszeitpunkt: "neu" und "archiviert" sollen nicht von der Wanduhr abhaengen.
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
 const ZUGANG = new Date('2026-10-10T10:00:00.000Z');
+/** Frist einer Helferliste, die noch laeuft: morgen um dieselbe Zeit. */
+const MORGEN = new Date('2026-10-23T10:00:00.000Z');
 
 describe('GET /threads', () => {
 	const prisma = createPrismaClientFromEnv();
@@ -78,6 +80,23 @@ describe('GET /threads', () => {
 	it('ist ohne Anmeldung 401', async () => {
 		const s = await szenario();
 		expect((await sende(server.url, s.api('/threads'))).status).toBe(401);
+	});
+
+	it('zeigt einen Thread mit Helferliste, ohne dass Eintraege oder Notizen in die Liste geraten', async () => {
+		const s = await szenario();
+		const t = await s.bowling('Sommerfest', {
+			module: [{ typ: 'HELFER', frist: MORGEN, positionen: [{ text: 'Kuchen', anzahl: 4 }] }],
+		});
+		await trageEinTest(
+			vereinDb(prisma, s.verein.id),
+			t.positionIds['kuchen'] as string,
+			s.sandra.personId,
+			s.sandra.personId,
+			'Marmorkuchen',
+		);
+		const sandra = await s.liste(s.sandra.cookie);
+		expect(sandra.threads.map((z) => z.id)).toEqual([t.threadId]);
+		expect(JSON.stringify(sandra)).not.toContain('Marmorkuchen');
 	});
 
 	describe('neu', () => {
@@ -415,6 +434,36 @@ describe('GET /threads', () => {
 
 			expect(sandra.brauchtAntwort).toHaveLength(1);
 			expect(sandra.brauchtAntwort[0]).toMatchObject({ threadId: offen.threadId, vorname: 'Lena' });
+		});
+
+		it('Braucht deine Antwort nennt Sandra fuer eine Helferliste mit Frist morgen, solange sie sich nicht eingetragen hat', async () => {
+			const s = await szenario();
+			const helfer = {
+				typ: 'HELFER' as const,
+				einheit: 'ERWACHSENER' as const,
+				frist: MORGEN,
+				positionen: [{ text: 'Kuchen', anzahl: 4 }],
+			};
+			const offen = await s.bowling('Sommerfest', { module: [helfer] });
+			const erledigt = await s.bowling('Herbstfest', { module: [helfer] });
+			await trageEinTest(
+				vereinDb(prisma, s.verein.id),
+				erledigt.positionIds['kuchen'] as string,
+				s.sandra.personId,
+				s.sandra.personId,
+			);
+
+			const sandra = await start(s, s.sandra.cookie);
+			expect(sandra.brauchtAntwort).toEqual([
+				expect.objectContaining({
+					threadId: offen.threadId,
+					titel: 'Sommerfest',
+					modulId: offen.modulIds[0],
+					fuerId: s.sandra.personId,
+					vorname: null,
+					frist: MORGEN.toISOString(),
+				}),
+			]);
 		});
 
 		it('ist ohne Anmeldung 401 und schreibt nichts', async () => {

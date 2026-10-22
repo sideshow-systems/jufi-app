@@ -11,8 +11,9 @@ import {
 	ladeThreadUmfeld,
 	ladeVereinsstand,
 	modulOrt,
+	positionOrt,
 } from './laden.js';
-import { legeThreadAn, ordneZu, steckeInUntergruppe } from './test-threads.js';
+import { legeThreadAn, ordneZu, steckeInUntergruppe, trageEinTest } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00Z');
 
@@ -323,6 +324,79 @@ describe('Threads laden', () => {
 
 		expect(await modulOrt(db, modulIds[0] as string)).toEqual({ threadId, typ: 'DATEIEN' });
 		expect(await modulOrt(db, modulIds[1] as string)).toEqual({ threadId, typ: 'FOTOS' });
+	});
+
+	it('laedt eine Helferliste mit Titel, Positionen nach position und Eintraegen nach eingetragenAm; modulOrt kennt HELFER', async () => {
+		const { verein, db } = await neuerVerein();
+		const sandra = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Sandra' });
+		const tina = await legeMitgliedAn(prisma, verein, { art: 'ERWACHSENER', vorname: 'Tina' });
+		const frist = new Date('2026-10-29T16:00:00Z');
+		const { threadId, modulIds, positionIds } = await legeThreadAn(prisma, verein, JETZT, {
+			erstelltVonId: sandra.personId,
+			module: [
+				{
+					typ: 'HELFER',
+					einheit: 'PERSON',
+					frist,
+					positionen: [
+						{ text: 'Kuchen', anzahl: 4 },
+						{ text: 'Salat', anzahl: 2 },
+					],
+				},
+			],
+		});
+		const modulId = modulIds[0] as string;
+		await db.threadModul.update({ where: { id: modulId }, data: { titel: 'Wer bringt was mit?' } });
+		// Umgekehrte Position: Die Reihenfolge der Liste ist die der Spalte, nicht die des Anlegens.
+		await db.helferPosition.update({ where: { id: positionIds['kuchen'] as string }, data: { position: 5 } });
+		const kuchen = positionIds['kuchen'] as string;
+		const zuerst = await trageEinTest(db, kuchen, sandra.personId, sandra.personId, 'Marmor');
+		await trageEinTest(db, kuchen, tina.personId, sandra.personId);
+		// Der zuerst angelegte Eintrag bekommt den spaeteren Zeitpunkt und steht damit hinten.
+		await db.helferEintrag.update({ where: { id: zuerst }, data: { eingetragenAm: new Date('2026-10-30T10:00:00Z') } });
+
+		const geladen = await ladeThread(db, threadId);
+		const [modul] = geladen?.module ?? [];
+		expect(modul).toMatchObject({ typ: 'HELFER', id: modulId, titel: 'Wer bringt was mit?' });
+		if (modul?.typ !== 'HELFER') throw new Error('Helferliste fehlt');
+		expect(modul.helfer).toMatchObject({ modulId, titel: 'Wer bringt was mit?', einheit: 'PERSON', frist });
+		expect(modul.helfer.positionen.map((p) => [p.id, p.schluessel, p.text, p.anzahl])).toEqual([
+			[positionIds['salat'], 'salat', 'Salat', 2],
+			[kuchen, 'kuchen', 'Kuchen', 4],
+		]);
+		expect(modul.helfer.positionen[0]?.eintraege).toEqual([]);
+		expect(modul.helfer.positionen[1]?.eintraege).toEqual([
+			{ fuerId: tina.personId, vonId: sandra.personId, notiz: null, eingetragenAm: expect.any(Date) },
+			{
+				fuerId: sandra.personId,
+				vonId: sandra.personId,
+				notiz: 'Marmor',
+				eingetragenAm: new Date('2026-10-30T10:00:00Z'),
+			},
+		]);
+		expect(await modulOrt(db, modulId)).toEqual({ threadId, typ: 'HELFER' });
+
+		// Ohne Antworten bleiben die Positionen, die Eintraege fehlen, wie bei Umfragen.
+		const [ohne] = await ladeThreads(db, { threadIds: [threadId], mitAntworten: false });
+		const ohneModul = ohne?.module[0];
+		if (ohneModul?.typ !== 'HELFER') throw new Error('Helferliste fehlt');
+		expect(ohneModul.helfer.positionen.map((p) => [p.schluessel, p.eintraege])).toEqual([
+			['salat', []],
+			['kuchen', []],
+		]);
+	});
+
+	it('positionOrt liefert Modul und Thread einer Position, null fuer eine unbekannte und eine aus einem fremden Verein', async () => {
+		const eigener = await neuerVerein();
+		const fremder = await neuerVerein();
+		const { threadId, modulIds, positionIds } = await legeThreadAn(prisma, eigener.verein, JETZT, {
+			module: [{ typ: 'HELFER', positionen: [{ text: 'Kuchen', anzahl: 4 }] }],
+		});
+		const kuchen = positionIds['kuchen'] as string;
+
+		expect(await positionOrt(eigener.db, kuchen)).toEqual({ modulId: modulIds[0], threadId });
+		expect(await positionOrt(eigener.db, 'gibt-es-nicht')).toBeNull();
+		expect(await positionOrt(fremder.db, kuchen)).toBeNull();
 	});
 
 	it('ueberspringt ein Datei- oder Foto-Modul ohne seine Kopfzeile', async () => {

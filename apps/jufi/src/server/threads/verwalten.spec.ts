@@ -7,7 +7,7 @@ import { sammleEreignisse } from '../echtzeit/test-bus.js';
 import { legeMitgliedAn } from '../mitglieder/test-mitglieder.js';
 import { sende, starteTestServer, TEST_UMGEBUNG, type TestServer } from '../test-setup.js';
 import { legeVereinAn } from '../test-vereine.js';
-import { legeThreadAn, ordneZu, type TestModul } from './test-threads.js';
+import { legeThreadAn, ordneZu, trageEinTest, type TestModul } from './test-threads.js';
 
 const JETZT = new Date('2026-10-22T10:00:00.000Z');
 /** Donnerstag, 22.10.2026, 18:00 in Berlin: nach JETZT, Antworten sind also noch offen. */
@@ -537,6 +537,31 @@ describe('Veroeffentlichen, Archiv, Anpinnen und Loeschen', () => {
 			});
 			expect(await s.stand()).toBe(stand);
 			expect(await prisma.thread.count({ where: { id: t.threadId } })).toBe(1);
+		});
+
+		it('mit einem Helfer-Eintrag 409 NICHT_LOESCHBAR, nichts geschrieben (Review Focus 3)', async () => {
+			const s = await szenario();
+			const t = await s.thread({ module: [{ typ: 'HELFER', positionen: [{ text: 'Kuchen', anzahl: 4 }] }] });
+			await trageEinTest(s.db, t.positionIds['kuchen'] as string, s.sandra.personId, s.sandra.personId);
+			const stand = await s.stand();
+			const r = await s.loesche(t.threadId, s.thomas.cookie);
+			expect(r.status).toBe(409);
+			expect(await r.json()).toEqual({
+				fehler: 'Der Thread hat Antworten oder Nachrichten und lässt sich nicht löschen. Archiviere ihn stattdessen.',
+				code: 'NICHT_LOESCHBAR',
+			});
+			expect(await s.stand()).toBe(stand);
+			expect(await prisma.thread.count({ where: { id: t.threadId } })).toBe(1);
+			expect(await prisma.helferEintrag.count({ where: { positionId: t.positionIds['kuchen'] } })).toBe(1);
+		});
+
+		it('mit einer leeren Helferliste 204, Liste und Positionen gehen mit', async () => {
+			const s = await szenario();
+			const t = await s.thread({ module: [{ typ: 'HELFER', positionen: [{ text: 'Kuchen', anzahl: 4 }] }] });
+			const r = await s.loesche(t.threadId, s.thomas.cookie);
+			expect(r.status).toBe(204);
+			expect(await prisma.helferModul.count({ where: { id: t.modulIds[0] } })).toBe(0);
+			expect(await prisma.helferPosition.count({ where: { id: t.positionIds['kuchen'] } })).toBe(0);
 		});
 
 		it('mit einer Nachricht 409, mit nur einer geloeschten Nachricht 204', async () => {
