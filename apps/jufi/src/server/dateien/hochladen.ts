@@ -13,7 +13,8 @@ export type UploadErgebnis =
 
 /**
  * Liest den Koerper eines Uploads als Strom in eine Temp-Datei, ohne ihn je ganz im Speicher
- * zu halten (der Container hat 256 MiB, eine Datei bis 25 MB, mehrere Uploads gleichzeitig).
+ * zu halten (das mem_limit des Containers deckt die App und genau eine Fotoverarbeitung, eine
+ * Datei hat bis 25 MB, und mehrere Uploads laufen gleichzeitig).
  * Verworfen: multer oder busboy -- der Koerper ist die Datei selbst (octet-stream), es gibt
  * nichts zu zerlegen, und ein Paket mehr in der Lieferkette brauchte es nur dafuer.
  *

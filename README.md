@@ -258,8 +258,9 @@ docker compose run --rm --no-deps -T -l traefik.enable=false jufi node apps/cli/
 
 Der ausgegebene Link führt nach `https://test.jufi-app.de/admin/einrichten#…` und gilt 1 Stunde.
 
-**Warum `run` und nicht `exec`:** `jufi` hat ein Speicherlimit von 256 MiB. Die CLI als zweiter Node-Prozess im laufenden
-Container sprengt es, der Kernel beendet dann Prozesse (Exit 137, oft ohne Ausgabe) und startet dabei die App neu. `run`
+**Warum `run` und nicht `exec`:** Das Speicherlimit von `jufi` (`mem_limit` in `deploy/jufi-services.yml`) deckt die App
+und genau eine Fotoverarbeitung (Fotoprobe, oben). Die CLI als zweiter Node-Prozess im laufenden Container kann es
+sprengen, wenn gerade ein Foto verarbeitet wird; der Kernel beendet dann Prozesse (Exit 137, oft ohne Ausgabe) und startet dabei die App neu. `run`
 startet einen eigenen Wegwerf-Container mit demselben Image und derselben Umgebung; `--no-deps` lässt Datenbank und
 Migration in Ruhe, `-l traefik.enable=false` hält Traefik davon ab, Anfragen an den Wegwerf-Container zu schicken. Dasselbe
 gilt für jede CLI-Aufgabe, etwa den Demo-Verein: `… jufi node apps/cli/dist/main.js demo einspielen`.
