@@ -620,6 +620,31 @@ describe('Thread-Seite', () => {
 			expect(text(seite.querySelector('#modul-m4') as HTMLElement)).toContain('Noch keine Dateien.');
 		});
 
+		it('legt ein Foto-Modul in seine Karte statt des Platzhalters', async () => {
+			const fotos: ModulAnsicht = {
+				typ: 'FOTOS',
+				id: 'm5',
+				titel: 'Zeltlager',
+				hochladen: 'ALLE',
+				darfHochladen: false,
+				hinweis: null,
+				fotos: [
+					{
+						id: 'f1',
+						breite: 1200,
+						hoehe: 800,
+						von: 'Mia',
+						hochgeladenAm: '2026-10-01T10:00:00.000Z',
+						darfLoeschen: false,
+					},
+				],
+			};
+			const { seite } = await oeffne('/demo/t/ck1-bowling', { id: 'ck1', koerper: thread({ module: [fotos] }) });
+
+			expect(seite.querySelector('jf-karte#modul-m5 jf-fotos-modul')?.textContent).toContain('1 Foto');
+			expect(text(seite)).not.toContain('nicht anzeigen');
+		});
+
 		it('scrollt bei einem Deep Link die Karte in den Blick und hebt sie hervor', async () => {
 			const scrollen = vi.fn();
 			Element.prototype.scrollIntoView = scrollen;

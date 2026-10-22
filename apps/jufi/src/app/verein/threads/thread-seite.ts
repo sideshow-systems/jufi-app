@@ -25,6 +25,7 @@ import { betrifft, Echtzeit, type EchtzeitEreignis } from '../echtzeit';
 import { beiAbgelaufenerSitzung } from '../sitzung-abgelaufen';
 import { VerwaltungThreadsApi } from '../verwaltung/threads/threads-api';
 import { DateienModulComponent } from './dateien-modul';
+import { FotosModulComponent } from './fotos-modul';
 import { InfoModul } from './info-modul';
 import { teile } from './teilen';
 import { TerminModul } from './termin-modul';
@@ -61,6 +62,7 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 	selector: 'jf-thread-seite',
 	imports: [
 		DateienModulComponent,
+		FotosModulComponent,
 		IconComponent,
 		InfoModul,
 		KarteComponent,
@@ -177,6 +179,9 @@ type Zustand = 'laedt' | 'bereit' | 'nicht-gefunden' | 'fehler';
 									}
 									@case ('DATEIEN') {
 										<jf-dateien-modul [modul]="m" [slug]="slug()" (geaendert)="dateienGeaendert()" />
+									}
+									@case ('FOTOS') {
+										<jf-fotos-modul [modul]="m" [slug]="slug()" (geaendert)="dateienGeaendert()" />
 									}
 									@default {
 										<!-- Ein Modultyp, den erst ein neuerer Server kennt: lieber ein Hinweis als eine leere Karte. -->
@@ -721,7 +726,7 @@ export class ThreadSeite {
 	}
 
 	/**
-	 * Nach Upload, Umbenennen oder Loeschen im Datei-Modul: Die Seite laedt still neu, wie nach einer
+	 * Nach Upload, Umbenennen oder Loeschen im Datei- und im Foto-Modul: Die Seite laedt still neu, wie nach einer
 	 * Live-Nachricht. Verworfen: die Dateiliste aus der Antwort einsetzen wie bei der Umfrage; der
 	 * Server haengt die Endung an und ordnet die Liste, und die Antwort des Hochladens kennt nur
 	 * die eine Zeile.
